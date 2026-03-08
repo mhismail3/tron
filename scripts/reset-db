@@ -24,7 +24,7 @@ DATA_TABLES=(
 )
 
 # FTS tables to rebuild (content is deleted via triggers or manually)
-FTS_TABLES=(events_fts logs_fts tasks_fts areas_fts)
+FTS_TABLES=(events_fts tasks_fts areas_fts)
 
 usage() {
   echo "Usage: $(basename "$0")"

@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, instrument};
 
 use crate::anthropic::message_converter::convert_messages;
 use crate::anthropic::message_sanitizer::sanitize_messages;
@@ -141,7 +141,7 @@ impl MiniMaxProvider {
                     .is_none_or(|t| t != "image")
             });
             if !warned && msg.content.len() < had_images {
-                warn!("Stripped image content blocks — MiniMax does not support images");
+                debug!("Stripped image content blocks — MiniMax does not support images");
                 warned = true;
             }
         }

@@ -143,7 +143,7 @@ impl WorktreeCoordinator {
             base_branch: info.base_branch.clone(),
         });
 
-        info!(session_id, branch = %info.branch, "worktree acquired");
+        debug!(session_id, branch = %info.branch, "worktree acquired");
         Ok(AcquireResult::Acquired(info))
     }
 
@@ -270,7 +270,7 @@ impl WorktreeCoordinator {
             deletions,
         });
 
-        info!(session_id, commit = %sha, files = files_changed.len(), "committed in worktree");
+        debug!(session_id, commit = %sha, files = files_changed.len(), "committed in worktree");
         Ok(Some(crate::types::CommitResult {
             commit_hash: sha,
             files_changed,

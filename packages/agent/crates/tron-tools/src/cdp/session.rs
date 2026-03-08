@@ -136,7 +136,7 @@ impl BrowserSession {
                     return Ok(session);
                 }
                 Err(e) if attempt < Self::MAX_PORT_ATTEMPTS - 1 => {
-                    tracing::warn!(port, attempt, error = %e, "port conflict, retrying");
+                    tracing::debug!(port, attempt, error = %e, "port conflict, retrying");
                     let _ = child.kill().await;
                     last_err = Some(e);
                 }

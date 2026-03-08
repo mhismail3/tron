@@ -46,6 +46,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Deduplicate iOS client logs and add partial unique index",
         sql: include_str!("v005_dedup_client_logs.sql"),
     },
+    Migration {
+        version: 6,
+        description: "Drop logs FTS (unused, 82% of DB) and purge noise rows",
+        sql: include_str!("v006_drop_logs_fts_purge_noise.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -197,8 +202,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 5);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 6);
+        assert_eq!(result.max_version_applied, 6);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -248,7 +253,7 @@ mod tests {
             .collect();
 
         assert!(tables.contains(&"events_fts".to_string()));
-        assert!(tables.contains(&"logs_fts".to_string()));
+        assert!(!tables.contains(&"logs_fts".to_string()), "logs_fts should be dropped by v006");
         assert!(tables.contains(&"tasks_fts".to_string()));
         assert!(tables.contains(&"areas_fts".to_string()));
     }
@@ -257,7 +262,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 5);
+        assert_eq!(first.applied, 6);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -275,12 +280,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 5);
+        assert_eq!(current_version(&conn).unwrap(), 6);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 5);
+        assert_eq!(latest_version(), 6);
     }
 
     #[test]
@@ -356,8 +361,6 @@ mod tests {
         let expected = [
             "events_fts_insert",
             "events_fts_delete",
-            "logs_fts_insert",
-            "logs_fts_delete",
             "tasks_fts_insert",
             "tasks_fts_update",
             "tasks_fts_delete",
@@ -804,7 +807,7 @@ mod tests {
 
         // Running full migrations (which includes v002) on a fresh DB is fine.
         // Verify no panic and version is correct.
-        assert_eq!(current_version(&conn).unwrap(), 5);
+        assert_eq!(current_version(&conn).unwrap(), 6);
 
         // Running again skips all migrations.
         let result = run_migrations(&conn).unwrap();
@@ -1020,6 +1023,122 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn v006_drops_logs_fts() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        // Apply v001 through v005
+        for m in &MIGRATIONS[..5] {
+            apply_migration(&conn, m).unwrap();
+        }
+
+        // logs_fts should exist before v006
+        let has_fts: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'logs_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_fts, "logs_fts should exist before v006");
+
+        // Apply v006
+        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
+
+        // logs_fts should be gone
+        let has_fts_after: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'logs_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!has_fts_after, "logs_fts should be dropped by v006");
+
+        // Triggers should be gone too
+        let trigger_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'logs_fts%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(trigger_count, 0, "logs_fts triggers should be dropped");
+    }
+
+    #[test]
+    fn v006_purges_ort_and_sanitizer_logs() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for m in &MIGRATIONS[..5] {
+            apply_migration(&conn, m).unwrap();
+        }
+
+        // Insert noise rows
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message)
+             VALUES ('2026-03-01T00:00:00Z', 'info', 30, 'ort::logging', 'BFCArena alloc')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message)
+             VALUES ('2026-03-01T00:00:01Z', 'warn', 40, 'tron_llm::anthropic::message_sanitizer', 'Converted signed thinking block')",
+            [],
+        )
+        .unwrap();
+        // A legitimate log
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message)
+             VALUES ('2026-03-01T00:00:02Z', 'error', 50, 'tron_server', 'real error')",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "only the legitimate log should survive");
+
+        let msg: String = conn
+            .query_row("SELECT message FROM logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(msg, "real error");
+    }
+
+    #[test]
+    fn v006_preserves_legitimate_logs() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for m in &MIGRATIONS[..5] {
+            apply_migration(&conn, m).unwrap();
+        }
+
+        // Warn from a real component (not message_sanitizer)
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message)
+             VALUES ('2026-03-01T00:00:00Z', 'warn', 40, 'tron_runtime::agent', 'guardrail blocked')",
+            [],
+        )
+        .unwrap();
+        // Error from message_sanitizer (only warn is purged)
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message)
+             VALUES ('2026-03-01T00:00:01Z', 'error', 50, 'tron_llm::anthropic::message_sanitizer', 'unexpected error')",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "both legitimate logs should survive");
     }
 
     #[test]

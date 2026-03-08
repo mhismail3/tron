@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
-use tracing::{info, instrument, warn};
+use tracing::{debug, instrument, warn};
 use tron_transcription::TranscriptionResult;
 
 use crate::rpc::context::RpcContext;
@@ -85,7 +85,7 @@ async fn transcribe_audio_full(
             #[allow(clippy::cast_possible_truncation)]
             let elapsed_ms = start.elapsed().as_millis() as u64;
             let cleaned = cleanup_transcription(&result.text);
-            info!(
+            debug!(
                 "transcription succeeded ({:.1}s audio)",
                 result.duration_seconds
             );
@@ -177,7 +177,7 @@ impl MethodHandler for TranscribeAudioHandler {
         let mime_type = opt_string(params.as_ref(), "mimeType");
         let mime_type = mime_type.as_deref().unwrap_or("audio/wav");
 
-        info!(
+        debug!(
             audio_bytes = audio_bytes.len(),
             mime_type,
             "transcribe.audio: received {} bytes, mime={}",
@@ -187,7 +187,7 @@ impl MethodHandler for TranscribeAudioHandler {
 
         let resp = transcribe_audio_full(ctx, &audio_bytes, mime_type).await?;
 
-        info!(
+        debug!(
             text_len = resp.text.len(),
             duration = resp.duration_seconds,
             processing_ms = resp.processing_time_ms,

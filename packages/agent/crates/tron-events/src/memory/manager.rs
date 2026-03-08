@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use super::errors::MemoryError;
 use super::trigger::CompactionTrigger;
@@ -100,7 +100,7 @@ impl<D: MemoryManagerDeps> MemoryManager<D> {
         });
 
         if compaction_result.compact {
-            info!(
+            debug!(
                 reason = %compaction_result.reason,
                 session_id = %session_id,
                 "Compaction triggered by memory manager"

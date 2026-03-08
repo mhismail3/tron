@@ -1,8 +1,7 @@
 //! `SQLite` write transport for `tracing` events.
 //!
 //! [`SqliteTransport`] implements [`tracing_subscriber::Layer`] to capture log
-//! events and write them to the `logs` + `logs_fts` tables in batched
-//! transactions.
+//! events and write them to the `logs` table in batched transactions.
 //!
 //! # Batching Strategy
 //!
@@ -93,7 +92,7 @@ pub struct SqliteTransport {
 impl SqliteTransport {
     /// Create a new transport with the given connection and config.
     ///
-    /// The connection must have the `logs` and `logs_fts` tables already created
+    /// The connection must have the `logs` table already created
     /// (via tron-events migrations).
     pub fn new(conn: Connection, config: TransportConfig) -> Self {
         Self {
@@ -441,21 +440,7 @@ mod tests {
                 error_message TEXT,
                 error_stack TEXT,
                 origin TEXT
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
-                log_id UNINDEXED,
-                session_id UNINDEXED,
-                component,
-                message,
-                error_message,
-                tokenize='porter unicode61'
-            );
-            CREATE TRIGGER IF NOT EXISTS logs_fts_insert
-            AFTER INSERT ON logs
-            BEGIN
-              INSERT INTO logs_fts (log_id, session_id, component, message, error_message)
-              VALUES (NEW.id, NEW.session_id, NEW.component, NEW.message, COALESCE(NEW.error_message, ''));
-            END;",
+            );",
         )
         .unwrap();
         conn
@@ -578,45 +563,6 @@ mod tests {
             .query_row("SELECT origin FROM logs WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(origin.as_deref(), Some("localhost:9847"));
-    }
-
-    #[test]
-    fn write_batch_populates_fts() {
-        let conn = create_test_db();
-        let entries = vec![make_entry(
-            "info",
-            30,
-            "EventStore",
-            "Session created successfully",
-        )];
-        write_batch(&conn, &entries).unwrap();
-
-        // FTS search should find it
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH 'session'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn write_batch_fts_error_message_searchable() {
-        let conn = create_test_db();
-        let mut entry = make_entry("error", 50, "Provider", "API call failed");
-        entry.error_message = Some("timeout after 30s".to_string());
-        write_batch(&conn, &[entry]).unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH 'timeout'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
     }
 
     // ── TransportConfig ──────────────────────────────────────────────

@@ -13,7 +13,7 @@ use tron_core::messages::{Message, TokenUsage, UserMessageContent};
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
@@ -131,7 +131,7 @@ impl TronAgent {
         let _ = self.emitter.emit(TronEvent::AgentStart {
             base: BaseEvent::now(&self.session_id),
         });
-        info!(session_id = %self.session_id, "agent run started");
+        debug!(session_id = %self.session_id, "agent run started");
 
         let max_turns = self.config.max_turns;
         let mut turn = 0u32;
@@ -218,7 +218,7 @@ impl TronAgent {
             final_stop_reason = StopReason::MaxTurns;
         }
 
-        info!(session_id = %self.session_id, turns = turn, stop_reason = ?final_stop_reason, "agent run completed");
+        debug!(session_id = %self.session_id, turns = turn, stop_reason = ?final_stop_reason, "agent run completed");
 
         // Emit AgentEnd
         let _ = self.emitter.emit(TronEvent::AgentEnd {

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::errors::{Result, WorktreeError};
 use crate::git::GitExecutor;
@@ -67,7 +67,7 @@ pub async fn create(
         repo_root,
     };
 
-    info!(
+    debug!(
         session_id,
         worktree = %info.worktree_path.display(),
         branch = %info.branch,
@@ -101,7 +101,7 @@ pub async fn remove(
                 .await
             {
                 Ok(sha) => {
-                    info!(session_id = %info.session_id, commit = %sha, "auto-committed changes");
+                    debug!(session_id = %info.session_id, commit = %sha, "auto-committed changes");
                     final_commit = Some(sha);
                 }
                 Err(e) => {
@@ -155,7 +155,7 @@ pub async fn remove(
         true
     };
 
-    info!(
+    debug!(
         session_id = %info.session_id,
         deleted,
         branch_preserved,

@@ -149,8 +149,6 @@ pub struct LogQueryOptions {
     pub min_level: Option<i32>,
     /// Filter by component names.
     pub components: Option<Vec<String>>,
-    /// Full-text search query.
-    pub search: Option<String>,
     /// Filter by trace ID.
     pub trace_id: Option<String>,
     /// Maximum number of results.

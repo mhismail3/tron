@@ -7,7 +7,7 @@
 //! and tool arguments across delta events, then emits complete blocks on `content_block_stop`.
 
 use serde_json::Map;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
@@ -95,7 +95,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
 
             let cache_hit = state.cache_read_tokens > 0;
             let cache_write = state.cache_creation_tokens > 0;
-            info!(
+            debug!(
                 input_tokens = state.input_tokens,
                 cache_read = state.cache_read_tokens,
                 cache_write = state.cache_creation_tokens,

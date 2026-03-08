@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::errors::{Result, WorktreeError};
 use crate::git::GitExecutor;
@@ -48,7 +48,7 @@ async fn do_merge(
 
     match git.merge(repo_root, source_branch).await {
         Ok(commit) => {
-            info!(source = source_branch, target = target_branch, commit, "merge complete");
+            debug!(source = source_branch, target = target_branch, commit, "merge complete");
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),
@@ -84,7 +84,7 @@ async fn do_rebase(
             // Fast-forward target
             git.checkout(repo_root, target_branch).await?;
             let commit = git.merge(repo_root, source_branch).await?;
-            info!(source = source_branch, target = target_branch, commit, "rebase complete");
+            debug!(source = source_branch, target = target_branch, commit, "rebase complete");
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),
@@ -123,7 +123,7 @@ async fn do_squash(
                     &format!("squash merge {source_branch} into {target_branch}"),
                 )
                 .await?;
-            info!(source = source_branch, target = target_branch, commit, "squash merge complete");
+            debug!(source = source_branch, target = target_branch, commit, "squash merge complete");
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),

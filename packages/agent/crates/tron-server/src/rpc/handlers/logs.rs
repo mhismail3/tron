@@ -273,28 +273,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingest_logs_fts_searchable() {
-        let ctx = make_test_context();
-        let params = json!({
-            "entries": [
-                {"timestamp": "2026-03-03T14:30:05.000Z", "level": "info", "category": "Network", "message": "connection established successfully"},
-            ]
-        });
-
-        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
-
-        let conn = ctx.event_store.pool().get().unwrap();
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH 'connection'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[tokio::test]
     async fn ingest_logs_dedup_skips_old_entries() {
         let ctx = make_test_context();
         let params = json!({

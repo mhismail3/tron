@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::{info, instrument, warn};
+use tracing::{debug, instrument, warn};
 use tron_events::EventType;
 
 use crate::rpc::context::RpcContext;
@@ -611,7 +611,7 @@ impl MethodHandler for PromptHandler {
                             .await
                         {
                             Ok(tron_worktree::AcquireResult::Acquired(wt_info)) => {
-                                info!(
+                                debug!(
                                     session_id = %session_id_clone,
                                     worktree = %wt_info.worktree_path.display(),
                                     branch = %wt_info.branch,
@@ -1200,7 +1200,7 @@ impl MethodHandler for PromptHandler {
                     });
                 }
 
-                info!(
+                debug!(
                     session_id = %session_id_clone,
                     run_id = %run_id_clone,
                     stop_reason = ?result.stop_reason,
@@ -1292,10 +1292,10 @@ impl MethodHandler for GetAgentStateHandler {
         };
 
         let (current_turn_text, current_turn_tool_calls, content_sequence) = if is_running {
-            tracing::info!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
+            tracing::trace!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
             match ctx.orchestrator.turn_accumulators().get_state(&session_id) {
                 Some((text, tools, seq)) => {
-                    tracing::info!(
+                    tracing::trace!(
                         session_id = %session_id,
                         text_len = text.len(),
                         tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0),

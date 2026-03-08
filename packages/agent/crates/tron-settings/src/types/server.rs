@@ -148,7 +148,7 @@ impl Default for LoggingSettings {
     fn default() -> Self {
         Self {
             db_log_level: LogLevel::Info,
-            module_overrides: HashMap::from([("ort".to_string(), LogLevel::Warn)]),
+            module_overrides: HashMap::from([("ort".to_string(), LogLevel::Error)]),
         }
     }
 }
@@ -383,6 +383,16 @@ mod tests {
 
         let roundtrip = serde_json::to_value(&a).unwrap();
         assert_eq!(roundtrip.get("subagentMaxDepth").unwrap(), 5);
+    }
+
+    #[test]
+    fn default_logging_suppresses_ort() {
+        let settings = LoggingSettings::default();
+        assert_eq!(
+            settings.module_overrides.get("ort"),
+            Some(&LogLevel::Error),
+            "ort default should be Error to suppress ONNX Runtime log spam"
+        );
     }
 
     #[test]

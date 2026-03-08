@@ -174,7 +174,7 @@ Returns the page content with title. Results are cached for 15 minutes — same 
             match summarizer.summarize(&task, &ctx.session_id).await {
                 Ok(result) => (result.answer, result.session_id),
                 Err(e) => {
-                    tracing::warn!(error = %e, "summarizer failed, returning raw content");
+                    tracing::debug!(error = %e, "summarizer failed, returning raw content");
                     (format!("# {title}\n\n{truncated_content}"), String::new())
                 }
             }

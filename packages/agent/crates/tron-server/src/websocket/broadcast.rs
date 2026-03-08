@@ -87,10 +87,10 @@ impl BroadcastManager {
                         counter!("ws_broadcast_drops_total").increment(1);
                         let drops = conn.drop_count();
                         if drops >= MAX_TOTAL_DROPS {
-                            warn!(conn_id = %conn.id, label, drops, "disconnecting slow client");
+                            debug!(conn_id = %conn.id, label, drops, "disconnecting slow client");
                             to_remove.push(conn.id.clone());
                         } else {
-                            warn!(conn_id = %conn.id, label, total_drops = drops, "failed to send event to client (channel full)");
+                            debug!(conn_id = %conn.id, label, total_drops = drops, "failed to send event to client (channel full)");
                         }
                     }
                 }

@@ -5,7 +5,7 @@
 //! since incomplete tool calls are common during streaming.
 
 use serde_json::{Map, Value};
-use tracing::warn;
+use tracing::debug;
 
 /// Context for logging when tool call parsing fails.
 #[derive(Clone, Debug, Default)]
@@ -42,7 +42,7 @@ pub fn parse_tool_call_arguments(
     match serde_json::from_str::<Value>(trimmed) {
         Ok(Value::Object(map)) => map,
         Ok(other) => {
-            warn!(
+            debug!(
                 tool_call_id = context.and_then(|c| c.tool_call_id.as_deref()),
                 tool_name = context.and_then(|c| c.tool_name.as_deref()),
                 provider = context.and_then(|c| c.provider.as_deref()),
@@ -52,7 +52,7 @@ pub fn parse_tool_call_arguments(
             Map::new()
         }
         Err(e) => {
-            warn!(
+            debug!(
                 tool_call_id = context.and_then(|c| c.tool_call_id.as_deref()),
                 tool_name = context.and_then(|c| c.tool_name.as_deref()),
                 provider = context.and_then(|c| c.provider.as_deref()),

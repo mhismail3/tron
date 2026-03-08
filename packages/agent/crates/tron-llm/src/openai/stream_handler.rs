@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{ToolCallContext, parse_tool_call_arguments};
-use tracing::{debug, warn};
+use tracing::debug;
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
 use tron_core::messages::TokenUsage;
@@ -195,7 +195,7 @@ pub fn process_stream_event(
         }
 
         SseEventType::ComputerCallCompleted => {
-            warn!("Computer use event received but not implemented — ignoring");
+            debug!("Computer use event received but not implemented — ignoring");
         }
 
         SseEventType::Completed => {
@@ -317,7 +317,7 @@ fn merge_completed_output_items(
                 debug!(item_type = ?item.item_type, "Tool search output item — transparent");
             }
             OutputItemType::ComputerCall => {
-                warn!("Computer call output item — not implemented");
+                debug!("Computer call output item — not implemented");
             }
             OutputItemType::Unknown => {}
         }

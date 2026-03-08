@@ -428,12 +428,13 @@ query_logs() {
 
     local sql
     if [ -n "$search" ]; then
-        sql="SELECT l.timestamp, l.level, l.component, l.message, l.session_id, l.error_message
-             FROM logs l
-             JOIN logs_fts f ON l.id = f.log_id
-             WHERE logs_fts MATCH '${search//\'/\'\'}'
+        local escaped_search="${search//\'/\'\'}"
+        local search_cond="(message LIKE '%${escaped_search}%' OR component LIKE '%${escaped_search}%' OR error_message LIKE '%${escaped_search}%')"
+        sql="SELECT timestamp, level, component, message, session_id, error_message
+             FROM logs
+             WHERE ${search_cond}
              ${where_clause:+AND ${where_clause#WHERE }}
-             ORDER BY l.timestamp DESC
+             ORDER BY timestamp DESC
              LIMIT $limit"
     else
         sql="SELECT timestamp, level, component, message, session_id, error_message
@@ -500,12 +501,14 @@ cmd_dev() {
     local do_build=false
     local do_test=false
     local do_background=false
+    local log_level=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--build)   do_build=true; shift ;;
             -t|--test)    do_test=true; shift ;;
             -d|--background) do_background=true; shift ;;
+            -l|--log-level) log_level="$2"; shift 2 ;;
             -bt|-tb)      do_build=true; do_test=true; shift ;;
             -bd|-db)      do_build=true; do_background=true; shift ;;
             -btd|-bdt|-tbd|-tdb|-dbt|-dtb) do_build=true; do_test=true; do_background=true; shift ;;
@@ -525,6 +528,7 @@ cmd_dev() {
                 echo "  -b, --build       Build before starting"
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (log to server.log)"
+                echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --stop            Stop dev server and restart production"
                 echo "  --log             Tail the server log"
                 echo ""
@@ -605,9 +609,9 @@ dev_start_foreground() {
     echo ""
     echo -e "${YELLOW}Prod stopped. Ctrl+C to stop dev and restart prod.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    RUST_LOG="${RUST_LOG:-debug}" cargo run --release \
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --release \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
-        --bin tron -- --port "$PROD_PORT"
+        --bin tron -- --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
 }
 
 dev_start_background() {
@@ -635,9 +639,9 @@ dev_start_background() {
 
     local log_file="$DEPLOY_DIR/dev-server.log"
 
-    RUST_LOG="${RUST_LOG:-debug}" cargo run --release \
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --release \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
-        --bin tron -- --port "$PROD_PORT" \
+        --bin tron -- --port "$PROD_PORT" ${log_level:+--log-level "$log_level"} \
         > "$log_file" 2>&1 &
 
     local pid=$!

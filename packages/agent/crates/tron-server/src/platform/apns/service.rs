@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use super::config::ApnsConfig;
 use super::types::{ApnsNotification, ApnsSendResult};
@@ -71,7 +71,7 @@ impl ApnsService {
                 reason: e.to_string(),
             })?;
 
-        info!(
+        debug!(
             key_id = %config.key_id,
             team_id = %config.team_id,
             environment = %config.environment,
@@ -121,7 +121,7 @@ impl ApnsService {
 
         let payload = self.build_payload(notification);
 
-        info!(
+        debug!(
             url = %url,
             token_len = device_token.len(),
             token_prefix = tron_core::text::truncate_str(device_token, 8),
@@ -154,7 +154,7 @@ impl ApnsService {
                 let http_version = format!("{:?}", response.version());
 
                 if response.status().is_success() {
-                    info!(
+                    debug!(
                         status,
                         http_version = %http_version,
                         device_token = tron_core::text::truncate_str(device_token, 8),

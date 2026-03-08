@@ -76,7 +76,7 @@ impl EventPersister {
             payload,
             reply: None,
         }) {
-            tracing::warn!(?event_type, error = %e, "fire-and-forget persist dropped: channel full");
+            tracing::debug!(?event_type, error = %e, "fire-and-forget persist dropped: channel full");
         }
     }
 

@@ -11,7 +11,7 @@ use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 
 use metrics::{counter, gauge, histogram};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 use super::broadcast::BroadcastManager;
 use super::connection::ClientConnection;
@@ -51,7 +51,7 @@ pub async fn run_ws_session(
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
     let connection_start = std::time::Instant::now();
-    info!(client_id, "client connected");
+    debug!(client_id, "client connected");
     counter!("ws_connections_total").increment(1);
     gauge!("ws_connections_active").increment(1.0);
 
@@ -133,7 +133,7 @@ pub async fn run_ws_session(
                 if let Ok(s) = std::str::from_utf8(data) {
                     Some(s)
                 } else {
-                    info!(
+                    debug!(
                         client_id,
                         len = data.len(),
                         "received non-UTF8 binary frame"
@@ -142,7 +142,7 @@ pub async fn run_ws_session(
                 }
             }
             Message::Close(_) => {
-                info!(client_id, "client sent close frame");
+                debug!(client_id, "client sent close frame");
                 break;
             }
             Message::Ping(_) | Message::Pong(_) => {
@@ -172,7 +172,7 @@ pub async fn run_ws_session(
         }
 
         if !connection.send(Arc::new(result.response_json)) {
-            info!(
+            debug!(
                 client_id,
                 "failed to enqueue response (channel full or closed)"
             );
@@ -180,7 +180,7 @@ pub async fn run_ws_session(
     }
 
     // Clean up — signal outbound forwarder to drain and exit
-    info!(client_id, "client disconnected");
+    debug!(client_id, "client disconnected");
     counter!("ws_disconnections_total").increment(1);
     gauge!("ws_connections_active").decrement(1.0);
     histogram!("ws_connection_duration_seconds").record(connection_start.elapsed().as_secs_f64());

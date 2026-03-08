@@ -62,7 +62,7 @@ impl BrowserService {
             .sessions
             .insert(session_id.to_string(), Arc::clone(&session));
         metrics::gauge!("browser_sessions_active").increment(1.0);
-        tracing::info!(session_id, "browser session created");
+        tracing::debug!(session_id, "browser session created");
         Ok(session)
     }
 
@@ -74,7 +74,7 @@ impl BrowserService {
         session
             .start_screencast(session_id.to_string(), ScreencastOptions::default())
             .await?;
-        tracing::info!(session_id, "screencast streaming started");
+        tracing::debug!(session_id, "screencast streaming started");
         Ok(())
     }
 
@@ -84,7 +84,7 @@ impl BrowserService {
     pub async fn stop_stream(&self, session_id: &str) -> Result<(), BrowserError> {
         if let Some(session) = self.sessions.get(session_id) {
             session.stop_screencast().await?;
-            tracing::info!(session_id, "screencast streaming stopped");
+            tracing::debug!(session_id, "screencast streaming stopped");
         }
         Ok(())
     }
@@ -117,7 +117,7 @@ impl BrowserService {
                 session_id: session_id.to_string(),
             });
             metrics::gauge!("browser_sessions_active").decrement(1.0);
-            tracing::info!(session_id, "browser session closed");
+            tracing::debug!(session_id, "browser session closed");
         }
         Ok(())
     }

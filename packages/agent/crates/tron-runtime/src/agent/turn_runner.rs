@@ -21,7 +21,7 @@ use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ExecutionMode;
 
 use metrics::{counter, histogram};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
@@ -657,7 +657,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         p.append_fire_and_forget(session_id, EventType::StreamTurnEnd, turn_end_payload);
     }
 
-    info!(
+    debug!(
         session_id,
         turn,
         duration_ms = duration,

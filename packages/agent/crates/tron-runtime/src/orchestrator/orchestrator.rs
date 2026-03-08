@@ -107,7 +107,7 @@ impl Orchestrator {
         );
         #[allow(clippy::cast_precision_loss)]
         gauge!("agent_runs_active").set(runs.len() as f64);
-        info!(session_id, run_id, "run started");
+        debug!(session_id, run_id, "run started");
         Ok(cancel)
     }
 

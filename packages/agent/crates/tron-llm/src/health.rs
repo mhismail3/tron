@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tracing::warn;
+use tracing::debug;
 
 /// Default window size for tracking recent requests.
 const DEFAULT_WINDOW_SIZE: usize = 10;
@@ -139,7 +139,7 @@ impl ProviderHealthTracker {
         metrics::gauge!("provider_degraded", "provider" => provider.to_string()).set(gauge_val);
 
         if degraded && !success {
-            warn!(
+            debug!(
                 provider,
                 error_rate = format!("{:.0}%", rate * 100.0),
                 window = self.window_size,

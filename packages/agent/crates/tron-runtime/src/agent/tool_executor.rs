@@ -14,7 +14,7 @@ use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ToolContext;
 
 use metrics::{counter, histogram};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::types::ToolExecutionResult;
@@ -211,7 +211,7 @@ pub async fn execute_tool(
         is_error: tool_result.is_error,
         result: Some(tool_result.clone()),
     });
-    info!(tool = %tool_name, duration_ms, "tool executed");
+    debug!(tool = %tool_name, duration_ms, "tool executed");
 
     // 7. Execute PostToolUse hooks (background, fire-and-forget)
     if let Some(hook_engine) = hooks {

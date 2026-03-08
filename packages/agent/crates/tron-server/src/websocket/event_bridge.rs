@@ -49,7 +49,7 @@ impl EventBridge {
             loop {
                 tokio::select! {
                     () = self.cancel.cancelled() => {
-                        tracing::info!("event bridge: shutdown signal received");
+                        tracing::debug!("event bridge: shutdown signal received");
                         break;
                     }
                     result = self.rx.recv() => {
@@ -61,7 +61,7 @@ impl EventBridge {
                         match result {
                             Ok(event) => self.bridge_browser_event(&event).await,
                             Err(broadcast::error::RecvError::Lagged(n)) => {
-                                tracing::warn!(lagged = n, "browser event bridge lagged");
+                                tracing::debug!(lagged = n, "browser event bridge lagged");
                                 metrics::counter!("broadcast_lagged_events_total", "source" => "browser_bridge").increment(n);
                             }
                             Err(broadcast::error::RecvError::Closed) => {
@@ -82,7 +82,7 @@ impl EventBridge {
         loop {
             tokio::select! {
                 () = self.cancel.cancelled() => {
-                    tracing::info!("event bridge: shutdown signal received");
+                    tracing::debug!("event bridge: shutdown signal received");
                     break;
                 }
                 result = self.rx.recv() => {
@@ -105,12 +105,12 @@ impl EventBridge {
                 true
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!(lagged = n, "event bridge lagged");
+                tracing::debug!(lagged = n, "event bridge lagged");
                 metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge").increment(n);
                 true
             }
             Err(broadcast::error::RecvError::Closed) => {
-                tracing::info!("event bridge: sender closed, exiting");
+                tracing::debug!("event bridge: sender closed, exiting");
                 false
             }
         }

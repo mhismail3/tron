@@ -82,6 +82,10 @@ struct Cli {
     /// Maximum concurrent sessions (overrides settings if specified).
     #[arg(long)]
     max_sessions: Option<usize>,
+
+    /// Override database log level (trace, debug, info, warn, error).
+    #[arg(long)]
+    log_level: Option<String>,
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -401,8 +405,12 @@ async fn main() -> Result<()> {
         .iter()
         .map(|(m, lvl)| (m.clone(), lvl.as_filter_str()))
         .collect();
+    let effective_log_level = args
+        .log_level
+        .as_deref()
+        .unwrap_or_else(|| settings.logging.db_log_level.as_filter_str());
     let log_handle = tron_core::logging::init_subscriber_with_sqlite(
-        settings.logging.db_log_level.as_filter_str(),
+        effective_log_level,
         &module_overrides,
         log_conn,
         Some(origin.clone()),
@@ -890,6 +898,18 @@ mod tests {
     fn cli_default_port() {
         let cli = Cli::parse_from(["tron"]);
         assert_eq!(cli.port, 9847);
+    }
+
+    #[test]
+    fn cli_parses_log_level_flag() {
+        let cli = Cli::parse_from(["tron", "--log-level", "debug"]);
+        assert_eq!(cli.log_level.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn cli_log_level_is_optional() {
+        let cli = Cli::parse_from(["tron"]);
+        assert!(cli.log_level.is_none());
     }
 
     #[test]

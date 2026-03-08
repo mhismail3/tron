@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use tracing::warn;
+use tracing::debug;
 
 use crate::types::{SkillFrontmatter, SkillSubagentMode, ToolDenialConfig};
 
@@ -29,7 +29,7 @@ pub fn skill_frontmatter_to_denials(
         .is_some_and(|a| !a.is_empty());
 
     if has_denied && has_allowed {
-        warn!("Skill specifies both deniedTools and allowedTools; using deniedTools");
+        debug!("Skill specifies both deniedTools and allowedTools; using deniedTools");
     }
 
     if has_denied {

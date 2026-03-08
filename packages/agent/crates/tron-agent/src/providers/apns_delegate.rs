@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::{debug, info};
+use tracing::debug;
 use tron_events::ConnectionPool;
 use tron_events::sqlite::repositories::device_token::DeviceTokenRepo;
 use tron_server::platform::apns::{ApnsNotification, ApnsService};
@@ -79,7 +79,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         let token_strings = self.active_tokens()?;
 
         if token_strings.is_empty() {
-            info!("No active device tokens — skipping APNS send");
+            debug!("No active device tokens — skipping APNS send");
             return Ok(NotifyResult {
                 success: true,
                 message: None,
@@ -89,7 +89,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         let apns_notif = Self::to_apns_notification(notification);
         let total = token_strings.len();
 
-        info!(
+        debug!(
             device_count = total,
             title = %notification.title,
             tokens = ?token_strings.iter().map(|t| format!("{}...({})", token_prefix(t), t.len())).collect::<Vec<_>>(),
@@ -103,7 +103,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         let mut errors = Vec::new();
 
         for result in &results {
-            info!(
+            debug!(
                 token_prefix = token_prefix(&result.device_token),
                 token_len = result.device_token.len(),
                 success = result.success,
@@ -146,7 +146,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             )
         };
 
-        info!(
+        debug!(
             success_count,
             error_count = errors.len(),
             total,

@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, TronEvent};
 
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::tron_agent::TronAgent;
@@ -89,7 +89,7 @@ pub async fn run_agent(
         hook_engine.wait_for_background().await;
     }
 
-    info!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
+    debug!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
 
     // INVARIANT: agent.ready MUST be emitted AFTER agent.complete — iOS
     // handleComplete() sets isPostProcessing=true, handleAgentReady() clears it.

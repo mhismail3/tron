@@ -21,7 +21,7 @@
 //! ...preserved messages...
 //! ```
 
-use tracing::{info, instrument, trace};
+use tracing::{instrument, trace};
 use tron_core::content::AssistantContent;
 use tron_core::messages::{Message, UserMessageContent};
 
@@ -165,7 +165,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
         // Nothing to summarize — conversation fits within preserve window
         if to_summarize.is_empty() {
-            info!(
+            trace!(
                 total_messages = messages.len(),
                 preserve_count, "Compaction skipped: all messages within preserve window"
             );

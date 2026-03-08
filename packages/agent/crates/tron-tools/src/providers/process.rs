@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::errors::ToolError;
 use crate::traits::{ProcessOptions, ProcessOutput, ProcessRunner};
@@ -92,7 +92,7 @@ impl ProcessRunner for TokioProcessRunner {
                 let _ = child.kill().await;
                 stdout_handle.abort();
                 stderr_handle.abort();
-                warn!(command, timeout_ms = opts.timeout_ms, "process timed out");
+                debug!(command, timeout_ms = opts.timeout_ms, "process timed out");
                 Ok(ProcessOutput {
                     stdout: String::new(),
                     stderr: "Process timed out".into(),

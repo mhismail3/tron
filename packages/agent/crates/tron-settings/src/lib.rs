@@ -110,7 +110,7 @@ pub fn reload_settings_from_path(path: &Path) {
     });
     let mut guard = SETTINGS.write().expect("settings lock poisoned");
     *guard = Some(new);
-    tracing::info!(?path, "settings reloaded from disk");
+    tracing::debug!(?path, "settings reloaded from disk");
 }
 
 /// Reset the global settings cache (test-only).

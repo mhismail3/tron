@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tracing::warn;
+use tracing::debug;
 
 use tron_core::content::AssistantContent;
 use tron_core::messages::{Message, ToolResultMessageContent};
@@ -45,7 +45,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
         match &msg {
             Message::User { content, .. } => {
                 if !is_valid_user_content(content) {
-                    warn!("Removed empty user message");
+                    debug!("Removed empty user message");
                     continue;
                 }
                 valid.push(msg);
@@ -60,7 +60,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                     match block {
                         AssistantContent::ToolUse { id, .. } => {
                             if seen_tool_use_ids.contains(id) {
-                                warn!(tool_use_id = %id, "Removed duplicate tool_use block");
+                                debug!(tool_use_id = %id, "Removed duplicate tool_use block");
                                 continue;
                             }
                             let _ = seen_tool_use_ids.insert(id.clone());
@@ -70,7 +70,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                             thinking,
                             signature: Some(_),
                         } => {
-                            warn!("Converted signed thinking block to text (cross-model signature)");
+                            debug!("Converted signed thinking block to text (cross-model signature)");
                             filtered.push(AssistantContent::text(thinking.clone()));
                         }
                         _ => {
@@ -81,7 +81,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
 
                 // Check if remaining content survives API conversion
                 if !has_content_surviving_conversion(&filtered) {
-                    warn!("Removed assistant message with no content surviving conversion");
+                    debug!("Removed assistant message with no content surviving conversion");
                     continue;
                 }
 
@@ -108,11 +108,11 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                 ..
             } => {
                 if tool_call_id.is_empty() {
-                    warn!("Removed tool result with empty tool_call_id");
+                    debug!("Removed tool result with empty tool_call_id");
                     continue;
                 }
                 if !is_valid_tool_result_content(content) {
-                    warn!(tool_call_id = %tool_call_id, "Removed empty tool result");
+                    debug!(tool_call_id = %tool_call_id, "Removed empty tool result");
                     continue;
                 }
                 valid.push(msg);
@@ -152,7 +152,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
         if let Some(missing_ids) = missing_by_index.get(&assistant_idx) {
             // Insert in reverse to maintain original tool_use order
             for tool_call_id in missing_ids.iter().rev() {
-                warn!(tool_call_id = %tool_call_id, "Injected synthetic tool result for interrupted execution");
+                debug!(tool_call_id = %tool_call_id, "Injected synthetic tool result for interrupted execution");
                 valid.insert(
                     assistant_idx + 1,
                     Message::ToolResult {
@@ -167,7 +167,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
 
     // PHASE 4: Ensure first message is user role
     if !valid.is_empty() && !valid[0].is_user() {
-        warn!("Injected placeholder user message at start");
+        debug!("Injected placeholder user message at start");
         valid.insert(0, Message::user(CONTINUED_CONTENT));
     }
 
