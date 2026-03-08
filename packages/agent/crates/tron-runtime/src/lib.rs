@@ -29,7 +29,7 @@ pub mod types;
 
 // Re-export main public API
 pub use agent::event_emitter::EventEmitter;
-pub use agent::tron_agent::TronAgent;
+pub use agent::tron_agent::{AgentDeps, TronAgent};
 pub use errors::{RuntimeError, StopReason};
 pub use orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 pub use orchestrator::agent_runner::run_agent;

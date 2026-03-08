@@ -11,7 +11,7 @@ use tron_core::messages::Message;
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
-use crate::agent::tron_agent::TronAgent;
+use crate::agent::tron_agent::{AgentDeps, TronAgent};
 use crate::types::AgentConfig;
 
 /// Options for creating an agent.
@@ -118,11 +118,13 @@ impl AgentFactory {
 
         TronAgent::new(
             config,
-            opts.provider,
-            registry,
-            opts.guardrails,
-            opts.hooks,
-            context_manager,
+            AgentDeps {
+                provider: opts.provider,
+                registry,
+                guardrails: opts.guardrails,
+                hooks: opts.hooks,
+                context_manager,
+            },
             session_id,
         )
     }

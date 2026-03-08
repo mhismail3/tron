@@ -203,15 +203,71 @@ fn set_opt<T: serde::Serialize>(data: &mut serde_json::Value, key: &str, val: &O
 }
 
 /// Convert a `TronEvent` to an `RpcEvent` for WebSocket transmission.
-#[allow(clippy::too_many_lines)]
 pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
-    let event_type = event.event_type();
-    let session_id = event.session_id();
-    let timestamp = event.timestamp();
+    if let Some(rpc) = convert_message_event(event) {
+        return rpc;
+    }
+    if let Some(rpc) = convert_turn_event(event) {
+        return rpc;
+    }
+    if let Some(rpc) = convert_tool_event(event) {
+        return rpc;
+    }
+    if let Some(rpc) = convert_hook_event(event) {
+        return rpc;
+    }
+    if let Some(rpc) = convert_streaming_event(event) {
+        return rpc;
+    }
+    convert_session_event(event)
+        .unwrap_or_else(|| make_rpc(event, event.event_type(), Some(serde_json::json!({}))))
+}
 
-    let data = match event {
-        TronEvent::MessageUpdate { content, .. } => Some(serde_json::json!({ "delta": content })),
-        TronEvent::TurnStart { turn, .. } => Some(serde_json::json!({ "turn": turn })),
+fn make_rpc(
+    event: &TronEvent,
+    wire_type: &str,
+    data: Option<serde_json::Value>,
+) -> RpcEvent {
+    let session_id = event.session_id();
+    RpcEvent {
+        event_type: wire_type.to_string(),
+        session_id: if session_id.is_empty() {
+            None
+        } else {
+            Some(session_id.to_string())
+        },
+        timestamp: event.timestamp().to_string(),
+        data,
+        run_id: None,
+    }
+}
+
+fn convert_message_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
+        TronEvent::MessageUpdate { content, .. } => {
+            Some(make_rpc(event, "agent.text_delta", Some(serde_json::json!({ "delta": content }))))
+        }
+        TronEvent::MessageDeleted {
+            target_event_id,
+            target_type,
+            target_turn,
+            reason,
+            ..
+        } => Some(make_rpc(event, "agent.message_deleted", Some(serde_json::json!({
+            "targetEventId": target_event_id,
+            "targetType": target_type,
+            "targetTurn": target_turn,
+            "reason": reason,
+        })))),
+        _ => None,
+    }
+}
+
+fn convert_turn_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
+        TronEvent::TurnStart { turn, .. } => {
+            Some(make_rpc(event, "agent.turn_start", Some(serde_json::json!({ "turn": turn }))))
+        }
         TronEvent::TurnEnd {
             turn,
             duration,
@@ -237,8 +293,83 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             set_opt(&mut data, "stopReason", stop_reason);
             set_opt(&mut data, "contextLimit", context_limit);
             set_opt(&mut data, "model", model);
-            Some(data)
+            Some(make_rpc(event, "agent.turn_end", Some(data)))
         }
+        TronEvent::TurnFailed {
+            turn,
+            error,
+            code,
+            category,
+            recoverable,
+            partial_content,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "turn": turn,
+                "error": error,
+                "recoverable": recoverable,
+            });
+            set_opt(&mut data, "code", code);
+            set_opt(&mut data, "category", category);
+            set_opt(&mut data, "partialContent", partial_content);
+            Some(make_rpc(event, "agent.turn_failed", Some(data)))
+        }
+        TronEvent::ResponseComplete {
+            turn,
+            stop_reason,
+            token_usage,
+            has_tool_calls,
+            tool_call_count,
+            token_record,
+            model,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "turn": turn,
+                "stopReason": stop_reason,
+                "hasToolCalls": has_tool_calls,
+                "toolCallCount": tool_call_count,
+            });
+            if let Some(usage) = token_usage {
+                data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
+            }
+            if let Some(record) = token_record {
+                data["tokenRecord"] = record.clone();
+            }
+            set_opt(&mut data, "model", model);
+            Some(make_rpc(event, "agent.response_complete", Some(data)))
+        }
+        TronEvent::AgentInterrupted {
+            turn,
+            partial_content,
+            active_tool,
+            ..
+        } => {
+            let mut data = serde_json::json!({ "turn": turn });
+            set_opt(&mut data, "partialContent", partial_content);
+            set_opt(&mut data, "activeTool", active_tool);
+            Some(make_rpc(event, "agent.interrupted", Some(data)))
+        }
+        TronEvent::ApiRetry {
+            attempt,
+            max_retries,
+            delay_ms,
+            error_category,
+            error_message,
+            ..
+        } => Some(make_rpc(event, "agent.retry", Some(serde_json::json!({
+            "attempt": attempt,
+            "maxRetries": max_retries,
+            "delayMs": delay_ms,
+            "errorCategory": error_category,
+            "errorMessage": error_message,
+        })))),
+        _ => None,
+    }
+}
+
+fn convert_tool_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
         TronEvent::ToolExecutionStart {
             tool_name,
             tool_call_id,
@@ -250,7 +381,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "toolCallId": tool_call_id,
             });
             set_opt(&mut data, "arguments", arguments);
-            Some(data)
+            Some(make_rpc(event, "agent.tool_start", Some(data)))
         }
         TronEvent::ToolExecutionEnd {
             tool_name,
@@ -291,18 +422,18 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                     data["details"] = details.clone();
                 }
             }
-            Some(data)
+            Some(make_rpc(event, "agent.tool_end", Some(data)))
         }
         TronEvent::ToolExecutionUpdate {
             tool_call_id,
             update,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.tool_output", Some(serde_json::json!({
             "toolCallId": tool_call_id,
             "output": update,
-        })),
+        })))),
         TronEvent::ToolUseBatch { tool_calls, .. } => {
-            Some(serde_json::json!({ "toolCalls": tool_calls }))
+            Some(make_rpc(event, "agent.tool_use_batch", Some(serde_json::json!({ "toolCalls": tool_calls }))))
         }
         TronEvent::ToolCallArgumentDelta {
             tool_call_id,
@@ -315,73 +446,117 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "argumentsDelta": arguments_delta,
             });
             set_opt(&mut data, "toolName", tool_name);
-            Some(data)
+            Some(make_rpc(event, "agent.toolcall_delta", Some(data)))
         }
         TronEvent::ToolCallGenerating {
             tool_call_id,
             tool_name,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.tool_generating", Some(serde_json::json!({
             "toolCallId": tool_call_id,
             "toolName": tool_name,
-        })),
-        TronEvent::AgentEnd { error, .. } => {
-            error.as_ref().map(|e| serde_json::json!({ "error": e }))
-        }
-        TronEvent::AgentInterrupted {
-            turn,
-            partial_content,
-            active_tool,
+        })))),
+        _ => None,
+    }
+}
+
+fn convert_hook_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
+        TronEvent::HookTriggered {
+            hook_names,
+            hook_event,
+            tool_name,
+            tool_call_id,
             ..
         } => {
-            let mut data = serde_json::json!({ "turn": turn });
-            set_opt(&mut data, "partialContent", partial_content);
-            set_opt(&mut data, "activeTool", active_tool);
-            Some(data)
+            let mut data = serde_json::json!({
+                "hookNames": hook_names,
+                "hookEvent": hook_event,
+            });
+            set_opt(&mut data, "toolName", tool_name);
+            set_opt(&mut data, "toolCallId", tool_call_id);
+            Some(make_rpc(event, "hook.triggered", Some(data)))
         }
-        TronEvent::TurnFailed {
-            turn,
+        TronEvent::HookCompleted {
+            hook_names,
+            hook_event,
+            result,
+            duration,
+            reason,
+            tool_name,
+            tool_call_id,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "hookNames": hook_names,
+                "hookEvent": hook_event,
+                "result": result,
+            });
+            set_opt(&mut data, "duration", duration);
+            set_opt(&mut data, "reason", reason);
+            set_opt(&mut data, "toolName", tool_name);
+            set_opt(&mut data, "toolCallId", tool_call_id);
+            Some(make_rpc(event, "hook.completed", Some(data)))
+        }
+        TronEvent::HookBackgroundStarted {
+            hook_names,
+            hook_event,
+            execution_id,
+            ..
+        } => Some(make_rpc(event, "hook.background_started", Some(serde_json::json!({
+            "hookNames": hook_names,
+            "hookEvent": hook_event,
+            "executionId": execution_id,
+        })))),
+        TronEvent::HookBackgroundCompleted {
+            hook_names,
+            hook_event,
+            execution_id,
+            result,
+            duration,
             error,
-            code,
-            category,
-            recoverable,
-            partial_content,
             ..
         } => {
             let mut data = serde_json::json!({
-                "turn": turn,
-                "error": error,
-                "recoverable": recoverable,
+                "hookNames": hook_names,
+                "hookEvent": hook_event,
+                "executionId": execution_id,
+                "result": result,
+                "duration": duration,
             });
-            set_opt(&mut data, "code", code);
-            set_opt(&mut data, "category", category);
-            set_opt(&mut data, "partialContent", partial_content);
-            Some(data)
+            set_opt(&mut data, "error", error);
+            Some(make_rpc(event, "hook.background_completed", Some(data)))
         }
-        TronEvent::ResponseComplete {
-            turn,
-            stop_reason,
-            token_usage,
-            has_tool_calls,
-            tool_call_count,
-            token_record,
-            model,
-            ..
-        } => {
-            let mut data = serde_json::json!({
-                "turn": turn,
-                "stopReason": stop_reason,
-                "hasToolCalls": has_tool_calls,
-                "toolCallCount": tool_call_count,
-            });
-            if let Some(usage) = token_usage {
-                data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
-            }
-            if let Some(record) = token_record {
-                data["tokenRecord"] = record.clone();
-            }
-            set_opt(&mut data, "model", model);
-            Some(data)
+        _ => None,
+    }
+}
+
+fn convert_streaming_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
+        TronEvent::ThinkingStart { .. } => {
+            Some(make_rpc(event, "agent.thinking_start", Some(serde_json::json!({}))))
+        }
+        TronEvent::ThinkingDelta { delta, .. } => {
+            Some(make_rpc(event, "agent.thinking_delta", Some(serde_json::json!({ "delta": delta }))))
+        }
+        TronEvent::ThinkingEnd { thinking, .. } => {
+            Some(make_rpc(event, "agent.thinking_end", Some(serde_json::json!({ "thinking": thinking }))))
+        }
+        _ => None,
+    }
+}
+
+fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
+    match event {
+        TronEvent::AgentStart { .. } => {
+            Some(make_rpc(event, "agent.start", Some(serde_json::json!({}))))
+        }
+        TronEvent::AgentEnd { error, .. } => {
+            let data = error.as_ref().map(|e| serde_json::json!({ "error": e }));
+            Some(make_rpc(event, "agent.complete", data))
+        }
+        TronEvent::AgentReady { .. } => {
+            Some(make_rpc(event, "agent.ready", Some(serde_json::json!({}))))
         }
         TronEvent::Error {
             error,
@@ -406,16 +581,16 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             set_opt(&mut data, "statusCode", status_code);
             set_opt(&mut data, "errorType", error_type);
             set_opt(&mut data, "model", model);
-            Some(data)
+            Some(make_rpc(event, "agent.error", Some(data)))
         }
         TronEvent::CompactionStart {
             reason,
             tokens_before,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.compaction_started", Some(serde_json::json!({
             "reason": reason,
             "tokensBefore": tokens_before,
-        })),
+        })))),
         TronEvent::CompactionComplete {
             success,
             tokens_before,
@@ -437,105 +612,22 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             }
             set_opt(&mut data, "summary", summary);
             set_opt(&mut data, "estimatedContextTokens", estimated_context_tokens);
-            Some(data)
+            Some(make_rpc(event, "agent.compaction", Some(data)))
         }
         TronEvent::ContextWarning {
             usage_percent,
             message,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "context.warning", Some(serde_json::json!({
             "usagePercent": usage_percent,
             "message": message,
-        })),
-        TronEvent::HookTriggered {
-            hook_names,
-            hook_event,
-            tool_name,
-            tool_call_id,
-            ..
-        } => {
-            let mut data = serde_json::json!({
-                "hookNames": hook_names,
-                "hookEvent": hook_event,
-            });
-            set_opt(&mut data, "toolName", tool_name);
-            set_opt(&mut data, "toolCallId", tool_call_id);
-            Some(data)
-        }
-        TronEvent::HookCompleted {
-            hook_names,
-            hook_event,
-            result,
-            duration,
-            reason,
-            tool_name,
-            tool_call_id,
-            ..
-        } => {
-            let mut data = serde_json::json!({
-                "hookNames": hook_names,
-                "hookEvent": hook_event,
-                "result": result,
-            });
-            set_opt(&mut data, "duration", duration);
-            set_opt(&mut data, "reason", reason);
-            set_opt(&mut data, "toolName", tool_name);
-            set_opt(&mut data, "toolCallId", tool_call_id);
-            Some(data)
-        }
-        TronEvent::HookBackgroundStarted {
-            hook_names,
-            hook_event,
-            execution_id,
-            ..
-        } => Some(serde_json::json!({
-            "hookNames": hook_names,
-            "hookEvent": hook_event,
-            "executionId": execution_id,
-        })),
-        TronEvent::HookBackgroundCompleted {
-            hook_names,
-            hook_event,
-            execution_id,
-            result,
-            duration,
-            error,
-            ..
-        } => {
-            let mut data = serde_json::json!({
-                "hookNames": hook_names,
-                "hookEvent": hook_event,
-                "executionId": execution_id,
-                "result": result,
-                "duration": duration,
-            });
-            set_opt(&mut data, "error", error);
-            Some(data)
-        }
-        TronEvent::ApiRetry {
-            attempt,
-            max_retries,
-            delay_ms,
-            error_category,
-            error_message,
-            ..
-        } => Some(serde_json::json!({
-            "attempt": attempt,
-            "maxRetries": max_retries,
-            "delayMs": delay_ms,
-            "errorCategory": error_category,
-            "errorMessage": error_message,
-        })),
-        TronEvent::ThinkingDelta { delta, .. } => Some(serde_json::json!({ "delta": delta })),
-        TronEvent::ThinkingEnd { thinking, .. } => {
-            Some(serde_json::json!({ "thinking": thinking }))
-        }
+        })))),
         TronEvent::SessionCreated {
             base,
             model,
             working_directory,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "session.created", Some(serde_json::json!({
             "model": model,
             "workingDirectory": working_directory,
             "messageCount": 0,
@@ -544,10 +636,12 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "cost": 0.0,
             "lastActivity": base.timestamp,
             "isActive": true,
-        })),
-        TronEvent::SessionForked { new_session_id, .. } => Some(serde_json::json!({
-            "newSessionId": new_session_id,
-        })),
+        })))),
+        TronEvent::SessionForked { new_session_id, .. } => {
+            Some(make_rpc(event, "session.forked", Some(serde_json::json!({
+                "newSessionId": new_session_id,
+            }))))
+        }
         TronEvent::SessionUpdated {
             title,
             model,
@@ -564,7 +658,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             last_assistant_response,
             parent_session_id,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "session.updated", Some(serde_json::json!({
             "title": title,
             "model": model,
             "messageCount": message_count,
@@ -579,62 +673,53 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "lastUserPrompt": last_user_prompt,
             "lastAssistantResponse": last_assistant_response,
             "parentSessionId": parent_session_id,
-        })),
+        })))),
+        TronEvent::MemoryUpdating { .. } => {
+            Some(make_rpc(event, "agent.memory_updating", Some(serde_json::json!({}))))
+        }
         TronEvent::MemoryUpdated {
             title,
             entry_type,
             event_id,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.memory_updated", Some(serde_json::json!({
             "title": title,
             "entryType": entry_type,
             "eventId": event_id,
-        })),
+        })))),
         TronEvent::ContextCleared {
             tokens_before,
             tokens_after,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.context_cleared", Some(serde_json::json!({
             "tokensBefore": tokens_before,
             "tokensAfter": tokens_after,
-        })),
-        TronEvent::MessageDeleted {
-            target_event_id,
-            target_type,
-            target_turn,
-            reason,
-            ..
-        } => Some(serde_json::json!({
-            "targetEventId": target_event_id,
-            "targetType": target_type,
-            "targetTurn": target_turn,
-            "reason": reason,
-        })),
+        })))),
         TronEvent::RulesLoaded {
             total_files,
             dynamic_rules_count,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "rules.loaded", Some(serde_json::json!({
             "totalFiles": total_files,
             "dynamicRulesCount": dynamic_rules_count,
-        })),
+        })))),
         TronEvent::RulesActivated {
             rules,
             total_activated,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "rules.activated", Some(serde_json::json!({
             "rules": rules.iter().map(|r| serde_json::json!({
                 "relativePath": r.relative_path,
                 "scopeDir": r.scope_dir,
             })).collect::<Vec<_>>(),
             "totalActivated": total_activated,
-        })),
-        TronEvent::MemoryLoaded { count, .. } => Some(serde_json::json!({
-            "count": count,
-        })),
-        TronEvent::SkillRemoved { skill_name, .. } => Some(serde_json::json!({
-            "skillName": skill_name,
-        })),
+        })))),
+        TronEvent::MemoryLoaded { count, .. } => {
+            Some(make_rpc(event, "memory.loaded", Some(serde_json::json!({ "count": count }))))
+        }
+        TronEvent::SkillRemoved { skill_name, .. } => {
+            Some(make_rpc(event, "agent.skill_removed", Some(serde_json::json!({ "skillName": skill_name }))))
+        }
         TronEvent::SubagentSpawned {
             subagent_session_id,
             task,
@@ -656,7 +741,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             });
             set_opt(&mut data, "toolCallId", tool_call_id);
             set_opt(&mut data, "workingDirectory", working_directory);
-            Some(data)
+            Some(make_rpc(event, "agent.subagent_spawned", Some(data)))
         }
         TronEvent::SubagentStatusUpdate {
             subagent_session_id,
@@ -671,7 +756,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "currentTurn": current_turn,
             });
             set_opt(&mut data, "activity", activity);
-            Some(data)
+            Some(make_rpc(event, "agent.subagent_status", Some(data)))
         }
         TronEvent::SubagentCompleted {
             subagent_session_id,
@@ -692,26 +777,26 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             set_opt(&mut data, "resultSummary", result_summary);
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "model", model);
-            Some(data)
+            Some(make_rpc(event, "agent.subagent_completed", Some(data)))
         }
         TronEvent::SubagentFailed {
             subagent_session_id,
             error,
             duration,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.subagent_failed", Some(serde_json::json!({
             "subagentSessionId": subagent_session_id,
             "error": error,
             "duration": duration,
-        })),
+        })))),
         TronEvent::SubagentEvent {
             subagent_session_id,
-            event,
+            event: inner,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "agent.subagent_event", Some(serde_json::json!({
             "subagentSessionId": subagent_session_id,
-            "event": event,
-        })),
+            "event": inner,
+        })))),
         TronEvent::SubagentResultAvailable {
             parent_session_id,
             subagent_session_id,
@@ -737,9 +822,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             });
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "error", error);
-            Some(data)
+            Some(make_rpc(event, "agent.subagent_result_available", Some(data)))
         }
-        // -- Worktree isolation --
         TronEvent::WorktreeAcquired {
             path,
             branch,
@@ -753,7 +837,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "baseCommit": base_commit,
             });
             set_opt(&mut data, "baseBranch", base_branch);
-            Some(data)
+            Some(make_rpc(event, "worktree.acquired", Some(data)))
         }
         TronEvent::WorktreeCommit {
             commit_hash,
@@ -762,13 +846,13 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             insertions,
             deletions,
             ..
-        } => Some(serde_json::json!({
+        } => Some(make_rpc(event, "worktree.commit", Some(serde_json::json!({
             "commitHash": commit_hash,
             "message": message,
             "filesChanged": files_changed,
             "insertions": insertions,
             "deletions": deletions,
-        })),
+        })))),
         TronEvent::WorktreeMerged {
             source_branch,
             target_branch,
@@ -782,7 +866,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "strategy": strategy,
             });
             set_opt(&mut data, "mergeCommit", merge_commit);
-            Some(data)
+            Some(make_rpc(event, "worktree.merged", Some(data)))
         }
         TronEvent::WorktreeReleased {
             final_commit,
@@ -795,86 +879,22 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "deleted": deleted,
             });
             set_opt(&mut data, "finalCommit", final_commit);
-            Some(data)
+            Some(make_rpc(event, "worktree.released", Some(data)))
         }
-        // Events with no additional data (empty object so clients can decode `data: {}`)
-        TronEvent::AgentStart { .. }
-        | TronEvent::AgentReady { .. }
-        | TronEvent::ThinkingStart { .. }
-        | TronEvent::MemoryUpdating { .. }
-        | TronEvent::SessionSaved { .. }
+        TronEvent::SessionSaved { .. }
         | TronEvent::SessionLoaded { .. }
         | TronEvent::SessionArchived { .. }
         | TronEvent::SessionUnarchived { .. }
-        | TronEvent::SessionDeleted { .. } => Some(serde_json::json!({})),
-    };
-
-    // Map internal event types to wire format
-    let wire_type = match event_type {
-        "agent_start" => "agent.start",
-        "agent_end" => "agent.complete",
-        "agent_ready" => "agent.ready",
-        "agent_interrupted" => "agent.interrupted",
-        "message_update" => "agent.text_delta",
-        "turn_start" => "agent.turn_start",
-        "turn_end" => "agent.turn_end",
-        "agent.turn_failed" => "agent.turn_failed",
-        "response_complete" => "agent.response_complete",
-        "tool_execution_start" => "agent.tool_start",
-        "tool_execution_end" => "agent.tool_end",
-        "tool_execution_update" => "agent.tool_output",
-        "tool_use_batch" => "agent.tool_use_batch",
-        "toolcall_delta" => "agent.toolcall_delta",
-        "toolcall_generating" => "agent.tool_generating",
-        "hook_triggered" => "hook.triggered",
-        "hook_completed" => "hook.completed",
-        "hook.background_started" => "hook.background_started",
-        "hook.background_completed" => "hook.background_completed",
-        "compaction_start" => "agent.compaction_started",
-        "compaction_complete" => "agent.compaction",
-        "context_warning" => "context.warning",
-        "api_retry" => "agent.retry",
-        "thinking_start" => "agent.thinking_start",
-        "thinking_delta" => "agent.thinking_delta",
-        "thinking_end" => "agent.thinking_end",
-        "error" => "agent.error",
-        "session_created" => "session.created",
-        "session_archived" => "session.archived",
-        "session_unarchived" => "session.unarchived",
-        "session_forked" => "session.forked",
-        "session_deleted" => "session.deleted",
-        "session_updated" => "session.updated",
-        "memory_updating" => "agent.memory_updating",
-        "memory_updated" => "agent.memory_updated",
-        "context_cleared" => "agent.context_cleared",
-        "message_deleted" => "agent.message_deleted",
-        "rules_loaded" => "rules.loaded",
-        "rules_activated" => "rules.activated",
-        "memory_loaded" => "memory.loaded",
-        "skill_removed" => "agent.skill_removed",
-        "subagent_spawned" => "agent.subagent_spawned",
-        "subagent_status_update" => "agent.subagent_status",
-        "subagent_completed" => "agent.subagent_completed",
-        "subagent_failed" => "agent.subagent_failed",
-        "subagent_event" => "agent.subagent_event",
-        "subagent_result_available" => "agent.subagent_result_available",
-        "worktree.acquired" => "worktree.acquired",
-        "worktree.commit" => "worktree.commit",
-        "worktree.merged" => "worktree.merged",
-        "worktree.released" => "worktree.released",
-        other => other,
-    };
-
-    RpcEvent {
-        event_type: wire_type.to_string(),
-        session_id: if session_id.is_empty() {
-            None
-        } else {
-            Some(session_id.to_string())
-        },
-        timestamp: timestamp.to_string(),
-        data,
-        run_id: None,
+        | TronEvent::SessionDeleted { .. } => {
+            let wire_type = match event.event_type() {
+                "session_archived" => "session.archived",
+                "session_unarchived" => "session.unarchived",
+                "session_deleted" => "session.deleted",
+                other => other,
+            };
+            Some(make_rpc(event, wire_type, Some(serde_json::json!({}))))
+        }
+        _ => None,
     }
 }
 

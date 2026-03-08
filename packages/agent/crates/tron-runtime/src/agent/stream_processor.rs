@@ -15,238 +15,305 @@ use crate::errors::RuntimeError;
 use crate::types::StreamResult;
 use tron_llm::provider::{ProviderError, StreamEventStream};
 
+struct StreamState {
+    text_acc: String,
+    thinking_acc: String,
+    tool_calls: Vec<ToolCall>,
+    current_tool_id: Option<String>,
+    current_tool_name: Option<String>,
+    current_tool_args: String,
+    token_usage: Option<TokenUsage>,
+    thinking_signature: Option<String>,
+    stream_start: Instant,
+    ttft_ms: Option<u64>,
+}
+
+impl StreamState {
+    fn new() -> Self {
+        Self {
+            text_acc: String::with_capacity(4096),
+            thinking_acc: String::with_capacity(2048),
+            tool_calls: Vec::with_capacity(4),
+            current_tool_id: None,
+            current_tool_name: None,
+            current_tool_args: String::with_capacity(512),
+            token_usage: None,
+            thinking_signature: None,
+            stream_start: Instant::now(),
+            ttft_ms: None,
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn record_ttft(&mut self) {
+        if self.ttft_ms.is_none() {
+            self.ttft_ms = Some(self.stream_start.elapsed().as_millis() as u64);
+        }
+    }
+
+    fn handle_text_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter) {
+        self.record_ttft();
+        self.text_acc.push_str(&delta);
+        let _ = emitter.emit(TronEvent::MessageUpdate {
+            base: BaseEvent::now(session_id),
+            content: delta,
+        });
+    }
+
+    fn handle_thinking_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter) {
+        self.record_ttft();
+        self.thinking_acc.push_str(&delta);
+        let _ = emitter.emit(TronEvent::ThinkingDelta {
+            base: BaseEvent::now(session_id),
+            delta,
+        });
+    }
+
+    fn handle_thinking_end(
+        &mut self,
+        thinking: String,
+        signature: Option<String>,
+        session_id: &str,
+        emitter: &EventEmitter,
+    ) {
+        self.thinking_acc.clone_from(&thinking);
+        self.thinking_signature = signature;
+        let _ = emitter.emit(TronEvent::ThinkingEnd {
+            base: BaseEvent::now(session_id),
+            thinking,
+        });
+    }
+
+    fn handle_tool_call_start(
+        &mut self,
+        tool_call_id: String,
+        name: String,
+        session_id: &str,
+        emitter: &EventEmitter,
+    ) {
+        finalize_tool_call(
+            &mut self.tool_calls,
+            &mut self.current_tool_id,
+            &mut self.current_tool_name,
+            &mut self.current_tool_args,
+        );
+
+        self.current_tool_id = Some(tool_call_id.clone());
+        self.current_tool_name = Some(name.clone());
+        self.current_tool_args.clear();
+
+        let _ = emitter.emit(TronEvent::ToolCallGenerating {
+            base: BaseEvent::now(session_id),
+            tool_call_id,
+            tool_name: name,
+        });
+    }
+
+    fn handle_tool_call_delta(
+        &mut self,
+        tool_call_id: String,
+        arguments_delta: String,
+        session_id: &str,
+        emitter: &EventEmitter,
+    ) {
+        self.current_tool_args.push_str(&arguments_delta);
+        let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
+            base: BaseEvent::now(session_id),
+            tool_call_id,
+            tool_name: self.current_tool_name.clone(),
+            arguments_delta,
+        });
+    }
+
+    fn handle_tool_call_end(&mut self, tool_call: ToolCall) {
+        self.current_tool_id = None;
+        self.current_tool_name = None;
+        self.current_tool_args.clear();
+        if let Some(pos) = self.tool_calls.iter().position(|tc| tc.id == tool_call.id) {
+            self.tool_calls[pos] = tool_call;
+        } else {
+            self.tool_calls.push(tool_call);
+        }
+    }
+
+    fn build_interrupted_result(self) -> StreamResult {
+        let partial = if self.text_acc.is_empty() {
+            None
+        } else {
+            Some(self.text_acc.clone())
+        };
+        StreamResult {
+            message: build_message(
+                &self.text_acc,
+                &self.thinking_acc,
+                self.thinking_signature.as_deref(),
+                &self.tool_calls,
+            ),
+            tool_calls: self.tool_calls,
+            stop_reason: "interrupted".into(),
+            token_usage: self.token_usage,
+            interrupted: true,
+            partial_content: partial,
+            ttft_ms: self.ttft_ms,
+        }
+    }
+
+    fn finalize_stream_result(
+        mut self,
+        final_message: Option<AssistantMessage>,
+        stop_reason: String,
+    ) -> StreamResult {
+        finalize_tool_call(
+            &mut self.tool_calls,
+            &mut self.current_tool_id,
+            &mut self.current_tool_name,
+            &mut self.current_tool_args,
+        );
+
+        let message = final_message.unwrap_or_else(|| {
+            build_message(
+                &self.text_acc,
+                &self.thinking_acc,
+                self.thinking_signature.as_deref(),
+                &self.tool_calls,
+            )
+        });
+
+        StreamResult {
+            message,
+            tool_calls: self.tool_calls,
+            stop_reason,
+            token_usage: self.token_usage,
+            interrupted: false,
+            partial_content: None,
+            ttft_ms: self.ttft_ms,
+        }
+    }
+}
+
 /// Process an LLM stream, accumulating content and emitting events.
-#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
 pub async fn process_stream(
     mut stream: StreamEventStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
 ) -> Result<StreamResult, RuntimeError> {
-    let mut text_acc = String::with_capacity(4096);
-    let mut thinking_acc = String::with_capacity(2048);
-    let mut tool_calls: Vec<ToolCall> = Vec::with_capacity(4);
-    let mut current_tool_id: Option<String> = None;
-    let mut current_tool_name: Option<String> = None;
-    let mut current_tool_args = String::with_capacity(512);
-    let mut token_usage: Option<TokenUsage> = None;
+    let mut state = StreamState::new();
     #[allow(unused_assignments)]
     let mut stop_reason = String::new();
     #[allow(unused_assignments)]
     let mut final_message: Option<AssistantMessage> = None;
-    let mut thinking_signature: Option<String> = None;
-    let stream_start = Instant::now();
-    let mut ttft_ms: Option<u64> = None;
 
     loop {
         // biased: prefer cancellation when both a stream event and cancel are ready
         let event = tokio::select! {
             biased;
             () = cancel.cancelled() => {
-                let partial = if text_acc.is_empty() { None } else { Some(text_acc.clone()) };
-                return Ok(StreamResult {
-                    message: build_message(&text_acc, &thinking_acc, thinking_signature.as_deref(), &tool_calls),
-                    tool_calls,
-                    stop_reason: "interrupted".into(),
-                    token_usage,
-                    interrupted: true,
-                    partial_content: partial,
-                    ttft_ms,
-                });
+                return Ok(state.build_interrupted_result());
             }
             event = stream.next() => event,
         };
 
         match event {
             None => {
-                // Stream ended without Done — treat as error
                 return Err(RuntimeError::Internal(
                     "Stream ended without Done event".into(),
                 ));
             }
             Some(Err(ProviderError::Cancelled)) => {
-                let partial = if text_acc.is_empty() {
-                    None
-                } else {
-                    Some(text_acc.clone())
-                };
-                return Ok(StreamResult {
-                    message: build_message(
-                        &text_acc,
-                        &thinking_acc,
-                        thinking_signature.as_deref(),
-                        &tool_calls,
-                    ),
-                    tool_calls,
-                    stop_reason: "interrupted".into(),
-                    token_usage,
-                    interrupted: true,
-                    partial_content: partial,
-                    ttft_ms,
-                });
+                return Ok(state.build_interrupted_result());
             }
             Some(Err(e)) => {
                 return Err(RuntimeError::Provider(e));
             }
-            Some(Ok(stream_event)) => {
-                match stream_event {
-                    StreamEvent::TextDelta { delta } => {
-                        if ttft_ms.is_none() {
-                            ttft_ms = Some(stream_start.elapsed().as_millis() as u64);
-                        }
-                        text_acc.push_str(&delta);
-                        let _ = emitter.emit(TronEvent::MessageUpdate {
-                            base: BaseEvent::now(session_id),
-                            content: delta,
-                        });
-                    }
+            Some(Ok(stream_event)) => match stream_event {
+                StreamEvent::TextDelta { delta } => {
+                    state.handle_text_delta(delta, session_id, emitter);
+                }
 
-                    StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
+                StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
 
-                    StreamEvent::ThinkingStart => {
-                        let _ = emitter.emit(TronEvent::ThinkingStart {
-                            base: BaseEvent::now(session_id),
-                        });
-                    }
+                StreamEvent::ThinkingStart => {
+                    let _ = emitter.emit(TronEvent::ThinkingStart {
+                        base: BaseEvent::now(session_id),
+                    });
+                }
 
-                    StreamEvent::ThinkingDelta { delta } => {
-                        if ttft_ms.is_none() {
-                            ttft_ms = Some(stream_start.elapsed().as_millis() as u64);
-                        }
-                        thinking_acc.push_str(&delta);
-                        let _ = emitter.emit(TronEvent::ThinkingDelta {
-                            base: BaseEvent::now(session_id),
-                            delta,
-                        });
-                    }
+                StreamEvent::ThinkingDelta { delta } => {
+                    state.handle_thinking_delta(delta, session_id, emitter);
+                }
 
-                    StreamEvent::ThinkingEnd {
-                        thinking,
-                        signature,
-                    } => {
-                        thinking_acc.clone_from(&thinking);
-                        thinking_signature = signature;
-                        let _ = emitter.emit(TronEvent::ThinkingEnd {
-                            base: BaseEvent::now(session_id),
-                            thinking,
-                        });
-                    }
+                StreamEvent::ThinkingEnd {
+                    thinking,
+                    signature,
+                } => {
+                    state.handle_thinking_end(thinking, signature, session_id, emitter);
+                }
 
-                    StreamEvent::ToolCallStart { tool_call_id, name } => {
-                        // Finalize any previous in-progress tool call
-                        finalize_tool_call(
-                            &mut tool_calls,
-                            &mut current_tool_id,
-                            &mut current_tool_name,
-                            &mut current_tool_args,
-                        );
+                StreamEvent::ToolCallStart { tool_call_id, name } => {
+                    state.handle_tool_call_start(tool_call_id, name, session_id, emitter);
+                }
 
-                        current_tool_id = Some(tool_call_id.clone());
-                        current_tool_name = Some(name.clone());
-                        current_tool_args.clear();
-
-                        let _ = emitter.emit(TronEvent::ToolCallGenerating {
-                            base: BaseEvent::now(session_id),
-                            tool_call_id,
-                            tool_name: name,
-                        });
-                    }
-
-                    StreamEvent::ToolCallDelta {
+                StreamEvent::ToolCallDelta {
+                    tool_call_id,
+                    arguments_delta,
+                } => {
+                    state.handle_tool_call_delta(
                         tool_call_id,
                         arguments_delta,
-                    } => {
-                        current_tool_args.push_str(&arguments_delta);
-                        let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
-                            base: BaseEvent::now(session_id),
-                            tool_call_id,
-                            tool_name: current_tool_name.clone(),
-                            arguments_delta,
-                        });
-                    }
+                        session_id,
+                        emitter,
+                    );
+                }
 
-                    StreamEvent::ToolCallEnd { tool_call } => {
-                        // Use the provider-parsed tool call directly; dedup by ID
-                        current_tool_id = None;
-                        current_tool_name = None;
-                        current_tool_args.clear();
-                        if let Some(pos) = tool_calls.iter().position(|tc| tc.id == tool_call.id) {
-                            tool_calls[pos] = tool_call;
-                        } else {
-                            tool_calls.push(tool_call);
-                        }
-                    }
+                StreamEvent::ToolCallEnd { tool_call } => {
+                    state.handle_tool_call_end(tool_call);
+                }
 
-                    StreamEvent::Done {
-                        message,
-                        stop_reason: sr,
-                    } => {
-                        stop_reason = sr;
-                        token_usage.clone_from(&message.token_usage);
-                        final_message = Some(message);
-                        break;
-                    }
+                StreamEvent::Done {
+                    message,
+                    stop_reason: sr,
+                } => {
+                    stop_reason = sr;
+                    state.token_usage.clone_from(&message.token_usage);
+                    final_message = Some(message);
+                    break;
+                }
 
-                    StreamEvent::Error { error } => {
-                        return Err(RuntimeError::Internal(error));
-                    }
+                StreamEvent::Error { error } => {
+                    return Err(RuntimeError::Internal(error));
+                }
 
-                    StreamEvent::Retry {
+                StreamEvent::Retry {
+                    attempt,
+                    max_retries,
+                    delay_ms,
+                    error,
+                } => {
+                    let _ = emitter.emit(TronEvent::ApiRetry {
+                        base: BaseEvent::now(session_id),
                         attempt,
                         max_retries,
                         delay_ms,
-                        error,
-                    } => {
-                        let _ = emitter.emit(TronEvent::ApiRetry {
-                            base: BaseEvent::now(session_id),
-                            attempt,
-                            max_retries,
-                            delay_ms,
-                            error_category: error.category,
-                            error_message: error.message,
-                        });
-                    }
-
-                    StreamEvent::SafetyBlock {
-                        blocked_categories,
-                        error,
-                    } => {
-                        return Err(RuntimeError::Internal(format!(
-                            "Safety block: {error} (categories: {})",
-                            blocked_categories.join(", ")
-                        )));
-                    }
+                        error_category: error.category,
+                        error_message: error.message,
+                    });
                 }
-            }
+
+                StreamEvent::SafetyBlock {
+                    blocked_categories,
+                    error,
+                } => {
+                    return Err(RuntimeError::Internal(format!(
+                        "Safety block: {error} (categories: {})",
+                        blocked_categories.join(", ")
+                    )));
+                }
+            },
         }
     }
 
-    // Finalize any trailing tool call
-    finalize_tool_call(
-        &mut tool_calls,
-        &mut current_tool_id,
-        &mut current_tool_name,
-        &mut current_tool_args,
-    );
-
-    let message = final_message.unwrap_or_else(|| {
-        build_message(
-            &text_acc,
-            &thinking_acc,
-            thinking_signature.as_deref(),
-            &tool_calls,
-        )
-    });
-
-    Ok(StreamResult {
-        message,
-        tool_calls,
-        stop_reason,
-        token_usage,
-        interrupted: false,
-        partial_content: None,
-        ttft_ms,
-    })
+    Ok(state.finalize_stream_result(final_message, stop_reason))
 }
 
 /// Finalize an in-progress tool call from accumulated deltas.

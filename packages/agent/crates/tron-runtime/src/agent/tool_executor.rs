@@ -33,34 +33,43 @@ fn duration_ceil_ms(d: Duration) -> u64 {
     micros.div_ceil(1000) as u64
 }
 
+/// Shared dependencies for tool execution (extracted to reduce parameter count).
+pub struct ToolExecutionContext<'a> {
+    /// Registered tools available for execution.
+    pub registry: &'a ToolRegistry,
+    /// Optional guardrail engine for pre-execution validation.
+    pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+    /// Optional hook engine for pre/post tool-use hooks.
+    pub hooks: &'a Option<Arc<HookEngine>>,
+    /// Event emitter for tool lifecycle events.
+    pub emitter: &'a Arc<EventEmitter>,
+    /// Cancellation token for cooperative cancellation.
+    pub cancel: &'a CancellationToken,
+    /// Current subagent nesting depth.
+    pub subagent_depth: u32,
+    /// Maximum allowed subagent nesting depth.
+    pub subagent_max_depth: u32,
+    /// Workspace identifier for scoped memory recall.
+    pub workspace_id: Option<&'a str>,
+}
+
 /// Execute a single tool call through the full pipeline.
 ///
 /// Pipeline: guardrails → pre-hooks → execute → post-hooks → result
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::cast_possible_truncation
-)]
+#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
 #[instrument(skip_all, fields(tool_name = tool_call.name, session_id))]
 pub async fn execute_tool(
     tool_call: &ToolCall,
-    registry: &ToolRegistry,
-    guardrails: &Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    hooks: &Option<Arc<HookEngine>>,
     session_id: &str,
     working_directory: &str,
-    emitter: &Arc<EventEmitter>,
-    cancel: &CancellationToken,
-    subagent_depth: u32,
-    subagent_max_depth: u32,
-    workspace_id: Option<&str>,
+    ctx: &ToolExecutionContext<'_>,
 ) -> ToolExecutionResult {
     let start = Instant::now();
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
 
     // 1. Look up tool
-    let Some(tool) = registry.get(&tool_name) else {
+    let Some(tool) = ctx.registry.get(&tool_name) else {
         error!(tool_name, "tool not found");
         return ToolExecutionResult {
             tool_call_id,
@@ -77,7 +86,7 @@ pub async fn execute_tool(
     let is_interactive = tool.is_interactive();
 
     // 2. Evaluate guardrails (synchronous)
-    if let Some(guardrail_engine) = guardrails {
+    if let Some(guardrail_engine) = ctx.guardrails {
         let eval_ctx = EvaluationContext {
             tool_name: tool_name.clone(),
             tool_arguments: Value::Object(tool_call.arguments.clone()),
@@ -107,7 +116,7 @@ pub async fn execute_tool(
 
     // 3. Execute PreToolUse hooks (blocking, sequential)
     let mut effective_args = Value::Object(tool_call.arguments.clone());
-    if let Some(hook_engine) = hooks {
+    if let Some(hook_engine) = ctx.hooks {
         let hook_ctx = HookContext::PreToolUse {
             session_id: session_id.to_owned(),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -115,7 +124,7 @@ pub async fn execute_tool(
             tool_arguments: effective_args.clone(),
             tool_call_id: tool_call_id.clone(),
         };
-        let _ = emitter.emit(TronEvent::HookTriggered {
+        let _ = ctx.emitter.emit(TronEvent::HookTriggered {
             base: BaseEvent::now(session_id),
             hook_names: vec![],
             hook_event: "PreToolUse".into(),
@@ -128,7 +137,7 @@ pub async fn execute_tool(
             HookAction::Modify => EventHookResult::Modify,
             HookAction::Continue => EventHookResult::Continue,
         };
-        let _ = emitter.emit(TronEvent::HookCompleted {
+        let _ = ctx.emitter.emit(TronEvent::HookCompleted {
             base: BaseEvent::now(session_id),
             hook_names: vec![],
             hook_event: "PreToolUse".into(),
@@ -164,7 +173,7 @@ pub async fn execute_tool(
     }
 
     // 4. Emit ToolExecutionStart
-    let _ = emitter.emit(TronEvent::ToolExecutionStart {
+    let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
         base: BaseEvent::now(session_id),
         tool_call_id: tool_call_id.clone(),
         tool_name: tool_name.clone(),
@@ -176,20 +185,20 @@ pub async fn execute_tool(
     );
 
     // 5. Execute tool
-    let ctx = ToolContext {
+    let tool_ctx = ToolContext {
         tool_call_id: tool_call_id.clone(),
         session_id: session_id.to_owned(),
         working_directory: working_directory.to_owned(),
-        cancellation: cancel.clone(),
-        subagent_depth,
-        subagent_max_depth,
-        workspace_id: workspace_id.map(String::from),
+        cancellation: ctx.cancel.clone(),
+        subagent_depth: ctx.subagent_depth,
+        subagent_max_depth: ctx.subagent_max_depth,
+        workspace_id: ctx.workspace_id.map(String::from),
     };
 
-    let tool_result = if cancel.is_cancelled() {
+    let tool_result = if ctx.cancel.is_cancelled() {
         tron_core::tools::error_result("Operation cancelled")
     } else {
-        match tool.execute(effective_args, &ctx).await {
+        match tool.execute(effective_args, &tool_ctx).await {
             Ok(r) => r,
             Err(e) => tron_core::tools::error_result(e.to_string()),
         }
@@ -203,7 +212,7 @@ pub async fn execute_tool(
         .record(start.elapsed().as_secs_f64());
 
     // 6. Emit ToolExecutionEnd
-    let _ = emitter.emit(TronEvent::ToolExecutionEnd {
+    let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
         base: BaseEvent::now(session_id),
         tool_call_id: tool_call_id.clone(),
         tool_name: tool_name.clone(),
@@ -214,7 +223,7 @@ pub async fn execute_tool(
     debug!(tool = %tool_name, duration_ms, "tool executed");
 
     // 7. Execute PostToolUse hooks (background, fire-and-forget)
-    if let Some(hook_engine) = hooks {
+    if let Some(hook_engine) = ctx.hooks {
         let hook_ctx = HookContext::PostToolUse {
             session_id: session_id.to_owned(),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -223,7 +232,7 @@ pub async fn execute_tool(
             result: serde_json::to_value(&tool_result).unwrap_or_default(),
             duration_ms,
         };
-        let _ = emitter.emit(TronEvent::HookTriggered {
+        let _ = ctx.emitter.emit(TronEvent::HookTriggered {
             base: BaseEvent::now(session_id),
             hook_names: vec![],
             hook_event: "PostToolUse".into(),
@@ -232,7 +241,7 @@ pub async fn execute_tool(
         });
         // PostToolUse hooks run fire-and-forget with a 30s timeout to prevent leaks.
         let engine = hook_engine.clone();
-        let emitter_bg = emitter.clone();
+        let emitter_bg = ctx.emitter.clone();
         let sid = session_id.to_owned();
         let tn = tool_name.clone();
         let tcid = tool_call_id.clone();
@@ -381,6 +390,25 @@ mod tests {
         ToolCall::new("tc-1", name, args)
     }
 
+    fn make_exec_ctx<'a>(
+        registry: &'a ToolRegistry,
+        guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+        hooks: &'a Option<Arc<HookEngine>>,
+        emitter: &'a Arc<EventEmitter>,
+        cancel: &'a CancellationToken,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            registry,
+            guardrails,
+            hooks,
+            emitter,
+            cancel,
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+        }
+    }
+
     #[tokio::test]
     async fn successful_execution() {
         let registry = make_registry(vec![Arc::new(EchoTool)]);
@@ -391,10 +419,8 @@ mod tests {
         let _ = args.insert("text".into(), json!("hello"));
         let tc = make_tool_call("echo", args);
 
-        let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(!result.result.is_error.unwrap_or(false));
         assert!(!result.blocked_by_hook);
@@ -411,10 +437,8 @@ mod tests {
         let cancel = CancellationToken::new();
 
         let tc = make_tool_call("nonexistent", Map::new());
-        let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
         match &result.result.content {
@@ -462,20 +486,8 @@ mod tests {
         let _ = args.insert("text".into(), json!("rm -rf /"));
         let tc = make_tool_call("echo", args);
 
-        let result = execute_tool(
-            &tc,
-            &registry,
-            &guardrails,
-            &None,
-            "s1",
-            "/tmp",
-            &emitter,
-            &cancel,
-            0,
-            0,
-            None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &guardrails, &None, &emitter, &cancel);
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
         assert!(result.blocked_by_guardrail);
@@ -488,10 +500,8 @@ mod tests {
         let cancel = CancellationToken::new();
 
         let tc = make_tool_call("ask_user", Map::new());
-        let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(!result.result.is_error.unwrap_or(false));
         assert!(result.stops_turn);
@@ -506,10 +516,8 @@ mod tests {
         cancel.cancel();
 
         let tc = make_tool_call("echo", Map::new());
-        let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
     }
@@ -525,10 +533,8 @@ mod tests {
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
-        let _ = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         let mut saw_start = false;
         let mut saw_end = false;
@@ -582,20 +588,9 @@ mod tests {
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
-        let _ = execute_tool(
-            &tc,
-            &registry,
-            &None,
-            &Some(hook_engine),
-            "s1",
-            "/tmp",
-            &emitter,
-            &cancel,
-            0,
-            0,
-            None,
-        )
-        .await;
+        let hooks = Some(hook_engine);
+        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         let mut saw_triggered = false;
         let mut saw_completed = false;
@@ -652,20 +647,9 @@ mod tests {
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
-        let _ = execute_tool(
-            &tc,
-            &registry,
-            &None,
-            &Some(hook_engine),
-            "s1",
-            "/tmp",
-            &emitter,
-            &cancel,
-            0,
-            0,
-            None,
-        )
-        .await;
+        let hooks = Some(hook_engine);
+        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         // Give background task a moment to complete
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -737,20 +721,9 @@ mod tests {
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
-        let _ = execute_tool(
-            &tc,
-            &registry,
-            &None,
-            &Some(hook_engine),
-            "s1",
-            "/tmp",
-            &emitter,
-            &cancel,
-            0,
-            0,
-            None,
-        )
-        .await;
+        let hooks = Some(hook_engine);
+        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         // Let the spawned task start and register its timers
         tokio::task::yield_now().await;
@@ -779,14 +752,9 @@ mod tests {
         });
         let tc2 = make_tool_call("ask_user", Map::new());
 
-        let r1 = execute_tool(
-            &tc1, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
-        let r2 = execute_tool(
-            &tc2, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
-        )
-        .await;
+        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let r1 = execute_tool(&tc1, "s1", "/tmp", &ctx).await;
+        let r2 = execute_tool(&tc2, "s1", "/tmp", &ctx).await;
 
         assert!(!r1.result.is_error.unwrap_or(false));
         assert!(!r1.stops_turn);

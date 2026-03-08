@@ -118,6 +118,7 @@ mod tests {
     use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::registry::ToolRegistry;
 
+    use crate::agent::tron_agent::AgentDeps;
     use crate::types::AgentConfig;
 
     struct MockProvider;
@@ -158,18 +159,20 @@ mod tests {
     fn make_agent() -> TronAgent {
         TronAgent::new(
             AgentConfig::default(),
-            Arc::new(MockProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ContextManagerConfig {
-                model: "mock".into(),
-                system_prompt: None,
-                working_directory: None,
-                tools: vec![],
-                rules_content: None,
-                compaction: crate::context::types::CompactionConfig::default(),
-            }),
+            AgentDeps {
+                provider: Arc::new(MockProvider),
+                registry: ToolRegistry::new(),
+                guardrails: None,
+                hooks: None,
+                context_manager: ContextManager::new(ContextManagerConfig {
+                    model: "mock".into(),
+                    system_prompt: None,
+                    working_directory: None,
+                    tools: vec![],
+                    rules_content: None,
+                    compaction: crate::context::types::CompactionConfig::default(),
+                }),
+            },
             "test-session".into(),
         )
     }
@@ -290,18 +293,20 @@ mod tests {
 
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(ErrorProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ContextManagerConfig {
-                model: "mock".into(),
-                system_prompt: None,
-                working_directory: None,
-                tools: vec![],
-                rules_content: None,
-                compaction: crate::context::types::CompactionConfig::default(),
-            }),
+            AgentDeps {
+                provider: Arc::new(ErrorProvider),
+                registry: ToolRegistry::new(),
+                guardrails: None,
+                hooks: None,
+                context_manager: ContextManager::new(ContextManagerConfig {
+                    model: "mock".into(),
+                    system_prompt: None,
+                    working_directory: None,
+                    tools: vec![],
+                    rules_content: None,
+                    compaction: crate::context::types::CompactionConfig::default(),
+                }),
+            },
             "test-session".into(),
         );
 
@@ -363,18 +368,20 @@ mod tests {
 
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(MultiEventProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ContextManagerConfig {
-                model: "mock".into(),
-                system_prompt: None,
-                working_directory: None,
-                tools: vec![],
-                rules_content: None,
-                compaction: crate::context::types::CompactionConfig::default(),
-            }),
+            AgentDeps {
+                provider: Arc::new(MultiEventProvider),
+                registry: ToolRegistry::new(),
+                guardrails: None,
+                hooks: None,
+                context_manager: ContextManager::new(ContextManagerConfig {
+                    model: "mock".into(),
+                    system_prompt: None,
+                    working_directory: None,
+                    tools: vec![],
+                    rules_content: None,
+                    compaction: crate::context::types::CompactionConfig::default(),
+                }),
+            },
             "test-session".into(),
         );
 

@@ -113,38 +113,37 @@ pub fn discover_rules_files(config: &RulesDiscoveryConfig) -> Vec<DiscoveredRule
     let mut results = Vec::new();
     let mut seen_real_paths = HashSet::new();
 
-    scan_directory(
-        &config.project_root,
-        &config.project_root,
-        &config.exclude_dirs,
-        config.max_depth,
-        0,
-        &mut results,
-        config.discover_standalone_files,
-        config.exclude_root_level,
-        &mut seen_real_paths,
-    );
+    let mut ctx = ScanContext {
+        project_root: &config.project_root,
+        exclude_dirs: &config.exclude_dirs,
+        max_depth: config.max_depth,
+        discover_standalone: config.discover_standalone_files,
+        exclude_root_level: config.exclude_root_level,
+        results: &mut results,
+        seen_real_paths: &mut seen_real_paths,
+    };
+
+    scan_directory(&config.project_root, 0, &mut ctx);
 
     results
 }
 
-#[allow(clippy::too_many_arguments)]
-fn scan_directory(
-    dir: &Path,
-    project_root: &Path,
-    exclude_dirs: &HashSet<String>,
+struct ScanContext<'a> {
+    project_root: &'a Path,
+    exclude_dirs: &'a HashSet<String>,
     max_depth: u32,
-    current_depth: u32,
-    results: &mut Vec<DiscoveredRulesFile>,
     discover_standalone: bool,
     exclude_root_level: bool,
-    seen_real_paths: &mut HashSet<PathBuf>,
-) {
-    if current_depth > max_depth {
+    results: &'a mut Vec<DiscoveredRulesFile>,
+    seen_real_paths: &'a mut HashSet<PathBuf>,
+}
+
+fn scan_directory(dir: &Path, current_depth: u32, ctx: &mut ScanContext<'_>) {
+    if current_depth > ctx.max_depth {
         return;
     }
 
-    let is_root = dir == project_root;
+    let is_root = dir == ctx.project_root;
 
     // Check agent dirs for context files at this level
     for agent_dir in AGENT_DIRS {
@@ -160,36 +159,49 @@ fn scan_directory(
                 if !is_context_filename(&entry.file_name().to_string_lossy()) {
                     continue;
                 }
-                if is_root && exclude_root_level {
+                if is_root && ctx.exclude_root_level {
                     continue;
                 }
-                try_add_file(&entry.path(), project_root, false, results, seen_real_paths);
+                try_add_file(
+                    &entry.path(),
+                    ctx.project_root,
+                    false,
+                    ctx.results,
+                    ctx.seen_real_paths,
+                );
             }
         }
     }
 
     // Check for standalone context files at this level
-    if discover_standalone
-        && let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let Ok(ft) = entry.file_type() else {
-                    continue;
-                };
-                if !ft.is_file() {
-                    continue;
-                }
-                if !is_context_filename(&entry.file_name().to_string_lossy()) {
-                    continue;
-                }
-                if is_root && exclude_root_level {
-                    continue;
-                }
-                try_add_file(&entry.path(), project_root, true, results, seen_real_paths);
+    if ctx.discover_standalone
+        && let Ok(entries) = fs::read_dir(dir)
+    {
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if !ft.is_file() {
+                continue;
             }
+            if !is_context_filename(&entry.file_name().to_string_lossy()) {
+                continue;
+            }
+            if is_root && ctx.exclude_root_level {
+                continue;
+            }
+            try_add_file(
+                &entry.path(),
+                ctx.project_root,
+                true,
+                ctx.results,
+                ctx.seen_real_paths,
+            );
         }
+    }
 
     // Recurse into subdirectories
-    if current_depth >= max_depth {
+    if current_depth >= ctx.max_depth {
         return;
     }
 
@@ -207,25 +219,14 @@ fn scan_directory(
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Skip excluded and hidden directories
-        if exclude_dirs.contains(name_str.as_ref()) {
+        if ctx.exclude_dirs.contains(name_str.as_ref()) {
             continue;
         }
         if name_str.starts_with('.') {
             continue;
         }
 
-        scan_directory(
-            &entry.path(),
-            project_root,
-            exclude_dirs,
-            max_depth,
-            current_depth + 1,
-            results,
-            discover_standalone,
-            exclude_root_level,
-            seen_real_paths,
-        );
+        scan_directory(&entry.path(), current_depth + 1, ctx);
     }
 }
 

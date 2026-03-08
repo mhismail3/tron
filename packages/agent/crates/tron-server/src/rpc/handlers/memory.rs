@@ -221,7 +221,6 @@ pub struct LedgerWriteDeps {
 /// 6. Fire-and-forget embedding for semantic search
 ///
 /// Returns a `LedgerWriteResult` suitable for both callers.
-#[allow(clippy::too_many_lines)]
 pub async fn execute_ledger_write(
     session_id: &str,
     working_directory: &str,
@@ -296,98 +295,119 @@ pub async fn execute_ledger_write(
             tron_events::memory::types::LedgerWriteResult::skipped("trivial interaction")
         }
         Some(LedgerParseResult::Entry(entry)) => {
-            // 4. Build full payload (matches TS server MemoryLedgerPayload format)
-            let session_info = deps.session_manager.get_session(session_id).ok().flatten();
-            let (total_input, total_output) = session_info
-                .as_ref()
-                .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
-            let model = session_info
-                .as_ref()
-                .map(|s| s.latest_model.clone())
-                .unwrap_or_default();
-
-            let payload = serde_json::json!({
-                "eventRange": {
-                    "firstEventId": cycle.first_event_id,
-                    "lastEventId": cycle.last_event_id,
-                },
-                "turnRange": {
-                    "firstTurn": cycle.first_turn,
-                    "lastTurn": cycle.last_turn,
-                },
-                "title": entry.title,
-                "entryType": entry.entry_type,
-                "status": entry.status,
-                "tags": entry.tags,
-                "input": entry.input,
-                "actions": entry.actions,
-                "files": entry.files.iter().map(|f| serde_json::json!({
-                    "path": f.path, "op": f.op, "why": f.why,
-                })).collect::<Vec<_>>(),
-                "decisions": entry.decisions.iter().map(|d| serde_json::json!({
-                    "choice": d.choice, "reason": d.reason,
-                })).collect::<Vec<_>>(),
-                "lessons": entry.lessons,
-                "thinkingInsights": entry.thinking_insights,
-                "tokenCost": { "input": total_input, "output": total_output },
-                "model": model,
-                "workingDirectory": working_directory,
-                "source": source,
-            });
-
-            // 5. Persist as memory.ledger event
-            let event_id = match deps.event_store.append(&tron_events::AppendOptions {
-                session_id,
-                event_type: tron_events::EventType::MemoryLedger,
-                payload: payload.clone(),
-                parent_id: None,
-            }) {
-                Ok(row) => row.id,
-                Err(e) => {
-                    warn!(
-                        session_id,
-                        error = %e,
-                        title = %entry.title,
-                        "failed to persist memory.ledger event"
-                    );
-                    return tron_events::memory::types::LedgerWriteResult::failed(
-                        "database temporarily busy",
-                    );
-                }
-            };
-
-            // 6. Fire-and-forget embedding
-            let embed_ws_id = deps
-                .event_store
-                .get_workspace_by_path(working_directory)
-                .ok()
-                .flatten()
-                .map_or_else(|| working_directory.to_owned(), |ws| ws.id);
-            spawn_embed_memory_with_deps(
-                deps.embedding_controller.as_ref(),
-                &event_id,
-                &embed_ws_id,
-                &payload,
-                deps.shutdown_coordinator.as_ref(),
+            let payload = build_ledger_payload(
+                &cycle, &entry, deps, session_id, working_directory, source,
             );
-
-            debug!(
-                session_id,
-                title = %entry.title,
-                entry_type = %entry.entry_type,
-                event_id = %event_id,
-                "ledger entry written"
-            );
-
-            tron_events::memory::types::LedgerWriteResult::written(
-                entry.title.clone(),
-                entry.entry_type.clone(),
-                event_id,
-                payload,
-            )
+            persist_and_embed(deps, session_id, working_directory, &entry, payload)
         }
         None => tron_events::memory::types::LedgerWriteResult::skipped("LLM call failed"),
     }
+}
+
+/// Build the full `memory.ledger` JSON payload (matches TS server `MemoryLedgerPayload` format).
+fn build_ledger_payload(
+    cycle: &CycleInfo,
+    entry: &tron_runtime::context::ledger_writer::LedgerEntry,
+    deps: &LedgerWriteDeps,
+    session_id: &str,
+    working_directory: &str,
+    source: &str,
+) -> Value {
+    let session_info = deps.session_manager.get_session(session_id).ok().flatten();
+    let (total_input, total_output) = session_info
+        .as_ref()
+        .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
+    let model = session_info
+        .as_ref()
+        .map(|s| s.latest_model.clone())
+        .unwrap_or_default();
+
+    serde_json::json!({
+        "eventRange": {
+            "firstEventId": cycle.first_event_id,
+            "lastEventId": cycle.last_event_id,
+        },
+        "turnRange": {
+            "firstTurn": cycle.first_turn,
+            "lastTurn": cycle.last_turn,
+        },
+        "title": entry.title,
+        "entryType": entry.entry_type,
+        "status": entry.status,
+        "tags": entry.tags,
+        "input": entry.input,
+        "actions": entry.actions,
+        "files": entry.files.iter().map(|f| serde_json::json!({
+            "path": f.path, "op": f.op, "why": f.why,
+        })).collect::<Vec<_>>(),
+        "decisions": entry.decisions.iter().map(|d| serde_json::json!({
+            "choice": d.choice, "reason": d.reason,
+        })).collect::<Vec<_>>(),
+        "lessons": entry.lessons,
+        "thinkingInsights": entry.thinking_insights,
+        "tokenCost": { "input": total_input, "output": total_output },
+        "model": model,
+        "workingDirectory": working_directory,
+        "source": source,
+    })
+}
+
+/// Persist a `memory.ledger` event and spawn fire-and-forget embedding.
+fn persist_and_embed(
+    deps: &LedgerWriteDeps,
+    session_id: &str,
+    working_directory: &str,
+    entry: &tron_runtime::context::ledger_writer::LedgerEntry,
+    payload: Value,
+) -> tron_events::memory::types::LedgerWriteResult {
+    let event_id = match deps.event_store.append(&tron_events::AppendOptions {
+        session_id,
+        event_type: tron_events::EventType::MemoryLedger,
+        payload: payload.clone(),
+        parent_id: None,
+    }) {
+        Ok(row) => row.id,
+        Err(e) => {
+            warn!(
+                session_id,
+                error = %e,
+                title = %entry.title,
+                "failed to persist memory.ledger event"
+            );
+            return tron_events::memory::types::LedgerWriteResult::failed(
+                "database temporarily busy",
+            );
+        }
+    };
+
+    let embed_ws_id = deps
+        .event_store
+        .get_workspace_by_path(working_directory)
+        .ok()
+        .flatten()
+        .map_or_else(|| working_directory.to_owned(), |ws| ws.id);
+    spawn_embed_memory_with_deps(
+        deps.embedding_controller.as_ref(),
+        &event_id,
+        &embed_ws_id,
+        &payload,
+        deps.shutdown_coordinator.as_ref(),
+    );
+
+    debug!(
+        session_id,
+        title = %entry.title,
+        entry_type = %entry.entry_type,
+        event_id = %event_id,
+        "ledger entry written"
+    );
+
+    tron_events::memory::types::LedgerWriteResult::written(
+        entry.title.clone(),
+        entry.entry_type.clone(),
+        event_id,
+        payload,
+    )
 }
 
 /// Spawn a fire-and-forget embedding task (standalone version, not requiring `RpcContext`).

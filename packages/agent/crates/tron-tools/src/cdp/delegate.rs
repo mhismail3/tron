@@ -8,6 +8,21 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::service::BrowserService;
+use super::session::BrowserSession;
+
+fn cdp_err(e: impl std::fmt::Display) -> ToolError {
+    ToolError::Internal {
+        message: e.to_string(),
+    }
+}
+
+#[allow(clippy::unnecessary_wraps)] // Intentional: ergonomic helper for match arms returning Result
+fn ok_result(content: impl Into<String>) -> Result<BrowserResult, ToolError> {
+    Ok(BrowserResult {
+        content: content.into(),
+        details: None,
+    })
+}
 
 /// CDP-backed browser delegate that routes actions to `BrowserSession` via `BrowserService`.
 pub struct CdpBrowserDelegate {
@@ -21,318 +36,177 @@ impl CdpBrowserDelegate {
     }
 }
 
+async fn execute_navigation(
+    session: &BrowserSession,
+    action: &BrowserAction,
+) -> Result<BrowserResult, ToolError> {
+    match action.action.as_str() {
+        "navigate" => {
+            let url = require_param(&action.params, "url", "navigate")?;
+            session.navigate(url).await.map_err(cdp_err)?;
+            ok_result(format!("Navigated to {url}"))
+        }
+        "goBack" => {
+            session.go_back().await.map_err(cdp_err)?;
+            ok_result("Navigated back")
+        }
+        "goForward" => {
+            session.go_forward().await.map_err(cdp_err)?;
+            ok_result("Navigated forward")
+        }
+        "reload" => {
+            session.reload().await.map_err(cdp_err)?;
+            ok_result("Page reloaded")
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn execute_query(
+    session: &BrowserSession,
+    action: &BrowserAction,
+) -> Result<BrowserResult, ToolError> {
+    match action.action.as_str() {
+        "snapshot" => {
+            let text = session.snapshot().await.map_err(cdp_err)?;
+            ok_result(text)
+        }
+        "screenshot" => {
+            let b64 = session.screenshot().await.map_err(cdp_err)?;
+            Ok(BrowserResult {
+                content: "Screenshot taken".into(),
+                details: Some(serde_json::json!({
+                    "screenshot": b64,
+                    "format": "png",
+                })),
+            })
+        }
+        "getText" => {
+            let selector = require_selector(&action.params)?;
+            let text = session.get_text(selector).await.map_err(cdp_err)?;
+            ok_result(text)
+        }
+        "getAttribute" => {
+            let selector = require_selector(&action.params)?;
+            let attribute = require_param(&action.params, "attribute", "getAttribute")?;
+            let value = session
+                .get_attribute(selector, attribute)
+                .await
+                .map_err(cdp_err)?;
+            ok_result(value.unwrap_or_default())
+        }
+        "pdf" => {
+            let path = require_param(&action.params, "path", "pdf")?;
+            session.pdf(path).await.map_err(cdp_err)?;
+            ok_result(format!("PDF saved to {path}"))
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn execute_interaction(
+    session: &BrowserSession,
+    action: &BrowserAction,
+) -> Result<BrowserResult, ToolError> {
+    match action.action.as_str() {
+        "click" => {
+            let selector = require_selector(&action.params)?;
+            session.click(selector).await.map_err(cdp_err)?;
+            ok_result(format!("Clicked {selector}"))
+        }
+        "fill" => {
+            let selector = require_selector(&action.params)?;
+            let value = require_param(&action.params, "value", "fill")?;
+            session.fill(selector, value).await.map_err(cdp_err)?;
+            ok_result(format!("Filled {selector}"))
+        }
+        "type" => {
+            let selector = require_selector(&action.params)?;
+            let text = require_param(&action.params, "text", "type")?;
+            let slowly = action
+                .params
+                .get("slowly")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            session
+                .type_text(selector, text, slowly)
+                .await
+                .map_err(cdp_err)?;
+            ok_result(format!("Typed into {selector}"))
+        }
+        "select" => {
+            let selector = require_selector(&action.params)?;
+            let value = require_param(&action.params, "value", "select")?;
+            session
+                .select_option(selector, value)
+                .await
+                .map_err(cdp_err)?;
+            ok_result(format!("Selected '{value}' in {selector}"))
+        }
+        "hover" => {
+            let selector = require_selector(&action.params)?;
+            session.hover(selector).await.map_err(cdp_err)?;
+            ok_result(format!("Hovered over {selector}"))
+        }
+        "pressKey" => {
+            let key = require_param(&action.params, "key", "pressKey")?;
+            session.press_key(key).await.map_err(cdp_err)?;
+            ok_result(format!("Pressed key '{key}'"))
+        }
+        "wait" => {
+            let selector = require_selector(&action.params)?;
+            let timeout = action
+                .params
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(30_000);
+            session.wait_for(selector, timeout).await.map_err(cdp_err)?;
+            ok_result(format!("Element {selector} found"))
+        }
+        "scroll" => {
+            let direction = action
+                .params
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("down");
+            let amount = action
+                .params
+                .get("amount")
+                .and_then(Value::as_i64)
+                .unwrap_or(500);
+            session.scroll(direction, amount).await.map_err(cdp_err)?;
+            ok_result(format!("Scrolled {direction} by {amount}px"))
+        }
+        _ => unreachable!(),
+    }
+}
+
 #[async_trait]
-#[allow(clippy::too_many_lines)]
 impl BrowserDelegate for CdpBrowserDelegate {
     async fn execute_action(
         &self,
         session_id: &str,
         action: &BrowserAction,
     ) -> Result<BrowserResult, ToolError> {
-        let session =
-            self.service
-                .get_or_create(session_id)
-                .await
-                .map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
+        let session = self.service.get_or_create(session_id).await.map_err(cdp_err)?;
 
         // Auto-start screencast for iOS frame streaming (matches TS server behavior)
         if !session.is_streaming()
-            && let Err(e) = self.service.start_stream(session_id).await {
-                tracing::debug!(session_id, error = %e, "auto-start screencast failed (non-fatal)");
-            }
+            && let Err(e) = self.service.start_stream(session_id).await
+        {
+            tracing::debug!(session_id, error = %e, "auto-start screencast failed (non-fatal)");
+        }
 
         match action.action.as_str() {
-            "navigate" => {
-                let url = action
-                    .params
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "navigate requires 'url' parameter".into(),
-                    })?;
-                session
-                    .navigate(url)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Navigated to {url}"),
-                    details: None,
-                })
+            "navigate" | "goBack" | "goForward" | "reload" => {
+                execute_navigation(&session, action).await
             }
-
-            "goBack" => {
-                session.go_back().await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
-                Ok(BrowserResult {
-                    content: "Navigated back".into(),
-                    details: None,
-                })
+            "snapshot" | "screenshot" | "getText" | "getAttribute" | "pdf" => {
+                execute_query(&session, action).await
             }
-
-            "goForward" => {
-                session
-                    .go_forward()
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: "Navigated forward".into(),
-                    details: None,
-                })
+            "click" | "fill" | "type" | "select" | "hover" | "pressKey" | "wait" | "scroll" => {
+                execute_interaction(&session, action).await
             }
-
-            "reload" => {
-                session.reload().await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
-                Ok(BrowserResult {
-                    content: "Page reloaded".into(),
-                    details: None,
-                })
-            }
-
-            "snapshot" => {
-                let text = session.snapshot().await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
-                Ok(BrowserResult {
-                    content: text,
-                    details: None,
-                })
-            }
-
-            "screenshot" => {
-                let b64 = session
-                    .screenshot()
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: "Screenshot taken".into(),
-                    details: Some(serde_json::json!({
-                        "screenshot": b64,
-                        "format": "png",
-                    })),
-                })
-            }
-
-            "click" => {
-                let selector = require_selector(&action.params)?;
-                session
-                    .click(selector)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Clicked {selector}"),
-                    details: None,
-                })
-            }
-
-            "fill" => {
-                let selector = require_selector(&action.params)?;
-                let value = action
-                    .params
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "fill requires 'value' parameter".into(),
-                    })?;
-                session
-                    .fill(selector, value)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Filled {selector}"),
-                    details: None,
-                })
-            }
-
-            "type" => {
-                let selector = require_selector(&action.params)?;
-                let text = action
-                    .params
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "type requires 'text' parameter".into(),
-                    })?;
-                let slowly = action
-                    .params
-                    .get("slowly")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                session
-                    .type_text(selector, text, slowly)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Typed into {selector}"),
-                    details: None,
-                })
-            }
-
-            "select" => {
-                let selector = require_selector(&action.params)?;
-                let value = action
-                    .params
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "select requires 'value' parameter".into(),
-                    })?;
-                session
-                    .select_option(selector, value)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Selected '{value}' in {selector}"),
-                    details: None,
-                })
-            }
-
-            "hover" => {
-                let selector = require_selector(&action.params)?;
-                session
-                    .hover(selector)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Hovered over {selector}"),
-                    details: None,
-                })
-            }
-
-            "pressKey" => {
-                let key = action
-                    .params
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "pressKey requires 'key' parameter".into(),
-                    })?;
-                session
-                    .press_key(key)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Pressed key '{key}'"),
-                    details: None,
-                })
-            }
-
-            "wait" => {
-                let selector = require_selector(&action.params)?;
-                let timeout = action
-                    .params
-                    .get("timeout")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(30_000);
-                session
-                    .wait_for(selector, timeout)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Element {selector} found"),
-                    details: None,
-                })
-            }
-
-            "scroll" => {
-                let direction = action
-                    .params
-                    .get("direction")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("down");
-                let amount = action
-                    .params
-                    .get("amount")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(500);
-                session
-                    .scroll(direction, amount)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: format!("Scrolled {direction} by {amount}px"),
-                    details: None,
-                })
-            }
-
-            "getText" => {
-                let selector = require_selector(&action.params)?;
-                let text = session
-                    .get_text(selector)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: text,
-                    details: None,
-                })
-            }
-
-            "getAttribute" => {
-                let selector = require_selector(&action.params)?;
-                let attribute = action
-                    .params
-                    .get("attribute")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "getAttribute requires 'attribute' parameter".into(),
-                    })?;
-                let value = session
-                    .get_attribute(selector, attribute)
-                    .await
-                    .map_err(|e| ToolError::Internal {
-                        message: e.to_string(),
-                    })?;
-                Ok(BrowserResult {
-                    content: value.unwrap_or_default(),
-                    details: None,
-                })
-            }
-
-            "pdf" => {
-                let path = action
-                    .params
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "pdf requires 'path' parameter".into(),
-                    })?;
-                session.pdf(path).await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
-                Ok(BrowserResult {
-                    content: format!("PDF saved to {path}"),
-                    details: None,
-                })
-            }
-
             other => Err(ToolError::Validation {
                 message: format!("unknown browser action: {other}"),
             }),
@@ -340,21 +214,24 @@ impl BrowserDelegate for CdpBrowserDelegate {
     }
 
     async fn close_session(&self, session_id: &str) -> Result<(), ToolError> {
-        self.service
-            .close_session(session_id)
-            .await
-            .map_err(|e| ToolError::Internal {
-                message: e.to_string(),
-            })
+        self.service.close_session(session_id).await.map_err(cdp_err)
     }
 }
 
 fn require_selector(params: &serde_json::Value) -> Result<&str, ToolError> {
+    require_param(params, "selector", "action")
+}
+
+fn require_param<'a>(
+    params: &'a serde_json::Value,
+    key: &str,
+    action_name: &str,
+) -> Result<&'a str, ToolError> {
     params
-        .get("selector")
+        .get(key)
         .and_then(|v| v.as_str())
         .ok_or_else(|| ToolError::Validation {
-            message: "action requires 'selector' parameter".into(),
+            message: format!("{action_name} requires '{key}' parameter"),
         })
 }
 

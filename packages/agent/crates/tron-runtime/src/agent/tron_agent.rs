@@ -41,6 +41,20 @@ impl Drop for RunGuard<'_> {
     }
 }
 
+/// Bundled dependencies for constructing a `TronAgent`.
+pub struct AgentDeps {
+    /// LLM provider for generating completions.
+    pub provider: Arc<dyn Provider>,
+    /// Tool registry for tool execution.
+    pub registry: ToolRegistry,
+    /// Optional guardrail engine for content safety.
+    pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+    /// Optional hook engine for lifecycle hooks.
+    pub hooks: Option<Arc<HookEngine>>,
+    /// Context manager for conversation history.
+    pub context_manager: ContextManager,
+}
+
 /// Multi-turn agent that owns all submodules.
 pub struct TronAgent {
     config: AgentConfig,
@@ -62,25 +76,16 @@ pub struct TronAgent {
 }
 
 impl TronAgent {
-    /// Create a new agent.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        config: AgentConfig,
-        provider: Arc<dyn Provider>,
-        registry: ToolRegistry,
-        guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-        hooks: Option<Arc<HookEngine>>,
-        context_manager: ContextManager,
-        session_id: String,
-    ) -> Self {
+    /// Create a new agent from bundled dependencies.
+    pub fn new(config: AgentConfig, deps: AgentDeps, session_id: String) -> Self {
         let compaction = CompactionHandler::new();
         Self {
             config,
-            provider,
-            registry,
-            guardrails,
-            hooks,
-            context_manager,
+            provider: deps.provider,
+            registry: deps.registry,
+            guardrails: deps.guardrails,
+            hooks: deps.hooks,
+            context_manager: deps.context_manager,
             emitter: Arc::new(EventEmitter::new()),
             compaction,
             session_id,
@@ -389,25 +394,25 @@ mod tests {
         }
     }
 
+    fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
+        AgentDeps {
+            provider: Arc::new(provider),
+            registry: ToolRegistry::new(),
+            guardrails: None,
+            hooks: None,
+            context_manager: ContextManager::new(ContextManagerConfig {
+                model: "mock-model".into(),
+                system_prompt: None,
+                working_directory: None,
+                tools: vec![],
+                rules_content: None,
+                compaction: crate::context::types::CompactionConfig::default(),
+            }),
+        }
+    }
+
     fn make_agent(provider: MockProvider) -> TronAgent {
-        let config = AgentConfig::default();
-        let ctx_config = ContextManagerConfig {
-            model: "mock-model".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
-        TronAgent::new(
-            config,
-            Arc::new(provider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
-            "test-session".into(),
-        )
+        TronAgent::new(AgentConfig::default(), make_deps(provider), "test-session".into())
     }
 
     #[tokio::test]
@@ -658,11 +663,7 @@ mod tests {
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(SlowProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            make_deps(SlowProvider),
             "test-session".into(),
         );
 
@@ -727,11 +728,7 @@ mod tests {
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(ErrorProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            make_deps(ErrorProvider),
             "test-session".into(),
         );
 
@@ -793,11 +790,7 @@ mod tests {
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(NoUsageProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            make_deps(NoUsageProvider),
             "test-session".into(),
         );
         let result = agent.run("Hi", RunContext::default()).await;
@@ -874,11 +867,7 @@ mod tests {
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(ErrorProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            make_deps(ErrorProvider),
             "test-session".into(),
         );
 
@@ -941,11 +930,7 @@ mod tests {
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            Arc::new(SlowProvider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            make_deps(SlowProvider),
             "test-session".into(),
         );
 
@@ -1019,11 +1004,13 @@ mod tests {
         };
         let agent = TronAgent::new(
             config,
-            Arc::new(provider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
+            AgentDeps {
+                provider: Arc::new(provider),
+                registry: ToolRegistry::new(),
+                guardrails: None,
+                hooks: None,
+                context_manager: ContextManager::new(ctx_config),
+            },
             sid.clone(),
         );
         (agent, sid)
@@ -1427,19 +1414,17 @@ mod tests {
             rules_content: None,
             compaction: crate::context::types::CompactionConfig::default(),
         };
-        let mut agent = TronAgent::new(
-            config,
-            Arc::new(provider),
-            ToolRegistry::new(),
-            None,
-            None,
-            ContextManager::new(ctx_config),
-            "test-session".into(),
-        );
+        let mut deps = AgentDeps {
+            provider: Arc::new(provider),
+            registry: ToolRegistry::new(),
+            guardrails: None,
+            hooks: None,
+            context_manager: ContextManager::new(ctx_config),
+        };
         for tool in tools {
-            agent.registry.register(tool);
+            deps.registry.register(tool);
         }
-        agent
+        TronAgent::new(config, deps, "test-session".into())
     }
 
     #[tokio::test]

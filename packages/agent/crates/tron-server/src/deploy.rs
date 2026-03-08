@@ -21,13 +21,18 @@ use crate::server::AppState;
 /// On-disk sentinel written before restart, completed on next startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)]
 pub struct RestartSentinel {
+    /// Action that triggered the restart (e.g. "deploy").
     pub action: String,
+    /// ISO-8601 timestamp of when the restart was initiated.
     pub timestamp: String,
+    /// Git commit hash being deployed.
     pub commit: String,
+    /// Git commit hash of the previous deployment.
     pub previous_commit: String,
+    /// Current status ("pending", "completed", "failed").
     pub status: String,
+    /// ISO-8601 timestamp of when the restart completed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
 }
@@ -35,15 +40,21 @@ pub struct RestartSentinel {
 /// GET /deploy/status response.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)]
 pub struct DeployStatusResponse {
+    /// Server version string.
     pub version: String,
+    /// Git commit hash of the currently deployed binary.
     pub deployed_commit: String,
+    /// Filesystem path to the server binary.
     pub binary_path: String,
+    /// Whether the binary exists on disk.
     pub binary_exists: bool,
+    /// ISO-8601 timestamp of binary's last modification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binary_modified: Option<String>,
+    /// Whether a restart has been initiated but not yet completed.
     pub restart_initiated: bool,
+    /// Active restart sentinel, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sentinel: Option<RestartSentinel>,
 }
@@ -51,10 +62,11 @@ pub struct DeployStatusResponse {
 /// POST /deploy/restart request body.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)]
 pub struct DeployRestartRequest {
+    /// Delay in milliseconds before the restart takes effect.
     #[serde(default = "default_delay")]
     pub delay_ms: u64,
+    /// Path to the new binary to deploy. Uses current binary if `None`.
     pub source_binary: Option<String>,
 }
 
@@ -65,26 +77,36 @@ fn default_delay() -> u64 {
 /// POST /deploy/restart response.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)]
 pub struct DeployRestartResponse {
+    /// Whether the restart was successfully initiated.
     pub ok: bool,
+    /// Delay before the restart takes effect.
     pub restarting_in_ms: u64,
+    /// Git commit hash being deployed.
     pub commit: String,
+    /// Git commit hash being replaced.
     pub previous_commit: String,
 }
 
 /// Deploy operation errors.
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum DeployError {
+    /// Source binary file was not found at the specified path.
     #[error("source binary not found: {path}")]
-    SourceNotFound { path: String },
+    SourceNotFound {
+        /// Path that was checked.
+        path: String,
+    },
+    /// Failed to copy the binary to the install directory.
     #[error("binary copy failed: {0}")]
     CopyFailed(#[source] io::Error),
+    /// Failed to set executable permissions on the new binary.
     #[error("failed to set executable permission: {0}")]
     PermissionFailed(#[source] io::Error),
+    /// Atomic rename of the staged binary to the target path failed.
     #[error("atomic rename failed: {0}")]
     RenameFailed(#[source] io::Error),
+    /// Failed to create a backup of the existing binary.
     #[error("backup failed: {0}")]
     BackupFailed(#[source] io::Error),
 }

@@ -213,7 +213,6 @@ impl CompactionHandler {
     }
 
     /// Force-execute compaction regardless of threshold.
-    #[allow(clippy::too_many_lines)]
     pub async fn execute_compaction(
         &self,
         context_manager: &mut ContextManager,
@@ -241,43 +240,18 @@ impl CompactionHandler {
 
         let tokens_before = context_manager.get_current_tokens();
 
-        // Execute PreCompact hooks
-        if let Some(hook_engine) = hooks {
-            let hook_ctx = HookContext::PreCompact {
-                session_id: session_id.to_owned(),
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                current_tokens: tokens_before,
-                target_tokens: (context_manager.get_context_limit() * 7) / 10,
-            };
-            let _ = emitter.emit(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreCompact".into(),
-                tool_name: None,
-                tool_call_id: None,
-            });
-            let result = hook_engine.execute(&hook_ctx).await;
-            let event_result = match result.action {
-                HookAction::Block => EventHookResult::Block,
-                HookAction::Modify => EventHookResult::Modify,
-                HookAction::Continue => EventHookResult::Continue,
-            };
-            let _ = emitter.emit(TronEvent::HookCompleted {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreCompact".into(),
-                result: event_result,
-                duration: None,
-                reason: result.reason.clone(),
-                tool_name: None,
-                tool_call_id: None,
-            });
-            if result.action == HookAction::Block {
-                return Ok(false);
-            }
+        if !Self::execute_precompact_hooks(
+            hooks.as_ref(),
+            session_id,
+            emitter,
+            tokens_before,
+            context_manager.get_context_limit(),
+        )
+        .await
+        {
+            return Ok(false);
         }
 
-        // Emit compaction start
         let _ = emitter.emit(TronEvent::CompactionStart {
             base: BaseEvent::now(session_id),
             reason: reason.clone(),
@@ -286,29 +260,112 @@ impl CompactionHandler {
 
         let compaction_start = std::time::Instant::now();
 
-        // Execute compaction: LLM summarizer via subsession, or keyword fallback
-        let result = if let Some(ref manager) = self.subagent_manager {
+        let result = Self::run_summarizer(
+            context_manager,
+            session_id,
+            self.subagent_manager.as_ref(),
+        )
+        .await;
+
+        Ok(Self::emit_compaction_events(
+            result,
+            compaction_start,
+            tokens_before,
+            context_manager.get_current_tokens(),
+            session_id,
+            emitter,
+            reason,
+            self.persister.as_ref(),
+        ))
+    }
+
+    /// Execute `PreCompact` hooks; returns `false` if hooks blocked compaction.
+    async fn execute_precompact_hooks(
+        hooks: Option<&Arc<HookEngine>>,
+        session_id: &str,
+        emitter: &Arc<EventEmitter>,
+        current_tokens: u64,
+        context_limit: u64,
+    ) -> bool {
+        let Some(hook_engine) = hooks else {
+            return true;
+        };
+
+        let hook_ctx = HookContext::PreCompact {
+            session_id: session_id.to_owned(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            current_tokens,
+            target_tokens: (context_limit * 7) / 10,
+        };
+        let _ = emitter.emit(TronEvent::HookTriggered {
+            base: BaseEvent::now(session_id),
+            hook_names: vec![],
+            hook_event: "PreCompact".into(),
+            tool_name: None,
+            tool_call_id: None,
+        });
+        let result = hook_engine.execute(&hook_ctx).await;
+        let event_result = match result.action {
+            HookAction::Block => EventHookResult::Block,
+            HookAction::Modify => EventHookResult::Modify,
+            HookAction::Continue => EventHookResult::Continue,
+        };
+        let _ = emitter.emit(TronEvent::HookCompleted {
+            base: BaseEvent::now(session_id),
+            hook_names: vec![],
+            hook_event: "PreCompact".into(),
+            result: event_result,
+            duration: None,
+            reason: result.reason.clone(),
+            tool_name: None,
+            tool_call_id: None,
+        });
+        result.action != HookAction::Block
+    }
+
+    async fn run_summarizer(
+        context_manager: &mut ContextManager,
+        session_id: &str,
+        subagent_manager: Option<&Arc<SubagentManager>>,
+    ) -> Result<
+        crate::context::types::CompactionResult,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        if let Some(manager) = subagent_manager {
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
                 system_prompt: crate::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
                     .to_string(),
-                model: None, // Use session's model
+                model: None,
             };
             let summarizer = crate::context::llm_summarizer::LlmSummarizer::new(spawner);
             context_manager.execute_compaction(&summarizer, None).await
         } else {
             let summarizer = KeywordSummarizer;
             context_manager.execute_compaction(&summarizer, None).await
-        };
+        }
+    }
 
+    fn emit_compaction_events(
+        result: Result<
+            crate::context::types::CompactionResult,
+            Box<dyn std::error::Error + Send + Sync>,
+        >,
+        compaction_start: std::time::Instant,
+        tokens_before: u64,
+        tokens_after: u64,
+        session_id: &str,
+        emitter: &Arc<EventEmitter>,
+        reason: CompactionReason,
+        persister: Option<&Arc<crate::orchestrator::event_persister::EventPersister>>,
+    ) -> bool {
         match result {
             Ok(compaction_result) => {
                 counter!("compaction_total", "status" => "success").increment(1);
                 histogram!("compaction_duration_seconds")
                     .record(compaction_start.elapsed().as_secs_f64());
-                let tokens_after = context_manager.get_current_tokens();
                 let summary_text = if compaction_result.summary.is_empty() {
                     None
                 } else {
@@ -329,9 +386,8 @@ impl CompactionHandler {
                     estimated_context_tokens: Some(tokens_after),
                 });
 
-                // Persist compact.boundary so iOS can reconstruct the pill on resume
                 if compaction_result.success
-                    && let Some(ref persister) = self.persister {
+                    && let Some(persister) = persister {
                         let reason_str = format!("{reason:?}");
                         #[allow(clippy::cast_possible_wrap)]
                         let payload = serde_json::json!({
@@ -348,7 +404,7 @@ impl CompactionHandler {
                             payload,
                         );
                     }
-                Ok(true)
+                true
             }
             Err(e) => {
                 let _ = emitter.emit(TronEvent::CompactionComplete {
@@ -363,7 +419,7 @@ impl CompactionHandler {
                 });
                 counter!("compaction_total", "status" => "failure").increment(1);
                 tracing::warn!(session_id, tokens_before, error = %e, "compaction failed");
-                Ok(false)
+                false
             }
         }
     }

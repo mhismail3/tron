@@ -87,7 +87,6 @@ impl ApnsService {
     }
 
     /// Send a notification to a single device.
-    #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
         device_token: &str,
@@ -107,6 +106,20 @@ impl ApnsService {
             }
         };
 
+        let (request, url) = self.build_apns_request(device_token, notification, &jwt);
+        let result = request.send().await;
+        Self::parse_apns_response(result, device_token, &url).await
+    }
+
+    /// Assemble the APNS HTTP/2 request: JWT auth header, topic, priority, and JSON payload.
+    ///
+    /// Returns the ready-to-send request builder and the target URL (for error reporting).
+    fn build_apns_request(
+        &self,
+        device_token: &str,
+        notification: &ApnsNotification,
+        jwt: &str,
+    ) -> (reqwest::RequestBuilder, String) {
         let url = format!(
             "https://{}:443/3/device/{}",
             self.config.apns_host(),
@@ -131,7 +144,7 @@ impl ApnsService {
             "APNS request"
         );
 
-        let result = self
+        let request = self
             .client
             .post(&url)
             .header("authorization", format!("bearer {jwt}"))
@@ -139,10 +152,17 @@ impl ApnsService {
             .header("apns-push-type", "alert")
             .header("apns-priority", priority)
             .header("apns-expiration", "0")
-            .json(&payload)
-            .send()
-            .await;
+            .json(&payload);
 
+        (request, url)
+    }
+
+    /// Parse the APNS HTTP response into a result — handles success, error, and transport failure.
+    async fn parse_apns_response(
+        result: Result<reqwest::Response, reqwest::Error>,
+        device_token: &str,
+        url: &str,
+    ) -> ApnsSendResult {
         match result {
             Ok(response) => {
                 let status = response.status().as_u16();

@@ -67,20 +67,23 @@ fn is_excluded(path: &std::path::Path, exclude_matchers: &[globset::GlobMatcher]
     })
 }
 
-/// Collect matching entries from a directory walk.
-#[allow(clippy::too_many_arguments)]
-fn collect_entries(
-    search_root: &std::path::Path,
-    glob: &globset::GlobMatcher,
-    exclude_matchers: &[globset::GlobMatcher],
-    type_filter: &str,
+struct FindParams<'a> {
+    glob: &'a globset::GlobMatcher,
+    exclude_matchers: &'a [globset::GlobMatcher],
+    type_filter: &'a str,
     max_depth: Option<usize>,
     max_results: usize,
     show_size: bool,
     sort_by_time: bool,
+}
+
+/// Collect matching entries from a directory walk.
+fn collect_entries(
+    search_root: &std::path::Path,
+    p: &FindParams<'_>,
 ) -> Vec<(String, Option<u64>, Option<std::time::SystemTime>)> {
     let mut walker = walkdir::WalkDir::new(search_root);
-    if let Some(depth) = max_depth {
+    if let Some(depth) = p.max_depth {
         walker = walker.max_depth(depth);
     }
 
@@ -99,7 +102,7 @@ fn collect_entries(
         let Ok(entry) = entry else { continue };
 
         let is_dir = entry.file_type().is_dir();
-        match type_filter {
+        match p.type_filter {
             "file" if is_dir => continue,
             "directory" if !is_dir => continue,
             _ => {}
@@ -109,21 +112,20 @@ fn collect_entries(
             .path()
             .strip_prefix(search_root)
             .unwrap_or(entry.path());
-        if !glob.is_match(rel_path) && !glob.is_match(entry.file_name()) {
+        if !p.glob.is_match(rel_path) && !p.glob.is_match(entry.file_name()) {
             continue;
         }
 
-        // Check exclude patterns
-        if is_excluded(rel_path, exclude_matchers) {
+        if is_excluded(rel_path, p.exclude_matchers) {
             continue;
         }
 
-        let size = if show_size || sort_by_time {
+        let size = if p.show_size || p.sort_by_time {
             entry.metadata().ok().map(|m| m.len())
         } else {
             None
         };
-        let modified = if sort_by_time {
+        let modified = if p.sort_by_time {
             entry.metadata().ok().and_then(|m| m.modified().ok())
         } else {
             None
@@ -131,14 +133,14 @@ fn collect_entries(
 
         entries.push((rel_path.to_string_lossy().into_owned(), size, modified));
 
-        if entries.len() >= max_results && !sort_by_time {
+        if entries.len() >= p.max_results && !p.sort_by_time {
             break;
         }
     }
 
-    if sort_by_time {
+    if p.sort_by_time {
         entries.sort_by(|a, b| b.2.cmp(&a.2));
-        entries.truncate(max_results);
+        entries.truncate(p.max_results);
     }
 
     entries
@@ -216,16 +218,16 @@ impl TronTool for FindTool {
             Err(e) => return Ok(error_result(format!("Invalid glob pattern: {e}"))),
         };
 
-        let entries = collect_entries(
-            &search_root,
-            &glob,
-            &exclude_matchers,
-            &type_filter,
+        let find_params = FindParams {
+            glob: &glob,
+            exclude_matchers: &exclude_matchers,
+            type_filter: &type_filter,
             max_depth,
             max_results,
             show_size,
             sort_by_time,
-        );
+        };
+        let entries = collect_entries(&search_root, &find_params);
         let truncated = entries.len() >= max_results;
 
         let mut output = String::new();

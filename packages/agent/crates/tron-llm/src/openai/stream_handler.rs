@@ -72,138 +72,171 @@ pub fn create_stream_state() -> StreamState {
 
 /// Process a single SSE event and return corresponding [`StreamEvent`]s.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn process_stream_event(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
-    let mut events = Vec::new();
-
     match event.event_type {
-        SseEventType::OutputTextDelta => {
-            if let Some(delta) = &event.delta {
-                if !state.text_started {
-                    state.text_started = true;
-                    events.push(StreamEvent::TextStart);
+        SseEventType::OutputTextDelta => handle_content_part_delta(event, state),
+        SseEventType::OutputItemAdded => handle_output_item_added(event, state),
+        SseEventType::OutputItemDone => handle_output_item_done(event, state),
+        SseEventType::ReasoningSummaryPartAdded => handle_reasoning_summary_part_added(state),
+        SseEventType::ReasoningTextDelta => handle_reasoning_text_delta(event, state),
+        SseEventType::ReasoningSummaryTextDelta => handle_reasoning_summary_text_delta(event, state),
+        SseEventType::FunctionCallArgsDelta => handle_function_call_args_delta(event, state),
+        SseEventType::ToolSearchCallSearching => {
+            debug!("Tool search: model is searching for relevant tools");
+            Vec::new()
+        }
+        SseEventType::ToolSearchCallCompleted => {
+            debug!("Tool search: completed — selected tools loaded into context");
+            Vec::new()
+        }
+        SseEventType::ComputerCallCompleted => {
+            debug!("Computer use event received but not implemented — ignoring");
+            Vec::new()
+        }
+        SseEventType::Completed => handle_response_completed(event, state),
+        SseEventType::Unknown => Vec::new(),
+    }
+}
+
+/// Handle `response.output_text.delta` — emit `TextStart` on first delta, then `TextDelta`.
+fn handle_content_part_delta(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if let Some(delta) = &event.delta {
+        if !state.text_started {
+            state.text_started = true;
+            events.push(StreamEvent::TextStart);
+        }
+        state.accumulated_text.push_str(delta);
+        events.push(StreamEvent::TextDelta {
+            delta: delta.clone(),
+        });
+    }
+    events
+}
+
+/// Handle `response.output_item.added` — start tool calls or reasoning items.
+fn handle_output_item_added(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if let Some(item) = &event.item {
+        if item.item_type == OutputItemType::FunctionCall {
+            if let Some(call_id) = &item.call_id {
+                let name = item.name.clone().unwrap_or_default();
+                let initial_args = item.arguments.clone().unwrap_or_default();
+                let is_new = !state.tool_calls.contains_key(call_id.as_str());
+                let _ = state.tool_calls.insert(
+                    call_id.clone(),
+                    ToolCallState {
+                        id: call_id.clone(),
+                        name: name.clone(),
+                        args: initial_args,
+                    },
+                );
+                if is_new {
+                    events.push(StreamEvent::ToolCallStart {
+                        tool_call_id: call_id.clone(),
+                        name,
+                    });
                 }
-                state.accumulated_text.push_str(delta);
-                events.push(StreamEvent::TextDelta {
-                    delta: delta.clone(),
-                });
+            }
+        } else if item.item_type == OutputItemType::Reasoning && !state.thinking_started {
+            state.thinking_started = true;
+            events.push(StreamEvent::ThinkingStart);
+        }
+    }
+    events
+}
+
+/// Handle `response.reasoning_summary_part.added` — emit `ThinkingStart` if not yet started.
+fn handle_reasoning_summary_part_added(state: &mut StreamState) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if !state.thinking_started {
+        state.thinking_started = true;
+        events.push(StreamEvent::ThinkingStart);
+    }
+    events
+}
+
+/// Handle `response.reasoning_text.delta` — full reasoning content, preferred over summary.
+fn handle_reasoning_text_delta(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if let Some(delta) = &event.delta {
+        if !state.has_reasoning_text {
+            state.has_reasoning_text = true;
+            if !state.accumulated_thinking.is_empty() {
+                state.accumulated_thinking.clear();
             }
         }
-
-        SseEventType::OutputItemAdded => {
-            if let Some(item) = &event.item {
-                if item.item_type == OutputItemType::FunctionCall {
-                    if let Some(call_id) = &item.call_id {
-                        let name = item.name.clone().unwrap_or_default();
-                        let initial_args = item.arguments.clone().unwrap_or_default();
-                        let is_new = !state.tool_calls.contains_key(call_id.as_str());
-                        let _ = state.tool_calls.insert(
-                            call_id.clone(),
-                            ToolCallState {
-                                id: call_id.clone(),
-                                name: name.clone(),
-                                args: initial_args,
-                            },
-                        );
-                        if is_new {
-                            events.push(StreamEvent::ToolCallStart {
-                                tool_call_id: call_id.clone(),
-                                name,
-                            });
-                        }
-                    }
-                } else if item.item_type == OutputItemType::Reasoning && !state.thinking_started {
-                    state.thinking_started = true;
-                    events.push(StreamEvent::ThinkingStart);
-                }
-            }
+        if !state.thinking_started {
+            state.thinking_started = true;
+            events.push(StreamEvent::ThinkingStart);
         }
+        state.accumulated_thinking.push_str(delta);
+        events.push(StreamEvent::ThinkingDelta {
+            delta: delta.clone(),
+        });
+    }
+    events
+}
 
-        SseEventType::OutputItemDone => {
-            events.extend(handle_output_item_done(event, state));
-        }
-
-        SseEventType::ReasoningSummaryPartAdded => {
+/// Handle `response.reasoning_summary_text.delta` — fallback when full reasoning is unavailable.
+fn handle_reasoning_summary_text_delta(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if state.has_reasoning_text {
+        return events;
+    }
+    if let Some(delta) = &event.delta
+        && !state.seen_thinking_texts.contains(delta.as_str()) {
+            let _ = state.seen_thinking_texts.insert(delta.clone());
             if !state.thinking_started {
                 state.thinking_started = true;
                 events.push(StreamEvent::ThinkingStart);
             }
+            state.accumulated_thinking.push_str(delta);
+            events.push(StreamEvent::ThinkingDelta {
+                delta: delta.clone(),
+            });
         }
-
-        SseEventType::ReasoningTextDelta => {
-            // Full reasoning content — preferred over summary when available.
-            if let Some(delta) = &event.delta {
-                if !state.has_reasoning_text {
-                    // First reasoning_text delta: replace any summary-only content.
-                    state.has_reasoning_text = true;
-                    if !state.accumulated_thinking.is_empty() {
-                        state.accumulated_thinking.clear();
-                    }
-                }
-                if !state.thinking_started {
-                    state.thinking_started = true;
-                    events.push(StreamEvent::ThinkingStart);
-                }
-                state.accumulated_thinking.push_str(delta);
-                events.push(StreamEvent::ThinkingDelta {
-                    delta: delta.clone(),
-                });
-            }
-        }
-
-        SseEventType::ReasoningSummaryTextDelta => {
-            // Skip summary deltas when we have full reasoning text.
-            if state.has_reasoning_text {
-                return events;
-            }
-            if let Some(delta) = &event.delta
-                && !state.seen_thinking_texts.contains(delta.as_str()) {
-                    let _ = state.seen_thinking_texts.insert(delta.clone());
-                    if !state.thinking_started {
-                        state.thinking_started = true;
-                        events.push(StreamEvent::ThinkingStart);
-                    }
-                    state.accumulated_thinking.push_str(delta);
-                    events.push(StreamEvent::ThinkingDelta {
-                        delta: delta.clone(),
-                    });
-                }
-        }
-
-        SseEventType::FunctionCallArgsDelta => {
-            if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta)
-                && let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
-                    tc.args.push_str(delta);
-                    events.push(StreamEvent::ToolCallDelta {
-                        tool_call_id: call_id.clone(),
-                        arguments_delta: delta.clone(),
-                    });
-                }
-        }
-
-        SseEventType::ToolSearchCallSearching => {
-            debug!("Tool search: model is searching for relevant tools");
-        }
-
-        SseEventType::ToolSearchCallCompleted => {
-            debug!("Tool search: completed — selected tools loaded into context");
-        }
-
-        SseEventType::ComputerCallCompleted => {
-            debug!("Computer use event received but not implemented — ignoring");
-        }
-
-        SseEventType::Completed => {
-            events.extend(process_completed_response(event, state));
-        }
-
-        SseEventType::Unknown => {} // Ignore unknown event types
-    }
-
     events
+}
+
+/// Handle `response.function_call_arguments.delta` — accumulate tool call arguments.
+fn handle_function_call_args_delta(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta)
+        && let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
+            tc.args.push_str(delta);
+            events.push(StreamEvent::ToolCallDelta {
+                tool_call_id: call_id.clone(),
+                arguments_delta: delta.clone(),
+            });
+        }
+    events
+}
+
+/// Handle `response.completed` — delegate to final event processing.
+fn handle_response_completed(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    process_completed_response(event, state)
 }
 
 /// Handle `response.output_item.done` — extract reasoning summary if not already streamed.

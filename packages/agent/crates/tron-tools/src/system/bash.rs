@@ -48,7 +48,7 @@ impl BashTool {
         Self { runner }
     }
 
-    fn check_dangerous(&self, command: &str) -> Option<String> {
+    fn check_dangerous(command: &str) -> Option<String> {
         for pattern in &*DANGER_PATTERNS {
             if pattern.is_match(command) {
                 return Some("Potentially destructive command pattern detected".into());
@@ -86,7 +86,7 @@ impl TronTool for BashTool {
         };
 
         // Check dangerous patterns
-        if let Some(reason) = self.check_dangerous(&command) {
+        if let Some(reason) = Self::check_dangerous(&command) {
             return Ok(error_result(reason));
         }
 

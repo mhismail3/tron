@@ -502,25 +502,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 .iter()
                 .map(|&idx| {
                     let tc = &stream_result.tool_calls[idx];
-                    let registry = &registry;
-                    let guardrails = &guardrails;
-                    let hooks = &hooks;
                     let working_dir = &working_dir;
-                    let emitter = &emitter;
-                    let cancel = &cancel;
+                    let tool_ctx = tool_executor::ToolExecutionContext {
+                        registry,
+                        guardrails,
+                        hooks,
+                        emitter,
+                        cancel,
+                        subagent_depth,
+                        subagent_max_depth,
+                        workspace_id,
+                    };
                     async move {
                         let result = tool_executor::execute_tool(
                             tc,
-                            registry,
-                            guardrails,
-                            hooks,
                             session_id,
                             working_dir,
-                            emitter,
-                            cancel,
-                            subagent_depth,
-                            subagent_max_depth,
-                            workspace_id,
+                            &tool_ctx,
                         )
                         .await;
                         (idx, result)

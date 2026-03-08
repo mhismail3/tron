@@ -52,6 +52,82 @@ fn parse_metadata(json: Option<String>) -> Option<serde_json::Value> {
     })
 }
 
+/// Build SQL SET clause fragments from scalar `TaskUpdateParams` fields.
+///
+/// Returns `(set_clauses, param_values)`. Does NOT include tag/note updates
+/// (those require DB reads) or the trailing `updated_at` / `id` params.
+fn build_update_sets(
+    updates: &TaskUpdateParams,
+) -> (Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut sets: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref title) = updates.title {
+        sets.push("title = ?".to_string());
+        values.push(Box::new(title.clone()));
+    }
+    if let Some(ref desc) = updates.description {
+        sets.push("description = ?".to_string());
+        values.push(Box::new(desc.clone()));
+    }
+    if let Some(ref af) = updates.active_form {
+        sets.push("active_form = ?".to_string());
+        values.push(Box::new(af.clone()));
+    }
+    if let Some(status) = updates.status {
+        sets.push("status = ?".to_string());
+        values.push(Box::new(status.as_sql().to_string()));
+    }
+    if let Some(priority) = updates.priority {
+        sets.push("priority = ?".to_string());
+        values.push(Box::new(priority.as_sql().to_string()));
+    }
+
+    // Normalize empty strings to NULL for FK columns
+    let normalize = |s: &str| -> Option<String> {
+        if s.is_empty() { None } else { Some(s.to_owned()) }
+    };
+
+    if let Some(ref pid) = updates.project_id {
+        sets.push("project_id = ?".to_string());
+        values.push(Box::new(normalize(pid)));
+    }
+    if let Some(ref ptid) = updates.parent_task_id {
+        sets.push("parent_task_id = ?".to_string());
+        values.push(Box::new(normalize(ptid)));
+    }
+    if let Some(ref aid) = updates.area_id {
+        sets.push("area_id = ?".to_string());
+        values.push(Box::new(normalize(aid)));
+    }
+    if let Some(ref dd) = updates.due_date {
+        sets.push("due_date = ?".to_string());
+        values.push(Box::new(dd.clone()));
+    }
+    if let Some(ref du) = updates.deferred_until {
+        sets.push("deferred_until = ?".to_string());
+        values.push(Box::new(du.clone()));
+    }
+    if let Some(em) = updates.estimated_minutes {
+        sets.push("estimated_minutes = ?".to_string());
+        values.push(Box::new(em));
+    }
+    if let Some(ref sid) = updates.last_session_id {
+        sets.push("last_session_id = ?".to_string());
+        values.push(Box::new(sid.clone()));
+        sets.push("last_session_at = ?".to_string());
+        values.push(Box::new(now_iso()));
+    }
+    if let Some(ref meta) = updates.metadata {
+        sets.push("metadata = ?".to_string());
+        values.push(Box::new(
+            serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
+        ));
+    }
+
+    (sets, values)
+}
+
 /// Build a WHERE clause from a `TaskFilter`.
 ///
 /// Returns `(where_clause, param_values)` where `where_clause` is either empty
@@ -265,92 +341,15 @@ impl TaskRepository {
     }
 
     /// Update a task. Returns the updated task, or `None` if not found.
-    #[allow(clippy::too_many_lines)]
     pub fn update_task(
         conn: &Connection,
         id: &str,
         updates: &TaskUpdateParams,
     ) -> Result<Option<Task>, TaskError> {
-        // Build dynamic SET clause
-        let mut sets: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let (mut sets, mut values) = build_update_sets(updates);
 
-        if let Some(ref title) = updates.title {
-            sets.push("title = ?".to_string());
-            values.push(Box::new(title.clone()));
-        }
-        if let Some(ref desc) = updates.description {
-            sets.push("description = ?".to_string());
-            values.push(Box::new(desc.clone()));
-        }
-        if let Some(ref af) = updates.active_form {
-            sets.push("active_form = ?".to_string());
-            values.push(Box::new(af.clone()));
-        }
-        if let Some(status) = updates.status {
-            sets.push("status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(priority) = updates.priority {
-            sets.push("priority = ?".to_string());
-            values.push(Box::new(priority.as_sql().to_string()));
-        }
-        if let Some(ref pid) = updates.project_id {
-            sets.push("project_id = ?".to_string());
-            // Normalize empty strings to NULL for FK columns
-            let normalized: Option<String> = if pid.is_empty() {
-                None
-            } else {
-                Some(pid.clone())
-            };
-            values.push(Box::new(normalized));
-        }
-        if let Some(ref ptid) = updates.parent_task_id {
-            sets.push("parent_task_id = ?".to_string());
-            let normalized: Option<String> = if ptid.is_empty() {
-                None
-            } else {
-                Some(ptid.clone())
-            };
-            values.push(Box::new(normalized));
-        }
-        if let Some(ref aid) = updates.area_id {
-            sets.push("area_id = ?".to_string());
-            let normalized: Option<String> = if aid.is_empty() {
-                None
-            } else {
-                Some(aid.clone())
-            };
-            values.push(Box::new(normalized));
-        }
-        if let Some(ref dd) = updates.due_date {
-            sets.push("due_date = ?".to_string());
-            values.push(Box::new(dd.clone()));
-        }
-        if let Some(ref du) = updates.deferred_until {
-            sets.push("deferred_until = ?".to_string());
-            values.push(Box::new(du.clone()));
-        }
-        if let Some(em) = updates.estimated_minutes {
-            sets.push("estimated_minutes = ?".to_string());
-            values.push(Box::new(em));
-        }
-        if let Some(ref sid) = updates.last_session_id {
-            sets.push("last_session_id = ?".to_string());
-            values.push(Box::new(sid.clone()));
-            sets.push("last_session_at = ?".to_string());
-            values.push(Box::new(now_iso()));
-        }
-        if let Some(ref meta) = updates.metadata {
-            sets.push("metadata = ?".to_string());
-            values.push(Box::new(
-                serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
-            ));
-        }
-
-        // Handle tags: add_tags and remove_tags
+        // Handle tags: add_tags and remove_tags (requires DB read)
         if updates.add_tags.is_some() || updates.remove_tags.is_some() {
-            // Read current tags
             let current: Option<String> = conn
                 .query_row("SELECT tags FROM tasks WHERE id = ?1", params![id], |row| {
                     row.get(0)
@@ -374,7 +373,7 @@ impl TaskRepository {
             }
         }
 
-        // Handle note appending
+        // Handle note appending (requires DB read)
         if let Some(ref note) = updates.add_note {
             let current_notes: Option<String> = conn
                 .query_row(

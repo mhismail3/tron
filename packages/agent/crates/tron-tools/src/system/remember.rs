@@ -91,8 +91,104 @@ fn format_json_entries(entries: &[Value]) -> String {
         .join("\n---\n")
 }
 
+async fn dispatch_action(
+    store: &dyn EventStoreQuery,
+    action: &str,
+    params: &Value,
+    workspace_id: Option<&str>,
+    limit: u32,
+    offset: u32,
+) -> Result<TronToolResult, ToolError> {
+    let query = get_optional_string(params, "query");
+    let session_id = get_optional_string(params, "session_id");
+
+    let content = match action {
+        "recall" => {
+            let q = query.unwrap_or_default();
+            let entries = store.recall_memory(&q, workspace_id, limit).await?;
+            format_entries(&entries)
+        }
+        "search" | "memory" => {
+            let q = query.unwrap_or_default();
+            let entries = store
+                .search_memory(session_id.as_deref(), &q, limit, offset)
+                .await?;
+            format_entries(&entries)
+        }
+        "sessions" => {
+            let sessions = store.list_sessions(limit, offset).await?;
+            format_sessions(&sessions)
+        }
+        "session" => {
+            let Some(sid) = &session_id else {
+                return Ok(error_result("session action requires session_id parameter"));
+            };
+            match store.get_session(sid).await? {
+                Some(s) => {
+                    serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}"))
+                }
+                None => format!("Session not found: {sid}"),
+            }
+        }
+        "events" => {
+            let sid = session_id.as_deref().unwrap_or("");
+            let event_type = get_optional_string(params, "type");
+            #[allow(clippy::cast_possible_truncation)]
+            let turn = get_optional_u64(params, "turn").map(|v| v as u32);
+            let entries = store
+                .get_events(sid, event_type.as_deref(), turn, limit, offset)
+                .await?;
+            format_json_entries(&entries)
+        }
+        "messages" => {
+            let Some(sid) = &session_id else {
+                return Ok(error_result(
+                    "messages action requires session_id parameter",
+                ));
+            };
+            let entries = store.get_messages(sid, limit).await?;
+            format_json_entries(&entries)
+        }
+        "tools" => {
+            let Some(sid) = &session_id else {
+                return Ok(error_result("tools action requires session_id parameter"));
+            };
+            let entries = store.get_tool_calls(sid, limit).await?;
+            format_json_entries(&entries)
+        }
+        "logs" => {
+            let sid = session_id.as_deref().unwrap_or("");
+            let level = get_optional_string(params, "level");
+            let entries = store
+                .get_logs(sid, level.as_deref(), limit, offset)
+                .await?;
+            format_json_entries(&entries)
+        }
+        "stats" => {
+            let stats = store.get_stats().await?;
+            serde_json::to_string_pretty(&stats).unwrap_or_else(|_| stats.to_string())
+        }
+        "schema" => store.get_schema().await?,
+        "read_blob" => {
+            let Some(blob_id) = get_optional_string(params, "blob_id") else {
+                return Ok(error_result("read_blob action requires blob_id parameter"));
+            };
+            store.read_blob(&blob_id).await?
+        }
+        _ => unreachable!(),
+    };
+
+    Ok(TronToolResult {
+        content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+            content,
+        )]),
+        details: Some(json!({"action": action})),
+        is_error: None,
+        stop_turn: None,
+    })
+}
+
 #[async_trait]
-#[allow(clippy::too_many_lines)]
 impl TronTool for RememberTool {
     fn name(&self) -> &str {
         "Remember"
@@ -160,96 +256,8 @@ Use read_blob to retrieve full content when tool results reference a blob_id.",
         let limit = clamp_limit(get_optional_u64(&params, "limit"));
         #[allow(clippy::cast_possible_truncation)]
         let offset = get_optional_u64(&params, "offset").unwrap_or(0) as u32;
-        let query = get_optional_string(&params, "query");
-        let session_id = get_optional_string(&params, "session_id");
 
-        let content = match action.as_str() {
-            "recall" => {
-                let q = query.unwrap_or_default();
-                let entries = self.store.recall_memory(&q, ctx.workspace_id.as_deref(), limit).await?;
-                format_entries(&entries)
-            }
-            "search" | "memory" => {
-                let q = query.unwrap_or_default();
-                let entries = self
-                    .store
-                    .search_memory(session_id.as_deref(), &q, limit, offset)
-                    .await?;
-                format_entries(&entries)
-            }
-            "sessions" => {
-                let sessions = self.store.list_sessions(limit, offset).await?;
-                format_sessions(&sessions)
-            }
-            "session" => {
-                let Some(sid) = &session_id else {
-                    return Ok(error_result("session action requires session_id parameter"));
-                };
-                match self.store.get_session(sid).await? {
-                    Some(s) => {
-                        serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}"))
-                    }
-                    None => format!("Session not found: {sid}"),
-                }
-            }
-            "events" => {
-                let sid = session_id.as_deref().unwrap_or("");
-                let event_type = get_optional_string(&params, "type");
-                #[allow(clippy::cast_possible_truncation)]
-                let turn = get_optional_u64(&params, "turn").map(|v| v as u32);
-                let entries = self
-                    .store
-                    .get_events(sid, event_type.as_deref(), turn, limit, offset)
-                    .await?;
-                format_json_entries(&entries)
-            }
-            "messages" => {
-                let Some(sid) = &session_id else {
-                    return Ok(error_result(
-                        "messages action requires session_id parameter",
-                    ));
-                };
-                let entries = self.store.get_messages(sid, limit).await?;
-                format_json_entries(&entries)
-            }
-            "tools" => {
-                let Some(sid) = &session_id else {
-                    return Ok(error_result("tools action requires session_id parameter"));
-                };
-                let entries = self.store.get_tool_calls(sid, limit).await?;
-                format_json_entries(&entries)
-            }
-            "logs" => {
-                let sid = session_id.as_deref().unwrap_or("");
-                let level = get_optional_string(&params, "level");
-                let entries = self
-                    .store
-                    .get_logs(sid, level.as_deref(), limit, offset)
-                    .await?;
-                format_json_entries(&entries)
-            }
-            "stats" => {
-                let stats = self.store.get_stats().await?;
-                serde_json::to_string_pretty(&stats).unwrap_or_else(|_| stats.to_string())
-            }
-            "schema" => self.store.get_schema().await?,
-            "read_blob" => {
-                let Some(blob_id) = get_optional_string(&params, "blob_id") else {
-                    return Ok(error_result("read_blob action requires blob_id parameter"));
-                };
-                self.store.read_blob(&blob_id).await?
-            }
-            _ => unreachable!(),
-        };
-
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
-                content,
-            )]),
-            details: Some(json!({"action": action})),
-            is_error: None,
-            stop_turn: None,
-        })
+        dispatch_action(&*self.store, &action, &params, ctx.workspace_id.as_deref(), limit, offset).await
     }
 }
 
