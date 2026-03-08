@@ -10,6 +10,15 @@ struct DeviceContextSection: View {
 
     private let accentColor: Color = .tronEmerald
 
+    /// Estimated token count from the formatted context line
+    private var estimatedTokens: Int {
+        guard let line = DeviceContextService.shared.formatContextLine(
+            settings: deviceContext,
+            locationSettings: location
+        ) else { return 0 }
+        return (line.utf8.count + 3) / 4
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -18,10 +27,13 @@ struct DeviceContextSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(accentColor)
                     .frame(width: 18)
-                Text("Device Context")
+                Text("Device Info")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(accentColor)
                 Spacer()
+                Text(TokenFormatter.format(estimatedTokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronTextMuted)
@@ -40,7 +52,6 @@ struct DeviceContextSection: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
                     signalRows
-                    contextLinePreview
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
@@ -88,25 +99,4 @@ struct DeviceContextSection: View {
         }
     }
 
-    // MARK: - Full Context Line Preview
-
-    @ViewBuilder
-    private var contextLinePreview: some View {
-        if let line = DeviceContextService.shared.formatContextLine(
-            settings: deviceContext,
-            locationSettings: location
-        ) {
-            ScrollView {
-                Text(line)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .textSelection(.enabled)
-            }
-            .frame(maxHeight: 80)
-            .sectionFill(accentColor, cornerRadius: 6, subtle: true)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-    }
 }
