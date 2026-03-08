@@ -87,7 +87,7 @@ struct SettingsView: View {
                 // Danger zone
                 DangerZoneSection(
                     hasChatSession: eventStoreManager.chatSession != nil,
-                    hasActiveSessions: !eventStoreManager.sessions.isEmpty,
+                    hasActiveSessions: eventStoreManager.sessions.contains { !$0.isChat },
                     isArchivingAll: isArchivingAll,
                     onResetChat: { showResetChatConfirmation = true },
                     onArchiveAll: { showArchiveAllConfirmation = true },
@@ -240,7 +240,10 @@ struct SettingsView: View {
                     archiveAllSessions()
                 }
             } message: {
-                Text("This will remove \(eventStoreManager.sessions.count) session\(eventStoreManager.sessions.count == 1 ? "" : "s") from your device. Session data on the server will remain.")
+                Text({
+                    let count = eventStoreManager.sessions.filter { !$0.isChat }.count
+                    return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
+                }())
             }
         }
         .adaptivePresentationDetents([.medium, .large])

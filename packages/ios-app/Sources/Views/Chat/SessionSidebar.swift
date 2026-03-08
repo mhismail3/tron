@@ -39,42 +39,59 @@ struct SessionSidebar: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                if eventStoreManager.sortedSessions.isEmpty {
-                    // Empty state placeholder
-                    VStack(spacing: 8) {
-                        Text("No active sessions")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextMuted)
+                // Always render List so NavigationSplitView can push on compact
+                List(selection: $selectedSessionId) {
+                    // Hidden chat anchor — enables programmatic navigation to chat on compact
+                    if let chat = eventStoreManager.chatSession, eventStoreManager.sortedSessions.isEmpty {
+                        Color.clear
+                            .frame(height: 0)
+                            .tag(chat.id)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(selection: $selectedSessionId) {
-                        Section {
-                            ForEach(eventStoreManager.sortedSessions) { session in
-                                CachedSessionSidebarRow(
-                                    session: session,
-                                    isSelected: session.id == selectedSessionId
-                                )
-                                .tag(session.id)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button {
-                                        sessionToArchive = session.id
-                                        showArchiveConfirmation = true
-                                    } label: {
-                                        Image(systemName: "archivebox")
-                                    }
-                                    .tint(.tronEmerald)
+
+                    Section {
+                        ForEach(eventStoreManager.sortedSessions) { session in
+                            CachedSessionSidebarRow(
+                                session: session,
+                                isSelected: session.id == selectedSessionId
+                            )
+                            .tag(session.id)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    sessionToArchive = session.id
+                                    showArchiveConfirmation = true
+                                } label: {
+                                    Image(systemName: "archivebox")
                                 }
+                                .tint(.tronEmerald)
                             }
                         }
                     }
-                    .tint(.clear) // Hide iPadOS native selection border
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .contentMargins(.top, 8)
+                }
+                .tint(.clear)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 8)
+                .overlay {
+                    if eventStoreManager.sortedSessions.isEmpty {
+                        // Tron placeholder when no non-chat sessions
+                        VStack(spacing: 16) {
+                            Image("TronLogo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: 80)
+
+                            Text("Start talking")
+                                .font(TronTypography.messageBody)
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                        .allowsHitTesting(false)
+                    }
                 }
             }
 
