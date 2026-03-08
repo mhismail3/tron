@@ -17,13 +17,28 @@ extension ChatViewModel: MessagingContext {
         skills: [Skill]?,
         spells: [Skill]?
     ) async throws {
+        // Collect device context if enabled in settings
+        let deviceContext = await collectDeviceContext()
+
         try await rpcClient.agent.sendPrompt(
             text,
             images: nil,  // Images sent via attachments instead
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             skills: skills,
-            spells: spells
+            spells: spells,
+            deviceContext: deviceContext
+        )
+    }
+
+    /// Collect device context line from DeviceContextService if enabled.
+    private func collectDeviceContext() async -> String? {
+        guard let settings = try? await rpcClient.settings.get() else { return nil }
+        let integrations = settings.integrations
+        guard integrations.deviceContext.enabled else { return nil }
+        return DeviceContextService.shared.formatContextLine(
+            settings: integrations.deviceContext,
+            locationSettings: integrations.location
         )
     }
 

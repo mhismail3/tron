@@ -24,6 +24,8 @@ enum NavigationIntent: Equatable {
     case voiceNotes
     /// Open the notification inbox, optionally auto-opening a specific notification
     case notification(toolCallId: String)
+    /// Process pending shared content from Share Extension
+    case share
 }
 
 // MARK: - Deep Link Router
@@ -102,6 +104,11 @@ final class DeepLinkRouter {
         case "voice-notes":
             pendingIntent = .voiceNotes
             TronLogger.shared.info("Deep link intent set: voiceNotes", category: .notification)
+            return true
+
+        case "share":
+            pendingIntent = .share
+            TronLogger.shared.info("Deep link intent set: share", category: .notification)
             return true
 
         default:

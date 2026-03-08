@@ -185,6 +185,8 @@ final class ChatViewModel: ChatEventContext {
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
+    /// Dispatches device requests to local services (calendar, contacts, health)
+    var deviceRequestDispatcher: DeviceRequestDispatcher?
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates event dispatch - routes plugin events to handlers
@@ -244,6 +246,7 @@ final class ChatViewModel: ChatEventContext {
         self.eventStoreManager = eventStoreManager
         self.connectionState = rpcClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
+        self.deviceRequestDispatcher = DeviceRequestDispatcher(rpcClient: rpcClient)
         setupBindings()
         setupEventHandlers()
         setupAudioRecorder()
@@ -446,14 +449,19 @@ final class ChatViewModel: ChatEventContext {
 
     /// Unified event handler - dispatches ParsedEventV2 to specific handlers
     private func handleEventV2(_ event: ParsedEventV2) {
-        // Suppress real-time events during catch-up to prevent duplicates
-        guard !isCatchingUp else { return }
-
         switch event {
         case .plugin(let type, _, _, let transform):
+            // Device requests are global — never suppress during catch-up
+            if type == "device.request" {
+                handlePluginEvent(type: type, transform: transform)
+                return
+            }
+            // Suppress other real-time events during catch-up to prevent duplicates
+            guard !isCatchingUp else { return }
             handlePluginEvent(type: type, transform: transform)
 
         case .unknown(let type):
+            guard !isCatchingUp else { return }
             logger.debug("Unknown event type: \(type)", category: .events)
         }
     }

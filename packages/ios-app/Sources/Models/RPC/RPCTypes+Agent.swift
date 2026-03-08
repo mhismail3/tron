@@ -22,6 +22,8 @@ struct AgentPromptParams: Encodable {
     let skills: [SkillReferenceParam]?
     /// Spells (ephemeral skills) - injected for one prompt only, not tracked
     let spells: [SkillReferenceParam]?
+    /// Device context line for system prompt injection (e.g. "[Device: battery 47% | WiFi]")
+    let deviceContext: String?
 
     init(
         sessionId: String,
@@ -30,7 +32,8 @@ struct AgentPromptParams: Encodable {
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
         skills: [Skill]? = nil,
-        spells: [Skill]? = nil
+        spells: [Skill]? = nil,
+        deviceContext: String? = nil
     ) {
         self.sessionId = sessionId
         self.prompt = prompt
@@ -39,6 +42,7 @@ struct AgentPromptParams: Encodable {
         self.reasoningLevel = reasoningLevel
         self.skills = skills?.map { SkillReferenceParam(from: $0) }
         self.spells = spells?.map { SkillReferenceParam(from: $0) }
+        self.deviceContext = deviceContext
     }
 }
 

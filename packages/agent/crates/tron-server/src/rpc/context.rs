@@ -18,6 +18,7 @@ use tron_skills::registry::SkillRegistry;
 use tron_tools::registry::ToolRegistry;
 use tron_transcription::MlxEngine;
 
+use crate::device::DeviceRequestBroker;
 use crate::shutdown::ShutdownCoordinator;
 
 /// Dependencies needed to create and run agents.
@@ -68,6 +69,8 @@ pub struct RpcContext {
     pub cron_scheduler: Option<std::sync::Arc<tron_cron::CronScheduler>>,
     /// Worktree coordinator for session isolation (None = isolation disabled).
     pub worktree_coordinator: Option<std::sync::Arc<tron_worktree::WorktreeCoordinator>>,
+    /// Device request broker for iOS request/response round-trips.
+    pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
 }
 
 #[cfg(test)]

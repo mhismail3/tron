@@ -172,6 +172,9 @@ extension ChatViewModel {
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
 
+        // Trigger task complete haptic
+        triggerHaptic(.taskComplete)
+
         // Enter post-processing state: text field enabled, send button disabled.
         // Cleared by agent_ready event when background hooks finish.
         agentPhase = .postProcessing
@@ -211,6 +214,11 @@ extension ChatViewModel {
         postProcessingTimeoutTask = nil
         // Clear queue — server context is lost, queued messages are stale
         messageQueueState.clear()
+    }
+
+    func handleDeviceRequest(_ result: DeviceRequestPlugin.Result) {
+        logger.info("Device request: method=\(result.method), requestId=\(result.requestId)", category: .events)
+        deviceRequestDispatcher?.handleRequest(result)
     }
 
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
@@ -484,6 +492,9 @@ extension ChatViewModel {
             logger.error("Agent error: \(result.message)", category: .events)
         }
 
+        // Trigger error haptic
+        triggerHaptic(.error)
+
         // Drain queued messages if any — agent is idle now
         drainMessageQueue()
     }
@@ -519,6 +530,9 @@ extension ChatViewModel {
 
         // Close browser session on error
         closeBrowserSession()
+
+        // Trigger error haptic
+        triggerHaptic(.error)
 
         // Drain queued messages if any — agent is idle now
         drainMessageQueue()
@@ -874,5 +888,15 @@ extension ChatViewModel {
         inputText = prompt
         sendMessage()
         logger.info("Subagent results sent as user message: \(subagent.subagentSessionId)", category: .chat)
+    }
+
+    // MARK: - Haptics
+
+    /// Fire-and-forget haptic trigger that fetches settings asynchronously.
+    func triggerHaptic(_ event: HapticEvent) {
+        Task {
+            guard let settings = try? await rpcClient.settings.get() else { return }
+            HapticService.shared.trigger(for: event, settings: settings.integrations.haptics)
+        }
     }
 }

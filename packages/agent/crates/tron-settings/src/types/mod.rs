@@ -8,6 +8,7 @@
 mod api;
 mod context;
 mod guardrails;
+mod integrations;
 mod server;
 mod tools;
 mod ui;
@@ -15,6 +16,7 @@ mod ui;
 pub use api::*;
 pub use context::*;
 pub use guardrails::*;
+pub use integrations::*;
 pub use server::*;
 pub use tools::*;
 pub use ui::*;
@@ -67,6 +69,8 @@ pub struct TronSettings {
     pub session: SessionSettings,
     /// UI/TUI appearance settings.
     pub ui: UiSettings,
+    /// iOS integration settings (device context, clipboard, haptics, etc.).
+    pub integrations: IntegrationSettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
@@ -88,6 +92,7 @@ impl Default for TronSettings {
             tmux: TmuxSettings::default(),
             session: SessionSettings::default(),
             ui: UiSettings::default(),
+            integrations: IntegrationSettings::default(),
             guardrails: None,
         }
     }

@@ -78,16 +78,17 @@ struct EnvironmentItemRow: View {
     let icon: String
     let label: String
     let value: String
+    var accent: Color = .tronPurple
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronPurple)
+                .foregroundStyle(accent)
 
             Text(label)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronPurple)
+                .foregroundStyle(accent)
 
             Spacer()
 
@@ -98,7 +99,7 @@ struct EnvironmentItemRow: View {
                 .truncationMode(.middle)
         }
         .padding(8)
-        .sectionFill(.tronPurple, cornerRadius: 6, subtle: true)
+        .sectionFill(accent, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }

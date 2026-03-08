@@ -18,6 +18,12 @@ cd packages/ios-app && xcodegen generate
 xcodebuild test -scheme TronMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+## Deployment
+
+- **NEVER run `tron deploy`** — production deployments are manual-only by the user.
+- Use `tron dev` variants to manage the beta server during development.
+- You may run `tron dev`, `tron dev-build`, etc. but never `tron deploy` or any production deployment command.
+
 ## Documentation
 
 Path-scoped rules in `.claude/rules/` load automatically.

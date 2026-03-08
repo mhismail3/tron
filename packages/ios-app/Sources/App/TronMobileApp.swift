@@ -102,12 +102,22 @@ struct TronMobileApp: App {
                 case .notification(let toolCallId):
                     deepLinkNotificationToolCallId = toolCallId
                     TronLogger.shared.info("Deep link to notification inbox: toolCallId=\(toolCallId)", category: .notification)
+                case .share:
+                    NotificationCenter.default.post(name: .pendingShareContent, object: nil)
+                    TronLogger.shared.info("Deep link to share", category: .notification)
                 }
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
                 container.setBackgroundState(isBackground)
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
+
+                // When returning to foreground, check for pending share content
+                if newPhase == .active && oldPhase != .active {
+                    if PendingShareService.load() != nil {
+                        container.deepLinkRouter.pendingIntent = .share
+                    }
+                }
 
                 // When returning to foreground, handle reconnection and refresh session list
                 if newPhase == .active && oldPhase != .active {
@@ -154,6 +164,20 @@ struct TronMobileApp: App {
         }
         if initializer.isReady {
             await setupPushNotifications()
+            await resumeEnabledIntegrations()
+        }
+    }
+
+    /// Resume integrations that were previously enabled (e.g. location monitoring).
+    /// Fetches server-authoritative settings and starts services accordingly.
+    private func resumeEnabledIntegrations() async {
+        do {
+            let settings = try await container.rpcClient.settings.get()
+            if settings.integrations.location.enabled {
+                LocationService.shared.startMonitoring()
+            }
+        } catch {
+            TronLogger.shared.warning("Failed to load settings for integration resume: \(error)", category: .general)
         }
     }
 

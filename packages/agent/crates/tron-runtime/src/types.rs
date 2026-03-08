@@ -220,6 +220,9 @@ pub struct RunContext {
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<tron_core::messages::UserMessageContent>,
+    /// Device context line from iOS app for system prompt injection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_context: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

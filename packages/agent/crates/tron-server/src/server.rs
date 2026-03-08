@@ -94,12 +94,16 @@ impl TronServer {
         metrics_handle: PrometheusHandle,
     ) -> Self {
         let shutdown = Arc::new(ShutdownCoordinator::new());
+        let broadcast = Arc::new(BroadcastManager::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         rpc_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
+        // Inject device request broker (uses broadcast for device.request events)
+        rpc_context.device_request_broker =
+            Some(Arc::new(crate::device::DeviceRequestBroker::new(broadcast.clone())));
         Self {
             config,
             registry: Arc::new(registry),
-            broadcast: Arc::new(BroadcastManager::new()),
+            broadcast,
             shutdown,
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),

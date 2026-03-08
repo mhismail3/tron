@@ -18,7 +18,8 @@ final class AgentClient {
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
         skills: [Skill]? = nil,
-        spells: [Skill]? = nil
+        spells: [Skill]? = nil,
+        deviceContext: String? = nil
     ) async throws {
         let (ws, sessionId) = try transport.requireSession()
 
@@ -29,7 +30,8 @@ final class AgentClient {
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             skills: skills,
-            spells: spells
+            spells: spells,
+            deviceContext: deviceContext
         )
 
         let result: AgentPromptResult = try await ws.send(

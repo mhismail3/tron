@@ -19,9 +19,10 @@ struct ServerSettings: Decodable {
     let rules: RulesSettings
     let tasks: TaskSettings
     let tools: ToolSettings
+    let integrations: IntegrationSettings
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, tools
+        case models, server, context, tools, integrations
     }
 
     private enum ModelsKeys: String, CodingKey {
@@ -73,6 +74,7 @@ struct ServerSettings: Decodable {
         }
 
         tools = (try? container.decodeIfPresent(ToolSettings.self, forKey: .tools)) ?? .defaults
+        integrations = (try? container.decodeIfPresent(IntegrationSettings.self, forKey: .integrations)) ?? .defaults
     }
 
     struct CompactionSettings: Decodable {
@@ -264,12 +266,213 @@ struct ServerSettings: Decodable {
             }
         }
     }
+
+    struct IntegrationSettings: Decodable {
+        let deviceContext: DeviceContextSettings
+        let clipboard: ClipboardSettings
+        let haptics: HapticsSettings
+        let calendar: CalendarSettings
+        let contacts: ContactsSettings
+        let health: HealthSettings
+        let location: LocationSettings
+
+        static let defaults = IntegrationSettings(
+            deviceContext: .defaults, clipboard: .defaults, haptics: .defaults,
+            calendar: .defaults, contacts: .defaults, health: .defaults, location: .defaults
+        )
+
+        private enum CodingKeys: String, CodingKey {
+            case deviceContext, clipboard, haptics, calendar, contacts, health, location
+        }
+
+        init(deviceContext: DeviceContextSettings, clipboard: ClipboardSettings,
+             haptics: HapticsSettings, calendar: CalendarSettings,
+             contacts: ContactsSettings, health: HealthSettings,
+             location: LocationSettings) {
+            self.deviceContext = deviceContext
+            self.clipboard = clipboard
+            self.haptics = haptics
+            self.calendar = calendar
+            self.contacts = contacts
+            self.health = health
+            self.location = location
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            deviceContext = (try? container.decodeIfPresent(DeviceContextSettings.self, forKey: .deviceContext)) ?? .defaults
+            clipboard = (try? container.decodeIfPresent(ClipboardSettings.self, forKey: .clipboard)) ?? .defaults
+            haptics = (try? container.decodeIfPresent(HapticsSettings.self, forKey: .haptics)) ?? .defaults
+            calendar = (try? container.decodeIfPresent(CalendarSettings.self, forKey: .calendar)) ?? .defaults
+            contacts = (try? container.decodeIfPresent(ContactsSettings.self, forKey: .contacts)) ?? .defaults
+            health = (try? container.decodeIfPresent(HealthSettings.self, forKey: .health)) ?? .defaults
+            location = (try? container.decodeIfPresent(LocationSettings.self, forKey: .location)) ?? .defaults
+        }
+
+        struct DeviceContextSettings: Decodable {
+            let enabled: Bool
+            let battery: Bool
+            let network: Bool
+            let audioRoute: Bool
+            let display: Bool
+            let activity: Bool
+            let calendarPreview: Bool
+
+            static let defaults = DeviceContextSettings(
+                enabled: false, battery: true, network: true, audioRoute: true,
+                display: true, activity: true, calendarPreview: true
+            )
+
+            private enum CodingKeys: String, CodingKey {
+                case enabled, battery, network, audioRoute, display, activity, calendarPreview
+            }
+
+            init(enabled: Bool, battery: Bool, network: Bool, audioRoute: Bool,
+                 display: Bool, activity: Bool, calendarPreview: Bool) {
+                self.enabled = enabled
+                self.battery = battery
+                self.network = network
+                self.audioRoute = audioRoute
+                self.display = display
+                self.activity = activity
+                self.calendarPreview = calendarPreview
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+                battery = (try? container.decodeIfPresent(Bool.self, forKey: .battery)) ?? true
+                network = (try? container.decodeIfPresent(Bool.self, forKey: .network)) ?? true
+                audioRoute = (try? container.decodeIfPresent(Bool.self, forKey: .audioRoute)) ?? true
+                display = (try? container.decodeIfPresent(Bool.self, forKey: .display)) ?? true
+                activity = (try? container.decodeIfPresent(Bool.self, forKey: .activity)) ?? true
+                calendarPreview = (try? container.decodeIfPresent(Bool.self, forKey: .calendarPreview)) ?? true
+            }
+        }
+
+        struct ClipboardSettings: Decodable {
+            let enabled: Bool
+            static let defaults = ClipboardSettings(enabled: false)
+
+            init(enabled: Bool) { self.enabled = enabled }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+            }
+            private enum CodingKeys: String, CodingKey { case enabled }
+        }
+
+        struct HapticsSettings: Decodable {
+            let enabled: Bool
+            let onTaskComplete: Bool
+            let onError: Bool
+            let onNotification: Bool
+
+            static let defaults = HapticsSettings(
+                enabled: false, onTaskComplete: true, onError: true, onNotification: true
+            )
+
+            private enum CodingKeys: String, CodingKey {
+                case enabled, onTaskComplete, onError, onNotification
+            }
+
+            init(enabled: Bool, onTaskComplete: Bool, onError: Bool, onNotification: Bool) {
+                self.enabled = enabled
+                self.onTaskComplete = onTaskComplete
+                self.onError = onError
+                self.onNotification = onNotification
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+                onTaskComplete = (try? container.decodeIfPresent(Bool.self, forKey: .onTaskComplete)) ?? true
+                onError = (try? container.decodeIfPresent(Bool.self, forKey: .onError)) ?? true
+                onNotification = (try? container.decodeIfPresent(Bool.self, forKey: .onNotification)) ?? true
+            }
+        }
+
+        struct CalendarSettings: Decodable {
+            let enabled: Bool
+            let allowWrite: Bool
+
+            static let defaults = CalendarSettings(enabled: false, allowWrite: false)
+
+            private enum CodingKeys: String, CodingKey { case enabled, allowWrite }
+
+            init(enabled: Bool, allowWrite: Bool) {
+                self.enabled = enabled
+                self.allowWrite = allowWrite
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+                allowWrite = (try? container.decodeIfPresent(Bool.self, forKey: .allowWrite)) ?? false
+            }
+        }
+
+        struct ContactsSettings: Decodable {
+            let enabled: Bool
+            static let defaults = ContactsSettings(enabled: false)
+
+            init(enabled: Bool) { self.enabled = enabled }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+            }
+            private enum CodingKeys: String, CodingKey { case enabled }
+        }
+
+        struct HealthSettings: Decodable {
+            let enabled: Bool
+            let dataTypes: [String]
+
+            static let defaults = HealthSettings(enabled: false, dataTypes: [])
+
+            private enum CodingKeys: String, CodingKey { case enabled, dataTypes }
+
+            init(enabled: Bool, dataTypes: [String]) {
+                self.enabled = enabled
+                self.dataTypes = dataTypes
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+                dataTypes = (try? container.decodeIfPresent([String].self, forKey: .dataTypes)) ?? []
+            }
+        }
+
+        struct LocationSettings: Decodable {
+            let enabled: Bool
+            let precision: String
+
+            static let defaults = LocationSettings(enabled: false, precision: "city")
+
+            private enum CodingKeys: String, CodingKey { case enabled, precision }
+
+            init(enabled: Bool, precision: String) {
+                self.enabled = enabled
+                self.precision = precision
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+                precision = (try? container.decodeIfPresent(String.self, forKey: .precision)) ?? "city"
+            }
+        }
+    }
 }
 
 struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
     var tools: ToolsUpdate?
+    var integrations: IntegrationsUpdate?
 
     struct ServerUpdate: Encodable {
         var defaultModel: String?
@@ -337,6 +540,56 @@ struct ServerSettingsUpdate: Encodable {
                 var ttlMs: Int?
                 var maxEntries: Int?
             }
+        }
+    }
+
+    struct IntegrationsUpdate: Encodable {
+        var deviceContext: DeviceContextUpdate?
+        var clipboard: ClipboardUpdate?
+        var haptics: HapticsUpdate?
+        var calendar: CalendarUpdate?
+        var contacts: ContactsUpdate?
+        var health: HealthUpdate?
+        var location: LocationUpdate?
+
+        struct DeviceContextUpdate: Encodable {
+            var enabled: Bool?
+            var battery: Bool?
+            var network: Bool?
+            var audioRoute: Bool?
+            var display: Bool?
+            var activity: Bool?
+            var calendarPreview: Bool?
+        }
+
+        struct ClipboardUpdate: Encodable {
+            var enabled: Bool?
+        }
+
+        struct HapticsUpdate: Encodable {
+            var enabled: Bool?
+            var onTaskComplete: Bool?
+            var onError: Bool?
+            var onNotification: Bool?
+        }
+
+        struct CalendarUpdate: Encodable {
+            var enabled: Bool?
+            var allowWrite: Bool?
+        }
+
+        struct ContactsUpdate: Encodable {
+            var enabled: Bool?
+        }
+
+        struct HealthUpdate: Encodable {
+            var enabled: Bool?
+            var dataTypes: [String]?
+        }
+
+        struct LocationUpdate: Encodable {
+            var enabled: Bool?
+            var precision: String?
         }
     }
 }

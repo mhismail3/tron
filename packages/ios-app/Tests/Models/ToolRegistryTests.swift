@@ -303,7 +303,7 @@ struct ToolRegistryTests {
 
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "openurl", "webfetch", "websearch", "task", "remember", "manageautomations"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "openurl", "webfetch", "websearch", "task", "remember", "manageautomations", "setclipboard", "managecalendar", "searchcontacts", "readhealth"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 

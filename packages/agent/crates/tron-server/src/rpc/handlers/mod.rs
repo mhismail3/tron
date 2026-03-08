@@ -225,6 +225,7 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Device
     registry.register("device.register", device::RegisterTokenHandler);
     registry.register("device.unregister", device::UnregisterTokenHandler);
+    registry.register("device.respond", device::DeviceRespondHandler);
 
     // Plan
     registry.register("plan.enter", plan::EnterPlanHandler);
@@ -470,6 +471,7 @@ pub(crate) mod test_helpers {
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
+            device_request_broker: None,
         }
     }
 
@@ -504,6 +506,7 @@ pub(crate) mod test_helpers {
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
+            device_request_broker: None,
         }
     }
 }
@@ -529,8 +532,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            122,
-            "expected 122 methods, got {}",
+            123,
+            "expected 123 methods, got {}",
             reg.methods().len()
         );
     }

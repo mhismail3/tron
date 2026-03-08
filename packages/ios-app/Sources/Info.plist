@@ -26,6 +26,14 @@
 	<string>Tron uses the microphone to record voice for transcription.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Tron uses the camera to capture photos for including in your messages.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Tron can read and manage your calendar events when the Calendar integration is enabled.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Tron can search your contacts when the Contacts integration is enabled.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Tron can read your health data (steps, sleep, workouts) when the Health integration is enabled.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Tron uses your location to provide context-aware responses when Location is enabled in settings.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -79,6 +87,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>tron-mobile</string>
+				<string>tron</string>
 			</array>
 		</dict>
 	</array>

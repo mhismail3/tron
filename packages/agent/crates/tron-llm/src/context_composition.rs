@@ -67,7 +67,7 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         }
     }
 
-    // Environment details: server origin + working directory
+    // Environment details: server origin + working directory + device context
     if let Some(ref origin) = context.server_origin {
         if !origin.is_empty() {
             parts.push(format!("Server: {origin}"));
@@ -77,6 +77,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
     if let Some(ref wd) = context.working_directory {
         if !wd.is_empty() {
             parts.push(format!("Current working directory: {wd}"));
+        }
+    }
+
+    if let Some(ref dc) = context.device_context {
+        if !dc.is_empty() {
+            parts.push(dc.clone());
         }
     }
 
@@ -162,6 +168,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         }
     }
 
+    if let Some(ref dc) = context.device_context {
+        if !dc.is_empty() {
+            volatile.push(dc.clone());
+        }
+    }
+
     GroupedContextParts { stable, volatile }
 }
 
@@ -186,6 +198,7 @@ mod tests {
             task_context: Some("Task #1: Fix the bug".into()),
             dynamic_rules_context: Some("Rule: no console.log".into()),
             server_origin: None,
+            device_context: None,
         }
     }
 
@@ -224,6 +237,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert!(parts.is_empty());
@@ -243,6 +257,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -263,6 +278,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -307,6 +323,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());
@@ -327,6 +344,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert_eq!(grouped.stable.len(), 2);
@@ -374,6 +392,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());

@@ -290,6 +290,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         }
     }
 

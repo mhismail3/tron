@@ -484,6 +484,7 @@ impl MethodHandler for PromptHandler {
         let attachments = opt_array(params.as_ref(), "attachments").cloned();
         let raw_skills_json = opt_array(params.as_ref(), "skills").cloned();
         let raw_spells_json = opt_array(params.as_ref(), "spells").cloned();
+        let device_context = opt_string(params.as_ref(), "deviceContext");
         let skills = {
             let tmp = raw_skills_json.clone().map(Value::Array);
             let v = extract_skills(tmp.as_ref());
@@ -1060,6 +1061,7 @@ impl MethodHandler for PromptHandler {
                     },
                     subagent_results: subagent_results_context,
                     user_content_override,
+                    device_context: device_context.clone(),
                     ..Default::default()
                 };
 

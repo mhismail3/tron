@@ -28,8 +28,18 @@ final class DateParserTests: XCTestCase {
         XCTAssertNil(DateParser.parse("not a date"))
     }
 
-    func testParse_dateOnly_returnsNil() {
-        XCTAssertNil(DateParser.parse("2026-01-05"))
+    func testParse_dateOnly_returnsStartOfDayUTC() {
+        let date = DateParser.parse("2026-01-05")
+        XCTAssertNotNil(date)
+        // Date-only strings parse as midnight UTC
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let components = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date!)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 1)
+        XCTAssertEqual(components.day, 5)
+        XCTAssertEqual(components.hour, 0)
+        XCTAssertEqual(components.minute, 0)
     }
 
     func testParse_unixTimestamp_returnsNil() {

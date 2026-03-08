@@ -157,6 +157,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         .clone()
         .or(context.dynamic_rules_context);
     context.server_origin = server_origin.map(String::from);
+    context.device_context = run_context.device_context.clone();
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
     let stream_options = ProviderStreamOptions {

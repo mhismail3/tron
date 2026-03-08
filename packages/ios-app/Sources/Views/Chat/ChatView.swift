@@ -261,6 +261,11 @@ struct ChatView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
+            guard let prompt = notification.object as? String else { return }
+            viewModel.inputText = prompt
+            viewModel.sendMessage()
+        }
         .onAppear {
             // Load persisted reasoning level for this session
             if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {
@@ -726,5 +731,7 @@ extension Notification.Name {
     static let chatMenuAction = Notification.Name("chatMenuAction")
     static let navigationModeAction = Notification.Name("navigationModeAction")
     static let showSettingsAction = Notification.Name("showSettingsAction")
+    static let pendingShareContent = Notification.Name("pendingShareContent")
+    static let pendingShareMessage = Notification.Name("pendingShareMessage")
     // modelPickerAction is defined in InputBar.swift
 }

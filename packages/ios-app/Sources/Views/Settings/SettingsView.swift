@@ -30,6 +30,11 @@ struct SettingsView: View {
     @State private var isArchivingAll = false
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
+    @State private var showConnectionPage = false
+    @State private var showSessionPage = false
+    @State private var showContextPage = false
+    @State private var showIntegrationsPage = false
+    @State private var showAppearancePage = false
 
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
@@ -53,49 +58,24 @@ struct SettingsView: View {
             List {
                 // Category links
                 Section {
-                    NavigationLink {
-                        ConnectionSettingsPage(
-                            serverHost: $serverHost,
-                            serverPort: $serverPort,
-                            settingsState: settingsState,
-                            onHostSubmit: {
-                                dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
-                            },
-                            onPortChange: { newPort in
-                                dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
-                            },
-                            updateServerSetting: updateServerSetting
-                        )
-                    } label: {
+                    Button { showConnectionPage = true } label: {
                         settingsRow("network", "Connection", "Server, accounts")
                     }
 
-                    NavigationLink {
-                        SessionSettingsPage(
-                            settingsState: settingsState,
-                            confirmArchive: $confirmArchive,
-                            selectedModelDisplayName: selectedModelDisplayName,
-                            onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
-                            onModelTap: { showModelPicker = true },
-                            updateServerSetting: updateServerSetting
-                        )
-                    } label: {
+                    Button { showSessionPage = true } label: {
                         settingsRow("bolt", "Session", "Workspace, model, limits")
                     }
 
-                    NavigationLink {
-                        ContextSettingsPage(
-                            settingsState: settingsState,
-                            updateServerSetting: updateServerSetting
-                        )
-                    } label: {
+                    Button { showContextPage = true } label: {
                         settingsRow("brain", "Context", "Compaction, memory, rules")
                     }
 
+                    Button { showIntegrationsPage = true } label: {
+                        settingsRow("iphone.and.arrow.forward", "Integrations", "Device context, clipboard, haptics")
+                    }
+
                     if #available(iOS 26.0, *) {
-                        NavigationLink {
-                            AppearanceSettingsPage()
-                        } label: {
+                        Button { showAppearancePage = true } label: {
                             settingsRow("paintbrush", "Appearance", "Theme, font, indicators")
                         }
                     }
@@ -158,6 +138,57 @@ struct SettingsView: View {
                             }
                         }
                     )
+                }
+            }
+            .sheet(isPresented: $showConnectionPage) {
+                ConnectionSettingsPage(
+                    serverHost: $serverHost,
+                    serverPort: $serverPort,
+                    settingsState: settingsState,
+                    onHostSubmit: {
+                        dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
+                    },
+                    onPortChange: { newPort in
+                        dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                    },
+                    updateServerSetting: updateServerSetting
+                )
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showSessionPage) {
+                SessionSettingsPage(
+                    settingsState: settingsState,
+                    confirmArchive: $confirmArchive,
+                    selectedModelDisplayName: selectedModelDisplayName,
+                    onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
+                    onModelTap: { showModelPicker = true },
+                    updateServerSetting: updateServerSetting
+                )
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showContextPage) {
+                ContextSettingsPage(
+                    settingsState: settingsState,
+                    updateServerSetting: updateServerSetting
+                )
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showIntegrationsPage) {
+                IntegrationSettingsPage(
+                    settingsState: settingsState,
+                    updateServerSetting: updateServerSetting
+                )
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showAppearancePage) {
+                if #available(iOS 26.0, *) {
+                    AppearanceSettingsPage()
+                        .adaptivePresentationDetents([.medium, .large])
+                        .presentationDragIndicator(.hidden)
                 }
             }
             .task {

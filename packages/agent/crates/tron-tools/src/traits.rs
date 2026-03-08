@@ -570,6 +570,13 @@ pub trait TaskManagerDelegate: Send + Sync {
     async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError>;
 }
 
+/// iOS device request/response (`ManageCalendar`, `SearchContacts`, `ReadHealth`).
+#[async_trait]
+pub trait DeviceDelegate: Send + Sync {
+    /// Send a request to the iOS device and await the response.
+    async fn device_request(&self, method: &str, params: Value) -> Result<Value, ToolError>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HTTP client
 // ─────────────────────────────────────────────────────────────────────────────

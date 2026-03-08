@@ -396,6 +396,9 @@ pub struct Context {
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,
+    /// Device context line from iOS app (e.g. `"[Device: battery 47% | WiFi | dark mode]"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_context: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -768,6 +771,7 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
+            device_context: None,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: Context = serde_json::from_str(&json).unwrap();

@@ -105,11 +105,22 @@ enum DateParser {
         isoWithFractional.string(from: date)
     }
 
+    // MARK: - Date-Only Formatter
+
+    private nonisolated(unsafe) static let dateOnly: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return f
+    }()
+
     // MARK: - Parsing
 
-    /// Parse an ISO8601 date string, trying fractional seconds first then standard.
+    /// Parse an ISO8601 date string, trying fractional seconds, standard, then date-only.
+    /// Handles "2026-03-10T09:00:00Z", "2026-03-10T09:00:00.000Z", and "2026-03-10".
     static func parse(_ string: String) -> Date? {
-        isoWithFractional.date(from: string) ?? isoStandard.date(from: string)
+        isoWithFractional.date(from: string)
+            ?? isoStandard.date(from: string)
+            ?? dateOnly.date(from: string)
     }
 
     /// Parse an ISO8601 date string, returning `Date()` if parsing fails.

@@ -105,6 +105,9 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
                 showSettings = true
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
+                handlePendingShare()
+            }
             .onChange(of: deepLinkNotificationToolCallId) { _, newToolCallId in
                 guard let toolCallId = newToolCallId else { return }
                 notificationAutoOpenToolCallId = toolCallId
@@ -436,6 +439,29 @@ struct ContentView: View {
     private func createQuickSession() {
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
             selectedSessionId = newId
+        }
+    }
+
+    private func handlePendingShare() {
+        guard let shared = PendingShareService.load() else { return }
+        PendingShareService.clear()
+
+        var prompt = ""
+        if let text = shared.text { prompt += text }
+        if let url = shared.url {
+            if !prompt.isEmpty { prompt += "\n\n" }
+            prompt += url
+        }
+        guard !prompt.isEmpty else { return }
+
+        coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
+            selectedSessionId = newId
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NotificationCenter.default.post(
+                    name: .pendingShareMessage,
+                    object: prompt
+                )
+            }
         }
     }
 }

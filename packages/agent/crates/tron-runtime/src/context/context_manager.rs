@@ -554,6 +554,7 @@ impl ContextManager {
             task_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
             server_origin: None,
+            device_context: None,
         }
     }
 

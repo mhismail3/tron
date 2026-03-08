@@ -38,7 +38,11 @@ enum ToolRegistry {
         "webfetch", "websearch",
         "task",
         "remember",
-        "manageautomations"
+        "manageautomations",
+        "setclipboard",
+        "managecalendar",
+        "searchcontacts",
+        "readhealth"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -299,6 +303,48 @@ enum ToolRegistry {
             iconColor: .tronCoral,
             displayName: "Automation",
             completedDisplayName: "Automated",
+            summaryExtractor: { args in
+                ToolArgumentParser.action(from: args)
+            },
+            viewerFactory: nil
+        ),
+        "setclipboard": ToolDescriptor(
+            icon: "doc.on.clipboard",
+            iconColor: .tronEmerald,
+            displayName: "Clipboard",
+            completedDisplayName: "Copied",
+            summaryExtractor: { args in
+                let label = ToolArgumentParser.string("label", from: args) ?? ""
+                return label.isEmpty ? "Text" : label
+            },
+            viewerFactory: nil
+        ),
+        "managecalendar": ToolDescriptor(
+            icon: "calendar",
+            iconColor: .red,
+            displayName: "Calendar",
+            completedDisplayName: nil,
+            summaryExtractor: { args in
+                ToolArgumentParser.action(from: args)
+            },
+            viewerFactory: nil
+        ),
+        "searchcontacts": ToolDescriptor(
+            icon: "person.crop.circle",
+            iconColor: .blue,
+            displayName: "Contacts",
+            completedDisplayName: "Searched",
+            summaryExtractor: { args in
+                let query = ToolArgumentParser.query(from: args)
+                return query.isEmpty ? "" : "\"\(ToolArgumentParser.truncate(query, maxLength: 30))\""
+            },
+            viewerFactory: nil
+        ),
+        "readhealth": ToolDescriptor(
+            icon: "heart.fill",
+            iconColor: .pink,
+            displayName: "Health",
+            completedDisplayName: "Read",
             summaryExtractor: { args in
                 ToolArgumentParser.action(from: args)
             },

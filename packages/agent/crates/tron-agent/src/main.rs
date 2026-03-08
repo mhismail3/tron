@@ -189,6 +189,8 @@ struct ToolRegistryConfig {
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
+    /// Device request broker for iOS round-trip tools (set after server creation via OnceLock).
+    device_request_broker: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -291,7 +293,45 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         notify_delegate,
     )));
 
-    // 14: WebFetch (always available)
+    // 14: SetClipboard (fire-and-forget — iOS handles via tool event)
+    registry.register(Arc::new(
+        tron_tools::ui::clipboard::SetClipboardTool::new(),
+    ));
+
+    // 15–17: Device-querying tools (conditional on device request broker)
+    if let Some(broker) = config.device_request_broker.get() {
+        let device_delegate: Arc<dyn tron_tools::traits::DeviceDelegate> =
+            Arc::new(providers::BrokerDeviceDelegate::new(broker.clone()));
+
+        let settings = tron_settings::loader::load_settings_from_path(
+            &tron_settings::loader::settings_path(),
+        )
+        .unwrap_or_default();
+
+        if settings.integrations.calendar.enabled {
+            registry.register(Arc::new(
+                tron_tools::ui::calendar::ManageCalendarTool::new(
+                    device_delegate.clone(),
+                    settings.integrations.calendar.allow_write,
+                ),
+            ));
+        }
+
+        if settings.integrations.contacts.enabled {
+            registry.register(Arc::new(
+                tron_tools::ui::contacts::SearchContactsTool::new(device_delegate.clone()),
+            ));
+        }
+
+        if settings.integrations.health.enabled && !settings.integrations.health.data_types.is_empty()
+        {
+            registry.register(Arc::new(
+                tron_tools::ui::health::ReadHealthTool::new(device_delegate),
+            ));
+        }
+    }
+
+    // 18: WebFetch (always available)
     registry.register(Arc::new(tron_tools::web::web_fetch::WebFetchTool::new(
         http.clone(),
     )));
@@ -506,6 +546,10 @@ async fn main() -> Result<()> {
     let shared_http_client = default_factory.http_client();
     let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
 
+    // Deferred device request broker reference (set after TronServer creation when BroadcastManager is available)
+    let device_broker_cell: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>> =
+        Arc::new(std::sync::OnceLock::new());
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -515,6 +559,7 @@ async fn main() -> Result<()> {
         apns_service,
         embedding_controller: embedding_controller.clone(),
         http_client: shared_http_client,
+        device_request_broker: device_broker_cell.clone(),
     });
 
     // Verify auth is available for the default model at startup.
@@ -700,6 +745,7 @@ async fn main() -> Result<()> {
         origin: origin.clone(),
         cron_scheduler: Some(cron_scheduler.clone()),
         worktree_coordinator,
+        device_request_broker: None, // set after TronServer creation (needs broadcast)
     };
 
     // Method registry
@@ -730,6 +776,17 @@ async fn main() -> Result<()> {
         orchestrator.turn_accumulators().clone(),
     );
     let bridge_handle = tokio::spawn(bridge.run());
+
+    // Wire device request broker into tool factory — MUST use the same instance
+    // the server's RPC context uses, otherwise device.respond resolves against
+    // a different broker than the one holding the pending request.
+    let _ = device_broker_cell.set(
+        server
+            .rpc_context()
+            .device_request_broker
+            .clone()
+            .expect("server must have device_request_broker"),
+    );
 
     // Wire cron broadcaster (needs BroadcastManager from server)
     cron_scheduler.set_broadcaster(Arc::new(providers::CronEventBroadcaster::new(
@@ -1152,6 +1209,7 @@ mod tests {
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
+            device_request_broker: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1237,6 +1295,7 @@ mod tests {
             apns_service: None,
             embedding_controller: None,
             http_client: reqwest::Client::new(),
+            device_request_broker: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -1275,10 +1334,11 @@ mod tests {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
         // 15 tools without Brave API key (no WebSearch), without subagent tools
+        // Includes SetClipboard (always registered)
         assert_eq!(
             registry.len(),
-            14,
-            "expected 14 tools (no WebSearch without Brave key), got: {:?}",
+            15,
+            "expected 15 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1292,8 +1352,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            15,
-            "expected 15 tools with WebSearch, got: {:?}",
+            16,
+            "expected 16 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }
@@ -1338,6 +1398,7 @@ mod tests {
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
+            device_request_broker: None,
         };
 
         let mut registry = MethodRegistry::new();

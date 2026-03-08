@@ -35,6 +35,20 @@
                ReferencedContainer = "container:TronMobile.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "80D2068C229B752A8D269B50"
+               BuildableName = "TronShareExtension.appex"
+               BlueprintName = "TronShareExtension"
+               ReferencedContainer = "container:TronMobile.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

@@ -51,6 +51,31 @@ impl MethodHandler for RegisterTokenHandler {
     }
 }
 
+/// Resolve a pending device request (sent by iOS in response to `device.request` event).
+pub struct DeviceRespondHandler;
+
+#[async_trait]
+impl MethodHandler for DeviceRespondHandler {
+    #[instrument(skip(self, ctx), fields(method = "device.respond"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let request_id = require_string_param(params.as_ref(), "requestId")?;
+        let result = params
+            .as_ref()
+            .and_then(|p| p.get("result"))
+            .cloned()
+            .unwrap_or(Value::Null);
+
+        if let Some(ref broker) = ctx.device_request_broker {
+            let resolved = broker.resolve(&request_id, result);
+            Ok(serde_json::json!({ "resolved": resolved }))
+        } else {
+            Err(RpcError::Internal {
+                message: "Device request broker not available".into(),
+            })
+        }
+    }
+}
+
 /// Unregister an APNS device token.
 pub struct UnregisterTokenHandler;
 

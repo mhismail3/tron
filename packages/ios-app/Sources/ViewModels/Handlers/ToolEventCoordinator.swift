@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Coordinates tool event handling (start/end) for ChatViewModel.
 ///
@@ -159,6 +160,14 @@ final class ToolEventCoordinator {
         if result.isOpenURL {
             handleOpenURLToolStart(url: result.openURL, context: context)
             // Don't return - still display as regular tool use
+        }
+
+        // Handle SetClipboard - copy content to pasteboard
+        if pluginResult.toolName == "SetClipboard" {
+            if let content = pluginResult.arguments?["content"]?.value as? String {
+                UIPasteboard.general.string = content
+                context.logInfo("Clipboard set: \(content.prefix(50))")
+            }
         }
 
         // Create the tool message

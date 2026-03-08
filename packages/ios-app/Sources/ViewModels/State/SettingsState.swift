@@ -25,6 +25,28 @@ final class SettingsState {
     var rulesDiscoverStandaloneFiles: Bool = true
     var taskAutoInjectEnabled: Bool = false
 
+    // MARK: - Integration Settings
+
+    var integrationDeviceContextEnabled: Bool = false
+    var integrationDeviceContextBattery: Bool = true
+    var integrationDeviceContextNetwork: Bool = true
+    var integrationDeviceContextAudioRoute: Bool = true
+    var integrationDeviceContextDisplay: Bool = true
+    var integrationDeviceContextActivity: Bool = true
+    var integrationDeviceContextCalendarPreview: Bool = true
+    var integrationClipboardEnabled: Bool = false
+    var integrationHapticsEnabled: Bool = false
+    var integrationHapticsOnTaskComplete: Bool = true
+    var integrationHapticsOnError: Bool = true
+    var integrationHapticsOnNotification: Bool = true
+    var integrationCalendarEnabled: Bool = false
+    var integrationCalendarAllowWrite: Bool = false
+    var integrationContactsEnabled: Bool = false
+    var integrationHealthEnabled: Bool = false
+    var integrationHealthDataTypes: [String] = []
+    var integrationLocationEnabled: Bool = false
+    var integrationLocationPrecision: String = "city"
+
     // MARK: - Account Settings
 
     var anthropicAccounts: [String] = []
@@ -65,6 +87,27 @@ final class SettingsState {
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
+            // Integration settings
+            integrationDeviceContextEnabled = settings.integrations.deviceContext.enabled
+            integrationDeviceContextBattery = settings.integrations.deviceContext.battery
+            integrationDeviceContextNetwork = settings.integrations.deviceContext.network
+            integrationDeviceContextAudioRoute = settings.integrations.deviceContext.audioRoute
+            integrationDeviceContextDisplay = settings.integrations.deviceContext.display
+            integrationDeviceContextActivity = settings.integrations.deviceContext.activity
+            integrationDeviceContextCalendarPreview = settings.integrations.deviceContext.calendarPreview
+            integrationClipboardEnabled = settings.integrations.clipboard.enabled
+            integrationHapticsEnabled = settings.integrations.haptics.enabled
+            integrationHapticsOnTaskComplete = settings.integrations.haptics.onTaskComplete
+            integrationHapticsOnError = settings.integrations.haptics.onError
+            integrationHapticsOnNotification = settings.integrations.haptics.onNotification
+            integrationCalendarEnabled = settings.integrations.calendar.enabled
+            integrationCalendarAllowWrite = settings.integrations.calendar.allowWrite
+            integrationContactsEnabled = settings.integrations.contacts.enabled
+            integrationHealthEnabled = settings.integrations.health.enabled
+            integrationHealthDataTypes = settings.integrations.health.dataTypes
+            integrationLocationEnabled = settings.integrations.location.enabled
+            integrationLocationPrecision = settings.integrations.location.precision
+
             anthropicAccounts = settings.anthropicAccounts ?? []
             selectedAnthropicAccount = settings.anthropicAccount
             if let workspace = settings.defaultWorkspace {
@@ -101,6 +144,25 @@ final class SettingsState {
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
         taskAutoInjectEnabled = false
+        integrationDeviceContextEnabled = false
+        integrationDeviceContextBattery = true
+        integrationDeviceContextNetwork = true
+        integrationDeviceContextAudioRoute = true
+        integrationDeviceContextDisplay = true
+        integrationDeviceContextActivity = true
+        integrationDeviceContextCalendarPreview = true
+        integrationClipboardEnabled = false
+        integrationHapticsEnabled = false
+        integrationHapticsOnTaskComplete = true
+        integrationHapticsOnError = true
+        integrationHapticsOnNotification = true
+        integrationCalendarEnabled = false
+        integrationCalendarAllowWrite = false
+        integrationContactsEnabled = false
+        integrationHealthEnabled = false
+        integrationHealthDataTypes = []
+        integrationLocationEnabled = false
+        integrationLocationPrecision = "city"
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 
@@ -126,7 +188,19 @@ final class SettingsState {
             tools: .init(web: .init(
                 fetch: .init(timeoutMs: 30000),
                 cache: .init(ttlMs: 900000, maxEntries: 100)
-            ))
+            )),
+            integrations: .init(
+                deviceContext: .init(
+                    enabled: false, battery: true, network: true, audioRoute: true,
+                    display: true, activity: true, calendarPreview: true
+                ),
+                clipboard: .init(enabled: false),
+                haptics: .init(enabled: false, onTaskComplete: true, onError: true, onNotification: true),
+                calendar: .init(enabled: false, allowWrite: false),
+                contacts: .init(enabled: false),
+                health: .init(enabled: false, dataTypes: []),
+                location: .init(enabled: false, precision: "city")
+            )
         )
     }
 }

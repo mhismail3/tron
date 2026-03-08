@@ -27,6 +27,7 @@ struct ContextAuditView: View {
     @State private var pendingSkillDeletions: Set<String> = []
 
     // Manual memory update state
+    @State private var integrationSettings: ServerSettings.IntegrationSettings?
     @State private var isAutoLedgerEnabled: Bool = true
     @State private var isUpdatingLedger: Bool = false
     @State private var showNoNewContentAlert: Bool = false
@@ -310,6 +311,14 @@ struct ContextAuditView: View {
                                 if let taskCtx = snapshot.taskContext {
                                     TaskContextSection(taskContext: taskCtx)
                                 }
+
+                                if let intSettings = integrationSettings,
+                                   intSettings.deviceContext.enabled {
+                                    DeviceContextSection(
+                                        deviceContext: intSettings.deviceContext,
+                                        location: intSettings.location
+                                    )
+                                }
                             }
                             .padding(.horizontal)
 
@@ -395,6 +404,7 @@ struct ContextAuditView: View {
             do {
                 let settings = try await settingsTask
                 isAutoLedgerEnabled = settings.memory.ledger.enabled
+                integrationSettings = settings.integrations
             } catch {
                 logger.warning("Failed to load settings for context sheet, defaulting auto-ledger to true: \(error)", category: .general)
             }

@@ -79,6 +79,10 @@ import Foundation
     func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result)
 }
 
+@MainActor protocol DeviceEventHandler: AnyObject {
+    func handleDeviceRequest(_ result: DeviceRequestPlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -92,5 +96,5 @@ import Foundation
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
     UICanvasEventHandler, TaskEventHandler, ServerEventHandler,
-    WorktreeEventHandler, EventDispatchLogger {}
+    WorktreeEventHandler, DeviceEventHandler, EventDispatchLogger {}
 

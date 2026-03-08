@@ -118,6 +118,7 @@ mod tests {
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
+            device_request_broker: None,
         }
     }
 

@@ -349,6 +349,20 @@ final class MiscClient {
         )
     }
 
+    // MARK: - Device Request Methods
+
+    /// Respond to a device request from the server.
+    /// Called by DeviceRequestDispatcher after handling a local device operation.
+    func deviceRespond(requestId: String, result: [String: AnyCodable]) async throws {
+        let ws = try transport.requireConnection()
+
+        let params = DeviceRespondParams(requestId: requestId, result: AnyCodable(result))
+        let _: DeviceRespondResult = try await ws.send(
+            method: "device.respond",
+            params: params
+        )
+    }
+
     // MARK: - Logs Methods
 
     /// Ingest structured client logs into the server database.

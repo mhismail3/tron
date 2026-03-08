@@ -915,6 +915,12 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleWorktreeReleasedCalledWith = result
     }
 
+    // MARK: - Device
+    var handleDeviceRequestCalledWith: DeviceRequestPlugin.Result?
+    func handleDeviceRequest(_ result: DeviceRequestPlugin.Result) {
+        handleDeviceRequestCalledWith = result
+    }
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

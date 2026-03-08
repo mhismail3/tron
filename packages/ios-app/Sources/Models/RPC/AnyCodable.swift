@@ -5,7 +5,14 @@ struct AnyCodable: Codable, Equatable, Hashable, @unchecked Sendable {
     let value: Any
 
     init(_ value: Any?) {
-        self.value = value ?? NSNull()
+        // Unwrap nested AnyCodable to prevent double-wrapping
+        // (e.g., encode() does mapValues { AnyCodable($0) } which would
+        //  wrap an already-AnyCodable value, causing encoding failure)
+        if let anyCodable = value as? AnyCodable {
+            self.value = anyCodable.value
+        } else {
+            self.value = value ?? NSNull()
+        }
     }
 
     init(from decoder: Decoder) throws {
