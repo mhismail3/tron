@@ -311,23 +311,24 @@ struct ContextAuditView: View {
                                 if let taskCtx = snapshot.taskContext {
                                     TaskContextSection(taskContext: taskCtx)
                                 }
-
-                                if let intSettings = integrationSettings,
-                                   intSettings.deviceContext.enabled {
-                                    DeviceContextSection(
-                                        deviceContext: intSettings.deviceContext,
-                                        location: intSettings.location
-                                    )
-                                }
                             }
                             .padding(.horizontal)
 
-                            // Session Context — only shown when skills, session memories, or messages exist
-                            if !displayedSkills.isEmpty || hasSessionMemories || !allMessages.isEmpty {
+                            // Session Context — only shown when skills, session memories, messages, or device context exist
+                            if !displayedSkills.isEmpty || hasSessionMemories || !allMessages.isEmpty
+                                || integrationSettings?.deviceContext.enabled == true {
                                 SessionContextHeader()
                                     .padding(.horizontal)
 
                                 VStack(spacing: 10) {
+                                    if let intSettings = integrationSettings,
+                                       intSettings.deviceContext.enabled {
+                                        DeviceContextSection(
+                                            deviceContext: intSettings.deviceContext,
+                                            location: intSettings.location
+                                        )
+                                    }
+
                                     if !displayedSkills.isEmpty {
                                         AddedSkillsContainer(
                                             skills: displayedSkills,

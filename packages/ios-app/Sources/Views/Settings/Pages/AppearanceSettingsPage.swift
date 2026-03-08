@@ -8,8 +8,15 @@ struct AppearanceSettingsPage: View {
                 AppearanceSection()
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Appearance")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Appearance")
+                        .font(TronTypography.button)
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
         }
     }
 }

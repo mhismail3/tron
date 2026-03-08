@@ -143,6 +143,9 @@ final class ToolEventCoordinator {
                     context.startBrowserStreamIfNeeded()
                 }
             }
+
+            // Handle side-effects even when updating existing chip
+            handleToolStartSideEffects(pluginResult, result: result, context: context)
             return
         }
 
@@ -156,19 +159,8 @@ final class ToolEventCoordinator {
             return
         }
 
-        // Handle OpenURL - opens Safari but also displays as regular tool
-        if result.isOpenURL {
-            handleOpenURLToolStart(url: result.openURL, context: context)
-            // Don't return - still display as regular tool use
-        }
-
-        // Handle SetClipboard - copy content to pasteboard
-        if pluginResult.toolName == "SetClipboard" {
-            if let content = pluginResult.arguments?["content"]?.value as? String {
-                UIPasteboard.general.string = content
-                context.logInfo("Clipboard set: \(content.prefix(50))")
-            }
-        }
+        // Handle side-effects (clipboard, URL opening, etc.)
+        handleToolStartSideEffects(pluginResult, result: result, context: context)
 
         // Create the tool message
         var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
@@ -374,6 +366,27 @@ final class ToolEventCoordinator {
             arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
+    }
+
+    /// Handle tool start side-effects that must run regardless of whether the chip
+    /// was pre-created by tool_generating. Clipboard copy, URL opening, etc.
+    private func handleToolStartSideEffects(
+        _ pluginResult: ToolStartPlugin.Result,
+        result: ToolStartResult,
+        context: ToolEventContext
+    ) {
+        // Handle OpenURL - opens Safari but also displays as regular tool
+        if result.isOpenURL {
+            handleOpenURLToolStart(url: result.openURL, context: context)
+        }
+
+        // Handle SetClipboard - copy content to pasteboard
+        if pluginResult.toolName == "SetClipboard" {
+            if let content = pluginResult.arguments?["content"]?.value as? String {
+                UIPasteboard.general.string = content
+                context.logInfo("Clipboard set: \(content.prefix(50))")
+            }
+        }
     }
 
     /// Handle OpenURL tool start - opens Safari in-app browser
