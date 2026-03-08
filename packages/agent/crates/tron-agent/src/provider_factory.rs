@@ -9,7 +9,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 use tron_llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
-use tron_core::messages::Provider as ProviderType;
 use tron_llm::provider::{Provider, ProviderError, ProviderFactory};
 
 // ─── Captured settings ───────────────────────────────────────────────
@@ -365,6 +364,8 @@ impl DefaultProviderFactory {
 #[async_trait]
 impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+        use tron_core::messages::Provider as ProviderKind;
+
         let bare_model = strip_provider_prefix(model);
         // INVARIANT: unknown model/provider → fail-fast with typed error.
         // No silent fallback or default provider substitution.
@@ -375,13 +376,13 @@ impl ProviderFactory for DefaultProviderFactory {
         })?;
 
         match provider_type {
-            ProviderType::Anthropic => self.create_anthropic(bare_model).await,
-            ProviderType::OpenAi | ProviderType::OpenAiCodex => {
+            ProviderKind::Anthropic => self.create_anthropic(bare_model).await,
+            ProviderKind::OpenAi | ProviderKind::OpenAiCodex => {
                 self.create_openai(bare_model).await
             }
-            ProviderType::Google => self.create_google(bare_model).await,
-            ProviderType::MiniMax => self.create_minimax(bare_model),
-            ProviderType::Unknown => Err(ProviderError::UnsupportedModel {
+            ProviderKind::Google => self.create_google(bare_model).await,
+            ProviderKind::MiniMax => self.create_minimax(bare_model),
+            ProviderKind::Unknown => Err(ProviderError::UnsupportedModel {
                 model: bare_model.to_string(),
             }),
         }

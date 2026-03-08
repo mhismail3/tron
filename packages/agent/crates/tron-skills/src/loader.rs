@@ -195,11 +195,10 @@ fn list_additional_files(skill_path: &Path) -> Vec<String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(skill_path) {
         for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if name != SKILL_MD_FILENAME && entry.path().is_file() {
+            if let Some(name) = entry.file_name().to_str()
+                && name != SKILL_MD_FILENAME && entry.path().is_file() {
                     files.push(name.to_string());
                 }
-            }
         }
     }
     files.sort();

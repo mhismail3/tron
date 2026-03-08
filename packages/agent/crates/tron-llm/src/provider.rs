@@ -14,8 +14,6 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tron_core::events::StreamEvent;
 
-use tron_core::messages::Provider as ProviderType;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +217,7 @@ impl ProviderError {
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Provider identifier (e.g., `"anthropic"`, `"openai"`, `"google"`).
-    fn provider_type(&self) -> ProviderType;
+    fn provider_type(&self) -> tron_core::messages::Provider;
 
     /// Current model ID (e.g., `"claude-opus-4-6"`).
     fn model(&self) -> &str;

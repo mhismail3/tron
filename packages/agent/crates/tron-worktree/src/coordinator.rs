@@ -1,3 +1,4 @@
+#![allow(unused_results)]
 //! Top-level orchestrator — main public API for worktree isolation.
 //!
 //! The coordinator manages the lifecycle of worktrees across all sessions,
@@ -68,7 +69,7 @@ impl WorktreeCoordinator {
         }
     }
 
-    /// Broadcast a TronEvent to WebSocket clients (non-blocking, best-effort).
+    /// Broadcast a `TronEvent` to WebSocket clients (non-blocking, best-effort).
     fn broadcast(&self, event: TronEvent) {
         if let Some(ref tx) = self.broadcast_tx {
             let _ = tx.send(event);
@@ -153,12 +154,9 @@ impl WorktreeCoordinator {
     /// Emits `worktree.released` event.
     #[instrument(skip(self), fields(session_id))]
     pub async fn release(&self, session_id: &str) -> Result<()> {
-        let info = match self.active.remove(session_id) {
-            Some((_, info)) => info,
-            None => {
-                debug!(session_id, "no active worktree to release");
-                return Ok(());
-            }
+        let Some((_, info)) = self.active.remove(session_id) else {
+            debug!(session_id, "no active worktree to release");
+            return Ok(());
         };
 
         let release_info =
@@ -229,22 +227,22 @@ impl WorktreeCoordinator {
         let sha = self.git.commit_all(&info.worktree_path, message).await?;
 
         // Gather files changed and diff stats between pre-commit and new HEAD
-        let files_changed = if !pre_commit.is_empty() {
+        let files_changed = if pre_commit.is_empty() {
+            Vec::new()
+        } else {
             self.git
                 .changed_files_since(&info.worktree_path, &pre_commit)
                 .await
                 .unwrap_or_default()
-        } else {
-            Vec::new()
         };
 
-        let (insertions, deletions) = if !pre_commit.is_empty() {
+        let (insertions, deletions) = if pre_commit.is_empty() {
+            (0, 0)
+        } else {
             self.git
                 .diff_numstat_total(&info.worktree_path, &pre_commit, &sha)
                 .await
                 .unwrap_or((0, 0))
-        } else {
-            (0, 0)
         };
 
         let _ = self.event_store.append(&AppendOptions {
@@ -401,7 +399,7 @@ impl WorktreeCoordinator {
     /// Rebuild active worktree state from persisted events.
     ///
     /// Scans for sessions with `worktree.acquired` events (without a subsequent
-    /// `worktree.released`) and re-populates the in-memory `active` DashMap.
+    /// `worktree.released`) and re-populates the in-memory `active` `DashMap`.
     /// Must be called before `recover_orphans` to prevent deleting valid worktrees.
     pub fn rebuild_from_events(&self) {
         let sessions = self
@@ -414,9 +412,8 @@ impl WorktreeCoordinator {
 
         let mut restored = 0usize;
         for session in &sessions {
-            let acq = match self.event_store.get_active_worktree(&session.id) {
-                Ok(Some(ev)) => ev,
-                _ => continue,
+            let Ok(Some(acq)) = self.event_store.get_active_worktree(&session.id) else {
+                continue;
             };
 
             let payload: serde_json::Value = match serde_json::from_str(&acq.payload) {
@@ -562,7 +559,7 @@ impl WorktreeCoordinator {
         Ok(results)
     }
 
-    /// Build a branch→base_branch map by scanning WorktreeAcquired events.
+    /// Build a `branch→base_branch` map by scanning `WorktreeAcquired` events.
     fn load_base_branches_from_events(&self) -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();
         let events = self
@@ -570,14 +567,13 @@ impl WorktreeCoordinator {
             .get_all_events_by_types(&["worktree.acquired"], Some(500), None)
             .unwrap_or_default();
         for event in &events {
-            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
-                if let (Some(branch), Some(base)) = (
+            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
+                && let (Some(branch), Some(base)) = (
                     payload.get("branch").and_then(|v| v.as_str()),
                     payload.get("baseBranch").and_then(|v| v.as_str()),
                 ) {
                     map.insert(branch.to_string(), base.to_string());
                 }
-            }
         }
         map
     }
@@ -614,9 +610,9 @@ impl WorktreeCoordinator {
             .event_store
             .get_events_by_type(session_id, &["worktree.acquired"], Some(1))
             .unwrap_or_default();
-        if let Some(event) = events.first() {
-            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
-                if let (Some(branch), Some(base_branch)) = (
+        if let Some(event) = events.first()
+            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
+                && let (Some(branch), Some(base_branch)) = (
                     payload.get("branch").and_then(|v| v.as_str()),
                     payload.get("baseBranch").and_then(|v| v.as_str()),
                 ) {
@@ -642,8 +638,6 @@ impl WorktreeCoordinator {
                         .await
                         .map(Some);
                 }
-            }
-        }
 
         // Fallback: scan workspaces for matching branch (for sessions before baseBranch was persisted)
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
@@ -829,7 +823,7 @@ impl WorktreeCoordinator {
     }
 }
 
-/// Split combined diff output by file, returning (path, diff_chunk) pairs.
+/// Split combined diff output by file, returning (path, `diff_chunk`) pairs.
 pub fn split_diff_by_file(diff: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     let mut current_path: Option<String> = None;

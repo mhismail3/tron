@@ -1,4 +1,4 @@
-//! `ManageCalendar` tool — read/write calendar events via iOS EventKit.
+//! `ManageCalendar` tool — read/write calendar events via iOS `EventKit`.
 //!
 //! Uses the `DeviceDelegate` to send requests to iOS and await responses.
 
@@ -11,14 +11,16 @@ use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error
 use crate::errors::ToolError;
 use crate::traits::{DeviceDelegate, ToolContext, TronTool};
 use crate::utils::schema::ToolSchemaBuilder;
-use crate::utils::validation::{get_optional_string, validate_required_string};
+use crate::utils::validation::validate_required_string;
 
+/// Read/write calendar events via iOS `EventKit`.
 pub struct ManageCalendarTool {
     delegate: Arc<dyn DeviceDelegate>,
     allow_write: bool,
 }
 
 impl ManageCalendarTool {
+    /// Create a new calendar tool with the given device delegate and write permission.
     pub fn new(delegate: Arc<dyn DeviceDelegate>, allow_write: bool) -> Self {
         Self {
             delegate,

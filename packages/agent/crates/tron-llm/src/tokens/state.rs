@@ -3,7 +3,7 @@
 //! [`TokenStateManager`] maintains the complete token state for a session:
 //! accumulated totals, context window tracking, and full audit history.
 
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 use super::normalization::normalize_tokens;
 use super::types::{AccumulatedTokens, TokenMeta, TokenRecord, TokenSource, TokenState};
@@ -80,7 +80,7 @@ impl TokenStateManager {
     ///
     /// Preserves accumulated tokens and history but resets the context
     /// window current size to 0 so the next turn starts fresh deltas.
-    pub fn on_provider_change(&mut self, _new_provider: ProviderType) {
+    pub fn on_provider_change(&mut self, _new_provider: Provider) {
         self.state.context_window.current_size = 0;
         self.state.context_window.recalculate();
     }
@@ -130,7 +130,7 @@ mod tests {
 
     fn anthropic_source(input: u64, output: u64, cache_read: u64) -> TokenSource {
         TokenSource {
-            provider: ProviderType::Anthropic,
+            provider: Provider::Anthropic,
             timestamp: "2024-01-15T12:00:00Z".to_string(),
             raw_input_tokens: input,
             raw_output_tokens: output,
@@ -208,7 +208,7 @@ mod tests {
         let _ = mgr.record_turn(anthropic_source(604, 100, 8266), make_meta(1), 0.05);
         assert_eq!(mgr.state().context_window.current_size, 8870);
 
-        mgr.on_provider_change(ProviderType::Google);
+        mgr.on_provider_change(Provider::Google);
         assert_eq!(mgr.state().context_window.current_size, 0);
 
         // Accumulated totals preserved

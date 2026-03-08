@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use serde_json::Map;
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
-use tron_core::messages::{ProviderType, TokenUsage, ToolCall};
+use tron_core::messages::{Provider, TokenUsage, ToolCall};
 
 use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating};
 
@@ -259,8 +259,8 @@ fn handle_finish(
     }
 
     // Handle safety block
-    if finish_reason == "SAFETY" {
-        if let Some(ratings) = safety_ratings {
+    if finish_reason == "SAFETY"
+        && let Some(ratings) = safety_ratings {
             let blocked: Vec<String> = ratings
                 .iter()
                 .filter(|r| {
@@ -277,7 +277,6 @@ fn handle_finish(
                 });
             }
         }
-    }
 
     // End text if active
     if state.text_started {
@@ -326,7 +325,7 @@ fn handle_finish(
                 cache_creation_tokens: None,
                 cache_creation_5m_tokens: None,
                 cache_creation_1h_tokens: None,
-                provider_type: Some(ProviderType::Google),
+                provider_type: Some(Provider::Google),
             }),
         },
         stop_reason: stop_reason.into(),
@@ -650,7 +649,7 @@ mod tests {
                 assert!(message.token_usage.is_some());
                 assert_eq!(
                     message.token_usage.as_ref().unwrap().provider_type,
-                    Some(ProviderType::Google)
+                    Some(Provider::Google)
                 );
             }
             _ => unreachable!(),

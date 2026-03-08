@@ -91,15 +91,14 @@ impl TronTool for WriteTool {
         let existed = self.fs.exists(&resolved);
 
         // Create parent directories
-        if let Some(parent) = resolved.parent() {
-            if let Err(e) = self.fs.create_dir_all(parent).await {
+        if let Some(parent) = resolved.parent()
+            && let Err(e) = self.fs.create_dir_all(parent).await {
                 return Ok(format_fs_error(
                     &e,
                     &parent.to_string_lossy(),
                     "creating directory",
                 ));
             }
-        }
 
         let bytes = content.as_bytes();
         if let Err(e) = self.fs.write_file(&resolved, bytes).await {

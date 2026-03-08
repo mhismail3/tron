@@ -32,11 +32,10 @@ fn require_coordinator(ctx: &RpcContext) -> Result<&tron_worktree::WorktreeCoord
 /// should work for any session, not only those with worktrees.
 fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
     // Check coordinator for active worktree
-    if let Some(ref coord) = ctx.worktree_coordinator {
-        if let Some(dir) = coord.effective_working_dir(session_id) {
+    if let Some(ref coord) = ctx.worktree_coordinator
+        && let Some(dir) = coord.effective_working_dir(session_id) {
             return Ok(dir);
         }
-    }
 
     // Fall back to session's original working directory
     let session = ctx
@@ -296,9 +295,8 @@ impl MethodHandler for ListSessionBranchesHandler {
 
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let dir_path = std::path::Path::new(&dir);
-        let repo_root_str = match coord.resolve_repo_root(dir_path).await {
-            Ok(root) => root,
-            Err(_) => return Ok(serde_json::json!({ "branches": [] })),
+        let Ok(repo_root_str) = coord.resolve_repo_root(dir_path).await else {
+            return Ok(serde_json::json!({ "branches": [] }));
         };
 
         let repo_root = std::path::Path::new(&repo_root_str);
@@ -419,11 +417,10 @@ impl MethodHandler for GetDiffHandler {
 
         let branch = branch_out
             .ok()
-            .map(|o| {
+            .and_then(|o| {
                 let b = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 if b.is_empty() { None } else { Some(b) }
-            })
-            .unwrap_or(None);
+            });
 
         let status_str = status_out
             .map_err(|e| RpcError::Internal {
@@ -534,8 +531,6 @@ fn parse_porcelain(output: &str) -> Vec<FileEntry> {
                     "added"
                 } else if x == b'D' || y == b'D' {
                     "deleted"
-                } else if x == b'M' || y == b'M' {
-                    "modified"
                 } else {
                     "modified"
                 }

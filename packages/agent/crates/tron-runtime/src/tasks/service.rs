@@ -27,8 +27,14 @@ use super::types::{
     TaskWithDetails,
 };
 
-/// Maximum retries for SQLITE_BUSY in batch operations.
+/// Maximum retries for `SQLITE_BUSY` in batch operations.
 const BATCH_BUSY_MAX_RETRIES: u32 = 16;
+
+/// Resolved batch operation target — eliminates unwraps via type-safe branching.
+enum ResolvedTarget<'a> {
+    Ids(&'a [String]),
+    Filter(TaskFilter),
+}
 
 /// Task service with business logic and validation.
 pub struct TaskService;
@@ -79,38 +85,18 @@ impl TaskService {
     fn is_sqlite_busy(err: &TaskError) -> bool {
         matches!(
             err,
-            TaskError::Database(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
-                    ..
-                },
-                _,
-            )) | TaskError::Database(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
-                    ..
-                },
-                _,
-            ))
+            TaskError::Database(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
+code: rusqlite::ffi::ErrorCode::DatabaseBusy, .. } | rusqlite::ffi::Error {
+code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _))
         )
     }
 
     fn is_rusqlite_busy(err: &rusqlite::Error) -> bool {
         matches!(
             err,
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
-                    ..
-                },
-                _,
-            ) | rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
-                    ..
-                },
-                _,
-            )
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
+code: rusqlite::ffi::ErrorCode::DatabaseBusy, .. } | rusqlite::ffi::Error {
+code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         )
     }
 
@@ -121,15 +107,13 @@ impl TaskService {
     /// Create a task with hierarchy validation and auto-timestamps.
     pub fn create_task(conn: &Connection, params: &TaskCreateParams) -> Result<Task, TaskError> {
         // Validate 2-level hierarchy
-        if let Some(ref parent_id) = params.parent_task_id {
-            if let Some(parent) = TaskRepository::get_task(conn, parent_id)? {
-                if parent.parent_task_id.is_some() {
+        if let Some(ref parent_id) = params.parent_task_id
+            && let Some(parent) = TaskRepository::get_task(conn, parent_id)?
+                && parent.parent_task_id.is_some() {
                     return Err(TaskError::Hierarchy(
                         "Cannot create subtask of a subtask (max 2-level hierarchy)".to_string(),
                     ));
                 }
-            }
-        }
 
         let task = TaskRepository::create_task(conn, params)?;
 
@@ -403,8 +387,8 @@ impl TaskService {
         session_id: Option<&str>,
     ) -> Result<bool, TaskError> {
         let removed = TaskRepository::remove_dependency(conn, blocker_id, blocked_id)?;
-        if removed {
-            if let Err(e) = TaskRepository::log_activity(
+        if removed
+            && let Err(e) = TaskRepository::log_activity(
                 conn,
                 &LogActivityParams {
                     task_id: blocker_id.to_string(),
@@ -419,7 +403,6 @@ impl TaskService {
             ) {
                 warn!(error = %e, "Failed to log dependency removal activity");
             }
-        }
         Ok(removed)
     }
 
@@ -434,42 +417,24 @@ impl TaskService {
         dry_run: bool,
         session_id: Option<&str>,
     ) -> Result<BatchResult, TaskError> {
-        let has_ids = target.ids.is_some();
-        let ids_empty = target.ids.as_ref().is_some_and(|ids| ids.is_empty());
-        let has_filter = target.filter.is_some();
-
-        if !has_ids && !has_filter {
-            return Err(TaskError::Validation("ids or filter required".into()));
-        }
-        if ids_empty {
+        if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
             return Ok(BatchResult { affected: 0, dry_run });
         }
-
-        // For filter-based batch ops, force include_* to true so the filter
-        // only matches what the user explicitly specifies.
-        let filter = target.filter.as_ref().map(|f| {
-            let mut f = f.clone();
-            f.include_completed = true;
-            f.include_deferred = true;
-            f.include_backlog = true;
-            f
-        });
+        let resolved = Self::resolve_batch_target(target)?;
 
         if dry_run {
-            let count = if has_ids {
-                TaskRepository::count_tasks_by_ids(conn, target.ids.as_ref().unwrap())?
-            } else {
-                TaskRepository::count_tasks_by_filter(conn, filter.as_ref().unwrap())?
+            let count = match &resolved {
+                ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
+                ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
             };
             return Ok(BatchResult { affected: count, dry_run: true });
         }
 
         Self::with_immediate_txn(conn, |tx| {
             // Pre-fetch for activity logging
-            let tasks = if has_ids {
-                TaskRepository::get_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
-            } else {
-                TaskRepository::get_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            let tasks = match &resolved {
+                ResolvedTarget::Ids(ids) => TaskRepository::get_tasks_by_ids(tx, ids)?,
+                ResolvedTarget::Filter(f) => TaskRepository::get_tasks_by_filter(tx, f)?,
             };
 
             // Log activity BEFORE deleting — delete cascades task_activity rows,
@@ -490,10 +455,9 @@ impl TaskService {
                 )?;
             }
 
-            let affected = if has_ids {
-                TaskRepository::delete_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
-            } else {
-                TaskRepository::delete_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            let affected = match &resolved {
+                ResolvedTarget::Ids(ids) => TaskRepository::delete_tasks_by_ids(tx, ids)?,
+                ResolvedTarget::Filter(f) => TaskRepository::delete_tasks_by_filter(tx, f)?,
             };
 
             Ok(BatchResult { affected, dry_run: false })
@@ -508,45 +472,32 @@ impl TaskService {
         dry_run: bool,
         session_id: Option<&str>,
     ) -> Result<BatchResult, TaskError> {
-        let has_ids = target.ids.is_some();
-        let ids_empty = target.ids.as_ref().is_some_and(|ids| ids.is_empty());
-        let has_filter = target.filter.is_some();
-
-        if !has_ids && !has_filter {
-            return Err(TaskError::Validation("ids or filter required".into()));
-        }
-        if ids_empty {
+        if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
             return Ok(BatchResult { affected: 0, dry_run });
         }
-
-        let filter = target.filter.as_ref().map(|f| {
-            let mut f = f.clone();
-            f.include_completed = true;
-            f.include_deferred = true;
-            f.include_backlog = true;
-            f
-        });
+        let resolved = Self::resolve_batch_target(target)?;
 
         if dry_run {
-            let count = if has_ids {
-                TaskRepository::count_tasks_by_ids(conn, target.ids.as_ref().unwrap())?
-            } else {
-                TaskRepository::count_tasks_by_filter(conn, filter.as_ref().unwrap())?
+            let count = match &resolved {
+                ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
+                ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
             };
             return Ok(BatchResult { affected: count, dry_run: true });
         }
 
         Self::with_immediate_txn(conn, |tx| {
-            let tasks_before = if has_ids {
-                TaskRepository::get_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
-            } else {
-                TaskRepository::get_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            let tasks_before = match &resolved {
+                ResolvedTarget::Ids(ids) => TaskRepository::get_tasks_by_ids(tx, ids)?,
+                ResolvedTarget::Filter(f) => TaskRepository::get_tasks_by_filter(tx, f)?,
             };
 
-            let affected = if has_ids {
-                TaskRepository::update_tasks_by_ids(tx, target.ids.as_ref().unwrap(), updates)?
-            } else {
-                TaskRepository::update_tasks_by_filter(tx, filter.as_ref().unwrap(), updates)?
+            let affected = match &resolved {
+                ResolvedTarget::Ids(ids) => {
+                    TaskRepository::update_tasks_by_ids(tx, ids, updates)?
+                }
+                ResolvedTarget::Filter(f) => {
+                    TaskRepository::update_tasks_by_filter(tx, f, updates)?
+                }
             };
 
             for task in &tasks_before {
@@ -572,6 +523,22 @@ impl TaskService {
 
             Ok(BatchResult { affected, dry_run: false })
         })
+    }
+
+    /// Resolve a `BatchTarget` into a type-safe `ResolvedTarget`, validating
+    /// that either IDs or a filter is present.
+    fn resolve_batch_target(target: &BatchTarget) -> Result<ResolvedTarget<'_>, TaskError> {
+        if let Some(ids) = &target.ids {
+            return Ok(ResolvedTarget::Ids(ids));
+        }
+        if let Some(filter) = &target.filter {
+            let mut f = filter.clone();
+            f.include_completed = true;
+            f.include_deferred = true;
+            f.include_backlog = true;
+            return Ok(ResolvedTarget::Filter(f));
+        }
+        Err(TaskError::Validation("ids or filter required".into()))
     }
 
     /// Batch create tasks atomically. Returns JSON with affected count and created IDs.

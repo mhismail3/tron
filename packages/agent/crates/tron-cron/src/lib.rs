@@ -5,7 +5,7 @@
 //! ## Architecture
 //!
 //! - **Config file** (`~/.tron/artifacts/automations.json`): Canonical job definitions
-//! - **SQLite** (`tron.db`): Runtime state (next_run_at, failures, runs)
+//! - **`SQLite`** (`tron.db`): Runtime state (`next_run_at`, failures, runs)
 //! - **Scheduler**: Timer-based loop that fires due jobs
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
@@ -17,25 +17,15 @@
 //! injected via the [`executor::AgentTurnExecutor`] trait, implemented
 //! in `tron-agent/main.rs`.
 
-#[allow(unused_results)]
 pub mod clock;
-#[allow(unused_results)]
 pub mod config;
-#[allow(unused_results)]
 pub mod delivery;
-#[allow(unused_results)]
 pub mod errors;
-#[allow(unused_results)]
 pub mod executor;
-#[allow(unused_results)]
 pub mod migrations;
-#[allow(unused_results)]
 pub mod schedule;
-#[allow(unused_results)]
 pub mod scheduler;
-#[allow(unused_results)]
 pub mod store;
-#[allow(unused_results)]
 pub mod types;
 
 // Re-exports for convenience

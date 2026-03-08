@@ -10,7 +10,6 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, info, instrument};
 
-use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
@@ -97,14 +96,13 @@ impl AnthropicProvider {
                     })?,
                 );
                 // API key: only add thinking beta for models that need it
-                if let Some(model_info) = get_claude_model(&self.config.model) {
-                    if model_info.supports_thinking_beta_headers {
+                if let Some(model_info) = get_claude_model(&self.config.model)
+                    && model_info.supports_thinking_beta_headers {
                         let _ = headers.insert(
                             "anthropic-beta",
                             HeaderValue::from_static("interleaved-thinking-2025-05-14"),
                         );
                     }
-                }
             }
             AnthropicAuth::OAuth { tokens, .. } => {
                 let auth_value = format!("Bearer {}", tokens.access_token);
@@ -248,14 +246,13 @@ impl AnthropicProvider {
             .collect();
 
         // Breakpoint 1: Last tool → 1h TTL (OAuth only)
-        if self.is_oauth() {
-            if let Some(last) = anthropic_tools.last_mut() {
+        if self.is_oauth()
+            && let Some(last) = anthropic_tools.last_mut() {
                 last.cache_control = Some(CacheControl {
                     cache_type: "ephemeral".into(),
                     ttl: Some("1h".into()),
                 });
             }
-        }
 
         Some(anthropic_tools)
     }
@@ -310,11 +307,10 @@ impl AnthropicProvider {
     fn apply_cache_to_last_user_message(messages: &mut [AnthropicMessageParam]) {
         for msg in messages.iter_mut().rev() {
             if msg.role == "user" && !msg.content.is_empty() {
-                if let Some(last_block) = msg.content.last_mut() {
-                    if let Some(obj) = last_block.as_object_mut() {
+                if let Some(last_block) = msg.content.last_mut()
+                    && let Some(obj) = last_block.as_object_mut() {
                         let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
                     }
-                }
                 break;
             }
         }
@@ -445,8 +441,8 @@ fn now_ms() -> u64 {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Anthropic
+    fn provider_type(&self) -> tron_core::messages::Provider {
+        tron_core::messages::Provider::Anthropic
     }
 
     fn model(&self) -> &str {
@@ -517,7 +513,7 @@ mod tests {
     #[test]
     fn provider_type_is_anthropic() {
         let provider = AnthropicProvider::new(api_key_config());
-        assert_eq!(provider.provider_type(), ProviderType::Anthropic);
+        assert_eq!(provider.provider_type(), tron_core::messages::Provider::Anthropic);
     }
 
     #[test]

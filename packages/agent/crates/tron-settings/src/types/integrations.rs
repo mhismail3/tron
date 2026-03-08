@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Root container for all iOS integration settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
 pub struct IntegrationSettings {
     /// Device context signals injected into system prompt.
     pub device_context: DeviceContextSettings,
@@ -20,36 +21,30 @@ pub struct IntegrationSettings {
     pub calendar: CalendarSettings,
     /// Contact search access.
     pub contacts: ContactsSettings,
-    /// HealthKit read access.
+    /// `HealthKit` read access.
     pub health: HealthSettings,
-    /// Location awareness (enriches DeviceContext).
+    /// Location awareness (enriches `DeviceContext`).
     pub location: LocationSettings,
 }
 
-impl Default for IntegrationSettings {
-    fn default() -> Self {
-        Self {
-            device_context: DeviceContextSettings::default(),
-            clipboard: ClipboardSettings::default(),
-            haptics: HapticsSettings::default(),
-            calendar: CalendarSettings::default(),
-            contacts: ContactsSettings::default(),
-            health: HealthSettings::default(),
-            location: LocationSettings::default(),
-        }
-    }
-}
 
 /// Device context signals piggybacked on agent prompts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DeviceContextSettings {
+    /// Master toggle for device context injection.
     pub enabled: bool,
+    /// Include battery level/state.
     pub battery: bool,
+    /// Include network type (WiFi/cellular).
     pub network: bool,
+    /// Include current audio route.
     pub audio_route: bool,
+    /// Include display metrics.
     pub display: bool,
+    /// Include motion/activity state.
     pub activity: bool,
+    /// Include upcoming calendar events.
     pub calendar_preview: bool,
 }
 
@@ -70,23 +65,24 @@ impl Default for DeviceContextSettings {
 /// Clipboard write access.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
 pub struct ClipboardSettings {
+    /// Master toggle for clipboard write access.
     pub enabled: bool,
 }
 
-impl Default for ClipboardSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
 
 /// Haptic feedback on agent events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HapticsSettings {
+    /// Master toggle for haptic feedback.
     pub enabled: bool,
+    /// Haptic on task completion.
     pub on_task_complete: bool,
+    /// Haptic on errors.
     pub on_error: bool,
+    /// Haptic on notifications.
     pub on_notification: bool,
 }
 
@@ -101,41 +97,35 @@ impl Default for HapticsSettings {
     }
 }
 
-/// Calendar read/write access via EventKit.
+/// Calendar read/write access via `EventKit`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
 pub struct CalendarSettings {
+    /// Master toggle for calendar access.
     pub enabled: bool,
+    /// Allow creating/modifying calendar events.
     pub allow_write: bool,
 }
 
-impl Default for CalendarSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allow_write: false,
-        }
-    }
-}
 
 /// Contact search access via Contacts framework.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[derive(Default)]
 pub struct ContactsSettings {
+    /// Master toggle for contact search access.
     pub enabled: bool,
 }
 
-impl Default for ContactsSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
 
-/// HealthKit read access.
+/// `HealthKit` read access.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HealthSettings {
+    /// Master toggle for `HealthKit` read access.
     pub enabled: bool,
+    /// Which `HealthKit` data types to expose.
     pub data_types: Vec<String>,
 }
 
@@ -153,10 +143,11 @@ impl Default for HealthSettings {
     }
 }
 
-/// Location awareness (enriches DeviceContext).
+/// Location awareness (enriches `DeviceContext`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LocationSettings {
+    /// Master toggle for location awareness.
     pub enabled: bool,
     /// `"city"` (reverse geocoded) or `"coordinates"`.
     pub precision: String,

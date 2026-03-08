@@ -15,7 +15,6 @@ use crate::anthropic::stream_handler::{create_stream_state_for, process_sse_even
 use crate::anthropic::types::{
     AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool,
 };
-use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
@@ -238,7 +237,7 @@ impl MiniMaxProvider {
         Ok(crate::stream_pipeline::sse_to_event_stream::<AnthropicSseEvent, _, _>(
             response,
             &SSE_OPTIONS,
-            create_stream_state_for(tron_core::messages::ProviderType::MiniMax),
+            create_stream_state_for(tron_core::messages::Provider::MiniMax),
             process_sse_event,
         ))
     }
@@ -246,8 +245,8 @@ impl MiniMaxProvider {
 
 #[async_trait]
 impl Provider for MiniMaxProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::MiniMax
+    fn provider_type(&self) -> tron_core::messages::Provider {
+        tron_core::messages::Provider::MiniMax
     }
 
     fn model(&self) -> &str {
@@ -302,7 +301,7 @@ mod tests {
     #[test]
     fn provider_type_is_minimax() {
         let provider = MiniMaxProvider::new(test_config());
-        assert_eq!(provider.provider_type(), ProviderType::MiniMax);
+        assert_eq!(provider.provider_type(), tron_core::messages::Provider::MiniMax);
     }
 
     #[test]

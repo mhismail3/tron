@@ -193,7 +193,7 @@ struct ToolRegistryConfig {
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
-    /// Device request broker for iOS round-trip tools (set after server creation via OnceLock).
+    /// Device request broker for iOS round-trip tools (set after server creation via `OnceLock`).
     device_request_broker: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>>,
 }
 
@@ -648,6 +648,7 @@ async fn main() -> Result<()> {
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
     {
         let cell = Arc::clone(&transcription_engine);
+        #[allow(clippy::let_underscore_future)]
         let _ = tokio::spawn(async move {
             match tron_transcription::MlxEngine::new().await {
                 Ok(engine) => {
@@ -718,6 +719,7 @@ async fn main() -> Result<()> {
         // Rebuild active worktrees from persisted events, then recover orphans.
         coord.rebuild_from_events();
         let coord_for_recovery = coord.clone();
+        #[allow(clippy::let_underscore_future)]
         let _ = tokio::spawn(async move {
             let count = coord_for_recovery.recover_orphans().await;
             if count > 0 {
@@ -805,6 +807,7 @@ async fn main() -> Result<()> {
     {
         let cron_cancel = cron_cancel.clone();
         let shutdown_token = server.shutdown().token();
+        #[allow(clippy::let_underscore_future)]
         let _ = tokio::spawn(async move {
             shutdown_token.cancelled().await;
             cron_cancel.cancel();

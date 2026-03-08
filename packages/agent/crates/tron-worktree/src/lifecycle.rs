@@ -91,8 +91,8 @@ pub async fn remove(
     let mut final_commit = None;
 
     // Auto-commit uncommitted changes
-    if config.auto_commit_on_release && info.worktree_path.exists() {
-        if let Ok(true) = git.has_changes(&info.worktree_path).await {
+    if config.auto_commit_on_release && info.worktree_path.exists()
+        && let Ok(true) = git.has_changes(&info.worktree_path).await {
             match git
                 .commit_all(
                     &info.worktree_path,
@@ -113,7 +113,6 @@ pub async fn remove(
                 }
             }
         }
-    }
 
     // Remove worktree directory
     let deleted = if config.delete_on_release && info.worktree_path.exists() {
@@ -141,18 +140,16 @@ pub async fn remove(
     };
 
     // Delete branch if not preserving
-    let branch_preserved = if !config.preserve_branches {
-        if let Err(e) = git
-            .branch_delete(&info.repo_root, &info.branch, true)
-            .await
-        {
-            tracing::warn!(branch = %info.branch, error = %e, "failed to delete branch");
-            true // branch still exists
-        } else {
-            false
-        }
-    } else {
+    let branch_preserved = if config.preserve_branches {
         true
+    } else if let Err(e) = git
+        .branch_delete(&info.repo_root, &info.branch, true)
+        .await
+    {
+        tracing::warn!(branch = %info.branch, error = %e, "failed to delete branch");
+        true // branch still exists
+    } else {
+        false
     };
 
     debug!(
@@ -171,6 +168,7 @@ pub async fn remove(
 
 /// Ensure the worktree base dir is in `.gitignore`.
 async fn ensure_gitignore(repo_root: &Path, base_dir_name: &str) -> Result<()> {
+    use std::fmt::Write;
     let gitignore = repo_root.join(".gitignore");
     let pattern = format!("{base_dir_name}/");
 
@@ -188,7 +186,7 @@ async fn ensure_gitignore(repo_root: &Path, base_dir_name: &str) -> Result<()> {
     if !new_content.is_empty() && !new_content.ends_with('\n') {
         new_content.push('\n');
     }
-    new_content.push_str(&format!("\n# Tron agent worktrees\n{pattern}\n"));
+    let _ = write!(new_content, "\n# Tron agent worktrees\n{pattern}\n");
 
     tokio::fs::write(&gitignore, new_content).await?;
     debug!(path = %gitignore.display(), "added {pattern} to .gitignore");

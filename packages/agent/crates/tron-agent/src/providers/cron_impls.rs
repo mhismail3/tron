@@ -229,7 +229,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             () = cancel.cancelled() => {
                 return Err(CronError::Cancelled("agent turn cancelled".into()));
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(DEFAULT_TURN_TIMEOUT_SECS)) => {
+            () = tokio::time::sleep(std::time::Duration::from_secs(DEFAULT_TURN_TIMEOUT_SECS)) => {
                 return Err(CronError::TimedOut);
             }
         };
@@ -287,6 +287,7 @@ impl Drop for SessionGuard {
 
 /// Write a memory ledger entry for a completed cron session.
 /// Returns `true` if written, `false` if skipped/failed (never errors).
+#[allow(clippy::ref_option)]
 async fn write_cron_ledger(
     session_id: &str,
     workspace_path: &str,
@@ -549,7 +550,7 @@ mod tests {
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
-    use tron_llm::models::types::Provider as ProviderType;
+    use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
@@ -559,8 +560,8 @@ mod tests {
     struct LedgerMockProvider;
     #[async_trait]
     impl Provider for LedgerMockProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock-ledger"

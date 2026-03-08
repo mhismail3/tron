@@ -50,7 +50,6 @@ impl TaskStatus {
     pub fn from_sql(s: &str) -> Self {
         match s {
             "backlog" => Self::Backlog,
-            "pending" => Self::Pending,
             "in_progress" => Self::InProgress,
             "completed" => Self::Completed,
             "cancelled" => Self::Cancelled,
@@ -96,7 +95,6 @@ impl TaskPriority {
     pub fn from_sql(s: &str) -> Self {
         match s {
             "low" => Self::Low,
-            "medium" => Self::Medium,
             "high" => Self::High,
             "critical" => Self::Critical,
             _ => Self::Medium,
@@ -140,7 +138,6 @@ impl TaskSource {
     #[must_use]
     pub fn from_sql(s: &str) -> Self {
         match s {
-            "agent" => Self::Agent,
             "user" => Self::User,
             "skill" => Self::Skill,
             "system" => Self::System,
@@ -179,7 +176,6 @@ impl ProjectStatus {
     #[must_use]
     pub fn from_sql(s: &str) -> Self {
         match s {
-            "active" => Self::Active,
             "paused" => Self::Paused,
             "completed" => Self::Completed,
             "archived" => Self::Archived,
@@ -212,7 +208,6 @@ impl AreaStatus {
     #[must_use]
     pub fn from_sql(s: &str) -> Self {
         match s {
-            "active" => Self::Active,
             "archived" => Self::Archived,
             _ => Self::Active,
         }
@@ -296,7 +291,6 @@ impl ActivityAction {
         match s {
             "created" => Self::Created,
             "status_changed" => Self::StatusChanged,
-            "updated" => Self::Updated,
             "note_added" => Self::NoteAdded,
             "time_logged" => Self::TimeLogged,
             "dependency_added" => Self::DependencyAdded,

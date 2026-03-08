@@ -166,9 +166,6 @@ impl std::str::FromStr for Provider {
     }
 }
 
-/// Backward-compatible alias (use [`Provider`] in new code).
-pub type ProviderType = Provider;
-
 /// Token usage information from an LLM response.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -844,10 +841,4 @@ mod tests {
         assert_eq!(Provider::Google.as_str(), "google");
     }
 
-    #[test]
-    fn provider_type_alias_works() {
-        // ProviderType alias is backward-compatible
-        let pt: ProviderType = Provider::Anthropic;
-        assert_eq!(pt, Provider::Anthropic);
-    }
 }

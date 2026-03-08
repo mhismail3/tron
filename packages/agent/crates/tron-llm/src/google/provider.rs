@@ -22,7 +22,6 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::auth::{OAuthTokens, calculate_expires_at, should_refresh};
 use crate::compose_context_parts;
-use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
@@ -279,11 +278,10 @@ impl GoogleProvider {
                     }
                     _ => {
                         // Cloud Code Assist requires project ID header
-                        if let Some(ref pid) = self.project_id {
-                            if let Ok(val) = HeaderValue::from_str(pid) {
+                        if let Some(ref pid) = self.project_id
+                            && let Ok(val) = HeaderValue::from_str(pid) {
                                 let _ = headers.insert("x-goog-user-project", val);
                             }
-                        }
                     }
                 }
 
@@ -319,14 +317,13 @@ impl GoogleProvider {
 
         let temperature = if is_gemini3 {
             let temp = options.temperature.or(self.config.temperature);
-            if let Some(t) = temp {
-                if (t - 1.0).abs() > f64::EPSILON {
+            if let Some(t) = temp
+                && (t - 1.0).abs() > f64::EPSILON {
                     warn!(
                         requested = t,
                         "Gemini 3 requires temperature=1.0, overriding"
                     );
                 }
-            }
             Some(1.0)
         } else {
             options.temperature.or(self.config.temperature)
@@ -586,8 +583,8 @@ impl GoogleProvider {
 
 #[async_trait]
 impl Provider for GoogleProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Google
+    fn provider_type(&self) -> tron_core::messages::Provider {
+        tron_core::messages::Provider::Google
     }
 
     fn model(&self) -> &str {
@@ -664,7 +661,7 @@ mod tests {
     #[test]
     fn provider_type_is_google() {
         let provider = GoogleProvider::new(oauth_config());
-        assert_eq!(provider.provider_type(), ProviderType::Google);
+        assert_eq!(provider.provider_type(), tron_core::messages::Provider::Google);
     }
 
     #[test]

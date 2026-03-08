@@ -4,7 +4,7 @@
 //! functions to extract raw [`TokenSource`] values from provider-specific
 //! response formats.
 
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 use super::errors::{Result, TokenError};
 use super::types::TokenSource;
@@ -78,7 +78,7 @@ pub fn extract_anthropic(
 ) -> Result<TokenSource> {
     if start_usage.is_none() && delta_usage.is_none() {
         return Err(TokenError::MissingData {
-            provider: Some(ProviderType::Anthropic),
+            provider: Some(Provider::Anthropic),
             turn: meta.turn,
             session_id: meta.session_id.clone(),
             has_partial_data: false,
@@ -115,7 +115,7 @@ pub fn extract_anthropic(
     let now = chrono::Utc::now().to_rfc3339();
 
     Ok(TokenSource {
-        provider: ProviderType::Anthropic,
+        provider: Provider::Anthropic,
         timestamp: now,
         raw_input_tokens: input_tokens,
         raw_output_tokens: output_tokens,
@@ -134,7 +134,7 @@ pub fn extract_anthropic(
 pub fn extract_openai(
     usage: Option<&OpenAiUsage>,
     meta: &ExtractionMeta,
-    provider: ProviderType,
+    provider: Provider,
 ) -> Result<TokenSource> {
     let usage = usage.ok_or_else(|| TokenError::MissingData {
         provider: Some(provider),
@@ -167,7 +167,7 @@ pub fn extract_google(
     meta: &ExtractionMeta,
 ) -> Result<TokenSource> {
     let usage = usage_metadata.ok_or_else(|| TokenError::MissingData {
-        provider: Some(ProviderType::Google),
+        provider: Some(Provider::Google),
         turn: meta.turn,
         session_id: meta.session_id.clone(),
         has_partial_data: false,
@@ -176,7 +176,7 @@ pub fn extract_google(
     let now = chrono::Utc::now().to_rfc3339();
 
     Ok(TokenSource {
-        provider: ProviderType::Google,
+        provider: Provider::Google,
         timestamp: now,
         raw_input_tokens: usage.prompt_token_count.unwrap_or(0),
         raw_output_tokens: usage.candidates_token_count.unwrap_or(0),
@@ -216,7 +216,7 @@ mod tests {
             output_tokens: Some(100),
         };
         let source = extract_anthropic(Some(&start), Some(&delta), &test_meta()).unwrap();
-        assert_eq!(source.provider, ProviderType::Anthropic);
+        assert_eq!(source.provider, Provider::Anthropic);
         assert_eq!(source.raw_input_tokens, 604);
         assert_eq!(source.raw_output_tokens, 100);
         assert_eq!(source.raw_cache_read_tokens, 8266);
@@ -250,7 +250,7 @@ mod tests {
                 has_partial_data,
                 ..
             } => {
-                assert_eq!(provider, Some(ProviderType::Anthropic));
+                assert_eq!(provider, Some(Provider::Anthropic));
                 assert!(!has_partial_data);
             }
             _ => panic!("expected MissingData"),
@@ -287,8 +287,8 @@ mod tests {
             output_tokens: Some(200),
             cached_tokens: Some(800),
         };
-        let source = extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAi).unwrap();
-        assert_eq!(source.provider, ProviderType::OpenAi);
+        let source = extract_openai(Some(&usage), &test_meta(), Provider::OpenAi).unwrap();
+        assert_eq!(source.provider, Provider::OpenAi);
         assert_eq!(source.raw_input_tokens, 1000);
         assert_eq!(source.raw_output_tokens, 200);
         assert_eq!(source.raw_cache_read_tokens, 800);
@@ -302,14 +302,14 @@ mod tests {
             output_tokens: Some(100),
             cached_tokens: None,
         };
-        let source = extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAiCodex).unwrap();
-        assert_eq!(source.provider, ProviderType::OpenAiCodex);
+        let source = extract_openai(Some(&usage), &test_meta(), Provider::OpenAiCodex).unwrap();
+        assert_eq!(source.provider, Provider::OpenAiCodex);
         assert_eq!(source.raw_cache_read_tokens, 0);
     }
 
     #[test]
     fn openai_missing_returns_error() {
-        let result = extract_openai(None, &test_meta(), ProviderType::OpenAi);
+        let result = extract_openai(None, &test_meta(), Provider::OpenAi);
         assert!(result.is_err());
     }
 
@@ -322,7 +322,7 @@ mod tests {
             candidates_token_count: Some(200),
         };
         let source = extract_google(Some(&usage), &test_meta()).unwrap();
-        assert_eq!(source.provider, ProviderType::Google);
+        assert_eq!(source.provider, Provider::Google);
         assert_eq!(source.raw_input_tokens, 500);
         assert_eq!(source.raw_output_tokens, 200);
         assert_eq!(source.raw_cache_read_tokens, 0);

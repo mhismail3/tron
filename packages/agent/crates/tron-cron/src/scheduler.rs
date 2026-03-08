@@ -1,8 +1,9 @@
+#![allow(unused_results)]
 //! Main cron scheduling loop.
 //!
 //! [`CronScheduler`] owns the in-memory job state, the scheduling timer,
 //! config file watcher, and execution task spawner. It coordinates between
-//! the config file (canonical definitions), SQLite (runtime state), and
+//! the config file (canonical definitions), `SQLite` (runtime state), and
 //! the executor (payload execution).
 
 use std::collections::HashMap;
@@ -38,7 +39,7 @@ pub struct CronScheduler {
     clock: Arc<dyn Clock>,
     /// In-memory job definitions (synced from file).
     jobs: parking_lot::RwLock<HashMap<String, CronJob>>,
-    /// Runtime state per job (synced from SQLite). Arc-wrapped for sharing
+    /// Runtime state per job (synced from `SQLite`). Arc-wrapped for sharing
     /// with spawned execution tasks.
     runtime: RuntimeMap,
     /// Serializes all access to `automations.json`.
@@ -247,11 +248,10 @@ impl CronScheduler {
 
         // Clean up orphaned run records from previous server instance
         let now = self.clock.now_utc();
-        if let Ok(orphaned) = store::complete_orphaned_runs(&self.pool, now, "server restarted") {
-            if orphaned > 0 {
+        if let Ok(orphaned) = store::complete_orphaned_runs(&self.pool, now, "server restarted")
+            && orphaned > 0 {
                 tracing::info!(count = orphaned, "cleaned up orphaned run records from previous instance");
             }
-        }
 
         // Detect stuck jobs
         self.detect_stuck_jobs()?;
@@ -322,15 +322,14 @@ impl CronScheduler {
             // Compute sleep duration until next job
             let sleep_duration = self
                 .next_wakeup()
-                .map(|next| {
+                .map_or(Duration::from_secs(60), |next| {
                     let diff = next - now;
                     if diff.num_milliseconds() <= 0 {
                         Duration::from_millis(0)
                     } else {
                         Duration::from_millis(diff.num_milliseconds().min(60_000) as u64)
                     }
-                })
-                .unwrap_or(Duration::from_secs(60));
+                });
 
             tokio::select! {
                 () = tokio::time::sleep(sleep_duration) => {
@@ -368,9 +367,9 @@ impl CronScheduler {
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                         // Check overlap policy
-                        if job.overlap_policy == OverlapPolicy::Skip {
-                            if let Ok(running) = store::count_running_runs(&self.pool, &job.id) {
-                                if running > 0 {
+                        if job.overlap_policy == OverlapPolicy::Skip
+                            && let Ok(running) = store::count_running_runs(&self.pool, &job.id)
+                                && running > 0 {
                                     tracing::debug!(job_id = %job.id, "skipping overlapping execution");
                                     // Still update next_run_at
                                     if let Some(next) = compute_next_run(&job.schedule, *scheduled_at) {
@@ -379,16 +378,11 @@ impl CronScheduler {
                                     }
                                     continue;
                                 }
-                            }
-                        }
 
                         // Acquire execution semaphore
-                        let permit = match self.execution_semaphore.clone().try_acquire_owned() {
-                            Ok(p) => p,
-                            Err(_) => {
-                                tracing::warn!(job_id = %job.id, "global execution limit reached, skipping");
-                                continue;
-                            }
+                        let Ok(permit) = self.execution_semaphore.clone().try_acquire_owned() else {
+                            tracing::warn!(job_id = %job.id, "global execution limit reached, skipping");
+                            continue;
                         };
 
                         // Capture job_id before moving job into the async block
@@ -474,7 +468,7 @@ impl CronScheduler {
         }
     }
 
-    /// Reload config from disk and sync to memory + SQLite.
+    /// Reload config from disk and sync to memory + `SQLite`.
     async fn reload_config(&self) -> Result<(), CronError> {
         let _guard = self.config_lock.lock().await;
         let config = config::load_config(&self.config_path, &self.backup_path)?;
@@ -495,7 +489,7 @@ impl CronScheduler {
             if job.enabled {
                 let schedule_changed = jobs
                     .get(&job.id)
-                    .map_or(true, |old| old.schedule != job.schedule);
+                    .is_none_or(|old| old.schedule != job.schedule);
                 let has_runtime = self
                     .runtime
                     .read()
@@ -624,18 +618,15 @@ async fn execute_job(
     // Update consecutive failures
     if run.status == RunStatus::Completed {
         let _ = store::reset_consecutive_failures(pool, &job.id);
-    } else {
-        if let Ok(failures) = store::increment_consecutive_failures(pool, &job.id) {
-            if job.auto_disable_after > 0 && failures >= job.auto_disable_after {
-                let _ = store::disable_job(pool, &job.id);
-                tracing::warn!(
-                    job_id = %job.id,
-                    failures,
-                    "auto-disabled after consecutive failures"
-                );
-            }
+    } else if let Ok(failures) = store::increment_consecutive_failures(pool, &job.id)
+        && job.auto_disable_after > 0 && failures >= job.auto_disable_after {
+            let _ = store::disable_job(pool, &job.id);
+            tracing::warn!(
+                job_id = %job.id,
+                failures,
+                "auto-disabled after consecutive failures"
+            );
         }
-    }
 
     // Deliver results
     delivery::deliver(job, &run, deps).await;

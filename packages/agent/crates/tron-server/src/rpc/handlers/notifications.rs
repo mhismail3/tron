@@ -2,7 +2,7 @@
 //!
 //! Three methods for the iOS notification inbox:
 //!
-//! - `notifications.list` — List recent NotifyApp notifications with read state
+//! - `notifications.list` — List recent `NotifyApp` notifications with read state
 //! - `notifications.markRead` — Mark a single notification as read
 //! - `notifications.markAllRead` — Mark all unread notifications as read
 
@@ -17,7 +17,7 @@ use crate::rpc::registry::MethodHandler;
 
 // ── notifications.list ──────────────────────────────────────────────
 
-/// List recent NotifyApp notifications with read state and session context.
+/// List recent `NotifyApp` notifications with read state and session context.
 pub struct ListHandler;
 
 #[async_trait]
@@ -171,7 +171,7 @@ impl MethodHandler for MarkReadHandler {
 
 // ── notifications.markAllRead ───────────────────────────────────────
 
-/// Mark all unread NotifyApp notifications as read.
+/// Mark all unread `NotifyApp` notifications as read.
 pub struct MarkAllReadHandler;
 
 #[async_trait]

@@ -57,11 +57,10 @@ impl ContextManager {
     /// Create a new context manager with the given configuration.
     pub fn new(mut config: ContextManagerConfig) -> Self {
         // Default working_directory to $HOME/Workspace/ rather than /tmp
-        if config.working_directory.is_none() {
-            if let Ok(home) = std::env::var("HOME") {
+        if config.working_directory.is_none()
+            && let Ok(home) = std::env::var("HOME") {
                 config.working_directory = Some(format!("{home}/Workspace"));
             }
-        }
 
         let system_prompt = config
             .system_prompt
@@ -457,11 +456,10 @@ impl ContextManager {
 
     /// Check and trigger compaction callback if needed.
     pub fn trigger_compaction_if_needed(&self) {
-        if self.should_compact() {
-            if let Some(cb) = &self.on_compaction_needed {
+        if self.should_compact()
+            && let Some(cb) = &self.on_compaction_needed {
                 cb();
             }
-        }
     }
 
     // ── Tool result processing ──────────────────────────────────────────

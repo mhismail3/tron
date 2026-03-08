@@ -16,8 +16,8 @@
 //!
 //! ## Critical Event Ordering
 //!
-//! `agent_runner` controls the post-run sequence: `agent.complete` (from TronAgent)
-//! → drain background hooks → `agent.ready` (from AgentRunner). iOS depends on
+//! `agent_runner` controls the post-run sequence: `agent.complete` (from `TronAgent`)
+//! → drain background hooks → `agent.ready` (from `AgentRunner`). iOS depends on
 //! `agent.ready` arriving AFTER `agent.complete` to clear the send button.
 
 pub mod agent_factory;

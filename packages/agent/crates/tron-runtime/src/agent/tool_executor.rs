@@ -22,7 +22,7 @@ use crate::types::ToolExecutionResult;
 /// Convert a `Duration` to milliseconds, rounding up (ceiling).
 ///
 /// `Duration::as_millis()` truncates sub-millisecond values to 0, which makes
-/// fast tools (file glob, SQLite lookup) report "0ms". This function ensures
+/// fast tools (file glob, `SQLite` lookup) report "0ms". This function ensures
 /// at least 1ms is reported for any non-zero duration.
 fn duration_ceil_ms(d: Duration) -> u64 {
     let micros = d.as_micros();
@@ -30,7 +30,7 @@ fn duration_ceil_ms(d: Duration) -> u64 {
         return 0;
     }
     // Ceiling division: (micros + 999) / 1000, minimum 1
-    ((micros + 999) / 1000) as u64
+    micros.div_ceil(1000) as u64
 }
 
 /// Execute a single tool call through the full pipeline.

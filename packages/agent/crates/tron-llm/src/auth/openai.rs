@@ -95,8 +95,8 @@ pub async fn load_server_auth_with_client(
     let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY);
 
     // 2. OAuth tokens
-    if let Some(ref pa) = pa {
-        if let Some(oauth) = &pa.oauth {
+    if let Some(ref pa) = pa
+        && let Some(oauth) = &pa.oauth {
             match maybe_refresh_tokens(oauth, client).await {
                 Ok((tokens, refreshed)) => {
                     if refreshed {
@@ -114,7 +114,6 @@ pub async fn load_server_auth_with_client(
                 }
             }
         }
-    }
 
     // 3. Env var API key
     if let Some(key) = env_api_key {
@@ -122,11 +121,10 @@ pub async fn load_server_auth_with_client(
     }
 
     // 4. API key from auth.json
-    if let Some(pa) = &pa {
-        if let Some(key) = &pa.api_key {
+    if let Some(pa) = &pa
+        && let Some(key) = &pa.api_key {
             return Ok(Some(ServerAuth::from_api_key(key)));
         }
-    }
 
     Ok(None)
 }

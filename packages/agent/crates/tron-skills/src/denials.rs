@@ -41,11 +41,8 @@ pub fn skill_frontmatter_to_denials(
         });
     }
 
-    if has_allowed {
-        let allowed: HashSet<&str> = frontmatter
-            .allowed_tools
-            .as_ref()
-            .unwrap()
+    if let Some(allowed_list) = frontmatter.allowed_tools.as_ref().filter(|a| !a.is_empty()) {
+        let allowed: HashSet<&str> = allowed_list
             .iter()
             .map(String::as_str)
             .collect();

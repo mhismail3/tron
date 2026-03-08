@@ -233,7 +233,9 @@ fn is_horizontal_rule(line: &str) -> bool {
         return false;
     }
     let mut chars = line.chars();
-    let first = chars.next().unwrap();
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if first != '-' && first != '*' && first != '_' {
         return false;
     }

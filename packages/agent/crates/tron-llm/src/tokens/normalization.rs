@@ -10,7 +10,7 @@
 //! This module normalizes provider data into a uniform [`TokenRecord`]
 //! with correct context window size and per-turn deltas.
 
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 use super::types::{CalculationMethod, ComputedTokens, TokenMeta, TokenRecord, TokenSource};
 
@@ -51,16 +51,16 @@ pub fn normalize_tokens(
 /// exclusive buckets. Other providers report the full context in `input_tokens`.
 fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
     match source.provider {
-        ProviderType::Anthropic | ProviderType::MiniMax => {
+        Provider::Anthropic | Provider::MiniMax => {
             let total = source.raw_input_tokens
                 + source.raw_cache_read_tokens
                 + source.raw_cache_creation_tokens;
             (total, CalculationMethod::AnthropicCacheAware)
         }
-        ProviderType::OpenAi
-        | ProviderType::OpenAiCodex
-        | ProviderType::Google
-        | ProviderType::Unknown => (source.raw_input_tokens, CalculationMethod::Direct),
+        Provider::OpenAi
+        | Provider::OpenAiCodex
+        | Provider::Google
+        | Provider::Unknown => (source.raw_input_tokens, CalculationMethod::Direct),
     }
 }
 
@@ -75,7 +75,7 @@ fn compute_new_input_tokens(
     context_window_tokens: u64,
     previous_baseline: u64,
 ) -> u64 {
-    if matches!(source.provider, ProviderType::Anthropic | ProviderType::MiniMax) {
+    if matches!(source.provider, Provider::Anthropic | Provider::MiniMax) {
         source.raw_input_tokens + source.raw_cache_creation_tokens
     } else {
         if previous_baseline == 0 {
@@ -104,7 +104,7 @@ mod tests {
 
     fn anthropic_source(input: u64, cache_read: u64, cache_creation: u64) -> TokenSource {
         TokenSource {
-            provider: ProviderType::Anthropic,
+            provider: Provider::Anthropic,
             timestamp: "2024-01-15T12:00:00Z".to_string(),
             raw_input_tokens: input,
             raw_output_tokens: 100,
@@ -117,7 +117,7 @@ mod tests {
 
     fn google_source(input: u64) -> TokenSource {
         TokenSource {
-            provider: ProviderType::Google,
+            provider: Provider::Google,
             timestamp: "2024-01-15T12:00:00Z".to_string(),
             raw_input_tokens: input,
             raw_output_tokens: 50,
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn openai_context_window_direct() {
         let source = TokenSource {
-            provider: ProviderType::OpenAi,
+            provider: Provider::OpenAi,
             timestamp: "2024-01-15T12:00:00Z".to_string(),
             raw_input_tokens: 10_000,
             raw_output_tokens: 500,

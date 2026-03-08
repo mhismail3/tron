@@ -9,10 +9,6 @@ use serde::{Deserialize, Serialize};
 // Re-export from tron-core as the canonical Provider type.
 pub use tron_core::messages::Provider;
 
-/// Backward-compatible alias — use [`Provider`] directly in new code.
-#[deprecated(note = "Use `Provider` directly")]
-pub type ProviderType = Provider;
-
 /// Model tier classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -213,71 +209,71 @@ mod tests {
 
     #[test]
     fn provider_type_as_str() {
-        assert_eq!(ProviderType::Anthropic.as_str(), "anthropic");
-        assert_eq!(ProviderType::OpenAi.as_str(), "openai");
-        assert_eq!(ProviderType::Google.as_str(), "google");
+        assert_eq!(Provider::Anthropic.as_str(), "anthropic");
+        assert_eq!(Provider::OpenAi.as_str(), "openai");
+        assert_eq!(Provider::Google.as_str(), "google");
     }
 
     #[test]
     fn provider_type_display() {
-        assert_eq!(ProviderType::Anthropic.to_string(), "anthropic");
-        assert_eq!(ProviderType::Google.to_string(), "google");
+        assert_eq!(Provider::Anthropic.to_string(), "anthropic");
+        assert_eq!(Provider::Google.to_string(), "google");
     }
 
     #[test]
     fn provider_type_from_str() {
         assert_eq!(
-            "anthropic".parse::<ProviderType>().unwrap(),
-            ProviderType::Anthropic
+            "anthropic".parse::<Provider>().unwrap(),
+            Provider::Anthropic
         );
         assert_eq!(
-            "openai".parse::<ProviderType>().unwrap(),
-            ProviderType::OpenAi
+            "openai".parse::<Provider>().unwrap(),
+            Provider::OpenAi
         );
         assert_eq!(
-            "openai-codex".parse::<ProviderType>().unwrap(),
-            ProviderType::OpenAiCodex
+            "openai-codex".parse::<Provider>().unwrap(),
+            Provider::OpenAiCodex
         );
         assert_eq!(
-            "google".parse::<ProviderType>().unwrap(),
-            ProviderType::Google
+            "google".parse::<Provider>().unwrap(),
+            Provider::Google
         );
-        assert!("nonexistent".parse::<ProviderType>().is_err());
+        assert!("nonexistent".parse::<Provider>().is_err());
     }
 
     #[test]
     fn provider_type_serde_roundtrip() {
-        let pt = ProviderType::Anthropic;
+        let pt = Provider::Anthropic;
         let json = serde_json::to_string(&pt).unwrap();
         assert_eq!(json, "\"anthropic\"");
-        let back: ProviderType = serde_json::from_str(&json).unwrap();
+        let back: Provider = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pt);
     }
 
     #[test]
     fn provider_type_minimax_as_str() {
-        assert_eq!(ProviderType::MiniMax.as_str(), "minimax");
+        assert_eq!(Provider::MiniMax.as_str(), "minimax");
     }
 
     #[test]
     fn provider_type_minimax_display() {
-        assert_eq!(ProviderType::MiniMax.to_string(), "minimax");
+        assert_eq!(Provider::MiniMax.to_string(), "minimax");
     }
 
     #[test]
     fn provider_type_minimax_from_str() {
         assert_eq!(
-            "minimax".parse::<ProviderType>().unwrap(),
-            ProviderType::MiniMax
+            "minimax".parse::<Provider>().unwrap(),
+            Provider::MiniMax
         );
     }
 
     #[test]
     fn provider_type_minimax_serde_roundtrip() {
-        let pt = ProviderType::MiniMax;
+        let pt = Provider::MiniMax;
         let json = serde_json::to_string(&pt).unwrap();
         assert_eq!(json, "\"minimax\"");
-        let back: ProviderType = serde_json::from_str(&json).unwrap();
+        let back: Provider = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pt);
     }
 
@@ -336,7 +332,7 @@ mod tests {
             name: "Claude Opus 4.6".into(),
             short_name: "Opus 4.6".into(),
             family: "Claude 4.6".into(),
-            provider: ProviderType::Anthropic,
+            provider: Provider::Anthropic,
             tier: ModelTier::Opus,
             context_window: 200_000,
             max_output: 128_000,
@@ -356,7 +352,7 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         let back: ModelInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, "claude-opus-4-6");
-        assert_eq!(back.provider, ProviderType::Anthropic);
+        assert_eq!(back.provider, Provider::Anthropic);
         assert_eq!(back.context_window, 200_000);
     }
 
@@ -367,7 +363,7 @@ mod tests {
             name: "Test".into(),
             short_name: "T".into(),
             family: "Test".into(),
-            provider: ProviderType::Anthropic,
+            provider: Provider::Anthropic,
             tier: ModelTier::Sonnet,
             context_window: 100_000,
             max_output: 8000,

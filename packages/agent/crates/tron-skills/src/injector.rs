@@ -10,9 +10,11 @@ use regex::Regex;
 use crate::registry::SkillRegistry;
 use crate::types::{SkillInjectionResult, SkillInfo, SkillMetadata, SkillReference};
 
+// INVARIANT: These regex patterns are compile-time literals, validated by tests.
 static SKILL_REF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"@([a-zA-Z][a-zA-Z0-9_-]*)").unwrap());
 
+// INVARIANT: Compile-time literal regex pattern.
 static MULTI_SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" {2,}").unwrap());
 
 /// Extract `@skill-name` references from a user prompt.
@@ -196,23 +198,21 @@ pub fn build_message_with_skill_context(prompt: &str, skill_context: &str) -> St
 fn build_tool_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
 
-    if let Some(allowed) = &fm.allowed_tools {
-        if !allowed.is_empty() {
+    if let Some(allowed) = &fm.allowed_tools
+        && !allowed.is_empty() {
             let tools = allowed.join(", ");
             return format!(
                 "<skill-tool-preferences>This skill works best with: {tools}. Prefer these tools.</skill-tool-preferences>"
             );
         }
-    }
 
-    if let Some(denied) = &fm.denied_tools {
-        if !denied.is_empty() {
+    if let Some(denied) = &fm.denied_tools
+        && !denied.is_empty() {
             let tools = denied.join(", ");
             return format!(
                 "<skill-tool-restrictions>This skill must NOT use: {tools}. These tools are restricted.</skill-tool-restrictions>"
             );
         }
-    }
 
     String::new()
 }

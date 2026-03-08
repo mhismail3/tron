@@ -133,8 +133,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
-    use tron_llm::models::types::Provider as ProviderType;
-    use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
+    use tron_llm::models::types::Provider as ProviderKind;
+    use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::traits::{ToolContext, TronTool};
 
     fn default_opts(provider: Arc<dyn Provider>, tools: ToolRegistry) -> CreateAgentOpts {
@@ -158,8 +158,8 @@ mod tests {
     struct MockProvider;
     #[async_trait]
     impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock"

@@ -13,7 +13,7 @@ where
     D: Deserializer<'de>,
     T: Default + Deserialize<'de>,
 {
-    Option::<T>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
+    Option::<T>::deserialize(deserializer).map(std::option::Option::unwrap_or_default)
 }
 
 /// Payload for `memory.ledger` events.

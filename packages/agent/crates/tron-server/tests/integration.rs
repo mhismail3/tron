@@ -16,7 +16,7 @@ use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use tron_core::messages::TokenUsage;
 use tron_events::{ConnectionConfig, EventStore};
-use tron_llm::models::types::Provider as ProviderType;
+use tron_llm::models::types::Provider as ProviderKind;
 use tron_llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
@@ -115,8 +115,8 @@ impl TextOnlyProvider {
 }
 #[async_trait]
 impl Provider for TextOnlyProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Anthropic
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
     }
     fn model(&self) -> &str {
         "mock"
@@ -151,8 +151,8 @@ impl Provider for TextOnlyProvider {
 struct ErrorProvider;
 #[async_trait]
 impl Provider for ErrorProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Anthropic
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
     }
     fn model(&self) -> &str {
         "mock"
@@ -171,8 +171,8 @@ impl Provider for ErrorProvider {
 struct SlowProvider;
 #[async_trait]
 impl Provider for SlowProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Anthropic
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
     }
     fn model(&self) -> &str {
         "mock"

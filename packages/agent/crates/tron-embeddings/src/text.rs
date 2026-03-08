@@ -101,12 +101,12 @@ pub fn build_lesson_texts(payload: &MemoryLedgerPayload) -> Vec<String> {
         .collect()
 }
 
-/// Wrap text with EmbeddingGemma document prefix for indexing.
+/// Wrap text with `EmbeddingGemma` document prefix for indexing.
 pub fn with_document_prefix(text: &str) -> String {
     format!("title: none | text: {text}")
 }
 
-/// Wrap text with EmbeddingGemma query prefix for search.
+/// Wrap text with `EmbeddingGemma` query prefix for search.
 pub fn with_query_prefix(text: &str) -> String {
     format!("task: search result | query: {text}")
 }

@@ -119,26 +119,26 @@ pub fn format_tokens(n: u64) -> String {
 
 /// Detect provider type from a model identifier string.
 #[must_use]
-pub fn detect_provider(model: &str) -> tron_core::messages::ProviderType {
-    use tron_core::messages::ProviderType;
+pub fn detect_provider(model: &str) -> tron_core::messages::Provider {
+    use tron_core::messages::Provider;
     let m = model.to_lowercase();
     if m.contains("claude") {
-        ProviderType::Anthropic
+        Provider::Anthropic
     } else if m.contains("codex")
         || m.starts_with("o1")
         || m.starts_with("o3")
         || m.starts_with("o4")
     {
-        ProviderType::OpenAiCodex
+        Provider::OpenAiCodex
     } else if m.contains("gpt") || m.contains("openai/") {
-        ProviderType::OpenAi
+        Provider::OpenAi
     } else if m.contains("gemini") || m.contains("google/") {
-        ProviderType::Google
+        Provider::Google
     } else if m.contains("minimax") {
-        ProviderType::MiniMax
+        Provider::MiniMax
     } else {
         // Default to Anthropic
-        ProviderType::Anthropic
+        Provider::Anthropic
     }
 }
 
@@ -320,7 +320,7 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron_core::messages::ProviderType;
+    use tron_core::messages::Provider;
 
     // ── Pricing tier lookup ──
 
@@ -527,37 +527,37 @@ mod tests {
 
     #[test]
     fn detect_anthropic() {
-        assert_eq!(detect_provider("claude-opus-4-6"), ProviderType::Anthropic);
+        assert_eq!(detect_provider("claude-opus-4-6"), Provider::Anthropic);
         assert_eq!(
             detect_provider("claude-sonnet-4-5-20250929"),
-            ProviderType::Anthropic
+            Provider::Anthropic
         );
     }
 
     #[test]
     fn detect_google() {
-        assert_eq!(detect_provider("gemini-2-5-pro"), ProviderType::Google);
+        assert_eq!(detect_provider("gemini-2-5-pro"), Provider::Google);
     }
 
     #[test]
     fn detect_openai() {
-        assert_eq!(detect_provider("gpt-4.1"), ProviderType::OpenAi);
+        assert_eq!(detect_provider("gpt-4.1"), Provider::OpenAi);
     }
 
     #[test]
     fn detect_openai_codex() {
-        assert_eq!(detect_provider("o3"), ProviderType::OpenAiCodex);
-        assert_eq!(detect_provider("o4-mini"), ProviderType::OpenAiCodex);
+        assert_eq!(detect_provider("o3"), Provider::OpenAiCodex);
+        assert_eq!(detect_provider("o4-mini"), Provider::OpenAiCodex);
     }
 
     #[test]
     fn detect_minimax() {
-        assert_eq!(detect_provider("MiniMax-M2.5"), ProviderType::MiniMax);
+        assert_eq!(detect_provider("MiniMax-M2.5"), Provider::MiniMax);
     }
 
     #[test]
     fn detect_minimax_lowercase() {
-        assert_eq!(detect_provider("minimax-m2.5"), ProviderType::MiniMax);
+        assert_eq!(detect_provider("minimax-m2.5"), Provider::MiniMax);
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
     fn detect_unknown_defaults_to_anthropic() {
         assert_eq!(
             detect_provider("some-unknown-model"),
-            ProviderType::Anthropic
+            Provider::Anthropic
         );
     }
 

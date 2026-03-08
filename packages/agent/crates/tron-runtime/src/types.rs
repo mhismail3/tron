@@ -54,8 +54,7 @@ impl ReasoningLevel {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
-            Self::XHigh => "xhigh",
-            Self::Max => "xhigh",
+            Self::XHigh | Self::Max => "xhigh",
         }
     }
 
@@ -119,7 +118,7 @@ impl ReasoningLevel {
 pub struct AgentConfig {
     /// LLM provider type override.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_type: Option<tron_core::messages::ProviderType>,
+    pub provider_type: Option<tron_core::messages::Provider>,
     /// Model identifier.
     pub model: String,
     /// System prompt override.

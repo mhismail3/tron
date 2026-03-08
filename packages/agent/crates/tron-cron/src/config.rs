@@ -1,3 +1,4 @@
+#![allow(unused_results)]
 //! JSON configuration file management.
 //!
 //! The canonical job definitions live in `~/.tron/artifacts/automations.json`.
@@ -35,8 +36,8 @@ pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronEr
                     error = %primary_err,
                     "automations.json corrupt, attempting recovery from backup"
                 );
-                if let Ok(bak_content) = std::fs::read_to_string(backup_path) {
-                    if let Ok(config) = serde_json::from_str::<CronConfig>(&bak_content) {
+                if let Ok(bak_content) = std::fs::read_to_string(backup_path)
+                    && let Ok(config) = serde_json::from_str::<CronConfig>(&bak_content) {
                         tracing::info!("recovered {} jobs from backup", config.jobs.len());
                         // Restore the primary file from backup
                         if let Err(e) = std::fs::copy(backup_path, path) {
@@ -44,7 +45,6 @@ pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronEr
                         }
                         return Ok(config);
                     }
-                }
             }
             Err(primary_err.into())
         }
@@ -53,7 +53,7 @@ pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronEr
 
 /// Atomically write config to a JSON file.
 ///
-/// Strategy: write .tmp → sync_all → backup existing → atomic rename.
+/// Strategy: write .tmp → `sync_all` → backup existing → atomic rename.
 pub fn save_config(path: &Path, backup_path: &Path, config: &CronConfig) -> Result<(), CronError> {
     // Reject symlinks
     if path.exists() {

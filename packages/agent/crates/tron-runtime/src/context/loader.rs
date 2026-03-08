@@ -110,11 +110,10 @@ impl ContextLoader {
         let target = target_dir.to_path_buf();
 
         // Check cache freshness
-        if let Some(cached) = self.cache.get(&target) {
-            if is_cache_fresh(&cached.file_mtimes) {
+        if let Some(cached) = self.cache.get(&target)
+            && is_cache_fresh(&cached.file_mtimes) {
                 return Ok(cached.result.clone());
             }
-        }
 
         let result = self.load_fresh(target_dir)?;
 
@@ -304,13 +303,11 @@ pub fn load_global_rules(home_dir: &Path) -> Option<String> {
     let tron_dir = home_dir.join(".tron");
     for name in GLOBAL_RULE_NAMES {
         let path = tron_dir.join(name);
-        if path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if !content.trim().is_empty() {
+        if path.is_file()
+            && let Ok(content) = std::fs::read_to_string(&path)
+                && !content.trim().is_empty() {
                     return Some(content);
                 }
-            }
-        }
     }
     None
 }

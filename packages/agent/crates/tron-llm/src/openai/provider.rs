@@ -24,7 +24,6 @@ use tracing::{debug, error, info, instrument};
 
 use crate::compose_context_parts;
 use crate::provider::ReasoningEffort;
-use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
@@ -353,11 +352,10 @@ impl OpenAIProvider {
             );
 
             let account_id = extract_account_id(&tokens.access_token);
-            if !account_id.is_empty() {
-                if let Ok(val) = HeaderValue::from_str(&account_id) {
+            if !account_id.is_empty()
+                && let Ok(val) = HeaderValue::from_str(&account_id) {
                     let _ = headers.insert("chatgpt-account-id", val);
                 }
-            }
         }
 
         Ok(headers)
@@ -399,8 +397,8 @@ impl OpenAIProvider {
         let mut input = convert_to_responses_input(&context.messages);
 
         // Prepend tool clarification on first turn (before any assistant messages)
-        if let Some(ref ctx_tools) = context.tools {
-            if !ctx_tools.is_empty() && Self::is_first_turn(&context.messages) {
+        if let Some(ref ctx_tools) = context.tools
+            && !ctx_tools.is_empty() && Self::is_first_turn(&context.messages) {
                 let clarification = generate_tool_clarification_message(
                     ctx_tools,
                     context.working_directory.as_deref(),
@@ -417,7 +415,6 @@ impl OpenAIProvider {
                 );
                 debug!("Prepended tool clarification message (first turn)");
             }
-        }
 
         // Inject context parts as developer message (rules, memory, skills, tasks)
         let context_parts = compose_context_parts(context);
@@ -547,8 +544,8 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl Provider for OpenAIProvider {
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::OpenAi
+    fn provider_type(&self) -> tron_core::messages::Provider {
+        tron_core::messages::Provider::OpenAi
     }
 
     fn model(&self) -> &str {
@@ -613,7 +610,7 @@ mod tests {
     #[test]
     fn provider_type_is_openai() {
         let provider = OpenAIProvider::new(test_config());
-        assert_eq!(provider.provider_type(), ProviderType::OpenAi);
+        assert_eq!(provider.provider_type(), tron_core::messages::Provider::OpenAi);
     }
 
     #[test]

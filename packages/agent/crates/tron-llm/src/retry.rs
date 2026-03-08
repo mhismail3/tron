@@ -112,13 +112,12 @@ pub fn with_provider_retry(
                     }
 
                     // Check cancellation
-                    if let Some(ref token) = config.cancel_token {
-                        if token.is_cancelled() {
+                    if let Some(ref token) = config.cancel_token
+                        && token.is_cancelled() {
                             let v: Item = Err(ProviderError::Cancelled);
                             yield v;
                             break;
                         }
-                    }
 
                     attempt += 1;
                     let backoff_ms = tron_core::retry::calculate_backoff_delay(

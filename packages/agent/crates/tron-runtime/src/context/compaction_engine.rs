@@ -259,11 +259,10 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
     /// Trigger callback if compaction is needed.
     pub fn trigger_if_needed(&self) {
-        if self.should_compact() {
-            if let Some(cb) = &self.on_needed_callback {
+        if self.should_compact()
+            && let Some(cb) = &self.on_needed_callback {
                 cb();
             }
-        }
     }
 
     // ─── Private helpers ─────────────────────────────────────────────────

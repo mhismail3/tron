@@ -11,11 +11,13 @@ use crate::traits::{DeviceDelegate, ToolContext, TronTool};
 use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 
+/// Read-only contact lookup via iOS Contacts framework.
 pub struct SearchContactsTool {
     delegate: Arc<dyn DeviceDelegate>,
 }
 
 impl SearchContactsTool {
+    /// Create a new contacts search tool with the given device delegate.
     pub fn new(delegate: Arc<dyn DeviceDelegate>) -> Self {
         Self { delegate }
     }
@@ -65,7 +67,7 @@ impl TronTool for SearchContactsTool {
 
         let limit = params
             .get("limit")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(10)
             .min(50);
 

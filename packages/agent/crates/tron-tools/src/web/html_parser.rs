@@ -65,14 +65,12 @@ fn extract_title(doc: &Html) -> String {
     if let Some(og) = Selector::parse(r#"meta[property="og:title"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-    {
-        if let Some(content) = og.value().attr("content") {
+        && let Some(content) = og.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {
                 return text;
             }
         }
-    }
 
     if let Some(h1) = Selector::parse("h1")
         .ok()
@@ -92,26 +90,22 @@ fn extract_description(doc: &Html) -> Option<String> {
     if let Some(meta) = Selector::parse(r#"meta[name="description"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-    {
-        if let Some(content) = meta.value().attr("content") {
+        && let Some(content) = meta.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {
                 return Some(text);
             }
         }
-    }
 
     if let Some(og) = Selector::parse(r#"meta[property="og:description"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-    {
-        if let Some(content) = og.value().attr("content") {
+        && let Some(content) = og.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {
                 return Some(text);
             }
         }
-    }
 
     None
 }

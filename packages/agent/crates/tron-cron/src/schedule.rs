@@ -1,3 +1,4 @@
+#![allow(unused_results)]
 //! Cron expression parsing and next-run computation.
 //!
 //! Custom 5-field cron parser that handles DST transitions safely.
@@ -65,6 +66,7 @@ impl CronExpression {
         let mut date = start.date();
         let start_time = start.time();
 
+        // INVARIANT: (0, 0, 0) is always a valid time.
         while NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap()) <= cap {
             // Check month
             if !self.months.contains(&date.month()) {
@@ -107,7 +109,6 @@ impl CronExpression {
                         chrono::LocalResult::None => {
                             // Spring-forward gap — this time doesn't exist.
                             // Skip to the end of the gap by using the UTC equivalent.
-                            continue;
                         }
                     }
                 }
@@ -123,6 +124,7 @@ impl CronExpression {
 /// Advance a `NaiveDateTime` to the start of the next minute.
 fn advance_one_minute(dt: NaiveDateTime) -> NaiveDateTime {
     let next = dt + chrono::Duration::minutes(1);
+    // INVARIANT: hour/minute from a valid NaiveDateTime are always valid time components.
     NaiveDateTime::new(
         next.date(),
         NaiveTime::from_hms_opt(next.hour(), next.minute(), 0).unwrap(),

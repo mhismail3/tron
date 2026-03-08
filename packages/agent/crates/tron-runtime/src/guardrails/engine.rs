@@ -109,11 +109,10 @@ impl GuardrailEngine {
         }
 
         // Check user overrides
-        if let Some(override_) = self.rule_overrides.get(rule_id) {
-            if let Some(enabled) = override_.enabled {
+        if let Some(override_) = self.rule_overrides.get(rule_id)
+            && let Some(enabled) = override_.enabled {
                 return enabled;
             }
-        }
 
         rule.base().enabled
     }

@@ -93,9 +93,7 @@ pub enum DeployError {
 
 /// Read the deployed commit from `artifacts/deployment/deployed-commit`.
 pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
-    std::fs::read_to_string(artifacts_dir.join("deployed-commit"))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
+    std::fs::read_to_string(artifacts_dir.join("deployed-commit")).map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
 }
 
 /// Read the restart sentinel if it exists.
@@ -109,7 +107,7 @@ pub fn read_sentinel(artifacts_dir: &Path) -> Option<RestartSentinel> {
 pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
     std::fs::create_dir_all(artifacts_dir)?;
     let json = serde_json::to_string_pretty(sentinel)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     std::fs::write(artifacts_dir.join("restart-sentinel.json"), json)
 }
 
@@ -131,7 +129,7 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     );
     let json = serde_json::to_string_pretty(&sentinel)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     std::fs::write(&path, json)?;
     Ok(Some(sentinel))
 }
@@ -148,7 +146,7 @@ pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -
         "error": null,
     });
     let pretty = serde_json::to_string_pretty(&json)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     std::fs::create_dir_all(artifacts_dir)?;
     std::fs::write(artifacts_dir.join("last-deployment.json"), pretty)
 }
@@ -316,17 +314,17 @@ pub async fn restart_handler(
     }
 
     // Read commits
-    let previous_commit = read_deployed_commit(&deploy_dir);
+    let previous_commit = read_deployed_commit(deploy_dir);
     let new_commit = workspace_root
         .as_deref()
-        .and_then(|w| git_head_commit(w))
+        .and_then(git_head_commit)
         .unwrap_or_else(|| "unknown".to_string());
 
     // Ensure deployment dir exists
     let _ = tokio::fs::create_dir_all(&deploy_dir).await;
 
     // Atomic binary install (backup + copy)
-    let _ = atomic_binary_install(&source, &installed_binary, &deploy_dir)
+    let _ = atomic_binary_install(&source, installed_binary, deploy_dir)
         .await
         .map_err(|e| {
             state
@@ -351,7 +349,7 @@ pub async fn restart_handler(
         status: "restarting".to_string(),
         completed_at: None,
     };
-    if let Err(e) = write_sentinel(&deploy_dir, &sentinel) {
+    if let Err(e) = write_sentinel(deploy_dir, &sentinel) {
         warn!(error = %e, "failed to write restart sentinel (non-fatal)");
     }
 
@@ -362,6 +360,7 @@ pub async fn restart_handler(
     let shutdown = state.shutdown.clone();
     let orchestrator = state.rpc_context.orchestrator.clone();
 
+    #[allow(clippy::let_underscore_future)]
     let _ = tokio::spawn(async move {
         // 1. Wait for response to reach client + agent to finish turn
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;

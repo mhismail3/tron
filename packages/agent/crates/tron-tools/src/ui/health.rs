@@ -1,4 +1,4 @@
-//! `ReadHealth` tool — read-only HealthKit data via iOS.
+//! `ReadHealth` tool — read-only `HealthKit` data via iOS.
 
 use std::sync::Arc;
 
@@ -11,11 +11,13 @@ use crate::traits::{DeviceDelegate, ToolContext, TronTool};
 use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 
+/// Read-only `HealthKit` data access via iOS.
 pub struct ReadHealthTool {
     delegate: Arc<dyn DeviceDelegate>,
 }
 
 impl ReadHealthTool {
+    /// Create a new health data tool with the given device delegate.
     pub fn new(delegate: Arc<dyn DeviceDelegate>) -> Self {
         Self { delegate }
     }

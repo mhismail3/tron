@@ -159,8 +159,8 @@ pub fn process_stream_event(
             if state.has_reasoning_text {
                 return events;
             }
-            if let Some(delta) = &event.delta {
-                if !state.seen_thinking_texts.contains(delta.as_str()) {
+            if let Some(delta) = &event.delta
+                && !state.seen_thinking_texts.contains(delta.as_str()) {
                     let _ = state.seen_thinking_texts.insert(delta.clone());
                     if !state.thinking_started {
                         state.thinking_started = true;
@@ -171,19 +171,17 @@ pub fn process_stream_event(
                         delta: delta.clone(),
                     });
                 }
-            }
         }
 
         SseEventType::FunctionCallArgsDelta => {
-            if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta) {
-                if let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
+            if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta)
+                && let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
                     tc.args.push_str(delta);
                     events.push(StreamEvent::ToolCallDelta {
                         tool_call_id: call_id.clone(),
                         arguments_delta: delta.clone(),
                     });
                 }
-            }
         }
 
         SseEventType::ToolSearchCallSearching => {
@@ -228,15 +226,14 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     }
     if let Some(summary) = &item.summary {
         for part in summary {
-            if part.content_type == "summary_text" {
-                if let Some(text) = &part.text {
+            if part.content_type == "summary_text"
+                && let Some(text) = &part.text {
                     let _ = state.seen_thinking_texts.insert(text.clone());
                     state.accumulated_thinking.push_str(text);
                     events.push(StreamEvent::ThinkingDelta {
                         delta: text.clone(),
                     });
                 }
-            }
         }
     }
     events
@@ -328,14 +325,12 @@ fn merge_completed_output_items(
 fn merge_message_item(item: &super::types::ResponsesOutputItem, state: &mut StreamState) {
     if let Some(content) = &item.content {
         for c in content {
-            if c.content_type == "output_text" {
-                if let Some(text) = &c.text {
-                    if !state.text_started {
+            if c.content_type == "output_text"
+                && let Some(text) = &c.text
+                    && !state.text_started {
                         state.text_started = true;
                         state.accumulated_text.clone_from(text);
                     }
-                }
-            }
         }
     }
 }
@@ -351,15 +346,14 @@ fn merge_reasoning_item(
     }
     if let Some(summary) = &item.summary {
         for s in summary {
-            if s.content_type == "summary_text" {
-                if let Some(text) = &s.text {
+            if s.content_type == "summary_text"
+                && let Some(text) = &s.text {
                     if !state.thinking_started {
                         state.thinking_started = true;
                         events.push(StreamEvent::ThinkingStart);
                     }
                     state.accumulated_thinking.clone_from(text);
                 }
-            }
         }
     }
 }
@@ -370,16 +364,14 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
         return;
     };
     if let Some(existing) = state.tool_calls.get_mut(call_id.as_str()) {
-        if let Some(arguments) = &item.arguments {
-            if existing.args.is_empty() {
+        if let Some(arguments) = &item.arguments
+            && existing.args.is_empty() {
                 existing.args.clone_from(arguments);
             }
-        }
-        if let Some(name) = &item.name {
-            if existing.name.is_empty() {
+        if let Some(name) = &item.name
+            && existing.name.is_empty() {
                 existing.name.clone_from(name);
             }
-        }
     } else {
         let _ = state.tool_calls.insert(
             call_id.clone(),
@@ -436,7 +428,7 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
             token_usage: Some(TokenUsage {
                 input_tokens: state.input_tokens,
                 output_tokens: state.output_tokens,
-                provider_type: Some(tron_core::messages::ProviderType::OpenAi),
+                provider_type: Some(tron_core::messages::Provider::OpenAi),
                 ..TokenUsage::default()
             }),
         },
@@ -1033,7 +1025,7 @@ mod tests {
         if let Some(StreamEvent::Done { message, .. }) = done {
             assert_eq!(
                 message.token_usage.as_ref().unwrap().provider_type,
-                Some(tron_core::messages::ProviderType::OpenAi)
+                Some(tron_core::messages::Provider::OpenAi)
             );
         }
     }

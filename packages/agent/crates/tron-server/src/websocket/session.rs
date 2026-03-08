@@ -158,8 +158,7 @@ pub async fn run_ws_session(
         // Bind session on create/resume
         if (result.method == "session.create" || result.method == "session.resume")
             && result.response.success
-        {
-            if let Some(sid) = result
+            && let Some(sid) = result
                 .response
                 .result
                 .as_ref()
@@ -169,7 +168,6 @@ pub async fn run_ws_session(
                 connection.bind_session(sid);
                 debug!(client_id, session_id = sid, "session bound to client");
             }
-        }
 
         if !connection.send(Arc::new(result.response_json)) {
             debug!(

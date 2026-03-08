@@ -29,11 +29,10 @@ pub async fn merge_session(
     };
 
     // On failure, try to restore original branch
-    if result.as_ref().is_ok_and(|r| !r.success) {
-        if let Some(ref branch) = original_branch {
+    if result.as_ref().is_ok_and(|r| !r.success)
+        && let Some(ref branch) = original_branch {
             let _ = git.checkout(repo_root, branch).await;
         }
-    }
 
     result
 }

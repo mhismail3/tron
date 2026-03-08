@@ -30,8 +30,9 @@ pub struct RecoveredWorktree {
 ///    - Auto-commit any changes with `[auto-recovered]` message
 ///    - Remove the worktree
 /// 3. Prune stale refs
+#[allow(clippy::implicit_hasher)]
 pub async fn recover_repo(
-    repo_root: &PathBuf,
+    repo_root: &std::path::Path,
     active_sessions: &HashSet<String>,
     config: &WorktreeConfig,
     git: &GitExecutor,
@@ -70,8 +71,8 @@ pub async fn recover_repo(
         let mut auto_committed = false;
 
         // Auto-commit any changes
-        if wt_path.exists() {
-            if let Ok(true) = git.has_changes(&wt_path).await {
+        if wt_path.exists()
+            && let Ok(true) = git.has_changes(&wt_path).await {
                 match git
                     .commit_all(&wt_path, "[auto-recovered] orphaned session changes")
                     .await
@@ -85,7 +86,6 @@ pub async fn recover_repo(
                     }
                 }
             }
-        }
 
         // Remove the worktree
         if wt_path.exists() {

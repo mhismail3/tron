@@ -33,11 +33,11 @@ pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
 
 /// Which `OpenAI` API endpoint a model targets.
 ///
-/// Codex models use the ChatGPT backend; GPT 5.4+ use the standard Platform API.
+/// Codex models use the `ChatGPT` backend; GPT 5.4+ use the standard Platform API.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiEndpoint {
-    /// ChatGPT Codex backend (`chatgpt.com/backend-api/codex/responses`).
+    /// `ChatGPT` Codex backend (`chatgpt.com/backend-api/codex/responses`).
     #[default]
     Codex,
     /// Standard Platform API (`api.openai.com/v1/responses`).

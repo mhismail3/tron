@@ -77,9 +77,9 @@ impl PathRule {
             }
 
             // Check hidden paths
-            if self.block_hidden {
-                if let Some(basename) = Path::new(value).file_name().and_then(|n| n.to_str()) {
-                    if basename.starts_with('.') {
+            if self.block_hidden
+                && let Some(basename) = Path::new(value).file_name().and_then(|n| n.to_str())
+                    && basename.starts_with('.') {
                         return RuleEvaluationResult::triggered(
                             &self.base.id,
                             self.base.severity,
@@ -87,8 +87,6 @@ impl PathRule {
                         )
                         .with_details(serde_json::json!({ "path": value }));
                     }
-                }
-            }
 
             // Check protected paths
             let absolute_value = to_absolute_path(value, &homedir);
@@ -176,11 +174,10 @@ fn has_hidden_mkdir(command: &str) -> bool {
     for caps in pattern.captures_iter(command) {
         if let Some(dir) = caps.get(1).map(|m| m.as_str()) {
             // Check if the last component starts with .
-            if let Some(basename) = Path::new(dir).file_name().and_then(|n| n.to_str()) {
-                if basename.starts_with('.') {
+            if let Some(basename) = Path::new(dir).file_name().and_then(|n| n.to_str())
+                && basename.starts_with('.') {
                     return true;
                 }
-            }
         }
     }
     false

@@ -19,7 +19,7 @@ use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 #[derive(Clone, Debug, Default)]
 pub struct StreamState {
     /// Provider type for token attribution in Done events.
-    pub provider_type: tron_core::messages::ProviderType,
+    pub provider_type: tron_core::messages::Provider,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
     /// Tool call ID for the current `tool_use` block.
@@ -65,7 +65,7 @@ pub enum BlockType {
 
 /// Create a new stream state for a specific provider.
 #[must_use]
-pub fn create_stream_state_for(provider_type: tron_core::messages::ProviderType) -> StreamState {
+pub fn create_stream_state_for(provider_type: tron_core::messages::Provider) -> StreamState {
     StreamState {
         provider_type,
         ..StreamState::default()
@@ -75,7 +75,7 @@ pub fn create_stream_state_for(provider_type: tron_core::messages::ProviderType)
 /// Create a new stream state (defaults to Anthropic).
 #[must_use]
 pub fn create_stream_state() -> StreamState {
-    create_stream_state_for(tron_core::messages::ProviderType::Anthropic)
+    create_stream_state_for(tron_core::messages::Provider::Anthropic)
 }
 
 /// Process a single Anthropic SSE event and return zero or more [`StreamEvent`]s.
@@ -295,7 +295,7 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron_core::messages::ProviderType;
+    use tron_core::messages::Provider;
 
     use crate::anthropic::types::{
         SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
@@ -318,24 +318,24 @@ mod tests {
         let state = create_stream_state();
         assert_eq!(
             state.provider_type,
-            tron_core::messages::ProviderType::Anthropic
+            tron_core::messages::Provider::Anthropic
         );
     }
 
     #[test]
     fn stream_state_for_minimax() {
         let state =
-            create_stream_state_for(tron_core::messages::ProviderType::MiniMax);
+            create_stream_state_for(tron_core::messages::Provider::MiniMax);
         assert_eq!(
             state.provider_type,
-            tron_core::messages::ProviderType::MiniMax
+            tron_core::messages::Provider::MiniMax
         );
     }
 
     #[test]
     fn done_event_uses_state_provider_type() {
         let mut state =
-            create_stream_state_for(tron_core::messages::ProviderType::MiniMax);
+            create_stream_state_for(tron_core::messages::Provider::MiniMax);
         state.input_tokens = 100;
         state.output_tokens = 50;
         let event = build_done_event(&mut state);
@@ -344,7 +344,7 @@ mod tests {
                 let usage = message.token_usage.as_ref().unwrap();
                 assert_eq!(
                     usage.provider_type,
-                    Some(tron_core::messages::ProviderType::MiniMax)
+                    Some(tron_core::messages::Provider::MiniMax)
                 );
             }
             _ => panic!("expected Done"),
@@ -706,7 +706,7 @@ mod tests {
                 let usage = message.token_usage.as_ref().unwrap();
                 assert_eq!(usage.input_tokens, 100);
                 assert_eq!(usage.output_tokens, 50);
-                assert_eq!(usage.provider_type, Some(ProviderType::Anthropic));
+                assert_eq!(usage.provider_type, Some(Provider::Anthropic));
             }
             _ => panic!("expected Done"),
         }

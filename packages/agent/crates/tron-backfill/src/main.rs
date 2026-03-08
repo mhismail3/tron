@@ -17,7 +17,7 @@ use tracing::info;
 #[derive(Parser)]
 #[command(name = "tron-backfill", about = "Import LEDGER.jsonl and embed memory entries")]
 struct Cli {
-    /// Path to the SQLite database file.
+    /// Path to the `SQLite` database file.
     #[arg(long, global = true)]
     db_path: Option<PathBuf>,
 
@@ -44,7 +44,7 @@ enum Command {
 
     /// Embed all unembedded memory.ledger events.
     Embed {
-        /// Drop and recreate the memory_vectors table before embedding.
+        /// Drop and recreate the `memory_vectors` table before embedding.
         #[arg(long)]
         force: bool,
     },
@@ -72,28 +72,28 @@ struct LedgerEntry {
     _meta: LedgerMeta,
     front: LedgerFront,
     body: LedgerBody,
-    #[allow(dead_code)]
-    history: Option<LedgerHistory>,
+    #[serde(rename = "history")]
+    _history: Option<LedgerHistory>,
 }
 
 #[derive(serde::Deserialize)]
 struct LedgerHistory {
-    #[allow(dead_code)]
-    embedded: Option<bool>,
+    #[serde(rename = "embedded")]
+    _embedded: Option<bool>,
 }
 
 #[derive(serde::Deserialize)]
 struct LedgerMeta {
     id: String,
     ts: String,
-    #[allow(dead_code)]
-    v: u32,
+    #[serde(rename = "v")]
+    _v: u32,
 }
 
 #[derive(serde::Deserialize)]
 struct LedgerFront {
-    #[allow(dead_code)]
-    project: Option<String>,
+    #[serde(rename = "project")]
+    _project: Option<String>,
     path: Option<String>,
     title: Option<String>,
     #[serde(rename = "type")]
@@ -106,8 +106,8 @@ struct LedgerFront {
 struct LedgerBody {
     input: Option<String>,
     actions: Option<Vec<String>>,
-    #[allow(dead_code)]
-    files: Option<serde_json::Value>,
+    #[serde(rename = "files")]
+    _files: Option<serde_json::Value>,
     decisions: Option<Vec<serde_json::Value>>,
     lessons: Option<Vec<String>>,
 }
@@ -142,9 +142,8 @@ fn open_store(
 
 /// Check if a ledger entry with the given meta ID already exists in the DB.
 fn has_ledger_entry(store: &tron_events::EventStore, meta_id: &str) -> bool {
-    let conn = match store.pool().get() {
-        Ok(c) => c,
-        Err(_) => return false,
+    let Ok(conn) = store.pool().get() else {
+        return false;
     };
     let id_pattern = format!("%\"id\":\"{meta_id}\"%");
     let count: i64 = conn
@@ -268,7 +267,7 @@ fn run_import(
 
     // End all backfill sessions so they don't appear in the session list.
     // Events retain their workspace_id — memory recall doesn't need active sessions.
-    for (_, sid) in &workspace_sessions {
+    for sid in workspace_sessions.values() {
         let _ = store.end_session(sid);
     }
 
@@ -328,7 +327,7 @@ async fn run_embed(
                 row.get::<_, String>(2)?,
             ))
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
     drop(stmt);
     drop(pool_conn);

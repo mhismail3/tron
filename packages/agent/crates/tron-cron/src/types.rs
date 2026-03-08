@@ -289,7 +289,7 @@ pub enum RunStatus {
 }
 
 impl RunStatus {
-    /// SQLite column value.
+    /// `SQLite` column value.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -301,8 +301,8 @@ impl RunStatus {
         }
     }
 
-    /// Parse from SQLite column value.
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse from `SQLite` column value.
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "running" => Some(Self::Running),
             "completed" => Some(Self::Completed),
@@ -683,14 +683,14 @@ mod tests {
         ];
         for s in &statuses {
             let str_val = s.as_str();
-            let back = RunStatus::from_str(str_val).unwrap();
+            let back = RunStatus::parse(str_val).unwrap();
             assert_eq!(s, &back);
         }
     }
 
     #[test]
     fn run_status_unknown_returns_none() {
-        assert!(RunStatus::from_str("unknown").is_none());
+        assert!(RunStatus::parse("unknown").is_none());
     }
 
     #[test]

@@ -92,8 +92,8 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 ).await.unwrap_or_default();
 
                 // 2b. Cross-project search (vector-only, excludes current workspace)
-                if let Some(ws) = workspace_id {
-                    if cross_project_top_k > 0 {
+                if let Some(ws) = workspace_id
+                    && cross_project_top_k > 0 {
                         let cross_opts = tron_embeddings::SearchOptions {
                             limit: cross_project_top_k * 2,
                             exclude_workspace_id: Some(ws.to_string()),
@@ -108,18 +108,16 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                             all_results.append(&mut cross);
                         }
                     }
-                }
 
                 if !all_results.is_empty() {
                     // 3. Apply temporal decay
                     let now = chrono::Utc::now();
                     let mut timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> = HashMap::new();
                     for r in &all_results {
-                        if let Ok(Some(event)) = self.store.get_event(&r.event_id) {
-                            if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
+                        if let Ok(Some(event)) = self.store.get_event(&r.event_id)
+                            && let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
                                 let _ = timestamps.insert(r.event_id.clone(), ts.with_timezone(&chrono::Utc));
                             }
-                        }
                     }
                     apply_temporal_decay(&mut all_results, &timestamps, half_life_days, now);
 

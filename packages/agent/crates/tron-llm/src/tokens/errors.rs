@@ -1,6 +1,6 @@
 //! Token subsystem error types.
 
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 /// Errors that can occur during token processing.
 #[derive(Debug, thiserror::Error)]
@@ -9,7 +9,7 @@ pub enum TokenError {
     #[error("missing token data from {provider:?} on turn {turn} (session {session_id})")]
     MissingData {
         /// Which provider failed to report.
-        provider: Option<ProviderType>,
+        provider: Option<Provider>,
         /// Turn number where the error occurred.
         turn: u64,
         /// Session identifier.
@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn missing_data_display() {
         let err = TokenError::MissingData {
-            provider: Some(ProviderType::Anthropic),
+            provider: Some(Provider::Anthropic),
             turn: 3,
             session_id: "sess_123".to_string(),
             has_partial_data: false,

@@ -101,11 +101,10 @@ fn extract_text_from_payload(payload_str: &str) -> String {
         Some(serde_json::Value::Array(arr)) => {
             let mut texts = Vec::new();
             for block in arr {
-                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                if block.get("type").and_then(|t| t.as_str()) == Some("text")
+                    && let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                         texts.push(text);
                     }
-                }
             }
             texts.join("")
         }

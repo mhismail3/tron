@@ -33,8 +33,8 @@ impl ResourceRule {
             _ => return RuleEvaluationResult::not_triggered(&self.base.id),
         };
 
-        if let Some(max) = self.max_value {
-            if value > max {
+        if let Some(max) = self.max_value
+            && value > max {
                 return RuleEvaluationResult::triggered(
                     &self.base.id,
                     self.base.severity,
@@ -48,10 +48,9 @@ impl ResourceRule {
                     "maxValue": max,
                 }));
             }
-        }
 
-        if let Some(min) = self.min_value {
-            if value < min {
+        if let Some(min) = self.min_value
+            && value < min {
                 return RuleEvaluationResult::triggered(
                     &self.base.id,
                     self.base.severity,
@@ -62,7 +61,6 @@ impl ResourceRule {
                     "minValue": min,
                 }));
             }
-        }
 
         RuleEvaluationResult::not_triggered(&self.base.id)
     }

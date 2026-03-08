@@ -1,4 +1,5 @@
-//! SQLite repository for cron jobs and runs.
+#![allow(unused_results)]
+//! `SQLite` repository for cron jobs and runs.
 //!
 //! Handles CRUD operations, runtime state management, and garbage collection.
 //! All operations use the shared `tron.db` connection pool.
@@ -10,7 +11,7 @@ use tron_events::ConnectionPool;
 use crate::errors::CronError;
 use crate::types::{CronJob, CronRun, DeliveryOutcome, JobRuntimeState, RunStatus};
 
-/// Insert or update a job definition in SQLite (from config file sync).
+/// Insert or update a job definition in `SQLite` (from config file sync).
 pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError> {
     let conn = pool.get()?;
     let schedule_json = serde_json::to_string(&job.schedule)?;
@@ -93,7 +94,7 @@ pub fn list_job_ids(pool: &ConnectionPool) -> Result<Vec<String>, CronError> {
     Ok(ids)
 }
 
-/// List all jobs from the database (for SQLite fallback when config is corrupt).
+/// List all jobs from the database (for `SQLite` fallback when config is corrupt).
 pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
@@ -117,7 +118,7 @@ pub fn delete_job(pool: &ConnectionPool, job_id: &str) -> Result<bool, CronError
     Ok(affected > 0)
 }
 
-/// Check if a job name already exists (excluding the given job_id).
+/// Check if a job name already exists (excluding the given `job_id`).
 pub fn name_exists(
     pool: &ConnectionPool,
     name: &str,
@@ -461,7 +462,7 @@ pub fn gc_old_runs(
 
 // ── Sync helpers ──
 
-/// Sync config file jobs into SQLite. Returns (added, updated, removed) counts.
+/// Sync config file jobs into `SQLite`. Returns (added, updated, removed) counts.
 pub fn sync_from_config(
     pool: &ConnectionPool,
     jobs: &[CronJob],
@@ -533,18 +534,20 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
             Vec::new()
         }),
         workspace_id: row.get(13)?,
-        created_at: DateTime::parse_from_rfc3339(&created_str)
-            .map(|t| t.to_utc())
-            .unwrap_or_else(|e| {
+        created_at: DateTime::parse_from_rfc3339(&created_str).map_or_else(
+            |e| {
                 tracing::warn!(error = %e, job_id = %id, "corrupt created_at in DB, using now");
                 Utc::now()
-            }),
-        updated_at: DateTime::parse_from_rfc3339(&updated_str)
-            .map(|t| t.to_utc())
-            .unwrap_or_else(|e| {
+            },
+            |t| t.to_utc(),
+        ),
+        updated_at: DateTime::parse_from_rfc3339(&updated_str).map_or_else(
+            |e| {
                 tracing::warn!(error = %e, job_id = %id, "corrupt updated_at in DB, using now");
                 Utc::now()
-            }),
+            },
+            |t| t.to_utc(),
+        ),
         id,
     })
 }
@@ -558,16 +561,17 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
     Ok(CronRun {
         job_id: row.get(1)?,
         job_name: row.get(2)?,
-        status: RunStatus::from_str(&status_str).unwrap_or_else(|| {
+        status: RunStatus::parse(&status_str).unwrap_or_else(|| {
             tracing::warn!(status = %status_str, run_id = %id, "unknown RunStatus in DB");
             RunStatus::Failed
         }),
-        started_at: DateTime::parse_from_rfc3339(&started_str)
-            .map(|t| t.to_utc())
-            .unwrap_or_else(|e| {
+        started_at: DateTime::parse_from_rfc3339(&started_str).map_or_else(
+            |e| {
                 tracing::warn!(error = %e, run_id = %id, "corrupt started_at in DB, using now");
                 Utc::now()
-            }),
+            },
+            |t| t.to_utc(),
+        ),
         completed_at: completed_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc())),
         duration_ms: row.get(6)?,
         output: row.get(7)?,

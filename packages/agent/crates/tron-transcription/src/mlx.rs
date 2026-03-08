@@ -108,11 +108,10 @@ impl MlxEngine {
                     ));
                 }
                 debug!("worker startup: {}", line.trim());
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                    if val.get("status").and_then(|s| s.as_str()) == Some("ready") {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim())
+                    && val.get("status").and_then(|s| s.as_str()) == Some("ready") {
                         return Ok(());
                     }
-                }
             }
         })
         .await;

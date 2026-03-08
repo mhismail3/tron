@@ -45,8 +45,8 @@ impl ApnsNotifyDelegate {
         let mut data = HashMap::new();
 
         // Forward custom data (convert Value map to String map)
-        if let Some(ref extra) = notification.data {
-            if let Some(obj) = extra.as_object() {
+        if let Some(ref extra) = notification.data
+            && let Some(obj) = extra.as_object() {
                 for (k, v) in obj {
                     let s = if let Some(s) = v.as_str() {
                         s.to_string()
@@ -56,7 +56,6 @@ impl ApnsNotifyDelegate {
                     let _ = data.insert(k.clone(), s);
                 }
             }
-        }
 
         ApnsNotification {
             title: notification.title.clone(),

@@ -169,8 +169,8 @@ fn scan_directory(
     }
 
     // Check for standalone context files at this level
-    if discover_standalone {
-        if let Ok(entries) = fs::read_dir(dir) {
+    if discover_standalone
+        && let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let Ok(ft) = entry.file_type() else {
                     continue;
@@ -187,7 +187,6 @@ fn scan_directory(
                 try_add_file(&entry.path(), project_root, true, results, seen_real_paths);
             }
         }
-    }
 
     // Recurse into subdirectories
     if current_depth >= max_depth {

@@ -27,7 +27,7 @@ pub enum CronError {
     #[error("config error: {0}")]
     Config(String),
 
-    /// SQLite database error.
+    /// `SQLite` database error.
     #[error("database error: {0}")]
     Database(String),
 

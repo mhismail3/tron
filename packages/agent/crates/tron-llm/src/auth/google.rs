@@ -290,8 +290,8 @@ pub async fn load_server_auth_with_client(
 
     // 2. OAuth from auth.json
     let gpa = super::storage::get_google_provider_auth(auth_path);
-    if let Some(ref gpa) = gpa {
-        if let Some(oauth) = &gpa.base.oauth {
+    if let Some(ref gpa) = gpa
+        && let Some(oauth) = &gpa.base.oauth {
             let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
             let cfg = get_config(endpoint);
 
@@ -327,7 +327,6 @@ pub async fn load_server_auth_with_client(
                 }
             }
         }
-    }
 
     // 3. Env var API key
     if let Some(key) = env_api_key {
@@ -341,8 +340,8 @@ pub async fn load_server_auth_with_client(
     }
 
     // 4. API key from auth.json
-    if let Some(gpa) = &gpa {
-        if let Some(key) = &gpa.base.api_key {
+    if let Some(gpa) = &gpa
+        && let Some(key) = &gpa.base.api_key {
             return Ok(Some(GoogleAuth {
                 auth: ServerAuth::from_api_key(key),
                 endpoint: None,
@@ -351,7 +350,6 @@ pub async fn load_server_auth_with_client(
                 project_id: None,
             }));
         }
-    }
 
     Ok(None)
 }

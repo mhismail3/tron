@@ -67,6 +67,7 @@ impl SessionManager {
     }
 
     /// Set the server origin (e.g. "localhost:9847") for all sessions created by this manager.
+    #[must_use]
     pub fn with_origin(mut self, origin: String) -> Self {
         self.origin = Some(origin);
         self
@@ -143,15 +144,14 @@ impl SessionManager {
     /// INVARIANT: worktree is released BEFORE `session.end` event is persisted.
     pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         // Release worktree before ending the session
-        if let Some(coord) = self.worktree_coordinator.get() {
-            if let Err(e) = coord.release(session_id).await {
+        if let Some(coord) = self.worktree_coordinator.get()
+            && let Err(e) = coord.release(session_id).await {
                 tracing::warn!(
                     session_id,
                     error = %e,
                     "failed to release worktree during session end"
                 );
             }
-        }
 
         if let Some((_, active)) = self.active_sessions.remove(session_id) {
             active.context.persister.flush().await?;

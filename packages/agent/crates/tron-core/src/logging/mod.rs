@@ -76,7 +76,8 @@ pub fn init_subscriber_with_sqlite(
     // Build filter: "info,ort=warn,other_crate=error"
     let mut filter_str = level.to_string();
     for (module, lvl) in module_overrides {
-        filter_str.push_str(&format!(",{module}={lvl}"));
+        use std::fmt::Write;
+        let _ = write!(filter_str, ",{module}={lvl}");
     }
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter_str));
 
@@ -85,8 +86,7 @@ pub fn init_subscriber_with_sqlite(
         .with_writer(std::io::stderr)
         .compact();
 
-    let mut config = TransportConfig::default();
-    config.origin = origin;
+    let config = TransportConfig { origin, ..Default::default() };
     let transport = SqliteTransport::new(conn, config);
     let handle = transport.handle();
 

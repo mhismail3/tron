@@ -40,7 +40,7 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
 
     let overall = if statuses.iter().all(|s| *s == DeliveryOutcome::Ok) {
         DeliveryOutcome::Ok
-    } else if statuses.iter().any(|s| *s == DeliveryOutcome::Ok) {
+    } else if statuses.contains(&DeliveryOutcome::Ok) {
         DeliveryOutcome::Partial
     } else {
         DeliveryOutcome::Failed

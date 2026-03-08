@@ -160,15 +160,14 @@ fn get_pending_subagent_results(
 
     let mut consumed_ids: HashSet<String> = HashSet::new();
     for event in &consumed_events {
-        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload) {
-            if let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array()) {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
+            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array()) {
                 for id in ids {
                     if let Some(s) = id.as_str() {
                         let _ = consumed_ids.insert(s.to_owned());
                     }
                 }
             }
-        }
     }
 
     // Filter unconsumed notifications
@@ -215,29 +214,27 @@ fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
             .unwrap_or(0);
         let duration = payload.get("duration").and_then(Value::as_i64).unwrap_or(0);
 
-        writeln!(ctx, "## [{icon}] Sub-Agent: `{subagent_id}`\n").unwrap();
-        writeln!(ctx, "**Task**: {task}").unwrap();
-        writeln!(
+        let _ = writeln!(ctx, "## [{icon}] Sub-Agent: `{subagent_id}`\n");
+        let _ = writeln!(ctx, "**Task**: {task}");
+        let _ = writeln!(
             ctx,
             "**Status**: {}",
             if success { "Completed" } else { "Failed" }
-        )
-        .unwrap();
-        writeln!(ctx, "**Turns**: {total_turns}").unwrap();
+        );
+        let _ = writeln!(ctx, "**Turns**: {total_turns}");
         #[allow(clippy::cast_precision_loss)]
         let duration_secs = duration as f64 / 1000.0;
-        writeln!(ctx, "**Duration**: {duration_secs:.1}s").unwrap();
+        let _ = writeln!(ctx, "**Duration**: {duration_secs:.1}s");
 
-        if let Some(output) = payload.get("output").and_then(Value::as_str) {
-            if !output.is_empty() {
+        if let Some(output) = payload.get("output").and_then(Value::as_str)
+            && !output.is_empty() {
                 let truncated = if output.len() > 2000 {
                     format!("{}\n\n... [Output truncated]", &output[..2000])
                 } else {
                     output.to_string()
                 };
-                write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n").unwrap();
+                let _ = write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n");
             }
-        }
         ctx.push_str("\n---\n\n");
     }
     Some(ctx)
@@ -446,17 +443,15 @@ fn gather_recent_events(
     for event in &events {
         event_types.push(event.event_type.clone());
 
-        if event.event_type == "tool.call" && event.tool_name.as_deref() == Some("Bash") {
-            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
-                if let Some(cmd) = payload
+        if event.event_type == "tool.call" && event.tool_name.as_deref() == Some("Bash")
+            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
+                && let Some(cmd) = payload
                     .get("arguments")
                     .and_then(|a| a.get("command"))
                     .and_then(|c| c.as_str())
                 {
                     bash_commands.push(cmd.to_string());
                 }
-            }
-        }
     }
 
     (event_types, bash_commands)
@@ -713,24 +708,19 @@ impl MethodHandler for PromptHandler {
                     for event in &events {
                         if boundary_types.contains(&event.event_type.as_str()) {
                             activated.clear();
-                        } else if event.event_type == "rules.activated" {
-                            if let Ok(payload) =
+                        } else if event.event_type == "rules.activated"
+                            && let Ok(payload) =
                                 serde_json::from_str::<serde_json::Value>(&event.payload)
-                            {
-                                if let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
+                                && let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
                                 {
                                     for rule in rules {
                                         if let Some(p) =
                                             rule.get("relativePath").and_then(|v| v.as_str())
-                                        {
-                                            if !activated.contains(&p.to_owned()) {
+                                            && !activated.contains(&p.to_owned()) {
                                                 activated.push(p.to_owned());
                                             }
-                                        }
                                     }
                                 }
-                            }
-                        }
                     }
                     activated
                 } else {
@@ -1293,25 +1283,22 @@ impl MethodHandler for GetAgentStateHandler {
 
         let (current_turn_text, current_turn_tool_calls, content_sequence) = if is_running {
             tracing::trace!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
-            match ctx.orchestrator.turn_accumulators().get_state(&session_id) {
-                Some((text, tools, seq)) => {
-                    tracing::trace!(
-                        session_id = %session_id,
-                        text_len = text.len(),
-                        tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0),
-                        seq_count = seq.as_array().map(|a| a.len()).unwrap_or(0),
-                        "agent.getState: returning accumulated content"
-                    );
-                    (
-                        Some(Value::String(text)),
-                        Some(tools),
-                        Some(seq),
-                    )
-                }
-                None => {
-                    tracing::warn!(session_id = %session_id, "agent.getState: no accumulator found despite isRunning=true");
-                    (None, None, None)
-                }
+            if let Some((text, tools, seq)) = ctx.orchestrator.turn_accumulators().get_state(&session_id) {
+                tracing::trace!(
+                    session_id = %session_id,
+                    text_len = text.len(),
+                    tool_count = tools.as_array().map_or(0, std::vec::Vec::len),
+                    seq_count = seq.as_array().map_or(0, std::vec::Vec::len),
+                    "agent.getState: returning accumulated content"
+                );
+                (
+                    Some(Value::String(text)),
+                    Some(tools),
+                    Some(seq),
+                )
+            } else {
+                tracing::warn!(session_id = %session_id, "agent.getState: no accumulator found despite isRunning=true");
+                (None, None, None)
             }
         } else {
             (None, None, None)
@@ -1350,7 +1337,7 @@ mod tests {
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
-    use tron_llm::models::types::Provider as ProviderType;
+    use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::registry::ToolRegistry;
 
@@ -1403,8 +1390,8 @@ mod tests {
     }
     #[async_trait]
     impl Provider for TextProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock"
@@ -1451,8 +1438,8 @@ mod tests {
     struct SlowProvider;
     #[async_trait]
     impl Provider for SlowProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock"
@@ -2187,8 +2174,8 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType {
-                ProviderType::Anthropic
+            fn provider_type(&self) -> ProviderKind {
+                ProviderKind::Anthropic
             }
             fn model(&self) -> &str {
                 "mock"
@@ -2234,8 +2221,8 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType {
-                ProviderType::Anthropic
+            fn provider_type(&self) -> ProviderKind {
+                ProviderKind::Anthropic
             }
             fn model(&self) -> &str {
                 "mock"
@@ -2299,8 +2286,8 @@ mod tests {
         struct RateLimitProvider;
         #[async_trait]
         impl Provider for RateLimitProvider {
-            fn provider_type(&self) -> ProviderType {
-                ProviderType::Anthropic
+            fn provider_type(&self) -> ProviderKind {
+                ProviderKind::Anthropic
             }
             fn model(&self) -> &str {
                 "mock"

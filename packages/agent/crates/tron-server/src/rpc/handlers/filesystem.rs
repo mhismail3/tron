@@ -55,15 +55,14 @@ impl MethodHandler for ListDirHandler {
                 });
 
                 // Add size and modifiedAt for files
-                if !is_dir {
-                    if let Ok(meta) = e.metadata() {
+                if !is_dir
+                    && let Ok(meta) = e.metadata() {
                         entry["size"] = serde_json::json!(meta.len());
                         if let Ok(modified) = meta.modified() {
                             let dt: chrono::DateTime<chrono::Utc> = modified.into();
                             entry["modifiedAt"] = serde_json::json!(dt.to_rfc3339());
                         }
                     }
-                }
 
                 Some(entry)
             })

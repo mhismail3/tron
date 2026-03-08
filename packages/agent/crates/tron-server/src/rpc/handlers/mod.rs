@@ -311,13 +311,13 @@ pub(crate) fn opt_string(params: Option<&serde_json::Value>, key: &str) -> Optio
 pub(crate) fn opt_u64(params: Option<&serde_json::Value>, key: &str, default: u64) -> u64 {
     params
         .and_then(|p| p.get(key))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(default)
 }
 
 /// Extract an optional bool parameter.
 pub(crate) fn opt_bool(params: Option<&serde_json::Value>, key: &str) -> Option<bool> {
-    params.and_then(|p| p.get(key)).and_then(|v| v.as_bool())
+    params.and_then(|p| p.get(key)).and_then(serde_json::Value::as_bool)
 }
 
 /// Extract an optional array parameter.
@@ -337,7 +337,7 @@ pub(crate) mod test_helpers {
     use async_trait::async_trait;
     use parking_lot::RwLock;
     use tron_events::EventStore;
-    use tron_llm::models::types::Provider as ProviderType;
+    use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
@@ -352,8 +352,8 @@ pub(crate) mod test_helpers {
     pub struct MockProvider;
     #[async_trait]
     impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock"
@@ -391,8 +391,8 @@ pub(crate) mod test_helpers {
     pub struct ModelAwareMockProvider(pub String);
     #[async_trait]
     impl Provider for ModelAwareMockProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             &self.0

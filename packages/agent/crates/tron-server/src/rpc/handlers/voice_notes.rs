@@ -103,8 +103,8 @@ impl MethodHandler for ListHandler {
                 let mut language: Option<String> = None;
                 let mut transcript = String::new();
 
-                if let Some(stripped) = content.strip_prefix("---\n") {
-                    if let Some(end) = stripped.find("---\n") {
+                if let Some(stripped) = content.strip_prefix("---\n")
+                    && let Some(end) = stripped.find("---\n") {
                         let fm = &stripped[..end];
                         for line in fm.lines() {
                             if let Some(val) = line.strip_prefix("created: ") {
@@ -117,7 +117,6 @@ impl MethodHandler for ListHandler {
                         }
                         transcript = content[4 + end + 4..].trim().to_string();
                     }
-                }
 
                 let preview = if transcript.len() > 100 {
                     transcript[..100].to_string()

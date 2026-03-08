@@ -571,7 +571,7 @@ impl MethodHandler for GetChatSessionHandler {
                 .broadcast()
                 .emit(TronEvent::SessionCreated {
                     base: BaseEvent::now(&session_id),
-                    model: model.to_string(),
+                    model: model.clone(),
                     working_directory: working_dir.clone(),
                 });
 
@@ -656,7 +656,7 @@ impl MethodHandler for ResetChatSessionHandler {
             .broadcast()
             .emit(TronEvent::SessionCreated {
                 base: BaseEvent::now(&new_id),
-                model: model.to_string(),
+                model: model.clone(),
                 working_directory: working_dir.clone(),
             });
 

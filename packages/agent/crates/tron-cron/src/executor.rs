@@ -1,3 +1,4 @@
+#![allow(unused_results)]
 //! Payload execution: shell commands, webhooks, agent turns, system events.
 //!
 //! Uses callback traits for dependency injection — the binary crate provides
@@ -179,8 +180,8 @@ pub async fn execute_with_retries(
     let mut attempt = 0u32;
     loop {
         // Re-check job is still enabled before retries
-        if attempt > 0 {
-            if let Ok(false) = crate::store::is_job_enabled(&deps.pool, &job.id) {
+        if attempt > 0
+            && let Ok(false) = crate::store::is_job_enabled(&deps.pool, &job.id) {
                 return make_run(
                     run_id,
                     &job.id,
@@ -193,7 +194,6 @@ pub async fn execute_with_retries(
                     Some("job disabled during retry".into()),
                 );
             }
-        }
 
         let result = execute_payload(job, deps, cancel.clone()).await;
 
@@ -282,9 +282,8 @@ async fn execute_shell(
     timeout_secs: u64,
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
-    let dir = working_dir
-        .map(String::from)
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()));
+    const MAX_OUTPUT: usize = 1_048_576; // 1MB
+    let dir = working_dir.map_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()), String::from);
 
     let mut cmd = tokio::process::Command::new("bash");
     cmd.arg("-c")
@@ -303,10 +302,15 @@ async fn execute_shell(
         .spawn()
         .map_err(|e| CronError::Execution(format!("failed to spawn: {e}")))?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CronError::Execution("failed to capture stdout".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CronError::Execution("failed to capture stderr".into()))?;
 
-    const MAX_OUTPUT: usize = 1_048_576; // 1MB
     let stdout_task = tokio::spawn(read_bounded(stdout, MAX_OUTPUT));
     let stderr_task = tokio::spawn(read_bounded(stderr, MAX_OUTPUT));
 

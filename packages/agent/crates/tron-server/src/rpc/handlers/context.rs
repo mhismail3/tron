@@ -289,7 +289,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             let skill_context = build_active_skill_context(&active_skill_names, &ctx.skill_registry);
 
             let mut composed_context = cm.build_base_context();
-            composed_context.server_origin = session.origin.clone();
+            composed_context.server_origin.clone_from(&session.origin);
             composed_context.skill_context = skill_context;
             // subagent_results_context and task_context are per-turn volatile — None in static view
 

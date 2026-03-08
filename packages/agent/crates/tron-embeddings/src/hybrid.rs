@@ -54,7 +54,7 @@ pub struct HybridResult {
 /// For each unique `event_id` across both lists:
 /// `rrf_score = (vector_weight / (vector_rank + k)) + (fts_weight / (fts_rank + k))`
 ///
-/// Vector results are expected to be pre-deduplicated by event_id (one per event).
+/// Vector results are expected to be pre-deduplicated by `event_id` (one per event).
 /// FTS results are `(event_id, bm25_score)` pairs sorted by score descending.
 pub fn reciprocal_rank_fusion(
     vector_results: &[VectorSearchResult],
@@ -116,6 +116,7 @@ pub fn reciprocal_rank_fusion(
 /// Missing timestamps leave the score unchanged.
 /// Future timestamps (negative age) are clamped to 1.0 (no boost).
 /// A `half_life_days` of 0.0 or negative is treated as no decay.
+#[allow(clippy::implicit_hasher)]
 pub fn apply_temporal_decay(
     results: &mut [HybridResult],
     event_timestamps: &HashMap<String, chrono::DateTime<chrono::Utc>>,

@@ -200,7 +200,7 @@ fn run_inference_inner(
     let mut results = Vec::with_capacity(batch_size);
     for i in 0..batch_size {
         let embedding =
-            mean_pool(&output_data, &attention_mask, i, max_len, seq_len_out, hidden_dim);
+            mean_pool(output_data, &attention_mask, i, max_len, seq_len_out, hidden_dim);
         let truncated = matryoshka_truncate(&embedding, config.dimensions);
         results.push(truncated);
     }
@@ -237,8 +237,8 @@ fn mean_pool(
     }
 
     if mask_sum > 0.0 {
-        for d in 0..hidden_dim {
-            sum[d] /= mask_sum;
+        for s in &mut sum[..hidden_dim] {
+            *s /= mask_sum;
         }
     }
 

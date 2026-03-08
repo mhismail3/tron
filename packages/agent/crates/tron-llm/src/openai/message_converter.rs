@@ -85,7 +85,7 @@ pub fn convert_tools_v2(tools: &[Tool], enable_tool_search: bool) -> Vec<Respons
 
 /// Convert Tron tools to Responses API format (legacy — kept for backward compatibility).
 ///
-/// Normalizes schemas to satisfy OpenAI's stricter validation
+/// Normalizes schemas to satisfy `OpenAI`'s stricter validation
 /// (e.g., arrays must have `items`).
 #[must_use]
 pub fn convert_tools(tools: &[Tool]) -> Vec<ResponsesTool> {
@@ -104,9 +104,9 @@ pub fn convert_tools(tools: &[Tool]) -> Vec<ResponsesTool> {
         .collect()
 }
 
-/// Normalize a JSON schema for the OpenAI API.
+/// Normalize a JSON schema for the `OpenAI` API.
 ///
-/// OpenAI requires `"items"` on every `"type": "array"` schema.
+/// `OpenAI` requires `"items"` on every `"type": "array"` schema.
 /// This recursively walks the schema and adds `"items": {}` where missing.
 pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Value {
     match schema {

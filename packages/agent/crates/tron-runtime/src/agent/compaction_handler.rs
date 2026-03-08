@@ -330,8 +330,8 @@ impl CompactionHandler {
                 });
 
                 // Persist compact.boundary so iOS can reconstruct the pill on resume
-                if compaction_result.success {
-                    if let Some(ref persister) = self.persister {
+                if compaction_result.success
+                    && let Some(ref persister) = self.persister {
                         let reason_str = format!("{reason:?}");
                         #[allow(clippy::cast_possible_wrap)]
                         let payload = serde_json::json!({
@@ -348,7 +348,6 @@ impl CompactionHandler {
                             payload,
                         );
                     }
-                }
                 Ok(true)
             }
             Err(e) => {

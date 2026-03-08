@@ -7,7 +7,7 @@
 use super::model_ids::{
     ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_MINIMAX_MODEL_IDS, ALL_OPENAI_MODEL_IDS,
 };
-use tron_core::messages::Provider as ProviderType;
+use tron_core::messages::Provider;
 use crate::anthropic::types::get_claude_model;
 use crate::google::types::get_gemini_model;
 use crate::minimax::types::get_minimax_model;
@@ -20,22 +20,22 @@ use crate::openai::types::get_openai_model;
 /// 2. Registry lookup (exact match against known model IDs)
 ///
 /// Unknown model IDs always return `None` (strict fail-fast behavior).
-pub fn detect_provider_from_model(model_id: &str) -> Option<ProviderType> {
+pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
     // 1. Explicit prefix: "provider/model". Prefix is accepted only when the
     // bare model exists in that provider's registry.
     if let Some((prefix, bare_model)) = model_id.split_once('/') {
         return match prefix {
             "anthropic" if ALL_ANTHROPIC_MODEL_IDS.contains(&bare_model) => {
-                Some(ProviderType::Anthropic)
+                Some(Provider::Anthropic)
             }
             "openai" | "openai-codex" if ALL_OPENAI_MODEL_IDS.contains(&bare_model) => {
-                Some(ProviderType::OpenAi)
+                Some(Provider::OpenAi)
             }
             "google" | "gemini" if ALL_GOOGLE_MODEL_IDS.contains(&bare_model) => {
-                Some(ProviderType::Google)
+                Some(Provider::Google)
             }
             "minimax" if ALL_MINIMAX_MODEL_IDS.contains(&bare_model) => {
-                Some(ProviderType::MiniMax)
+                Some(Provider::MiniMax)
             }
             _ => None,
         };
@@ -43,16 +43,16 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<ProviderType> {
 
     // 2. Registry lookup (exact match)
     if ALL_ANTHROPIC_MODEL_IDS.contains(&model_id) {
-        return Some(ProviderType::Anthropic);
+        return Some(Provider::Anthropic);
     }
     if ALL_OPENAI_MODEL_IDS.contains(&model_id) {
-        return Some(ProviderType::OpenAi);
+        return Some(Provider::OpenAi);
     }
     if ALL_GOOGLE_MODEL_IDS.contains(&model_id) {
-        return Some(ProviderType::Google);
+        return Some(Provider::Google);
     }
     if ALL_MINIMAX_MODEL_IDS.contains(&model_id) {
-        return Some(ProviderType::MiniMax);
+        return Some(Provider::MiniMax);
     }
 
     // Unknown model.
@@ -128,7 +128,7 @@ mod tests {
     fn detect_explicit_prefix_anthropic() {
         assert_eq!(
             detect_provider_from_model("anthropic/claude-opus-4-6"),
-            Some(ProviderType::Anthropic)
+            Some(Provider::Anthropic)
         );
     }
 
@@ -136,11 +136,11 @@ mod tests {
     fn detect_explicit_prefix_openai() {
         assert_eq!(
             detect_provider_from_model("openai/gpt-5.3-codex"),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
         assert_eq!(
             detect_provider_from_model("openai-codex/gpt-5.3-codex"),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
     }
 
@@ -148,11 +148,11 @@ mod tests {
     fn detect_explicit_prefix_google() {
         assert_eq!(
             detect_provider_from_model("google/gemini-2.5-flash"),
-            Some(ProviderType::Google)
+            Some(Provider::Google)
         );
         assert_eq!(
             detect_provider_from_model("gemini/gemini-2.5-flash"),
-            Some(ProviderType::Google)
+            Some(Provider::Google)
         );
     }
 
@@ -168,15 +168,15 @@ mod tests {
     fn detect_registry_lookup_anthropic() {
         assert_eq!(
             detect_provider_from_model(CLAUDE_OPUS_4_6),
-            Some(ProviderType::Anthropic)
+            Some(Provider::Anthropic)
         );
         assert_eq!(
             detect_provider_from_model(CLAUDE_HAIKU_4_5),
-            Some(ProviderType::Anthropic)
+            Some(Provider::Anthropic)
         );
         assert_eq!(
             detect_provider_from_model(CLAUDE_3_HAIKU),
-            Some(ProviderType::Anthropic)
+            Some(Provider::Anthropic)
         );
     }
 
@@ -184,7 +184,7 @@ mod tests {
     fn detect_registry_lookup_anthropic_sonnet_46() {
         assert_eq!(
             detect_provider_from_model(CLAUDE_SONNET_4_6),
-            Some(ProviderType::Anthropic)
+            Some(Provider::Anthropic)
         );
     }
 
@@ -192,7 +192,7 @@ mod tests {
     fn detect_registry_lookup_openai() {
         assert_eq!(
             detect_provider_from_model(GPT_5_3_CODEX),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
     }
 
@@ -200,11 +200,11 @@ mod tests {
     fn detect_registry_lookup_openai_gpt_54() {
         assert_eq!(
             detect_provider_from_model(GPT_5_4),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
         assert_eq!(
             detect_provider_from_model(GPT_5_4_PRO),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
     }
 
@@ -212,7 +212,7 @@ mod tests {
     fn detect_registry_lookup_openai_spark() {
         assert_eq!(
             detect_provider_from_model("gpt-5.3-codex-spark"),
-            Some(ProviderType::OpenAi)
+            Some(Provider::OpenAi)
         );
     }
 
@@ -220,11 +220,11 @@ mod tests {
     fn detect_registry_lookup_google() {
         assert_eq!(
             detect_provider_from_model(GEMINI_2_5_FLASH),
-            Some(ProviderType::Google)
+            Some(Provider::Google)
         );
         assert_eq!(
             detect_provider_from_model(GEMINI_3_PRO_PREVIEW),
-            Some(ProviderType::Google)
+            Some(Provider::Google)
         );
     }
 
@@ -343,7 +343,7 @@ mod tests {
     fn detect_registry_lookup_minimax() {
         assert_eq!(
             detect_provider_from_model(MINIMAX_M2_5),
-            Some(ProviderType::MiniMax)
+            Some(Provider::MiniMax)
         );
     }
 
@@ -351,7 +351,7 @@ mod tests {
     fn detect_registry_lookup_minimax_m2() {
         assert_eq!(
             detect_provider_from_model(MINIMAX_M2),
-            Some(ProviderType::MiniMax)
+            Some(Provider::MiniMax)
         );
     }
 
@@ -359,7 +359,7 @@ mod tests {
     fn detect_explicit_prefix_minimax() {
         assert_eq!(
             detect_provider_from_model("minimax/MiniMax-M2.5"),
-            Some(ProviderType::MiniMax)
+            Some(Provider::MiniMax)
         );
     }
 

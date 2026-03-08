@@ -228,10 +228,10 @@ impl EmbeddingController {
         }
 
         // Vector search (may be empty if query is empty or service not ready)
-        let vector_results = if !query_text.is_empty() {
-            self.search(query_text, search_opts).await.unwrap_or_default()
-        } else {
+        let vector_results = if query_text.is_empty() {
             vec![]
+        } else {
+            self.search(query_text, search_opts).await.unwrap_or_default()
         };
 
         Ok(reciprocal_rank_fusion(
@@ -295,7 +295,7 @@ impl EmbeddingController {
         let anchor_count = recency_anchor_count.min(parsed.len());
 
         // 4. Decide which entries to include
-        let trimmed_ctx = session_context.map(|s| s.trim()).unwrap_or("");
+        let trimmed_ctx = session_context.map_or("", str::trim);
         let semantic_slots = count.saturating_sub(anchor_count);
 
         let selected: Vec<(String, String, serde_json::Value)> =
@@ -368,12 +368,12 @@ impl EmbeddingController {
                             .map(String::as_str)
                             .collect();
 
-                        let extra_events = if !missing.is_empty() {
+                        let extra_events = if missing.is_empty() {
+                            std::collections::HashMap::new()
+                        } else {
                             event_store
                                 .get_events_by_ids(&missing)
                                 .unwrap_or_default()
-                        } else {
-                            std::collections::HashMap::new()
                         };
 
                         // Build final list from pre-fetched + extra
@@ -386,8 +386,7 @@ impl EmbeddingController {
                         for (eid, row) in &extra_events {
                             if selected_set.contains(eid.as_str())
                                 && !result.iter().any(|(id, _, _)| id == eid)
-                            {
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(
+                                && let Ok(v) = serde_json::from_str::<serde_json::Value>(
                                     &row.payload,
                                 ) {
                                     result.push((
@@ -396,7 +395,6 @@ impl EmbeddingController {
                                         v,
                                     ));
                                 }
-                            }
                         }
 
                         result
@@ -433,11 +431,10 @@ impl EmbeddingController {
 
             if let Some(lessons) = entry.get("lessons").and_then(serde_json::Value::as_array) {
                 for lesson in lessons {
-                    if let Some(text) = lesson.as_str() {
-                        if !text.is_empty() {
-                            write!(section, "\n- {text}").unwrap();
+                    if let Some(text) = lesson.as_str()
+                        && !text.is_empty() {
+                            let _ = write!(section, "\n- {text}");
                         }
-                    }
                 }
             }
 
@@ -452,7 +449,7 @@ impl EmbeddingController {
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("");
                     if !choice.is_empty() {
-                        write!(section, "\n- {choice}: {reason}").unwrap();
+                        let _ = write!(section, "\n- {choice}: {reason}");
                     }
                 }
             }

@@ -84,6 +84,7 @@ fn core_destructive_commands() -> GuardrailRule {
             tags: vec!["security".into(), "system-protection".into()],
         },
         target_argument: "command".into(),
+        // INVARIANT: All patterns below are compile-time literals, validated by tests.
         patterns: vec![
             // rm -rf / or rm -rf /* (with or without sudo)
             Regex::new(r"(?i)^(sudo\s+)?rm\s+(-rf?|--force)\s+/\s*$").unwrap(),

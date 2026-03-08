@@ -233,11 +233,10 @@ impl ApnsService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-        if let Some(ref token) = *cached {
-            if token.created_at.elapsed() < TOKEN_VALIDITY {
+        if let Some(ref token) = *cached
+            && token.created_at.elapsed() < TOKEN_VALIDITY {
                 return Ok(token.token.clone());
             }
-        }
 
         let jwt = self.generate_jwt()?;
         *cached = Some(CachedToken {

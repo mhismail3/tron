@@ -50,20 +50,17 @@ pub async fn transcribe_audio(
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> TranscriptionResult {
-    match transcribe_audio_full(ctx, audio_bytes, mime_type).await {
-        Ok(resp) => TranscriptionResult {
-            text: resp.text,
-            language: resp.language,
-            duration_seconds: resp.duration_seconds,
-        },
-        Err(_) => {
-            #[allow(clippy::cast_precision_loss)]
-            let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
-            TranscriptionResult {
-                text: "(transcription not available)".into(),
-                language: "en".into(),
-                duration_seconds: estimated_duration,
-            }
+    if let Ok(resp) = transcribe_audio_full(ctx, audio_bytes, mime_type).await { TranscriptionResult {
+        text: resp.text,
+        language: resp.language,
+        duration_seconds: resp.duration_seconds,
+    } } else {
+        #[allow(clippy::cast_precision_loss)]
+        let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
+        TranscriptionResult {
+            text: "(transcription not available)".into(),
+            language: "en".into(),
+            duration_seconds: estimated_duration,
         }
     }
 }

@@ -104,11 +104,10 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                 }
             }
             EventType::ConfigPromptUpdate => {
-                if event.payload.get("contentBlobId").is_some() {
-                    if let Some(hash) = event.payload.get("newHash").and_then(Value::as_str) {
+                if event.payload.get("contentBlobId").is_some()
+                    && let Some(hash) = event.payload.get("newHash").and_then(Value::as_str) {
                         system_prompt = Some(format!("[Updated prompt - hash: {hash}]"));
                     }
-                }
             }
             _ => {}
         }
@@ -157,13 +156,11 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
     }
 
     // End-of-stream flush: if last message is assistant with tool_use
-    if !st.pending_tool_results.is_empty() {
-        if let Some(last) = st.combined.last() {
-            if last.message.role == "assistant" && content_has_tool_use(&last.message.content) {
+    if !st.pending_tool_results.is_empty()
+        && let Some(last) = st.combined.last()
+            && last.message.role == "assistant" && content_has_tool_use(&last.message.content) {
                 flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
             }
-        }
-    }
 
     // Inject synthetic error results for any unmatched tool calls.
     // This happens when: (a) a user interrupt discards pending tool results,
@@ -250,8 +247,11 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
 
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
 
-    if st.combined.last().is_some_and(|e| e.message.role == "user") {
-        let last = st.combined.last_mut().unwrap();
+    if let Some(last) = st
+        .combined
+        .last_mut()
+        .filter(|e| e.message.role == "user")
+    {
         last.message.content = merge_message_content(&last.message.content, &content, "user");
         last.event_ids.push(Some(event.id.clone()));
     } else {
@@ -286,12 +286,11 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
     }
 
     // Re-check after potential flush — merge consecutive assistant messages
-    if st
+    if let Some(last) = st
         .combined
-        .last()
-        .is_some_and(|e| e.message.role == "assistant")
+        .last_mut()
+        .filter(|e| e.message.role == "assistant")
     {
-        let last = st.combined.last_mut().unwrap();
         last.message.content =
             merge_message_content(&last.message.content, &restored_content, "assistant");
         last.event_ids.push(Some(event.id.clone()));
@@ -314,12 +313,11 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
 
     accumulate_tokens(&event.payload, &mut st.tokens);
 
-    if let Some(turn) = event.payload.get("turn").and_then(Value::as_i64) {
-        if turn > st.current_turn {
+    if let Some(turn) = event.payload.get("turn").and_then(Value::as_i64)
+        && turn > st.current_turn {
             st.current_turn = turn;
             st.turn_count = turn;
         }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -476,15 +474,13 @@ fn restore_truncated_inputs(
                         .unwrap_or(false);
                     let block_id = block.get("id").and_then(Value::as_str);
 
-                    if is_tool_use && is_truncated {
-                        if let Some(id) = block_id {
-                            if let Some(full_args) = tool_call_args_map.get(id) {
+                    if is_tool_use && is_truncated
+                        && let Some(id) = block_id
+                            && let Some(full_args) = tool_call_args_map.get(id) {
                                 let mut restored_block = block.clone();
                                 restored_block["arguments"] = full_args.clone();
                                 return restored_block;
                             }
-                        }
-                    }
                     block.clone()
                 })
                 .collect();

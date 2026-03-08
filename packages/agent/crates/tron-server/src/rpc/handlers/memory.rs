@@ -426,8 +426,8 @@ fn prepare_cron_transcript(messages: &[Message]) -> Vec<Message> {
     messages
         .iter()
         .map(|m| {
-            if let Message::User { content, .. } = m {
-                if user_message_len(content) > 500 {
+            if let Message::User { content, .. } = m
+                && user_message_len(content) > 500 {
                     return Message::User {
                         content: UserMessageContent::Text(
                             "[Recurring cron task prompt omitted — focus on the assistant's actions below]".into(),
@@ -435,13 +435,12 @@ fn prepare_cron_transcript(messages: &[Message]) -> Vec<Message> {
                         timestamp: None,
                     };
                 }
-            }
             m.clone()
         })
         .collect()
 }
 
-/// Total text length across all assistant messages (ignores tool_use, thinking, etc.).
+/// Total text length across all assistant messages (ignores `tool_use`, thinking, etc.).
 /// Used to detect no-op cron sessions before spending an LLM call on ledger generation.
 fn cron_assistant_text_len(messages: &[Message]) -> usize {
     messages
@@ -573,6 +572,7 @@ impl MethodHandler for GetLedgerHandler {
 
         // Tag-filtered path: filter in memory, then paginate
         if let Some(all_events) = all_events_for_tags {
+            // INVARIANT: `all_events_for_tags` is Some only when `tags_filter` is Some.
             let tags = tags_filter.as_ref().unwrap();
             let filtered: Vec<Value> = all_events
                 .iter()
@@ -609,6 +609,7 @@ impl MethodHandler for GetLedgerHandler {
         }
 
         // Non-tag path: already paginated by SQL
+        // INVARIANT: `count_and_page` is Some when `all_events_for_tags` is None (early return above).
         let (events, total_count) = count_and_page.unwrap();
         let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
         #[allow(clippy::cast_possible_wrap)]
@@ -863,8 +864,8 @@ impl MethodHandler for GetHandoffsHandler {
                 .get_events_by_type(&session.id, &["memory.ledger"], Some(1))
                 .unwrap_or_default();
 
-            if let Some(event) = events.first() {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
+            if let Some(event) = events.first()
+                && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
                     let summary = parsed
                         .get("input")
                         .and_then(Value::as_str)
@@ -879,7 +880,6 @@ impl MethodHandler for GetHandoffsHandler {
                         "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
                     }));
                 }
-            }
 
             if handoffs.len() >= limit {
                 break;
@@ -2011,7 +2011,7 @@ mod tests {
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
-    use tron_llm::models::types::Provider as LlmProviderType;
+    use tron_llm::models::types::Provider as LlmProvider;
     use tron_llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
@@ -2021,8 +2021,8 @@ mod tests {
     struct LedgerMockProvider;
     #[async_trait]
     impl Provider for LedgerMockProvider {
-        fn provider_type(&self) -> LlmProviderType {
-            LlmProviderType::Anthropic
+        fn provider_type(&self) -> LlmProvider {
+            LlmProvider::Anthropic
         }
         fn model(&self) -> &str {
             "mock-ledger"

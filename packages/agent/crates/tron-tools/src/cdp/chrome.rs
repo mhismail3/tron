@@ -68,7 +68,7 @@ fn find_playwright_chrome() -> Option<PathBuf> {
     // Collect chromium-* dirs sorted by revision (descending)
     let mut chromium_dirs: Vec<(u64, PathBuf)> = std::fs::read_dir(&cache_dir)
         .ok()?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             if let Some(rev) = name.strip_prefix("chromium-") {
@@ -102,7 +102,7 @@ fn find_playwright_chrome() -> Option<PathBuf> {
     // Try chrome-headless-shell as fallback
     let mut shell_dirs: Vec<(u64, PathBuf)> = std::fs::read_dir(&cache_dir)
         .ok()?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             if let Some(rev) = name.strip_prefix("chromium_headless_shell-") {

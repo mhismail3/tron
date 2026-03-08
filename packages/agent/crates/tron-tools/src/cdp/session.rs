@@ -198,14 +198,13 @@ impl BrowserSession {
             })?;
 
         // Check for navigation errors (e.g. net::ERR_ABORTED)
-        if let Some(error_text) = result["errorText"].as_str() {
-            if !error_text.is_empty() {
+        if let Some(error_text) = result["errorText"].as_str()
+            && !error_text.is_empty() {
                 return Err(BrowserError::NavigationFailed {
                     url: url.into(),
                     reason: error_text.to_string(),
                 });
             }
-        }
 
         // Best-effort wait for page load (10s timeout, non-fatal)
         let _ = tokio::time::timeout(Duration::from_secs(10), self.wait_for_load()).await;
@@ -217,11 +216,10 @@ impl BrowserSession {
     /// Poll `document.readyState` until "complete" or timeout.
     async fn wait_for_load(&self) -> Result<(), BrowserError> {
         for _ in 0..100 {
-            if let Ok(val) = self.evaluate("document.readyState").await {
-                if val.as_str() == Some("complete") {
+            if let Ok(val) = self.evaluate("document.readyState").await
+                && val.as_str() == Some("complete") {
                     return Ok(());
                 }
-            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(()) // Timeout is non-fatal
@@ -255,8 +253,8 @@ impl BrowserSession {
             .await?;
         let idx = history["currentIndex"].as_u64().unwrap_or(0) as usize;
         let entries = history["entries"].as_array();
-        if let Some(entries) = entries {
-            if idx + 1 < entries.len() {
+        if let Some(entries) = entries
+            && idx + 1 < entries.len() {
                 let entry_id = entries[idx + 1]["id"].as_i64().unwrap_or(0);
                 let _ = self
                     .send_cdp(
@@ -266,7 +264,6 @@ impl BrowserSession {
                     .await?;
                 self.update_url().await;
             }
-        }
         Ok(())
     }
 
@@ -430,11 +427,10 @@ impl BrowserSession {
         if let Some(nodes) = result["nodes"].as_array() {
             for node in nodes {
                 let role = node["role"]["value"].as_str().unwrap_or("unknown");
-                if let Some(name) = node["name"]["value"].as_str() {
-                    if !name.is_empty() {
+                if let Some(name) = node["name"]["value"].as_str()
+                    && !name.is_empty() {
                         let _ = writeln!(output, "[{role}] {name}");
                     }
-                }
             }
         }
         Ok(output)
@@ -631,11 +627,10 @@ impl BrowserSession {
     }
 
     async fn update_url(&self) {
-        if let Ok(val) = self.evaluate("window.location.href").await {
-            if let Some(url) = val.as_str() {
+        if let Ok(val) = self.evaluate("window.location.href").await
+            && let Some(url) = val.as_str() {
                 *self.current_url.write() = Some(url.into());
             }
-        }
     }
 }
 
@@ -663,11 +658,10 @@ async fn wait_for_ws_url(port: u16, child: &mut Child) -> Result<String, Browser
         let Ok(pages): Result<Vec<Value>, _> = resp.json().await else {
             continue;
         };
-        if let Some(page) = pages.first() {
-            if let Some(ws_url) = page["webSocketDebuggerUrl"].as_str() {
+        if let Some(page) = pages.first()
+            && let Some(ws_url) = page["webSocketDebuggerUrl"].as_str() {
                 return Ok(ws_url.to_string());
             }
-        }
     }
 
     Err(BrowserError::LaunchFailed {

@@ -76,7 +76,7 @@ pub struct ForkOptions<'a> {
 ///
 /// INVARIANT: session writes are serialized per-session via in-process mutex
 /// locks (`with_session_write_lock`). Global mutations use a separate global
-/// lock. SQLite `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
+/// lock. `SQLite` `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
 pub struct EventStore {
     pool: ConnectionPool,
     global_write_lock: Mutex<()>,
@@ -392,8 +392,8 @@ impl EventStore {
         }
 
         // Last turn context window (SET, not increment): set on message.assistant
-        if opts.event_type == EventType::MessageAssistant {
-            if let Some(tu) = opts.payload.get("tokenUsage") {
+        if opts.event_type == EventType::MessageAssistant
+            && let Some(tu) = opts.payload.get("tokenUsage") {
                 counters.last_turn_input_tokens = opts
                     .payload
                     .get("tokenRecord")
@@ -402,7 +402,6 @@ impl EventStore {
                     .and_then(Value::as_i64)
                     .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
             }
-        }
 
         let _ = SessionRepo::increment_counters(&tx, opts.session_id, &counters)?;
 

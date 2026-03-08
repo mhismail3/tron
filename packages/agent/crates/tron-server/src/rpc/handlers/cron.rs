@@ -54,21 +54,18 @@ impl MethodHandler for ListHandler {
         let filtered: Vec<_> = jobs
             .values()
             .filter(|j| {
-                if let Some(enabled) = enabled_filter {
-                    if j.enabled != enabled {
+                if let Some(enabled) = enabled_filter
+                    && j.enabled != enabled {
                         return false;
                     }
-                }
-                if let Some(ref tags) = tag_filter {
-                    if !tags.iter().any(|t| j.tags.contains(t)) {
+                if let Some(ref tags) = tag_filter
+                    && !tags.iter().any(|t| j.tags.contains(t)) {
                         return false;
                     }
-                }
-                if let Some(ws) = workspace_filter {
-                    if j.workspace_id.as_deref() != Some(ws) {
+                if let Some(ws) = workspace_filter
+                    && j.workspace_id.as_deref() != Some(ws) {
                         return false;
                     }
-                }
                 true
             })
             .collect();
@@ -197,7 +194,7 @@ impl MethodHandler for CreateHandler {
                 .map(String::from),
             enabled: job_param
                 .get("enabled")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true),
             schedule,
             payload,
@@ -220,15 +217,15 @@ impl MethodHandler for CreateHandler {
                 .unwrap_or_default(),
             max_retries: job_param
                 .get("maxRetries")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as u32,
             auto_disable_after: job_param
                 .get("autoDisableAfter")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as u32,
             stuck_timeout_secs: job_param
                 .get("stuckTimeoutSecs")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(7200),
             tags: job_param
                 .get("tags")
@@ -354,12 +351,12 @@ impl MethodHandler for UpdateHandler {
                     details: None,
                 });
             }
-            job.name = name.to_owned();
+            name.clone_into(&mut job.name);
         }
         if let Some(desc) = params.get("description") {
             job.description = desc.as_str().map(String::from);
         }
-        if let Some(enabled) = params.get("enabled").and_then(|v| v.as_bool()) {
+        if let Some(enabled) = params.get("enabled").and_then(serde_json::Value::as_bool) {
             job.enabled = enabled;
         }
         if let Some(sched_val) = params.get("schedule") {
@@ -397,13 +394,13 @@ impl MethodHandler for UpdateHandler {
                 }
             })?;
         }
-        if let Some(v) = params.get("maxRetries").and_then(|v| v.as_u64()) {
+        if let Some(v) = params.get("maxRetries").and_then(serde_json::Value::as_u64) {
             job.max_retries = v as u32;
         }
-        if let Some(v) = params.get("autoDisableAfter").and_then(|v| v.as_u64()) {
+        if let Some(v) = params.get("autoDisableAfter").and_then(serde_json::Value::as_u64) {
             job.auto_disable_after = v as u32;
         }
-        if let Some(v) = params.get("stuckTimeoutSecs").and_then(|v| v.as_u64()) {
+        if let Some(v) = params.get("stuckTimeoutSecs").and_then(serde_json::Value::as_u64) {
             job.stuck_timeout_secs = v;
         }
         if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {

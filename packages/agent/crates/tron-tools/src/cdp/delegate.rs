@@ -38,11 +38,10 @@ impl BrowserDelegate for CdpBrowserDelegate {
                 })?;
 
         // Auto-start screencast for iOS frame streaming (matches TS server behavior)
-        if !session.is_streaming() {
-            if let Err(e) = self.service.start_stream(session_id).await {
+        if !session.is_streaming()
+            && let Err(e) = self.service.start_stream(session_id).await {
                 tracing::debug!(session_id, error = %e, "auto-start screencast failed (non-fatal)");
             }
-        }
 
         match action.action.as_str() {
             "navigate" => {

@@ -23,7 +23,7 @@ pub fn blob_as_f32_slice(blob: &[u8]) -> Option<&[f32]> {
     if blob.is_empty() {
         return Some(&[]);
     }
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return None;
     }
     Some(bytemuck::cast_slice(blob))

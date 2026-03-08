@@ -65,8 +65,8 @@ impl SearchRepo {
             );
             param_values.push(Box::new(sess_id.to_string()));
         }
-        if let Some(types) = opts.types {
-            if !types.is_empty() {
+        if let Some(types) = opts.types
+            && !types.is_empty() {
                 let placeholders: Vec<String> = types
                     .iter()
                     .enumerate()
@@ -77,7 +77,6 @@ impl SearchRepo {
                     param_values.push(Box::new(t.to_string()));
                 }
             }
-        }
 
         sql.push_str(" ORDER BY score");
 

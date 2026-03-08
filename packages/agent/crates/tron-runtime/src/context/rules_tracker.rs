@@ -371,8 +371,8 @@ impl RulesTracker {
         let mut tracker = Self::new();
 
         for event in events {
-            if event.event_type == "rules.loaded" {
-                if let Ok(files) = serde_json::from_value::<Vec<RulesFileInfo>>(
+            if event.event_type == "rules.loaded"
+                && let Ok(files) = serde_json::from_value::<Vec<RulesFileInfo>>(
                     event.payload.get("files").cloned().unwrap_or_default(),
                 ) {
                     let merged_tokens = event
@@ -384,7 +384,6 @@ impl RulesTracker {
                     #[allow(clippy::cast_possible_truncation)]
                     tracker.set_rules(files, merged_tokens as u32, event.id.clone(), None);
                 }
-            }
         }
 
         tracker

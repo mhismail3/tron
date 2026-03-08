@@ -8,7 +8,7 @@
 //! [`TokenState`]) are managed by the state module.
 
 use serde::{Deserialize, Serialize};
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 /// Raw token values directly from the provider API response.
 ///
@@ -18,7 +18,7 @@ use tron_core::messages::ProviderType;
 #[serde(rename_all = "camelCase")]
 pub struct TokenSource {
     /// Which provider reported these values.
-    pub provider: ProviderType,
+    pub provider: Provider,
     /// ISO 8601 timestamp when tokens were extracted.
     pub timestamp: String,
     /// Raw input tokens from the API response.
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn token_source_serde_roundtrip() {
         let source = TokenSource {
-            provider: ProviderType::Anthropic,
+            provider: Provider::Anthropic,
             timestamp: "2024-01-15T12:00:00Z".to_string(),
             raw_input_tokens: 604,
             raw_output_tokens: 100,
@@ -262,7 +262,7 @@ mod tests {
     fn token_record_serde_roundtrip() {
         let record = TokenRecord {
             source: TokenSource {
-                provider: ProviderType::Google,
+                provider: Provider::Google,
                 timestamp: "2024-01-15T12:00:00Z".to_string(),
                 raw_input_tokens: 500,
                 raw_output_tokens: 200,

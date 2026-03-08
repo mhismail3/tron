@@ -122,12 +122,11 @@ fn convert_messages_impl(
 fn merge_consecutive_roles(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessageParam> {
     let mut merged: Vec<AnthropicMessageParam> = Vec::with_capacity(messages.len());
     for msg in messages {
-        if let Some(prev) = merged.last_mut() {
-            if prev.role == msg.role {
+        if let Some(prev) = merged.last_mut()
+            && prev.role == msg.role {
                 prev.content.extend(msg.content);
                 continue;
             }
-        }
         merged.push(msg);
     }
     merged
@@ -160,11 +159,10 @@ fn dedup_tool_blocks(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessa
                 .into_iter()
                 .rev()
                 .filter(|block| {
-                    if block.get("type").and_then(|t| t.as_str()) == Some(block_type) {
-                        if let Some(id) = block.get(key).and_then(|v| v.as_str()) {
+                    if block.get("type").and_then(|t| t.as_str()) == Some(block_type)
+                        && let Some(id) = block.get(key).and_then(|v| v.as_str()) {
                             return seen.insert(id.to_owned());
                         }
-                    }
                     true // non-tool blocks always kept
                 })
                 .collect();
@@ -424,14 +422,13 @@ fn convert_tools(tools: &[tron_core::tools::Tool], is_oauth: bool) -> Vec<Anthro
         .collect();
 
     // Breakpoint 1: Last tool gets 1h cache (OAuth only)
-    if is_oauth {
-        if let Some(last) = result.last_mut() {
+    if is_oauth
+        && let Some(last) = result.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
             });
         }
-    }
 
     result
 }

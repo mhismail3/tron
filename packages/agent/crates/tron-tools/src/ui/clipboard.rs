@@ -15,7 +15,14 @@ use crate::utils::validation::{get_optional_string, validate_required_string};
 /// Copy text to the user's iOS clipboard.
 pub struct SetClipboardTool;
 
+impl Default for SetClipboardTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SetClipboardTool {
+    /// Create a new clipboard tool.
     pub fn new() -> Self {
         Self
     }

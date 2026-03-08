@@ -165,7 +165,7 @@ impl GitExecutor {
         let output = self
             .run(dir, &["diff", "--name-only", "--diff-filter=U"])
             .await?;
-        Ok(output.lines().map(|l| l.to_string()).collect())
+        Ok(output.lines().map(std::string::ToString::to_string).collect())
     }
 
     /// Count commits since a base commit (inclusive of commits after base, exclusive of base).
@@ -185,7 +185,7 @@ impl GitExecutor {
         Ok(output
             .lines()
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
+            .map(std::string::ToString::to_string)
             .collect())
     }
 

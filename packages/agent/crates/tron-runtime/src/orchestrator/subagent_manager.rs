@@ -1182,7 +1182,7 @@ mod tests {
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
-    use tron_llm::models::types::Provider as ProviderType;
+    use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
@@ -1190,8 +1190,8 @@ mod tests {
     struct MockProvider;
     #[async_trait]
     impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock-model"
@@ -1225,8 +1225,8 @@ mod tests {
     struct ErrorProvider;
     #[async_trait]
     impl Provider for ErrorProvider {
-        fn provider_type(&self) -> ProviderType {
-            ProviderType::Anthropic
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
         }
         fn model(&self) -> &str {
             "mock-model"

@@ -12,21 +12,13 @@
 //! Does NOT depend on `tron-runtime` or `tron-llm` — the coordinator
 //! is injected into runtime from the binary crate.
 
-#[allow(unused_results)]
 pub mod coordinator;
-#[allow(unused_results)]
 pub mod errors;
-#[allow(unused_results)]
 pub mod git;
-#[allow(unused_results)]
 pub mod isolation;
-#[allow(unused_results)]
 pub mod lifecycle;
-#[allow(unused_results)]
 pub mod merge;
-#[allow(unused_results)]
 pub mod recovery;
-#[allow(unused_results)]
 pub mod types;
 
 pub use coordinator::{WorktreeCoordinator, count_diff_stats, split_diff_by_file};

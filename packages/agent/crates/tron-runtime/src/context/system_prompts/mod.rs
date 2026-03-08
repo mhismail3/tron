@@ -12,7 +12,7 @@ use std::path::Path;
 
 use tracing::{debug, warn};
 
-use tron_core::messages::ProviderType;
+use tron_core::messages::Provider;
 
 use super::constants::MAX_SYSTEM_PROMPT_FILE_SIZE;
 
@@ -242,7 +242,7 @@ pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSys
 #[derive(Debug, Clone)]
 pub struct SystemPromptConfig {
     /// Provider type.
-    pub provider_type: ProviderType,
+    pub provider_type: Provider,
     /// Working directory path.
     pub working_directory: String,
     /// Custom system prompt override.
@@ -255,7 +255,7 @@ pub struct SystemPromptConfig {
 /// returns an empty string (context is injected via tool clarification).
 #[must_use]
 pub fn build_system_prompt(config: &SystemPromptConfig) -> String {
-    if config.provider_type == ProviderType::OpenAiCodex {
+    if config.provider_type == Provider::OpenAiCodex {
         // Codex: system prompt is fixed by OAuth validation.
         // Tron context goes via tool clarification message.
         String::new()
@@ -291,8 +291,8 @@ pub fn build_codex_tool_clarification(config: &SystemPromptConfig) -> String {
 /// Check if a provider requires a tool clarification message
 /// instead of a custom system prompt.
 #[must_use]
-pub fn requires_tool_clarification(provider_type: &ProviderType) -> bool {
-    *provider_type == ProviderType::OpenAiCodex
+pub fn requires_tool_clarification(provider_type: &Provider) -> bool {
+    *provider_type == Provider::OpenAiCodex
 }
 
 /// Get the tool clarification message for providers that need it.
@@ -300,7 +300,7 @@ pub fn requires_tool_clarification(provider_type: &ProviderType) -> bool {
 /// Returns `None` if the provider uses standard system prompts.
 #[must_use]
 pub fn get_tool_clarification(config: &SystemPromptConfig) -> Option<String> {
-    if config.provider_type == ProviderType::OpenAiCodex {
+    if config.provider_type == Provider::OpenAiCodex {
         Some(build_codex_tool_clarification(config))
     } else {
         None
@@ -360,7 +360,7 @@ mod tests {
 
     // ── System prompt builders ───────────────────────────────────────────
 
-    fn make_config(provider_type: ProviderType) -> SystemPromptConfig {
+    fn make_config(provider_type: Provider) -> SystemPromptConfig {
         SystemPromptConfig {
             provider_type,
             working_directory: "/tmp/project".into(),
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn build_anthropic_prompt() {
-        let config = make_config(ProviderType::Anthropic);
+        let config = make_config(Provider::Anthropic);
         let prompt = build_system_prompt(&config);
         assert!(prompt.contains(TRON_CORE_PROMPT));
         assert!(prompt.contains("/tmp/project"));
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn build_openai_prompt() {
-        let config = make_config(ProviderType::OpenAi);
+        let config = make_config(Provider::OpenAi);
         let prompt = build_system_prompt(&config);
         assert!(prompt.contains(TRON_CORE_PROMPT));
         assert!(prompt.contains("/tmp/project"));
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn build_google_prompt() {
-        let config = make_config(ProviderType::Google);
+        let config = make_config(Provider::Google);
         let prompt = build_system_prompt(&config);
         assert!(prompt.contains(TRON_CORE_PROMPT));
         assert!(prompt.contains("/tmp/project"));
@@ -395,14 +395,14 @@ mod tests {
 
     #[test]
     fn build_codex_prompt_is_empty() {
-        let config = make_config(ProviderType::OpenAiCodex);
+        let config = make_config(Provider::OpenAiCodex);
         let prompt = build_system_prompt(&config);
         assert!(prompt.is_empty());
     }
 
     #[test]
     fn build_codex_tool_clarification_contains_context() {
-        let config = make_config(ProviderType::OpenAiCodex);
+        let config = make_config(Provider::OpenAiCodex);
         let clarification = build_codex_tool_clarification(&config);
         assert!(clarification.contains("[TRON CONTEXT]"));
         assert!(clarification.contains(TRON_CORE_PROMPT));
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn custom_prompt_overrides_core() {
         let config = SystemPromptConfig {
-            provider_type: ProviderType::Anthropic,
+            provider_type: Provider::Anthropic,
             working_directory: "/tmp".into(),
             custom_prompt: Some("Custom system prompt".into()),
         };
@@ -427,19 +427,19 @@ mod tests {
 
     #[test]
     fn codex_requires_tool_clarification() {
-        assert!(requires_tool_clarification(&ProviderType::OpenAiCodex));
+        assert!(requires_tool_clarification(&Provider::OpenAiCodex));
     }
 
     #[test]
     fn non_codex_does_not_require_tool_clarification() {
-        assert!(!requires_tool_clarification(&ProviderType::Anthropic));
-        assert!(!requires_tool_clarification(&ProviderType::OpenAi));
-        assert!(!requires_tool_clarification(&ProviderType::Google));
+        assert!(!requires_tool_clarification(&Provider::Anthropic));
+        assert!(!requires_tool_clarification(&Provider::OpenAi));
+        assert!(!requires_tool_clarification(&Provider::Google));
     }
 
     #[test]
     fn get_tool_clarification_codex() {
-        let config = make_config(ProviderType::OpenAiCodex);
+        let config = make_config(Provider::OpenAiCodex);
         let result = get_tool_clarification(&config);
         assert!(result.is_some());
         assert!(result.unwrap().contains("[TRON CONTEXT]"));
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn get_tool_clarification_non_codex() {
-        let config = make_config(ProviderType::Anthropic);
+        let config = make_config(Provider::Anthropic);
         assert!(get_tool_clarification(&config).is_none());
     }
 

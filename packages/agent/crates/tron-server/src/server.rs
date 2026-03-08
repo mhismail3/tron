@@ -208,6 +208,7 @@ impl TronServer {
     }
 
     /// Override deploy paths (for test isolation).
+    #[must_use]
     pub fn with_deploy_paths(mut self, binary_path: PathBuf, deploy_dir: PathBuf) -> Self {
         self.deploy_binary_path = binary_path;
         self.deploy_dir = deploy_dir;

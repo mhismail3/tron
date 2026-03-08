@@ -294,7 +294,7 @@ fn load_memory(
                 .filter_map(Value::as_str)
                 .filter(|text| !text.is_empty())
             {
-                write!(summary, "\n- {lesson}").unwrap();
+                let _ = write!(summary, "\n- {lesson}");
             }
         }
         sections.push(format!("\n{summary}"));

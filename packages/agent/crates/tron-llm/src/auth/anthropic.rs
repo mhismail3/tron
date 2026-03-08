@@ -184,8 +184,8 @@ pub async fn load_server_auth_with_client(
     };
 
     // 2. Multi-account tokens
-    if let Some(accounts) = &pa.accounts {
-        if !accounts.is_empty() {
+    if let Some(accounts) = &pa.accounts
+        && !accounts.is_empty() {
             let account = if let Some(label) = preferred_account {
                 accounts.iter().find(|a| a.label == label)
             } else {
@@ -210,7 +210,6 @@ pub async fn load_server_auth_with_client(
                 )));
             }
         }
-    }
 
     // 3. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {

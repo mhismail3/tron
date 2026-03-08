@@ -38,14 +38,13 @@ pub fn reconstruct(
     let mut result = from_session_state(&state);
 
     // Check for active worktree
-    if let Ok(Some(event)) = event_store.get_active_worktree(session_id) {
-        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
+    if let Ok(Some(event)) = event_store.get_active_worktree(session_id)
+        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
             result.worktree_path = payload
                 .get("path")
                 .and_then(|v| v.as_str())
                 .map(String::from);
         }
-    }
 
     Ok(result)
 }

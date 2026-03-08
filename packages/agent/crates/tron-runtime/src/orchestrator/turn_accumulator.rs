@@ -16,7 +16,8 @@
 //! The lock is held only for short, non-async operations.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
 
 use serde_json::Value;
 use tron_core::events::TronEvent;
@@ -110,6 +111,7 @@ impl AccumulatedToolCall {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Accumulates content for a single in-progress turn.
+#[derive(Default)]
 pub struct TurnAccumulator {
     /// Concatenated assistant text output so far.
     pub text: String,
@@ -208,7 +210,7 @@ impl TurnAccumulator {
         }
     }
 
-    /// Serialize the current state to JSON triple: (text, tool_calls, content_sequence).
+    /// Serialize the current state to JSON triple: (text, `tool_calls`, `content_sequence`).
     pub fn to_json(&self) -> (String, Value, Value) {
         let tools = Value::Array(self.tool_calls.iter().map(AccumulatedToolCall::to_json).collect());
         let sequence = Value::Array(
@@ -226,6 +228,7 @@ impl TurnAccumulator {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Thread-safe map of session ID → `TurnAccumulator`.
+#[derive(Default)]
 pub struct TurnAccumulatorMap {
     accumulators: Mutex<HashMap<String, TurnAccumulator>>,
 }
@@ -245,52 +248,51 @@ impl TurnAccumulatorMap {
         let _ = self
             .accumulators
             .lock()
-            .unwrap()
             .insert(session_id.to_string(), TurnAccumulator::new());
     }
 
     /// Remove the accumulator when a turn ends.
     pub fn handle_turn_end(&self, session_id: &str) {
-        let _ = self.accumulators.lock().unwrap().remove(session_id);
+        let _ = self.accumulators.lock().remove(session_id);
     }
 
     /// Remove the accumulator when the agent ends.
     pub fn handle_agent_end(&self, session_id: &str) {
-        let _ = self.accumulators.lock().unwrap().remove(session_id);
+        let _ = self.accumulators.lock().remove(session_id);
     }
 
     /// Append a text delta to the session's accumulator.
     pub fn handle_text_delta(&self, session_id: &str, delta: &str) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.append_text(delta);
         }
     }
 
     /// Append a thinking delta to the session's accumulator.
     pub fn handle_thinking_delta(&self, session_id: &str, delta: &str) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.append_thinking(delta);
         }
     }
 
     /// Record a new tool call in "generating" state.
     pub fn handle_tool_generating(&self, session_id: &str, tool_call_id: &str, tool_name: &str) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.add_tool_generating(tool_call_id, tool_name);
         }
     }
 
     /// Transition a tool call to "running" state.
     pub fn handle_tool_start(&self, session_id: &str, tool_call_id: &str, arguments: Option<&Value>) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.update_tool_start(tool_call_id, arguments);
         }
     }
 
     /// Append streaming output to a running tool call.
     pub fn handle_tool_output(&self, session_id: &str, tool_call_id: &str, output: &str) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
-            if let Some(tc) = acc
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id)
+            && let Some(tc) = acc
                 .tool_calls
                 .iter_mut()
                 .find(|tc| tc.tool_call_id == tool_call_id)
@@ -298,7 +300,6 @@ impl TurnAccumulatorMap {
                 let streaming = tc.streaming_output.get_or_insert_with(String::new);
                 streaming.push_str(output);
             }
-        }
     }
 
     /// Record tool completion or error.
@@ -309,7 +310,7 @@ impl TurnAccumulatorMap {
         result: Option<&str>,
         is_error: bool,
     ) {
-        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.update_tool_end(tool_call_id, result, is_error);
         }
     }
@@ -319,7 +320,7 @@ impl TurnAccumulatorMap {
     /// Get a serialized snapshot of the current turn state for a session.
     /// Returns `None` if no turn is in progress.
     pub fn get_state(&self, session_id: &str) -> Option<(String, Value, Value)> {
-        let guard = self.accumulators.lock().unwrap();
+        let guard = self.accumulators.lock();
         let result = guard.get(session_id).map(|acc| {
             tracing::info!(
                 session_id,
