@@ -13,9 +13,10 @@ import SwiftUI
 /// - ProcessingTrackable: Processing state and dashboard updates
 /// - StreamingManaging: Streaming state management
 /// - BrowserManaging: Browser session management
+/// - DeviceRequestManaging: Device request cancellation on abort
 /// - DashboardUpdating: Dashboard info updates
 @MainActor
-protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, BrowserManaging, DashboardUpdating {
+protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, BrowserManaging, DeviceRequestManaging, DashboardUpdating {
     /// The current input text
     var inputText: String { get set }
 
@@ -249,6 +250,8 @@ final class MessagingCoordinator {
             context.appendInterruptedMessage()
             context.logInfo("Agent aborted successfully")
 
+            // Cancel active device requests (Health, Calendar, Contacts)
+            context.cancelActiveDeviceRequests()
             // Close browser session when agent is interrupted
             context.closeBrowserSession()
         } catch {

@@ -89,6 +89,16 @@ impl DeviceRequestBroker {
         }
     }
 
+    /// Cancel all pending requests. Dropping senders causes receivers
+    /// to get `DeviceRequestError::Cancelled`.
+    pub fn cancel_all_pending(&self) {
+        let mut pending = self.pending.lock();
+        if !pending.is_empty() {
+            tracing::debug!(count = pending.len(), "cancelling all pending device requests");
+            pending.clear();
+        }
+    }
+
     /// Number of pending (unresolved) requests.
     pub fn pending_count(&self) -> usize {
         self.pending.lock().len()
@@ -166,5 +176,57 @@ mod tests {
     fn pending_count_starts_at_zero() {
         let broker = make_broker();
         assert_eq!(broker.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_all_pending_clears_entries() {
+        let broker = Arc::new(make_broker());
+        let broker2 = broker.clone();
+
+        let handle = tokio::spawn(async move {
+            broker2
+                .request("test.method", json!({}), Duration::from_secs(5))
+                .await
+        });
+
+        // Wait for the request to register
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(broker.pending_count(), 1);
+
+        // Cancel all — should clear pending and cause receiver to get Cancelled
+        broker.cancel_all_pending();
+        assert_eq!(broker.pending_count(), 0);
+
+        let result = handle.await.unwrap();
+        assert!(matches!(result, Err(DeviceRequestError::Cancelled)));
+    }
+
+    #[test]
+    fn cancel_all_pending_empty_is_noop() {
+        let broker = make_broker();
+        broker.cancel_all_pending(); // should not panic
+        assert_eq!(broker.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_all_pending_then_resolve_returns_false() {
+        let broker = Arc::new(make_broker());
+        let broker2 = broker.clone();
+
+        let handle = tokio::spawn(async move {
+            broker2
+                .request("test.method", json!({}), Duration::from_secs(5))
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let request_id = broker.pending.lock().keys().next().cloned().unwrap();
+
+        broker.cancel_all_pending();
+
+        // Late resolve should return false (entry already gone)
+        assert!(!broker.resolve(&request_id, json!({"result": "late"})));
+
+        let _ = handle.await;
     }
 }

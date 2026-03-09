@@ -1226,6 +1226,13 @@ impl MethodHandler for AbortHandler {
                 message: e.to_string(),
             })?;
 
+        // Clean up pending device requests to unblock any waiting tools immediately
+        if aborted {
+            if let Some(ref broker) = ctx.device_request_broker {
+                broker.cancel_all_pending();
+            }
+        }
+
         Ok(serde_json::json!({ "aborted": aborted }))
     }
 }

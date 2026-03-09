@@ -18,6 +18,9 @@ final class DeviceRequestDispatcher {
     /// Static because each ChatViewModel creates its own dispatcher instance.
     private static var handledRequestIds = Set<String>()
 
+    /// Active device request tasks, keyed by requestId.
+    private var activeTasks: [String: Task<Void, Never>] = [:]
+
     init(rpcClient: RPCClient) {
         self.rpcClient = rpcClient
     }
@@ -32,20 +35,41 @@ final class DeviceRequestDispatcher {
         let requestId = result.requestId
         let method = result.method
 
-        Task {
+        let task = Task { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.activeTasks.removeValue(forKey: requestId)
+                }
+            }
             do {
                 logger.info("Device request dispatching: method=\(method), requestId=\(requestId)", category: .general)
-                let response = try await dispatch(method: method, params: result.params)
+                guard let self else { return }
+                let response = try await self.dispatch(method: method, params: result.params)
+                guard !Task.isCancelled else { return }
                 logger.info("Device request responding: method=\(method), requestId=\(requestId)", category: .general)
-                try await respond(requestId: requestId, result: response)
+                try await self.respond(requestId: requestId, result: response)
+            } catch is CancellationError {
+                logger.debug("Device request cancelled: method=\(method), requestId=\(requestId)", category: .general)
             } catch {
+                guard !Task.isCancelled else { return }
                 logger.error("Device request failed: method=\(method), requestId=\(requestId), error=\(error)", category: .general)
                 let errorResponse: [String: AnyCodable] = [
                     "error": AnyCodable(error.localizedDescription)
                 ]
-                try? await respond(requestId: requestId, result: errorResponse)
+                try? await self?.respond(requestId: requestId, result: errorResponse)
             }
         }
+        activeTasks[requestId] = task
+    }
+
+    /// Cancel all active device request tasks (called on abort).
+    func cancelAll() {
+        guard !activeTasks.isEmpty else { return }
+        logger.info("Cancelling \(activeTasks.count) active device request(s)", category: .general)
+        for (_, task) in activeTasks {
+            task.cancel()
+        }
+        activeTasks.removeAll()
     }
 
     // MARK: - Routing

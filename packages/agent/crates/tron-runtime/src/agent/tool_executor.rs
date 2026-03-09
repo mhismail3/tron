@@ -198,9 +198,18 @@ pub async fn execute_tool(
     let tool_result = if ctx.cancel.is_cancelled() {
         tron_core::tools::error_result("Operation cancelled")
     } else {
-        match tool.execute(effective_args, &tool_ctx).await {
-            Ok(r) => r,
-            Err(e) => tron_core::tools::error_result(e.to_string()),
+        tokio::select! {
+            biased;
+            () = ctx.cancel.cancelled() => {
+                warn!(tool_name, "cancelled during execution");
+                tron_core::tools::error_result("Operation cancelled")
+            }
+            result = tool.execute(effective_args, &tool_ctx) => {
+                match result {
+                    Ok(r) => r,
+                    Err(e) => tron_core::tools::error_result(e.to_string()),
+                }
+            }
         }
     };
 
@@ -773,6 +782,133 @@ mod tests {
         let guardrails = Arc::new(parking_lot::Mutex::new(engine));
         // parking_lot::Mutex::lock() always succeeds (no Result, no poison)
         let _guard = guardrails.lock();
+    }
+
+    // ── SlowTool: sleeps 60s to test mid-execution cancellation ──
+
+    struct SlowTool;
+
+    #[async_trait]
+    impl TronTool for SlowTool {
+        fn name(&self) -> &'static str {
+            "slow"
+        }
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "slow".into(),
+                description: "Sleeps for 60s".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _params: Value,
+            _ctx: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok(text_result("completed", false))
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_during_execution() {
+        let registry = make_registry(vec![Arc::new(SlowTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("slow", Map::new());
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
+
+        // Cancel after 100ms — tool should NOT run for 60s
+        let cancel2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancel2.cancel();
+        });
+
+        let start = Instant::now();
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.result.is_error.unwrap_or(false));
+        assert!(elapsed < Duration::from_secs(2), "should cancel quickly, took {elapsed:?}");
+    }
+
+    #[tokio::test]
+    async fn cancelled_during_execution_emits_start_and_end() {
+        let registry = make_registry(vec![Arc::new(SlowTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let mut rx = emitter.subscribe();
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("slow", Map::new());
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
+
+        let cancel2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancel2.cancel();
+        });
+
+        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        let mut saw_start = false;
+        let mut saw_end = false;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                TronEvent::ToolExecutionStart { tool_name, .. } if tool_name == "slow" => {
+                    saw_start = true;
+                }
+                TronEvent::ToolExecutionEnd { tool_name, .. } if tool_name == "slow" => {
+                    saw_end = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_start, "should emit ToolExecutionStart");
+        assert!(saw_end, "should emit ToolExecutionEnd");
+    }
+
+    #[tokio::test]
+    async fn cancelled_during_execution_result_is_error() {
+        let registry = make_registry(vec![Arc::new(SlowTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("slow", Map::new());
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
+
+        let cancel2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancel2.cancel();
+        });
+
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        assert!(result.result.is_error.unwrap_or(false));
+        let ToolResultBody::Blocks(blocks) = &result.result.content else {
+            panic!("Expected blocks result");
+        };
+        let ToolResultContent::Text { text } = &blocks[0] else {
+            panic!("Expected text block");
+        };
+        assert!(text.to_lowercase().contains("cancelled"), "error should mention cancellation, got: {text}");
     }
 
     #[tokio::test]

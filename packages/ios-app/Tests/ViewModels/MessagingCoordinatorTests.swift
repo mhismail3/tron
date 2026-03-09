@@ -318,6 +318,14 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.closeBrowserSessionCalled)
     }
 
+    func testAbortAgentCancelsDeviceRequests() async {
+        // When: Aborting agent
+        await coordinator.abortAgent(context: mockContext)
+
+        // Then: Active device requests should be cancelled
+        XCTAssertTrue(mockContext.cancelActiveDeviceRequestsCalled)
+    }
+
     func testAbortAgentUpdatesDashboardState() async {
         // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
@@ -426,6 +434,7 @@ final class MockMessagingContext: MessagingContext {
     var abortAgentCalled = false
     var finalizeStreamingMessageCalled = false
     var closeBrowserSessionCalled = false
+    var cancelActiveDeviceRequestsCalled = false
     var showErrorAlertCalled = false
 
     // MARK: - Test Configuration
@@ -498,6 +507,10 @@ final class MockMessagingContext: MessagingContext {
 
     func closeBrowserSession() {
         closeBrowserSessionCalled = true
+    }
+
+    func cancelActiveDeviceRequests() {
+        cancelActiveDeviceRequestsCalled = true
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {
