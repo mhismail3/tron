@@ -72,9 +72,19 @@ impl MlxEngine {
             .to_string_lossy()
             .to_string();
 
+        // Ensure PATH includes Homebrew so the worker can find ffmpeg
+        // (launchd provides only /usr/bin:/bin:/usr/sbin:/sbin).
+        let path = std::env::var("PATH").unwrap_or_default();
+        let augmented_path = if path.contains("/opt/homebrew/bin") {
+            path
+        } else {
+            format!("/opt/homebrew/bin:{path}")
+        };
+
         let mut child = Command::new(&self.python_path)
             .arg(&self.worker_script)
             .env("HF_HOME", &hf_home)
+            .env("PATH", &augmented_path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
