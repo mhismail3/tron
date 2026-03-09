@@ -98,8 +98,9 @@ impl TronServer {
         // Inject shutdown coordinator into context so handlers can register tasks
         rpc_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         // Inject device request broker (uses broadcast for device.request events)
-        rpc_context.device_request_broker =
-            Some(Arc::new(crate::device::DeviceRequestBroker::new(broadcast.clone())));
+        rpc_context.device_request_broker = Some(Arc::new(
+            crate::device::DeviceRequestBroker::new(broadcast.clone()),
+        ));
         Self {
             config,
             registry: Arc::new(registry),
@@ -414,7 +415,11 @@ mod tests {
     async fn health_reports_active_sessions_from_orchestrator() {
         let ctx = make_test_context();
         // Create a session so orchestrator reports 1
-        ctx.session_manager.create_session("claude-opus-4-6", "/tmp", None).unwrap();
+        assert!(
+            ctx.session_manager
+                .create_session("claude-opus-4-6", "/tmp", None)
+                .is_ok()
+        );
         let server = TronServer::new(
             ServerConfig::default(),
             MethodRegistry::new(),

@@ -15,7 +15,9 @@ use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
 use tron_core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
 
-use super::types::{MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH};
+use super::types::{
+    MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
+};
 
 /// Convert Tron messages to Responses API input format.
 ///
@@ -701,7 +703,10 @@ mod tests {
     #[test]
     fn convert_tools_v2_without_tool_search() {
         use crate::openai::types::ResponsesToolEntry;
-        let tools = vec![make_tool("bash", "Run commands"), make_tool("read", "Read file")];
+        let tools = vec![
+            make_tool("bash", "Run commands"),
+            make_tool("read", "Read file"),
+        ];
         let result = convert_tools_v2(&tools, false);
 
         assert_eq!(result.len(), 2);
@@ -718,7 +723,10 @@ mod tests {
     #[test]
     fn convert_tools_v2_with_tool_search() {
         use crate::openai::types::ResponsesToolEntry;
-        let tools = vec![make_tool("bash", "Run commands"), make_tool("read", "Read file")];
+        let tools = vec![
+            make_tool("bash", "Run commands"),
+            make_tool("read", "Read file"),
+        ];
         let result = convert_tools_v2(&tools, true);
 
         // 2 functions + 1 tool_search sentinel
@@ -740,7 +748,6 @@ mod tests {
 
     #[test]
     fn convert_tools_v2_tool_search_json_shape() {
-        use crate::openai::types::ResponsesToolEntry;
         let tools = vec![make_tool("bash", "Run commands")];
         let result = convert_tools_v2(&tools, true);
         let json = serde_json::to_value(&result).unwrap();

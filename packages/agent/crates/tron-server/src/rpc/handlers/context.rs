@@ -16,11 +16,11 @@ use tron_skills::registry::SkillRegistry;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::handlers::session_context::{
     RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
     load_session_context_artifacts,
 };
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 // =============================================================================
@@ -286,7 +286,8 @@ impl MethodHandler for GetDetailedSnapshotHandler {
                 .iter()
                 .filter_map(|s| s.get("name").and_then(Value::as_str).map(String::from))
                 .collect();
-            let skill_context = build_active_skill_context(&active_skill_names, &ctx.skill_registry);
+            let skill_context =
+                build_active_skill_context(&active_skill_names, &ctx.skill_registry);
 
             let mut composed_context = cm.build_base_context();
             composed_context.server_origin.clone_from(&session.origin);
@@ -883,7 +884,7 @@ mod tests {
             .unwrap();
         let messages = result["messages"].as_array().unwrap();
         assert!(
-            messages.len() >= 1,
+            !messages.is_empty(),
             "expected at least 1 message, got {}",
             messages.len()
         );
@@ -1495,9 +1496,8 @@ mod tests {
             let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
-        let mgr = Arc::new(
-            SessionManager::new(store.clone()).with_origin("localhost:9847".to_string()),
-        );
+        let mgr =
+            Arc::new(SessionManager::new(store.clone()).with_origin("localhost:9847".to_string()));
         let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
         let ctx = RpcContext {
             orchestrator: orch,

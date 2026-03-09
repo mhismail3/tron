@@ -237,7 +237,10 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => openai_tier(0.10, 0.40),
 
         // MiniMax — $0.3/M input, $1.2/M output (no cache)
-        "MiniMax-M2.5" | "MiniMax-M2.5-highspeed" | "MiniMax-M2.1" | "MiniMax-M2.1-highspeed"
+        "MiniMax-M2.5"
+        | "MiniMax-M2.5-highspeed"
+        | "MiniMax-M2.1"
+        | "MiniMax-M2.1-highspeed"
         | "MiniMax-M2" => minimax_tier(0.3, 1.2),
 
         _ => return None,
@@ -318,66 +321,73 @@ mod tests {
     use super::*;
     use tron_core::messages::Provider;
 
+    fn assert_float_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
     // ── Pricing tier lookup ──
 
     #[test]
     fn pricing_claude_opus_46() {
         let tier = get_pricing_tier("claude-opus-4-6").unwrap();
-        assert_eq!(tier.input_per_million, 5.0);
-        assert_eq!(tier.output_per_million, 25.0);
-        assert_eq!(tier.cache_write_5m_multiplier, 1.25);
-        assert_eq!(tier.cache_write_1h_multiplier, 2.0);
-        assert_eq!(tier.cache_read_multiplier, 0.1);
+        assert_float_eq(tier.input_per_million, 5.0);
+        assert_float_eq(tier.output_per_million, 25.0);
+        assert_float_eq(tier.cache_write_5m_multiplier, 1.25);
+        assert_float_eq(tier.cache_write_1h_multiplier, 2.0);
+        assert_float_eq(tier.cache_read_multiplier, 0.1);
     }
 
     #[test]
     fn pricing_claude_sonnet_45() {
         let tier = get_pricing_tier("claude-sonnet-4-5-20250929").unwrap();
-        assert_eq!(tier.input_per_million, 3.0);
-        assert_eq!(tier.output_per_million, 15.0);
+        assert_float_eq(tier.input_per_million, 3.0);
+        assert_float_eq(tier.output_per_million, 15.0);
     }
 
     #[test]
     fn pricing_claude_haiku_45() {
         let tier = get_pricing_tier("claude-haiku-4-5-20251001").unwrap();
-        assert_eq!(tier.input_per_million, 1.0);
-        assert_eq!(tier.output_per_million, 5.0);
+        assert_float_eq(tier.input_per_million, 1.0);
+        assert_float_eq(tier.output_per_million, 5.0);
     }
 
     #[test]
     fn pricing_claude_opus_41() {
         let tier = get_pricing_tier("claude-opus-4-1").unwrap();
-        assert_eq!(tier.input_per_million, 15.0);
-        assert_eq!(tier.output_per_million, 75.0);
+        assert_float_eq(tier.input_per_million, 15.0);
+        assert_float_eq(tier.output_per_million, 75.0);
     }
 
     #[test]
     fn pricing_claude_3_haiku() {
         let tier = get_pricing_tier("claude-3-haiku").unwrap();
-        assert_eq!(tier.input_per_million, 0.25);
-        assert_eq!(tier.output_per_million, 1.25);
+        assert_float_eq(tier.input_per_million, 0.25);
+        assert_float_eq(tier.output_per_million, 1.25);
     }
 
     #[test]
     fn pricing_gemini_pro() {
         let tier = get_pricing_tier("gemini-3-pro-preview").unwrap();
-        assert_eq!(tier.input_per_million, 1.25);
-        assert_eq!(tier.output_per_million, 5.0);
-        assert_eq!(tier.cache_read_multiplier, 0.25);
+        assert_float_eq(tier.input_per_million, 1.25);
+        assert_float_eq(tier.output_per_million, 5.0);
+        assert_float_eq(tier.cache_read_multiplier, 0.25);
     }
 
     #[test]
     fn pricing_gemini_flash() {
         let tier = get_pricing_tier("gemini-2-5-flash").unwrap();
-        assert_eq!(tier.input_per_million, 0.075);
-        assert_eq!(tier.output_per_million, 0.3);
+        assert_float_eq(tier.input_per_million, 0.075);
+        assert_float_eq(tier.output_per_million, 0.3);
     }
 
     #[test]
     fn pricing_o3() {
         let tier = get_pricing_tier("o3").unwrap();
-        assert_eq!(tier.input_per_million, 10.0);
-        assert_eq!(tier.output_per_million, 40.0);
+        assert_float_eq(tier.input_per_million, 10.0);
+        assert_float_eq(tier.output_per_million, 40.0);
     }
 
     #[test]
@@ -388,10 +398,10 @@ mod tests {
     #[test]
     fn pricing_pattern_match_partial_names() {
         let tier = get_pricing_tier("claude-opus-4-6-extended").unwrap();
-        assert_eq!(tier.input_per_million, 5.0);
+        assert_float_eq(tier.input_per_million, 5.0);
 
         let tier = get_pricing_tier("gemini-2-5-pro-latest").unwrap();
-        assert_eq!(tier.input_per_million, 1.25);
+        assert_float_eq(tier.input_per_million, 1.25);
     }
 
     // ── Cost calculation ──
@@ -459,7 +469,7 @@ mod tests {
     fn cost_zero_usage() {
         let usage = TokenUsage::default();
         let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
-        assert_eq!(cost.total, 0.0);
+        assert_float_eq(cost.total, 0.0);
     }
 
     #[test]
@@ -577,10 +587,7 @@ mod tests {
 
     #[test]
     fn detect_unknown_defaults_to_anthropic() {
-        assert_eq!(
-            detect_provider("some-unknown-model"),
-            Provider::Anthropic
-        );
+        assert_eq!(detect_provider("some-unknown-model"), Provider::Anthropic);
     }
 
     // ── Context limit ──

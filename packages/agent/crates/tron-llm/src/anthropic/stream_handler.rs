@@ -324,18 +324,13 @@ mod tests {
 
     #[test]
     fn stream_state_for_minimax() {
-        let state =
-            create_stream_state_for(tron_core::messages::Provider::MiniMax);
-        assert_eq!(
-            state.provider_type,
-            tron_core::messages::Provider::MiniMax
-        );
+        let state = create_stream_state_for(tron_core::messages::Provider::MiniMax);
+        assert_eq!(state.provider_type, tron_core::messages::Provider::MiniMax);
     }
 
     #[test]
     fn done_event_uses_state_provider_type() {
-        let mut state =
-            create_stream_state_for(tron_core::messages::Provider::MiniMax);
+        let mut state = create_stream_state_for(tron_core::messages::Provider::MiniMax);
         state.input_tokens = 100;
         state.output_tokens = 50;
         let event = build_done_event(&mut state);
@@ -473,13 +468,13 @@ mod tests {
         assert_eq!(state.accumulated_text, "Hello ");
 
         // Second delta
-        let event2 = AnthropicSseEvent::ContentBlockDelta {
+        let second_event = AnthropicSseEvent::ContentBlockDelta {
             index: 0,
             delta: SseDelta::TextDelta {
                 text: "world".into(),
             },
         };
-        let _ = process_sse_event(&event2, &mut state);
+        let _ = process_sse_event(&second_event, &mut state);
         assert_eq!(state.accumulated_text, "Hello world");
     }
 
@@ -516,13 +511,13 @@ mod tests {
         assert_eq!(state.accumulated_signature, "sig_part1");
 
         // Second signature delta
-        let event2 = AnthropicSseEvent::ContentBlockDelta {
+        let second_event = AnthropicSseEvent::ContentBlockDelta {
             index: 0,
             delta: SseDelta::SignatureDelta {
                 signature: "_part2".into(),
             },
         };
-        let _ = process_sse_event(&event2, &mut state);
+        let _ = process_sse_event(&second_event, &mut state);
         assert_eq!(state.accumulated_signature, "sig_part1_part2");
     }
 

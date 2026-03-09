@@ -393,15 +393,16 @@ impl EventStore {
 
         // Last turn context window (SET, not increment): set on message.assistant
         if opts.event_type == EventType::MessageAssistant
-            && let Some(tu) = opts.payload.get("tokenUsage") {
-                counters.last_turn_input_tokens = opts
-                    .payload
-                    .get("tokenRecord")
-                    .and_then(|r| r.get("computed"))
-                    .and_then(|c| c.get("contextWindowTokens"))
-                    .and_then(Value::as_i64)
-                    .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
-            }
+            && let Some(tu) = opts.payload.get("tokenUsage")
+        {
+            counters.last_turn_input_tokens = opts
+                .payload
+                .get("tokenRecord")
+                .and_then(|r| r.get("computed"))
+                .and_then(|c| c.get("contextWindowTokens"))
+                .and_then(Value::as_i64)
+                .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
+        }
 
         let _ = SessionRepo::increment_counters(&tx, opts.session_id, &counters)?;
 
@@ -1027,14 +1028,12 @@ impl EventStore {
     /// subsequent `worktree.released` event (or the acquired event has a
     /// higher sequence number).
     pub fn get_active_worktree(&self, session_id: &str) -> Result<Option<EventRow>> {
-        let acquired = self
-            .get_events_by_type(session_id, &["worktree.acquired"], None)?;
+        let acquired = self.get_events_by_type(session_id, &["worktree.acquired"], None)?;
         if acquired.is_empty() {
             return Ok(None);
         }
 
-        let released = self
-            .get_events_by_type(session_id, &["worktree.released"], None)?;
+        let released = self.get_events_by_type(session_id, &["worktree.released"], None)?;
 
         let latest_acquired = acquired.last();
         let latest_released = released.last();
@@ -1196,7 +1195,13 @@ mod tests {
     fn create_session_with_explicit_provider() {
         let store = setup();
         let result = store
-            .create_session("claude-opus-4-6", "/tmp/project", None, Some("openai"), None)
+            .create_session(
+                "claude-opus-4-6",
+                "/tmp/project",
+                None,
+                Some("openai"),
+                None,
+            )
             .unwrap();
 
         let payload_str: String = result.root_event.payload;
@@ -1497,7 +1502,10 @@ mod tests {
             .unwrap();
 
         let session = store.get_session(&cr.session.id).unwrap().unwrap();
-        assert_eq!(session.total_input_tokens, 0, "message.assistant should not count tokens");
+        assert_eq!(
+            session.total_input_tokens, 0,
+            "message.assistant should not count tokens"
+        );
         assert_eq!(session.total_output_tokens, 0);
         assert_eq!(session.total_cache_read_tokens, 0);
         assert_eq!(session.total_cache_creation_tokens, 0);
@@ -2125,7 +2133,13 @@ mod tests {
     fn update_source_sets_source() {
         let store = setup();
         let cr = store
-            .create_session("claude-opus-4-6", "/tmp/project", Some("Cron: test"), None, None)
+            .create_session(
+                "claude-opus-4-6",
+                "/tmp/project",
+                Some("Cron: test"),
+                None,
+                None,
+            )
             .unwrap();
 
         let updated = store.update_source(&cr.session.id, "cron").unwrap();
@@ -2345,8 +2359,8 @@ mod tests {
             .get_events_by_session(&cr.session.id, &ListEventsOptions::default())
             .unwrap();
         assert_eq!(events.len(), 7);
-        for i in 0..7 {
-            assert_eq!(events[i].sequence, i as i64);
+        for (i, event) in events.iter().enumerate() {
+            assert_eq!(event.sequence, i as i64);
         }
     }
 
@@ -3016,7 +3030,13 @@ mod tests {
                 let store = Arc::clone(&store);
                 std::thread::spawn(move || {
                     let cr = store
-                        .create_session("claude-opus-4-6", &format!("/tmp/project-{i}"), None, None, None)
+                        .create_session(
+                            "claude-opus-4-6",
+                            &format!("/tmp/project-{i}"),
+                            None,
+                            None,
+                            None,
+                        )
                         .unwrap();
                     for _ in 0..5 {
                         store

@@ -386,11 +386,7 @@ pub struct ProviderError {
 impl ProviderError {
     /// Create a new provider error.
     #[must_use]
-    pub fn new(
-        provider: Provider,
-        model: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(provider: Provider, model: impl Into<String>, message: impl Into<String>) -> Self {
         let provider_upper = provider.to_string().to_uppercase();
         Self {
             provider,
@@ -717,9 +713,8 @@ mod tests {
 
     #[test]
     fn tron_error_from_provider() {
-        let provider_err =
-            ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded")
-                .with_status(529);
+        let provider_err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded")
+            .with_status(529);
         let err = TronError::from(provider_err);
         assert!(err.to_string().contains("anthropic"));
         assert!(err.is_retryable());
@@ -768,7 +763,7 @@ mod tests {
 
     #[test]
     fn session_error_with_source() {
-        let cause = std::io::Error::new(std::io::ErrorKind::Other, "disk error");
+        let cause = std::io::Error::other("disk error");
         let err = SessionError::new("sess-1", SessionOperation::Resume, "database read failed")
             .with_source(cause);
         assert!(err.source.is_some());
@@ -807,7 +802,7 @@ mod tests {
 
     #[test]
     fn persistence_error_with_source() {
-        let cause = std::io::Error::new(std::io::ErrorKind::Other, "sqlite busy");
+        let cause = std::io::Error::other("sqlite busy");
         let err = PersistenceError::new("events", PersistenceOperation::Read, "locked")
             .with_source(cause);
         assert!(err.source.is_some());
@@ -842,16 +837,15 @@ mod tests {
 
     #[test]
     fn provider_error_with_429_status() {
-        let err =
-            ProviderError::new(Provider::OpenAi, "gpt-4", "rate limited").with_status(429);
+        let err = ProviderError::new(Provider::OpenAi, "gpt-4", "rate limited").with_status(429);
         assert_eq!(err.category, ErrorCategory::RateLimit);
         assert!(err.retryable);
     }
 
     #[test]
     fn provider_error_with_500_status() {
-        let err = ProviderError::new(Provider::Google, "gemini-2.0", "internal error")
-            .with_status(500);
+        let err =
+            ProviderError::new(Provider::Google, "gemini-2.0", "internal error").with_status(500);
         assert_eq!(err.category, ErrorCategory::Server);
         assert!(err.retryable);
     }
@@ -885,8 +879,7 @@ mod tests {
 
     #[test]
     fn provider_error_explicit_retryable() {
-        let err =
-            ProviderError::new(Provider::OpenAi, "gpt-4", "temporary").with_retryable(true);
+        let err = ProviderError::new(Provider::OpenAi, "gpt-4", "temporary").with_retryable(true);
         assert!(err.retryable);
     }
 

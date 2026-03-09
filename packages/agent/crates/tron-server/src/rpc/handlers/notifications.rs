@@ -26,9 +26,13 @@ impl MethodHandler for ListHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let limit = opt_u64(params.as_ref(), "limit", 50).min(100);
 
-        let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let conn = ctx
+            .event_store
+            .pool()
+            .get()
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to get DB connection: {e}"),
+            })?;
 
         let mut stmt = conn
             .prepare(
@@ -60,15 +64,15 @@ impl MethodHandler for ListHandler {
         let rows = stmt
             .query_map([limit], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,          // event_id
-                    row.get::<_, String>(1)?,          // session_id
-                    row.get::<_, Option<String>>(2)?,  // tool_call_id
-                    row.get::<_, String>(3)?,          // timestamp
-                    row.get::<_, String>(4)?,          // payload
-                    row.get::<_, Option<String>>(5)?,  // session_title
-                    row.get::<_, Option<String>>(6)?,  // source
-                    row.get::<_, Option<String>>(7)?,  // spawning_session_id
-                    row.get::<_, Option<String>>(8)?,  // read_at
+                    row.get::<_, String>(0)?,         // event_id
+                    row.get::<_, String>(1)?,         // session_id
+                    row.get::<_, Option<String>>(2)?, // tool_call_id
+                    row.get::<_, String>(3)?,         // timestamp
+                    row.get::<_, String>(4)?,         // payload
+                    row.get::<_, Option<String>>(5)?, // session_title
+                    row.get::<_, Option<String>>(6)?, // source
+                    row.get::<_, Option<String>>(7)?, // spawning_session_id
+                    row.get::<_, Option<String>>(8)?, // read_at
                 ))
             })
             .map_err(|e| RpcError::Internal {
@@ -99,7 +103,10 @@ impl MethodHandler for ListHandler {
             let payload: Value = match serde_json::from_str(&payload_str) {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!(event_id, "skipping notification with malformed payload: {e}");
+                    warn!(
+                        event_id,
+                        "skipping notification with malformed payload: {e}"
+                    );
                     continue;
                 }
             };
@@ -152,9 +159,13 @@ impl MethodHandler for MarkReadHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let event_id = require_string_param(params.as_ref(), "eventId")?;
 
-        let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let conn = ctx
+            .event_store
+            .pool()
+            .get()
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to get DB connection: {e}"),
+            })?;
 
         let _ = conn
             .execute(
@@ -178,9 +189,13 @@ pub struct MarkAllReadHandler;
 impl MethodHandler for MarkAllReadHandler {
     #[instrument(skip(self, ctx), fields(method = "notifications.markAllRead"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let conn = ctx
+            .event_store
+            .pool()
+            .get()
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to get DB connection: {e}"),
+            })?;
 
         let marked = conn
             .execute(
@@ -208,36 +223,48 @@ mod tests {
     fn setup_test_data(ctx: &RpcContext) {
         let conn = ctx.event_store.pool().get().unwrap();
 
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+                 VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         // User session (source=NULL, spawning_session_id=NULL)
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_user', 'ws_1', 'My Session', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at)
+                 VALUES ('sess_user', 'ws_1', 'My Session', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         // Cron session
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at, source)
-             VALUES ('sess_cron', 'ws_1', 'Cron: daily report', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'cron')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at, source)
+                 VALUES ('sess_cron', 'ws_1', 'Cron: daily report', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'cron')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         // Subagent session
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at, spawning_session_id)
-             VALUES ('sess_sub', 'ws_1', 'Subagent task', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'sess_user')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at, spawning_session_id)
+                 VALUES ('sess_sub', 'ws_1', 'Subagent task', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'sess_user')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
     }
 
     fn insert_notify_event(
@@ -259,19 +286,22 @@ mod tests {
             },
             "turn": 1,
         });
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-             VALUES (?1, ?2, ?3, 'tool.call', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
-            [
-                event_id,
-                session_id,
-                "1",
-                timestamp,
-                &serde_json::to_string(&payload).unwrap() as &str,
-                tool_call_id,
-            ],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
+                 VALUES (?1, ?2, ?3, 'tool.call', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
+                [
+                    event_id,
+                    session_id,
+                    "1",
+                    timestamp,
+                    &serde_json::to_string(&payload).unwrap() as &str,
+                    tool_call_id,
+                ],
+            )
+            .unwrap(),
+            1
+        );
     }
 
     // ── notifications.list ─────────────────────────────────────────
@@ -288,7 +318,15 @@ mod tests {
     async fn list_returns_notify_events() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "Test Title", "Test Body");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "Test Title",
+            "Test Body",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notifs = result["notifications"].as_array().unwrap();
@@ -304,7 +342,15 @@ mod tests {
     async fn list_includes_session_context() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notif = &result["notifications"][0];
@@ -316,7 +362,15 @@ mod tests {
     async fn list_cron_session_not_user_session() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_cron", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_cron",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notif = &result["notifications"][0];
@@ -327,7 +381,15 @@ mod tests {
     async fn list_subagent_session_not_user_session() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_sub", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_sub",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notif = &result["notifications"][0];
@@ -338,16 +400,27 @@ mod tests {
     async fn list_filters_only_tool_call_not_tool_result() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         // Insert a tool.result for the same tool_call_id (should NOT appear)
         let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-             VALUES ('evt_2', 'sess_user', 2, 'tool.result', '2025-01-01T01:00:01Z', '{\"content\":\"ok\"}', 'ws_1', 'NotifyApp', 'tc_1')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
+                 VALUES ('evt_2', 'sess_user', 2, 'tool.result', '2025-01-01T01:00:01Z', '{\"content\":\"ok\"}', 'ws_1', 'NotifyApp', 'tc_1')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["notifications"].as_array().unwrap().len(), 1);
@@ -357,10 +430,26 @@ mod tests {
     async fn list_ordered_by_timestamp_desc() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "First", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "First",
+            "b",
+        );
 
         // Second event needs a different sequence for the same session — use a different session
-        insert_notify_event(&ctx, "evt_2", "sess_cron", "tc_2", "2025-01-02T01:00:00Z", "Second", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_2",
+            "sess_cron",
+            "tc_2",
+            "2025-01-02T01:00:00Z",
+            "Second",
+            "b",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notifs = result["notifications"].as_array().unwrap();
@@ -372,8 +461,24 @@ mod tests {
     async fn list_respects_limit() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
-        insert_notify_event(&ctx, "evt_2", "sess_cron", "tc_2", "2025-01-02T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
+        insert_notify_event(
+            &ctx,
+            "evt_2",
+            "sess_cron",
+            "tc_2",
+            "2025-01-02T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = ListHandler
             .handle(Some(json!({"limit": 1})), &ctx)
@@ -386,16 +491,35 @@ mod tests {
     async fn list_unread_count_accurate() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
-        insert_notify_event(&ctx, "evt_2", "sess_cron", "tc_2", "2025-01-02T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
+        insert_notify_event(
+            &ctx,
+            "evt_2",
+            "sess_cron",
+            "tc_2",
+            "2025-01-02T01:00:00Z",
+            "t",
+            "b",
+        );
 
         // Mark one as read
         let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2025-01-03T00:00:00Z')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2025-01-03T00:00:00Z')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["unreadCount"], 1);
@@ -413,15 +537,26 @@ mod tests {
 
         // Insert event with malformed payload
         let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-             VALUES ('evt_bad', 'sess_user', 1, 'tool.call', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'NotifyApp', 'tc_bad')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
+                 VALUES ('evt_bad', 'sess_user', 1, 'tool.call', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'NotifyApp', 'tc_bad')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         // Insert a good event too
-        insert_notify_event(&ctx, "evt_good", "sess_cron", "tc_good", "2025-01-02T01:00:00Z", "Good", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_good",
+            "sess_cron",
+            "tc_good",
+            "2025-01-02T01:00:00Z",
+            "Good",
+            "b",
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         // Malformed event skipped, good one returned
@@ -444,12 +579,15 @@ mod tests {
             },
             "turn": 1,
         });
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-             VALUES ('evt_1', 'sess_user', 1, 'tool.call', '2025-01-01T01:00:00Z', ?1, 'ws_1', 'NotifyApp', 'tc_1')",
-            [&serde_json::to_string(&payload).unwrap() as &str],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
+                 VALUES ('evt_1', 'sess_user', 1, 'tool.call', '2025-01-01T01:00:00Z', ?1, 'ws_1', 'NotifyApp', 'tc_1')",
+                [&serde_json::to_string(&payload).unwrap() as &str],
+            )
+            .unwrap(),
+            1
+        );
 
         let result = ListHandler.handle(None, &ctx).await.unwrap();
         let notif = &result["notifications"][0];
@@ -462,7 +600,15 @@ mod tests {
     async fn mark_read_success() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = MarkReadHandler
             .handle(Some(json!({"eventId": "evt_1"})), &ctx)
@@ -480,13 +626,22 @@ mod tests {
     async fn mark_read_idempotent() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         // Mark twice — no error
-        MarkReadHandler
+        let first = MarkReadHandler
             .handle(Some(json!({"eventId": "evt_1"})), &ctx)
             .await
             .unwrap();
+        assert_eq!(first["success"], true);
         let result = MarkReadHandler
             .handle(Some(json!({"eventId": "evt_1"})), &ctx)
             .await
@@ -520,8 +675,24 @@ mod tests {
     async fn mark_all_read_marks_all_unread() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
-        insert_notify_event(&ctx, "evt_2", "sess_cron", "tc_2", "2025-01-02T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
+        insert_notify_event(
+            &ctx,
+            "evt_2",
+            "sess_cron",
+            "tc_2",
+            "2025-01-02T01:00:00Z",
+            "t",
+            "b",
+        );
 
         let result = MarkAllReadHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["marked"], 2);
@@ -534,15 +705,26 @@ mod tests {
     async fn mark_all_read_preserves_already_read() {
         let ctx = make_test_context();
         setup_test_data(&ctx);
-        insert_notify_event(&ctx, "evt_1", "sess_user", "tc_1", "2025-01-01T01:00:00Z", "t", "b");
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
 
         // Mark one as read manually
         let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2025-01-02T00:00:00Z')",
-            [],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2025-01-02T00:00:00Z')",
+                [],
+            )
+            .unwrap(),
+            1
+        );
 
         // Mark all — should only mark 0 new
         let result = MarkAllReadHandler.handle(None, &ctx).await.unwrap();

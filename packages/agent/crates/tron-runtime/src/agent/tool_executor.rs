@@ -294,13 +294,35 @@ pub async fn execute_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
+    use crate::guardrails::types::{RuleTier, Scope, Severity};
+    use crate::hooks::errors::HookError;
+    use crate::hooks::handler::HookHandler;
+    use crate::hooks::registry::HookRegistry;
+    use crate::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
     use async_trait::async_trait;
     use serde_json::{Map, json};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tron_core::content::ToolResultContent;
     use tron_core::tools::{
         Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result,
     };
     use tron_tools::traits::TronTool;
+
+    macro_rules! tool_exec_ctx {
+        ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr) => {
+            ToolExecutionContext {
+                registry: $registry,
+                guardrails: $guardrails,
+                hooks: $hooks,
+                emitter: $emitter,
+                cancel: $cancel,
+                subagent_depth: 0,
+                subagent_max_depth: 0,
+                workspace_id: None,
+            }
+        };
+    }
 
     // ── Test tool implementations ──
 
@@ -308,7 +330,7 @@ mod tests {
 
     #[async_trait]
     impl TronTool for EchoTool {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "echo"
         }
         fn category(&self) -> ToolCategory {
@@ -344,7 +366,7 @@ mod tests {
 
     #[async_trait]
     impl TronTool for StopTurnTool {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "ask_user"
         }
         fn category(&self) -> ToolCategory {
@@ -378,6 +400,69 @@ mod tests {
         }
     }
 
+    struct ContinueHandler;
+
+    #[async_trait]
+    impl HookHandler for ContinueHandler {
+        fn name(&self) -> &'static str {
+            "test-continue"
+        }
+
+        fn hook_type(&self) -> HookType {
+            HookType::PreToolUse
+        }
+
+        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+            Ok(HookExecResult::continue_())
+        }
+    }
+
+    struct BgHandler;
+
+    #[async_trait]
+    impl HookHandler for BgHandler {
+        fn name(&self) -> &'static str {
+            "test-bg"
+        }
+
+        fn hook_type(&self) -> HookType {
+            HookType::PostToolUse
+        }
+
+        fn execution_mode(&self) -> HookExecutionMode {
+            HookExecutionMode::Background
+        }
+
+        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+            Ok(HookExecResult::continue_())
+        }
+    }
+
+    struct SlowBackgroundHandler {
+        completed: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl HookHandler for SlowBackgroundHandler {
+        fn name(&self) -> &'static str {
+            "test-slow"
+        }
+
+        fn hook_type(&self) -> HookType {
+            HookType::PostToolUse
+        }
+
+        fn execution_mode(&self) -> HookExecutionMode {
+            HookExecutionMode::Background
+        }
+
+        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            self.completed.store(true, Ordering::SeqCst);
+            Ok(HookExecResult::continue_())
+        }
+    }
+
     fn make_registry(tools: Vec<Arc<dyn TronTool>>) -> ToolRegistry {
         let mut registry = ToolRegistry::new();
         for tool in tools {
@@ -390,36 +475,19 @@ mod tests {
         ToolCall::new("tc-1", name, args)
     }
 
-    fn make_exec_ctx<'a>(
-        registry: &'a ToolRegistry,
-        guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-        hooks: &'a Option<Arc<HookEngine>>,
-        emitter: &'a Arc<EventEmitter>,
-        cancel: &'a CancellationToken,
-    ) -> ToolExecutionContext<'a> {
-        ToolExecutionContext {
-            registry,
-            guardrails,
-            hooks,
-            emitter,
-            cancel,
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-            workspace_id: None,
-        }
-    }
-
     #[tokio::test]
     async fn successful_execution() {
         let registry = make_registry(vec![Arc::new(EchoTool)]);
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("hello"));
         let tc = make_tool_call("echo", args);
 
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(!result.result.is_error.unwrap_or(false));
@@ -435,22 +503,21 @@ mod tests {
         let registry = ToolRegistry::new();
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let tc = make_tool_call("nonexistent", Map::new());
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
-        match &result.result.content {
-            ToolResultBody::Blocks(blocks) => {
-                let text = match &blocks[0] {
-                    ToolResultContent::Text { text } => text,
-                    _ => panic!("Expected text block"),
-                };
-                assert!(text.contains("not found"));
-            }
-            _ => panic!("Expected blocks result"),
-        }
+        let ToolResultBody::Blocks(blocks) = &result.result.content else {
+            panic!("Expected blocks result");
+        };
+        let ToolResultContent::Text { text } = &blocks[0] else {
+            panic!("Expected text block");
+        };
+        assert!(text.contains("not found"));
     }
 
     #[tokio::test]
@@ -461,16 +528,14 @@ mod tests {
 
         // Set up guardrails that block "echo" with dangerous args
         let mut engine = GuardrailEngine::new(crate::guardrails::GuardrailEngineOptions::default());
-        use crate::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
-        use crate::guardrails::types::Severity;
         engine.register_rule(GuardrailRule::Pattern(PatternRule {
             base: RuleBase {
                 id: "test-block".into(),
                 name: "Block rm".into(),
                 description: "Block rm commands".into(),
                 severity: Severity::Block,
-                scope: crate::guardrails::types::Scope::Tool,
-                tier: crate::guardrails::types::RuleTier::Custom,
+                scope: Scope::Tool,
+                tier: RuleTier::Custom,
                 tools: vec!["echo".into()],
                 priority: 100,
                 enabled: true,
@@ -481,12 +546,13 @@ mod tests {
         }));
 
         let guardrails = Some(Arc::new(parking_lot::Mutex::new(engine)));
+        let no_hooks = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("rm -rf /"));
         let tc = make_tool_call("echo", args);
 
-        let ctx = make_exec_ctx(&registry, &guardrails, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &guardrails, &no_hooks, &emitter, &cancel);
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
@@ -498,9 +564,11 @@ mod tests {
         let registry = make_registry(vec![Arc::new(StopTurnTool)]);
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let tc = make_tool_call("ask_user", Map::new());
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(!result.result.is_error.unwrap_or(false));
@@ -514,9 +582,11 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
         cancel.cancel();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let tc = make_tool_call("echo", Map::new());
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         assert!(result.result.is_error.unwrap_or(false));
@@ -528,12 +598,14 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new());
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         let mut saw_start = false;
@@ -555,26 +627,6 @@ mod tests {
 
     #[tokio::test]
     async fn pre_tool_use_hook_emits_triggered_and_completed() {
-        use crate::hooks::errors::HookError;
-        use crate::hooks::handler::HookHandler;
-        use crate::hooks::registry::HookRegistry;
-        use crate::hooks::types::{HookResult as HookExecResult, HookType};
-
-        struct ContinueHandler;
-
-        #[async_trait]
-        impl HookHandler for ContinueHandler {
-            fn name(&self) -> &str {
-                "test-continue"
-            }
-            fn hook_type(&self) -> HookType {
-                HookType::PreToolUse
-            }
-            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-                Ok(HookExecResult::continue_())
-            }
-        }
-
         let mut hook_registry = HookRegistry::new();
         hook_registry.register(Arc::new(ContinueHandler));
         let hook_engine = Arc::new(HookEngine::new(hook_registry));
@@ -583,13 +635,14 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new());
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
         let hooks = Some(hook_engine);
-        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
         let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         let mut saw_triggered = false;
@@ -611,29 +664,6 @@ mod tests {
 
     #[tokio::test]
     async fn post_tool_use_hook_emits_triggered() {
-        use crate::hooks::errors::HookError;
-        use crate::hooks::handler::HookHandler;
-        use crate::hooks::registry::HookRegistry;
-        use crate::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
-
-        struct BgHandler;
-
-        #[async_trait]
-        impl HookHandler for BgHandler {
-            fn name(&self) -> &str {
-                "test-bg"
-            }
-            fn hook_type(&self) -> HookType {
-                HookType::PostToolUse
-            }
-            fn execution_mode(&self) -> HookExecutionMode {
-                HookExecutionMode::Background
-            }
-            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-                Ok(HookExecResult::continue_())
-            }
-        }
-
         let mut hook_registry = HookRegistry::new();
         hook_registry.register(Arc::new(BgHandler));
         let hook_engine = Arc::new(HookEngine::new(hook_registry));
@@ -642,13 +672,14 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new());
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
         let hooks = Some(hook_engine);
-        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
         let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         // Give background task a moment to complete
@@ -673,56 +704,28 @@ mod tests {
 
     #[tokio::test]
     async fn post_tool_use_hook_timeout() {
-        use crate::hooks::errors::HookError;
-        use crate::hooks::handler::HookHandler;
-        use crate::hooks::registry::HookRegistry;
-        use crate::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
-        use std::sync::atomic::{AtomicBool, Ordering};
-
         // Track whether the handler completed (it shouldn't — timeout fires first)
         let handler_completed = Arc::new(AtomicBool::new(false));
-        let handler_completed_clone = handler_completed.clone();
-
-        struct SlowHandler {
-            completed: Arc<AtomicBool>,
-        }
-
-        #[async_trait]
-        impl HookHandler for SlowHandler {
-            fn name(&self) -> &str {
-                "test-slow"
-            }
-            fn hook_type(&self) -> HookType {
-                HookType::PostToolUse
-            }
-            fn execution_mode(&self) -> HookExecutionMode {
-                HookExecutionMode::Background
-            }
-            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                self.completed.store(true, Ordering::SeqCst);
-                Ok(HookExecResult::continue_())
-            }
-        }
 
         tokio::time::pause();
 
         let mut hook_registry = HookRegistry::new();
-        hook_registry.register(Arc::new(SlowHandler {
-            completed: handler_completed_clone,
+        hook_registry.register(Arc::new(SlowBackgroundHandler {
+            completed: Arc::clone(&handler_completed),
         }));
         let hook_engine = Arc::new(HookEngine::new(hook_registry));
 
         let registry = make_registry(vec![Arc::new(EchoTool)]);
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("test"));
         let tc = make_tool_call("echo", args);
 
         let hooks = Some(hook_engine);
-        let ctx = make_exec_ctx(&registry, &None, &hooks, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
         let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
         // Let the spawned task start and register its timers
@@ -744,6 +747,8 @@ mod tests {
         let registry = make_registry(vec![Arc::new(EchoTool), Arc::new(StopTurnTool)]);
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
 
         let tc1 = make_tool_call("echo", {
             let mut m = Map::new();
@@ -752,7 +757,7 @@ mod tests {
         });
         let tc2 = make_tool_call("ask_user", Map::new());
 
-        let ctx = make_exec_ctx(&registry, &None, &None, &emitter, &cancel);
+        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
         let r1 = execute_tool(&tc1, "s1", "/tmp", &ctx).await;
         let r2 = execute_tool(&tc2, "s1", "/tmp", &ctx).await;
 
@@ -773,16 +778,14 @@ mod tests {
     #[tokio::test]
     async fn guardrail_evaluates_after_lock() {
         let mut engine = GuardrailEngine::new(crate::guardrails::GuardrailEngineOptions::default());
-        use crate::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
-        use crate::guardrails::types::Severity;
         engine.register_rule(GuardrailRule::Pattern(PatternRule {
             base: RuleBase {
                 id: "test".into(),
                 name: "Test".into(),
                 description: "Test".into(),
                 severity: Severity::Block,
-                scope: crate::guardrails::types::Scope::Tool,
-                tier: crate::guardrails::types::RuleTier::Custom,
+                scope: Scope::Tool,
+                tier: RuleTier::Custom,
                 tools: vec!["bash".into()],
                 priority: 100,
                 enabled: true,

@@ -37,14 +37,15 @@ pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronEr
                     "automations.json corrupt, attempting recovery from backup"
                 );
                 if let Ok(bak_content) = std::fs::read_to_string(backup_path)
-                    && let Ok(config) = serde_json::from_str::<CronConfig>(&bak_content) {
-                        tracing::info!("recovered {} jobs from backup", config.jobs.len());
-                        // Restore the primary file from backup
-                        if let Err(e) = std::fs::copy(backup_path, path) {
-                            tracing::warn!(error = %e, "failed to restore backup to primary");
-                        }
-                        return Ok(config);
+                    && let Ok(config) = serde_json::from_str::<CronConfig>(&bak_content)
+                {
+                    tracing::info!("recovered {} jobs from backup", config.jobs.len());
+                    // Restore the primary file from backup
+                    if let Err(e) = std::fs::copy(backup_path, path) {
+                        tracing::warn!(error = %e, "failed to restore backup to primary");
                     }
+                    return Ok(config);
+                }
             }
             Err(primary_err.into())
         }
@@ -129,9 +130,7 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
                 ));
             }
             if *timeout_secs > 3600 {
-                return Err(CronError::Validation(
-                    "shell timeout max is 3600s".into(),
-                ));
+                return Err(CronError::Validation("shell timeout max is 3600s".into()));
             }
         }
         Payload::Webhook {
@@ -149,9 +148,7 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
                 )));
             }
             if *timeout_secs > 300 {
-                return Err(CronError::Validation(
-                    "webhook timeout max is 300s".into(),
-                ));
+                return Err(CronError::Validation("webhook timeout max is 300s".into()));
             }
         }
         Payload::SystemEvent {
@@ -290,11 +287,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("automations.json");
         let bak = dir.path().join("automations.json.bak");
-        std::fs::write(
-            &path,
-            r#"{"version":1,"jobs":[],"futureField":"ignored"}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"version":1,"jobs":[],"futureField":"ignored"}"#).unwrap();
         let config = load_config(&path, &bak).unwrap();
         assert!(config.jobs.is_empty());
     }
@@ -328,7 +321,8 @@ mod tests {
 
         // Backup should exist
         assert!(bak.exists());
-        let backup: CronConfig = serde_json::from_str(&std::fs::read_to_string(&bak).unwrap()).unwrap();
+        let backup: CronConfig =
+            serde_json::from_str(&std::fs::read_to_string(&bak).unwrap()).unwrap();
         assert_eq!(backup.jobs.len(), 1);
     }
 
@@ -439,7 +433,7 @@ mod tests {
     #[test]
     fn validate_job_empty_name() {
         let mut job = make_valid_job();
-        job.name = "".into();
+        job.name = String::new();
         assert!(validate_job(&job).is_err());
     }
 
@@ -447,7 +441,7 @@ mod tests {
     fn validate_job_empty_agent_prompt() {
         let mut job = make_valid_job();
         job.payload = Payload::AgentTurn {
-            prompt: "".into(),
+            prompt: String::new(),
             model: None,
             workspace_id: None,
             system_prompt: None,
@@ -459,7 +453,7 @@ mod tests {
     fn validate_job_empty_system_event() {
         let mut job = make_valid_job();
         job.payload = Payload::SystemEvent {
-            session_id: "".into(),
+            session_id: String::new(),
             message: "hello".into(),
         };
         assert!(validate_job(&job).is_err());

@@ -11,9 +11,9 @@ use tron_core::tools::{Tool, ToolCategory, TronToolResult, text_result};
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{validate_path_not_root, validate_required_string};
 
 const MAX_CONTENT_SIZE: usize = 50 * 1024 * 1024; // 50 MB
@@ -45,8 +45,14 @@ impl TronTool for WriteTool {
             "Write",
             "Write content to a file. Creates parent directories if they do not exist.",
         )
-        .required_property("file_path", json!({"type": "string", "description": "The path to the file to write"}))
-        .required_property("content", json!({"type": "string", "description": "The content to write to the file"}))
+        .required_property(
+            "file_path",
+            json!({"type": "string", "description": "The path to the file to write"}),
+        )
+        .required_property(
+            "content",
+            json!({"type": "string", "description": "The content to write to the file"}),
+        )
         .build()
     }
 
@@ -92,13 +98,14 @@ impl TronTool for WriteTool {
 
         // Create parent directories
         if let Some(parent) = resolved.parent()
-            && let Err(e) = self.fs.create_dir_all(parent).await {
-                return Ok(format_fs_error(
-                    &e,
-                    &parent.to_string_lossy(),
-                    "creating directory",
-                ));
-            }
+            && let Err(e) = self.fs.create_dir_all(parent).await
+        {
+            return Ok(format_fs_error(
+                &e,
+                &parent.to_string_lossy(),
+                "creating directory",
+            ));
+        }
 
         let bytes = content.as_bytes();
         if let Err(e) = self.fs.write_file(&resolved, bytes).await {
@@ -142,7 +149,7 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crate::testutil::{extract_text, make_ctx, MockFs};
+    use crate::testutil::{MockFs, extract_text, make_ctx};
 
     #[tokio::test]
     async fn create_new_file() {
@@ -163,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn overwrite_existing_file() {
-        let fs = Arc::new(MockFs::new().with_file("/tmp/exist.txt", b"old".to_vec()));
+        let fs = Arc::new(MockFs::new().with_file("/tmp/exist.txt", b"old"));
         let tool = WriteTool::new(fs);
         let result = tool
             .execute(

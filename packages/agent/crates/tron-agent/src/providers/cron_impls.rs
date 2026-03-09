@@ -48,7 +48,9 @@ impl CronAgentTurnExecutor {
         provider_factory: Arc<dyn tron_llm::provider::ProviderFactory>,
         tool_factory: Arc<dyn Fn() -> tron_tools::registry::ToolRegistry + Send + Sync>,
         origin: String,
-        subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+        subagent_manager: Option<
+            Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>,
+        >,
         embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     ) -> Self {
         Self {
@@ -75,11 +77,7 @@ impl CronAgentTurnExecutor {
                         .filter_map(|c| c.as_text())
                         .collect::<Vec<_>>()
                         .join("");
-                    if text.is_empty() {
-                        None
-                    } else {
-                        Some(text)
-                    }
+                    if text.is_empty() { None } else { Some(text) }
                 } else {
                     None
                 }
@@ -107,27 +105,22 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<tron_cron::AgentTurnResult, CronError> {
         // Resolve model (fall back to settings default)
-        let settings = tron_settings::loader::load_settings_from_path(
-            &tron_settings::loader::settings_path(),
-        )
-        .unwrap_or_default();
+        let settings =
+            tron_settings::loader::load_settings_from_path(&tron_settings::loader::settings_path())
+                .unwrap_or_default();
         let model = model.unwrap_or(&settings.server.default_model);
 
         // Resolve workspace path
         let workspace_path = workspace_id
             .and_then(|wid| {
-                self.event_store
-                    .pool()
-                    .get()
+                self.event_store.pool().get().ok().and_then(|conn| {
+                    tron_events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
+                        &conn, wid,
+                    )
                     .ok()
-                    .and_then(|conn| {
-                        tron_events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
-                            &conn, wid,
-                        )
-                        .ok()
-                        .flatten()
-                        .map(|ws| ws.path)
-                    })
+                    .flatten()
+                    .map(|ws| ws.path)
+                })
             })
             .or_else(|| std::env::var("HOME").ok())
             .unwrap_or_else(|| "/tmp".into());
@@ -404,8 +397,7 @@ impl tron_cron::EventBroadcaster for CronEventBroadcaster {
         let event = RpcEvent {
             event_type: "cron.runComplete".to_owned(),
             session_id: None,
-            timestamp: chrono::Utc::now()
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             data: Some(serde_json::json!({
                 "jobId": job.id,
                 "jobName": job.name,
@@ -423,8 +415,7 @@ impl tron_cron::EventBroadcaster for CronEventBroadcaster {
         let event = RpcEvent {
             event_type: event_type.to_owned(),
             session_id: None,
-            timestamp: chrono::Utc::now()
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             data: Some(payload),
             run_id: None,
         };
@@ -490,18 +481,16 @@ mod tests {
             let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(tron_events::EventStore::new(pool));
-        let mgr = Arc::new(tron_runtime::orchestrator::session_manager::SessionManager::new(
-            store.clone(),
-        ));
+        let mgr = Arc::new(
+            tron_runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
+        );
         (store, mgr)
     }
 
     #[tokio::test]
     async fn write_cron_ledger_no_subagent_manager() {
         let (store, mgr) = make_test_store_and_manager();
-        let sid = mgr
-            .create_session("mock", "/tmp", Some("test"))
-            .unwrap();
+        let sid = mgr.create_session("mock", "/tmp", Some("test")).unwrap();
         // Append a user message so compute_cycle_messages finds something
         let _ = store.append(&tron_events::AppendOptions {
             session_id: &sid,
@@ -518,9 +507,7 @@ mod tests {
     #[tokio::test]
     async fn write_cron_ledger_no_session_events() {
         let (store, mgr) = make_test_store_and_manager();
-        let sid = mgr
-            .create_session("mock", "/tmp", Some("empty"))
-            .unwrap();
+        let sid = mgr.create_session("mock", "/tmp", Some("empty")).unwrap();
         mgr.invalidate_session(&sid);
 
         let result = write_cron_ledger(&sid, "/tmp", &store, &mgr, &None, &None).await;
@@ -563,7 +550,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock-ledger"
         }
         async fn stream(
@@ -595,10 +582,7 @@ mod tests {
     struct LedgerMockProviderFactory;
     #[async_trait]
     impl ProviderFactory for LedgerMockProviderFactory {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(Arc::new(LedgerMockProvider))
         }
     }
@@ -667,10 +651,9 @@ mod tests {
             embedding_controller: None,
             shutdown_coordinator: None,
         };
-        let lw = tron_server::rpc::handlers::memory::execute_ledger_write(
-            &sid, "/tmp", &deps, "cron",
-        )
-        .await;
+        let lw =
+            tron_server::rpc::handlers::memory::execute_ledger_write(&sid, "/tmp", &deps, "cron")
+                .await;
         assert!(
             lw.written,
             "ledger write should succeed: reason={:?}",
@@ -686,4 +669,3 @@ mod tests {
         assert_eq!(payload["source"], "cron");
     }
 }
-

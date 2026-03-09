@@ -156,10 +156,7 @@ impl SubagentManager {
     }
 
     /// Set the worktree coordinator for subagent isolation.
-    pub fn set_worktree_coordinator(
-        &self,
-        coordinator: Arc<tron_worktree::WorktreeCoordinator>,
-    ) {
+    pub fn set_worktree_coordinator(&self, coordinator: Arc<tron_worktree::WorktreeCoordinator>) {
         let _ = self.worktree_coordinator.set(coordinator);
     }
 
@@ -1193,7 +1190,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock-model"
         }
         async fn stream(
@@ -1228,7 +1225,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock-model"
         }
         async fn stream(

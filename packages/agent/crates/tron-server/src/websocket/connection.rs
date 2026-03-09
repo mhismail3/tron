@@ -189,7 +189,7 @@ mod tests {
         let sent = conn.send_json(&value);
         assert!(sent);
         let msg = rx.recv().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&*msg).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
         assert_eq!(parsed["key"], "value");
     }
 

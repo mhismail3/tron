@@ -1643,7 +1643,7 @@ mod tests {
         assert_eq!(events.len(), VARIANT_COUNT);
 
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
-        types.sort();
+        types.sort_unstable();
         types.dedup();
         assert_eq!(types.len(), VARIANT_COUNT);
     }

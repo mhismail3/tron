@@ -165,7 +165,10 @@ impl GitExecutor {
         let output = self
             .run(dir, &["diff", "--name-only", "--diff-filter=U"])
             .await?;
-        Ok(output.lines().map(std::string::ToString::to_string).collect())
+        Ok(output
+            .lines()
+            .map(std::string::ToString::to_string)
+            .collect())
     }
 
     /// Count commits since a base commit (inclusive of commits after base, exclusive of base).
@@ -196,9 +199,7 @@ impl GitExecutor {
         base: &str,
         head: &str,
     ) -> Result<(usize, usize)> {
-        let output = self
-            .run(dir, &["diff", "--numstat", base, head])
-            .await?;
+        let output = self.run(dir, &["diff", "--numstat", base, head]).await?;
         let mut insertions = 0usize;
         let mut deletions = 0usize;
         for line in output.lines() {
@@ -214,7 +215,12 @@ impl GitExecutor {
 
     /// List branches matching a glob pattern.
     pub async fn list_branches_matching(&self, repo: &Path, pattern: &str) -> Result<Vec<String>> {
-        let output = self.run(repo, &["branch", "--list", pattern, "--format=%(refname:short)"]).await?;
+        let output = self
+            .run(
+                repo,
+                &["branch", "--list", pattern, "--format=%(refname:short)"],
+            )
+            .await?;
         Ok(output
             .lines()
             .filter(|l| !l.is_empty())
@@ -231,7 +237,10 @@ impl GitExecutor {
     ) -> Result<Vec<(String, String, String)>> {
         let count_str = format!("-{count}");
         let output = self
-            .run(repo, &["log", &count_str, "--format=%H%x00%s%x00%aI", branch])
+            .run(
+                repo,
+                &["log", &count_str, "--format=%H%x00%s%x00%aI", branch],
+            )
             .await?;
         Ok(output
             .lines()
@@ -258,12 +267,7 @@ impl GitExecutor {
     }
 
     /// Count commits between base (exclusive) and head (inclusive).
-    pub async fn commit_count_between(
-        &self,
-        repo: &Path,
-        base: &str,
-        head: &str,
-    ) -> Result<usize> {
+    pub async fn commit_count_between(&self, repo: &Path, base: &str, head: &str) -> Result<usize> {
         let range = format!("{base}..{head}");
         let output = self.run(repo, &["rev-list", "--count", &range]).await?;
         output.parse::<usize>().map_err(|e| {
@@ -296,8 +300,11 @@ impl GitExecutor {
     ///
     /// Uses `git merge-base --is-ancestor` which returns exit 0 if true, 1 if not.
     pub async fn is_ancestor(&self, repo: &Path, potential_ancestor: &str, branch: &str) -> bool {
-        self.run_status(repo, &["merge-base", "--is-ancestor", potential_ancestor, branch])
-            .await
+        self.run_status(
+            repo,
+            &["merge-base", "--is-ancestor", potential_ancestor, branch],
+        )
+        .await
     }
 
     /// Run a git command and return whether it succeeded (exit code 0).
@@ -364,11 +371,7 @@ fn parse_worktree_porcelain(output: &str) -> Vec<WorktreeListEntry> {
             head = Some(line.strip_prefix("HEAD ").unwrap_or("").to_string());
         } else if line.starts_with("branch ") {
             let full = line.strip_prefix("branch ").unwrap_or("");
-            branch = Some(
-                full.strip_prefix("refs/heads/")
-                    .unwrap_or(full)
-                    .to_string(),
-            );
+            branch = Some(full.strip_prefix("refs/heads/").unwrap_or(full).to_string());
         } else if line == "bare" {
             bare = true;
         }
@@ -532,7 +535,11 @@ branch refs/heads/session/x
         // List
         let entries = git.worktree_list(dir.path()).await.unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().any(|e| e.branch.as_deref() == Some("test-branch")));
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.branch.as_deref() == Some("test-branch"))
+        );
 
         // Remove
         git.worktree_remove(dir.path(), &wt_path, false)
@@ -586,12 +593,12 @@ branch refs/heads/session/x
 
         // One commit
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
-        git.commit_all(dir.path(), "first").await.unwrap();
+        let _ = git.commit_all(dir.path(), "first").await.unwrap();
         assert_eq!(git.commit_count_since(dir.path(), &base).await.unwrap(), 1);
 
         // Two commits
         std::fs::write(dir.path().join("b.txt"), "b").unwrap();
-        git.commit_all(dir.path(), "second").await.unwrap();
+        let _ = git.commit_all(dir.path(), "second").await.unwrap();
         assert_eq!(git.commit_count_since(dir.path(), &base).await.unwrap(), 2);
     }
 
@@ -602,7 +609,7 @@ branch refs/heads/session/x
         let base = git.head_commit(dir.path()).await.unwrap();
 
         std::fs::write(dir.path().join("new.txt"), "new").unwrap();
-        git.commit_all(dir.path(), "add new").await.unwrap();
+        let _ = git.commit_all(dir.path(), "add new").await.unwrap();
 
         let files = git.changed_files_since(dir.path(), &base).await.unwrap();
         assert_eq!(files, vec!["new.txt"]);
@@ -616,10 +623,13 @@ branch refs/heads/session/x
 
         // Write a file with 3 lines
         std::fs::write(dir.path().join("code.txt"), "line1\nline2\nline3\n").unwrap();
-        git.commit_all(dir.path(), "add code").await.unwrap();
+        let _ = git.commit_all(dir.path(), "add code").await.unwrap();
         let head = git.head_commit(dir.path()).await.unwrap();
 
-        let (ins, del) = git.diff_numstat_total(dir.path(), &base, &head).await.unwrap();
+        let (ins, del) = git
+            .diff_numstat_total(dir.path(), &base, &head)
+            .await
+            .unwrap();
         assert_eq!(ins, 3);
         assert_eq!(del, 0);
     }
@@ -638,7 +648,10 @@ branch refs/heads/session/x
     async fn list_branches_no_matches() {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
-        let branches = git.list_branches_matching(dir.path(), "session/*").await.unwrap();
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
         assert!(branches.is_empty());
     }
 
@@ -647,7 +660,10 @@ branch refs/heads/session/x
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         run_cmd(dir.path(), &["git", "branch", "session/abc"]).await;
-        let branches = git.list_branches_matching(dir.path(), "session/*").await.unwrap();
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
         assert_eq!(branches, vec!["session/abc"]);
     }
 
@@ -658,7 +674,10 @@ branch refs/heads/session/x
         run_cmd(dir.path(), &["git", "branch", "session/aaa"]).await;
         run_cmd(dir.path(), &["git", "branch", "session/bbb"]).await;
         run_cmd(dir.path(), &["git", "branch", "session/ccc"]).await;
-        let branches = git.list_branches_matching(dir.path(), "session/*").await.unwrap();
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
         assert_eq!(branches.len(), 3);
     }
 
@@ -668,7 +687,10 @@ branch refs/heads/session/x
         let git = init_repo(dir.path()).await;
         run_cmd(dir.path(), &["git", "branch", "session/abc"]).await;
         run_cmd(dir.path(), &["git", "branch", "feature/xyz"]).await;
-        let branches = git.list_branches_matching(dir.path(), "session/*").await.unwrap();
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
         assert_eq!(branches.len(), 1);
         assert_eq!(branches[0], "session/abc");
     }
@@ -692,7 +714,10 @@ branch refs/heads/session/x
         let git = init_repo(dir.path()).await;
         for i in 1..=5 {
             std::fs::write(dir.path().join(format!("f{i}.txt")), format!("content{i}")).unwrap();
-            git.commit_all(dir.path(), &format!("commit {i}")).await.unwrap();
+            let _ = git
+                .commit_all(dir.path(), &format!("commit {i}"))
+                .await
+                .unwrap();
         }
         let entries = git.branch_log(dir.path(), "HEAD", 3).await.unwrap();
         assert_eq!(entries.len(), 3);
@@ -717,7 +742,7 @@ branch refs/heads/session/x
         // Create a branch and add a commit
         run_cmd(dir.path(), &["git", "checkout", "-b", "feature"]).await;
         std::fs::write(dir.path().join("f.txt"), "feature").unwrap();
-        git.commit_all(dir.path(), "feature commit").await.unwrap();
+        let _ = git.commit_all(dir.path(), "feature commit").await.unwrap();
 
         // Checkout default branch (may be main or master)
         let branch = git.current_branch(dir.path()).await.unwrap_or_default();
@@ -784,7 +809,10 @@ branch refs/heads/session/x
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         let head = git.head_commit(dir.path()).await.unwrap();
-        let count = git.commit_count_between(dir.path(), &head, &head).await.unwrap();
+        let count = git
+            .commit_count_between(dir.path(), &head, &head)
+            .await
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -795,10 +823,13 @@ branch refs/heads/session/x
         let base = git.head_commit(dir.path()).await.unwrap();
         for i in 0..3 {
             std::fs::write(dir.path().join(format!("f{i}.txt")), "x").unwrap();
-            git.commit_all(dir.path(), &format!("c{i}")).await.unwrap();
+            let _ = git.commit_all(dir.path(), &format!("c{i}")).await.unwrap();
         }
         let head = git.head_commit(dir.path()).await.unwrap();
-        let count = git.commit_count_between(dir.path(), &base, &head).await.unwrap();
+        let count = git
+            .commit_count_between(dir.path(), &base, &head)
+            .await
+            .unwrap();
         assert_eq!(count, 3);
     }
 
@@ -811,7 +842,10 @@ branch refs/heads/session/x
         let base = git.head_commit(dir.path()).await.unwrap();
         std::fs::write(dir.path().join("new.txt"), "new").unwrap();
         let head = git.commit_all(dir.path(), "add").await.unwrap();
-        let entries = git.diff_name_status(dir.path(), &base, &head).await.unwrap();
+        let entries = git
+            .diff_name_status(dir.path(), &base, &head)
+            .await
+            .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "A");
         assert_eq!(entries[0].1, "new.txt");
@@ -828,7 +862,10 @@ branch refs/heads/session/x
         std::fs::write(dir.path().join("new.txt"), "new").unwrap();
         let head = git.commit_all(dir.path(), "changes").await.unwrap();
 
-        let entries = git.diff_name_status(dir.path(), &base, &head).await.unwrap();
+        let entries = git
+            .diff_name_status(dir.path(), &base, &head)
+            .await
+            .unwrap();
         assert!(entries.len() >= 2);
     }
 
@@ -837,7 +874,10 @@ branch refs/heads/session/x
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         let head = git.head_commit(dir.path()).await.unwrap();
-        let entries = git.diff_name_status(dir.path(), &head, &head).await.unwrap();
+        let entries = git
+            .diff_name_status(dir.path(), &head, &head)
+            .await
+            .unwrap();
         assert!(entries.is_empty());
     }
 }

@@ -161,13 +161,14 @@ fn get_pending_subagent_results(
     let mut consumed_ids: HashSet<String> = HashSet::new();
     for event in &consumed_events {
         if let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
-            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array()) {
-                for id in ids {
-                    if let Some(s) = id.as_str() {
-                        let _ = consumed_ids.insert(s.to_owned());
-                    }
+            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array())
+        {
+            for id in ids {
+                if let Some(s) = id.as_str() {
+                    let _ = consumed_ids.insert(s.to_owned());
                 }
             }
+        }
     }
 
     // Filter unconsumed notifications
@@ -227,14 +228,15 @@ fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
         let _ = writeln!(ctx, "**Duration**: {duration_secs:.1}s");
 
         if let Some(output) = payload.get("output").and_then(Value::as_str)
-            && !output.is_empty() {
-                let truncated = if output.len() > 2000 {
-                    format!("{}\n\n... [Output truncated]", &output[..2000])
-                } else {
-                    output.to_string()
-                };
-                let _ = write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n");
-            }
+            && !output.is_empty()
+        {
+            let truncated = if output.len() > 2000 {
+                format!("{}\n\n... [Output truncated]", &output[..2000])
+            } else {
+                output.to_string()
+            };
+            let _ = write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n");
+        }
         ctx.push_str("\n---\n\n");
     }
     Some(ctx)
@@ -443,15 +445,16 @@ fn gather_recent_events(
     for event in &events {
         event_types.push(event.event_type.clone());
 
-        if event.event_type == "tool.call" && event.tool_name.as_deref() == Some("Bash")
+        if event.event_type == "tool.call"
+            && event.tool_name.as_deref() == Some("Bash")
             && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-                && let Some(cmd) = payload
-                    .get("arguments")
-                    .and_then(|a| a.get("command"))
-                    .and_then(|c| c.as_str())
-                {
-                    bash_commands.push(cmd.to_string());
-                }
+            && let Some(cmd) = payload
+                .get("arguments")
+                .and_then(|a| a.get("command"))
+                .and_then(|c| c.as_str())
+        {
+            bash_commands.push(cmd.to_string());
+        }
     }
 
     (event_types, bash_commands)
@@ -599,10 +602,7 @@ impl MethodHandler for PromptHandler {
                             })
                     } else if let Some(ref coord) = worktree_coordinator {
                         match coord
-                            .maybe_acquire(
-                                &session_id_clone,
-                                std::path::Path::new(&working_dir),
-                            )
+                            .maybe_acquire(&session_id_clone, std::path::Path::new(&working_dir))
                             .await
                         {
                             Ok(tron_worktree::AcquireResult::Acquired(wt_info)) => {
@@ -670,10 +670,7 @@ impl MethodHandler for PromptHandler {
                     let wd_path = std::path::Path::new(&working_dir);
                     let config = tron_runtime::context::rules_discovery::RulesDiscoveryConfig {
                         project_root: wd_path.to_path_buf(),
-                        discover_standalone_files: settings
-                            .context
-                            .rules
-                            .discover_standalone_files,
+                        discover_standalone_files: settings.context.rules.discover_standalone_files,
                         exclude_root_level: true,
                         ..Default::default()
                     };
@@ -711,16 +708,16 @@ impl MethodHandler for PromptHandler {
                         } else if event.event_type == "rules.activated"
                             && let Ok(payload) =
                                 serde_json::from_str::<serde_json::Value>(&event.payload)
-                                && let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
+                            && let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
+                        {
+                            for rule in rules {
+                                if let Some(p) = rule.get("relativePath").and_then(|v| v.as_str())
+                                    && !activated.contains(&p.to_owned())
                                 {
-                                    for rule in rules {
-                                        if let Some(p) =
-                                            rule.get("relativePath").and_then(|v| v.as_str())
-                                            && !activated.contains(&p.to_owned()) {
-                                                activated.push(p.to_owned());
-                                            }
-                                    }
+                                    activated.push(p.to_owned());
                                 }
+                            }
+                        }
                     }
                     activated
                 } else {
@@ -952,7 +949,9 @@ impl MethodHandler for PromptHandler {
                         }
                         // Strip images if model doesn't support them
                         if !tron_llm::model_supports_images(&model) {
-                            blocks.retain(|b| !matches!(b, tron_core::content::UserContent::Image { .. }));
+                            blocks.retain(|b| {
+                                !matches!(b, tron_core::content::UserContent::Image { .. })
+                            });
                         }
 
                         if blocks.len() > 1 {
@@ -1283,7 +1282,9 @@ impl MethodHandler for GetAgentStateHandler {
 
         let (current_turn_text, current_turn_tool_calls, content_sequence) = if is_running {
             tracing::trace!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
-            if let Some((text, tools, seq)) = ctx.orchestrator.turn_accumulators().get_state(&session_id) {
+            if let Some((text, tools, seq)) =
+                ctx.orchestrator.turn_accumulators().get_state(&session_id)
+            {
                 tracing::trace!(
                     session_id = %session_id,
                     text_len = text.len(),
@@ -1291,11 +1292,7 @@ impl MethodHandler for GetAgentStateHandler {
                     seq_count = seq.as_array().map_or(0, std::vec::Vec::len),
                     "agent.getState: returning accumulated content"
                 );
-                (
-                    Some(Value::String(text)),
-                    Some(tools),
-                    Some(seq),
-                )
+                (Some(Value::String(text)), Some(tools), Some(seq))
             } else {
                 tracing::warn!(session_id = %session_id, "agent.getState: no accumulator found despite isRunning=true");
                 (None, None, None)
@@ -1393,7 +1390,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock"
         }
         async fn stream(
@@ -1441,7 +1438,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock"
         }
         async fn stream(
@@ -2177,7 +2174,7 @@ mod tests {
             fn provider_type(&self) -> ProviderKind {
                 ProviderKind::Anthropic
             }
-            fn model(&self) -> &str {
+            fn model(&self) -> &'static str {
                 "mock"
             }
             async fn stream(
@@ -2224,7 +2221,7 @@ mod tests {
             fn provider_type(&self) -> ProviderKind {
                 ProviderKind::Anthropic
             }
-            fn model(&self) -> &str {
+            fn model(&self) -> &'static str {
                 "mock"
             }
             async fn stream(
@@ -2289,7 +2286,7 @@ mod tests {
             fn provider_type(&self) -> ProviderKind {
                 ProviderKind::Anthropic
             }
-            fn model(&self) -> &str {
+            fn model(&self) -> &'static str {
                 "mock"
             }
             async fn stream(
@@ -3480,7 +3477,9 @@ mod tests {
             .unwrap();
         assert!(!events.is_empty(), "expected message.user event");
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
-        let content = payload["content"].as_array().expect("content should be array");
+        let content = payload["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "image");
@@ -3517,7 +3516,9 @@ mod tests {
         assert!(!events.is_empty(), "expected message.user event");
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["content"], "use this skill"); // text-only
-        let skills = payload["skills"].as_array().expect("skills should be array");
+        let skills = payload["skills"]
+            .as_array()
+            .expect("skills should be array");
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0]["name"], "my-skill");
     }
@@ -3698,8 +3699,7 @@ mod tests {
             json!({"data": "img2", "mimeType": "image/jpeg"}),
             json!({"data": "doc1", "mimeType": "application/pdf", "fileName": "f.pdf"}),
         ];
-        let payload =
-            build_user_event_payload("mixed", Some(&images), Some(&atts), None, None);
+        let payload = build_user_event_payload("mixed", Some(&images), Some(&atts), None, None);
         let content = payload["content"].as_array().unwrap();
         // text + 1 image param + 1 image att + 1 doc att = 4
         assert_eq!(content.len(), 4);
@@ -3708,7 +3708,8 @@ mod tests {
 
     #[test]
     fn payload_with_skills_only() {
-        let skills = vec![json!({"name": "my-skill", "source": "global", "displayName": "My Skill"})];
+        let skills =
+            vec![json!({"name": "my-skill", "source": "global", "displayName": "My Skill"})];
         let payload = build_user_event_payload("hello", None, None, Some(&skills), None);
         assert_eq!(payload["content"], "hello"); // text-only path
         let s = payload["skills"].as_array().unwrap();
@@ -3732,13 +3733,8 @@ mod tests {
         let images = vec![json!({"data": "img", "mediaType": "image/png"})];
         let skills = vec![json!({"name": "sk", "source": "global"})];
         let spells = vec![json!({"name": "sp", "source": "global"})];
-        let payload = build_user_event_payload(
-            "hi",
-            Some(&images),
-            None,
-            Some(&skills),
-            Some(&spells),
-        );
+        let payload =
+            build_user_event_payload("hi", Some(&images), None, Some(&skills), Some(&spells));
         assert!(payload["content"].is_array()); // multimodal
         assert!(payload["skills"].is_array());
         assert!(payload["spells"].is_array());

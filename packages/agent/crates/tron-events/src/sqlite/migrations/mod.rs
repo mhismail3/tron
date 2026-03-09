@@ -211,7 +211,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         let expected = [
@@ -249,11 +249,14 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         assert!(tables.contains(&"events_fts".to_string()));
-        assert!(!tables.contains(&"logs_fts".to_string()), "logs_fts should be dropped by v006");
+        assert!(
+            !tables.contains(&"logs_fts".to_string()),
+            "logs_fts should be dropped by v006"
+        );
         assert!(tables.contains(&"tasks_fts".to_string()));
         assert!(tables.contains(&"areas_fts".to_string()));
     }
@@ -316,7 +319,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         // Spot-check key indexes
@@ -355,7 +358,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         let expected = [
@@ -386,7 +389,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         let expected = [
@@ -434,7 +437,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         let expected = [
@@ -482,7 +485,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         assert!(
             sessions_cols.contains(&"origin".to_string()),
@@ -495,7 +498,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         assert!(
             logs_cols.contains(&"origin".to_string()),
@@ -726,7 +729,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         assert!(
@@ -824,7 +827,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         assert!(
@@ -879,7 +882,7 @@ mod tests {
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         assert!(
@@ -978,7 +981,11 @@ mod tests {
         }
 
         let before: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(before, 3);
 
@@ -986,7 +993,11 @@ mod tests {
         apply_migration(&conn, &MIGRATIONS[4]).unwrap();
 
         let after: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(after, 1);
     }
@@ -1020,7 +1031,11 @@ mod tests {
         .unwrap();
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -1158,7 +1173,11 @@ mod tests {
 
         // Two server logs with identical content but different origins
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs WHERE origin != 'ios-client'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin != 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
     }

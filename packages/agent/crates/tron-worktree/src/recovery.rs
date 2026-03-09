@@ -53,9 +53,7 @@ pub async fn recover_repo(
         };
 
         // Extract session prefix from branch name
-        let session_prefix = branch
-            .strip_prefix(&config.branch_prefix)
-            .unwrap_or(branch);
+        let session_prefix = branch.strip_prefix(&config.branch_prefix).unwrap_or(branch);
 
         // Check if any active session matches this prefix
         let is_active = active_sessions
@@ -72,20 +70,21 @@ pub async fn recover_repo(
 
         // Auto-commit any changes
         if wt_path.exists()
-            && let Ok(true) = git.has_changes(&wt_path).await {
-                match git
-                    .commit_all(&wt_path, "[auto-recovered] orphaned session changes")
-                    .await
-                {
-                    Ok(sha) => {
-                        info!(branch, commit = %sha, "auto-committed orphan changes");
-                        auto_committed = true;
-                    }
-                    Err(e) => {
-                        warn!(branch, error = %e, "failed to auto-commit orphan");
-                    }
+            && let Ok(true) = git.has_changes(&wt_path).await
+        {
+            match git
+                .commit_all(&wt_path, "[auto-recovered] orphaned session changes")
+                .await
+            {
+                Ok(sha) => {
+                    info!(branch, commit = %sha, "auto-committed orphan changes");
+                    auto_committed = true;
+                }
+                Err(e) => {
+                    warn!(branch, error = %e, "failed to auto-commit orphan");
                 }
             }
+        }
 
         // Remove the worktree
         if wt_path.exists() {
@@ -160,7 +159,7 @@ mod tests {
         let config = WorktreeConfig::default();
         let active: HashSet<String> = HashSet::new();
 
-        let result = recover_repo(&dir.path().to_path_buf(), &active, &config, &git)
+        let result = recover_repo(dir.path(), &active, &config, &git)
             .await
             .unwrap();
         assert!(result.is_empty());
@@ -173,7 +172,11 @@ mod tests {
         let config = WorktreeConfig::default();
 
         // Create a worktree that simulates an orphaned session
-        let wt_path = dir.path().join(".worktrees").join("session").join("orphaned");
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("orphaned");
         git.worktree_add(dir.path(), &wt_path, "session/orphaned", "HEAD")
             .await
             .unwrap();
@@ -181,7 +184,7 @@ mod tests {
 
         // No active sessions
         let active: HashSet<String> = HashSet::new();
-        let result = recover_repo(&dir.path().to_path_buf(), &active, &config, &git)
+        let result = recover_repo(dir.path(), &active, &config, &git)
             .await
             .unwrap();
 
@@ -196,15 +199,19 @@ mod tests {
         let git = init_repo(dir.path()).await;
         let config = WorktreeConfig::default();
 
-        let wt_path = dir.path().join(".worktrees").join("session").join("active12");
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("active12");
         git.worktree_add(dir.path(), &wt_path, "session/active12", "HEAD")
             .await
             .unwrap();
 
         let mut active: HashSet<String> = HashSet::new();
-        active.insert("active12-full-session-id".to_string());
+        assert!(active.insert("active12-full-session-id".to_string()));
 
-        let result = recover_repo(&dir.path().to_path_buf(), &active, &config, &git)
+        let result = recover_repo(dir.path(), &active, &config, &git)
             .await
             .unwrap();
 
@@ -218,7 +225,11 @@ mod tests {
         let git = init_repo(dir.path()).await;
         let config = WorktreeConfig::default();
 
-        let wt_path = dir.path().join(".worktrees").join("session").join("dirty123");
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("dirty123");
         git.worktree_add(dir.path(), &wt_path, "session/dirty123", "HEAD")
             .await
             .unwrap();
@@ -227,7 +238,7 @@ mod tests {
         std::fs::write(wt_path.join("work.txt"), "uncommitted work").unwrap();
 
         let active: HashSet<String> = HashSet::new();
-        let result = recover_repo(&dir.path().to_path_buf(), &active, &config, &git)
+        let result = recover_repo(dir.path(), &active, &config, &git)
             .await
             .unwrap();
 

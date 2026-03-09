@@ -387,6 +387,32 @@ mod tests {
         }
     }
 
+    struct CountingHandler {
+        name: String,
+        counter: Arc<AtomicUsize>,
+        result: HookResult,
+    }
+
+    #[async_trait]
+    impl HookHandler for CountingHandler {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn hook_type(&self) -> HookType {
+            HookType::PreToolUse
+        }
+
+        fn priority(&self) -> i32 {
+            if self.name == "blocker" { 100 } else { 0 }
+        }
+
+        async fn handle(&self, _ctx: &HookContext) -> Result<HookResult, HookError> {
+            let _ = self.counter.fetch_add(1, Ordering::SeqCst);
+            Ok(self.result.clone())
+        }
+    }
+
     fn make_ctx(hook_type: HookType) -> HookContext {
         match hook_type {
             HookType::PreToolUse => HookContext::PreToolUse {
@@ -469,29 +495,6 @@ mod tests {
     async fn test_execute_block_stops_chain() {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = Arc::clone(&counter);
-
-        struct CountingHandler {
-            name: String,
-            counter: Arc<AtomicUsize>,
-            result: HookResult,
-        }
-
-        #[async_trait]
-        impl HookHandler for CountingHandler {
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn hook_type(&self) -> HookType {
-                HookType::PreToolUse
-            }
-            fn priority(&self) -> i32 {
-                if self.name == "blocker" { 100 } else { 0 }
-            }
-            async fn handle(&self, _ctx: &HookContext) -> Result<HookResult, HookError> {
-                let _ = self.counter.fetch_add(1, Ordering::SeqCst);
-                Ok(self.result.clone())
-            }
-        }
 
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(CountingHandler {

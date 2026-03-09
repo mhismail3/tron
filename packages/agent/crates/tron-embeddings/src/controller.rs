@@ -8,13 +8,13 @@ use tracing::{debug, warn};
 
 use crate::config::EmbeddingConfig;
 use crate::errors::{EmbeddingError, Result};
-use crate::hybrid::{reciprocal_rank_fusion, HybridResult, HybridSearchOptions};
+use crate::hybrid::{HybridResult, HybridSearchOptions, reciprocal_rank_fusion};
 use crate::service::EmbeddingService;
 use crate::text::{
     build_embedding_text_from_json, build_lesson_texts, with_document_prefix, with_query_prefix,
 };
-use tron_events::types::payloads::memory::MemoryLedgerPayload;
 use crate::vector_repo::{SearchOptions, VectorRepository, VectorSearchResult};
+use tron_events::types::payloads::memory::MemoryLedgerPayload;
 
 /// Workspace memory loaded from ledger entries.
 pub struct WorkspaceMemory {
@@ -231,7 +231,9 @@ impl EmbeddingController {
         let vector_results = if query_text.is_empty() {
             vec![]
         } else {
-            self.search(query_text, search_opts).await.unwrap_or_default()
+            self.search(query_text, search_opts)
+                .await
+                .unwrap_or_default()
         };
 
         Ok(reciprocal_rank_fusion(
@@ -371,9 +373,7 @@ impl EmbeddingController {
                         let extra_events = if missing.is_empty() {
                             std::collections::HashMap::new()
                         } else {
-                            event_store
-                                .get_events_by_ids(&missing)
-                                .unwrap_or_default()
+                            event_store.get_events_by_ids(&missing).unwrap_or_default()
                         };
 
                         // Build final list from pre-fetched + extra
@@ -386,15 +386,11 @@ impl EmbeddingController {
                         for (eid, row) in &extra_events {
                             if selected_set.contains(eid.as_str())
                                 && !result.iter().any(|(id, _, _)| id == eid)
-                                && let Ok(v) = serde_json::from_str::<serde_json::Value>(
-                                    &row.payload,
-                                ) {
-                                    result.push((
-                                        eid.clone(),
-                                        row.timestamp.clone(),
-                                        v,
-                                    ));
-                                }
+                                && let Ok(v) =
+                                    serde_json::from_str::<serde_json::Value>(&row.payload)
+                            {
+                                result.push((eid.clone(), row.timestamp.clone(), v));
+                            }
                         }
 
                         result
@@ -432,9 +428,10 @@ impl EmbeddingController {
             if let Some(lessons) = entry.get("lessons").and_then(serde_json::Value::as_array) {
                 for lesson in lessons {
                     if let Some(text) = lesson.as_str()
-                        && !text.is_empty() {
-                            let _ = write!(section, "\n- {text}");
-                        }
+                        && !text.is_empty()
+                    {
+                        let _ = write!(section, "\n- {text}");
+                    }
                 }
             }
 
@@ -464,10 +461,7 @@ impl EmbeddingController {
             self.service
                 .as_ref()
                 .filter(|s| s.is_ready())
-                .map_or_else(
-                    || (text.len() as u64) / 4,
-                    |s| s.count_tokens(text) as u64,
-                )
+                .map_or_else(|| (text.len() as u64) / 4, |s| s.count_tokens(text) as u64)
         };
         let mut tokens = count_fn(&content);
 
@@ -983,7 +977,9 @@ mod tests {
     async fn load_workspace_memory_no_entries_returns_none() {
         let ctrl = make_controller(512);
         let store = make_event_store();
-        let result = ctrl.load_workspace_memory(&store, "/tmp/project", 5, None, 2).await;
+        let result = ctrl
+            .load_workspace_memory(&store, "/tmp/project", 5, None, 2)
+            .await;
         assert!(result.is_none());
     }
 
@@ -1023,7 +1019,10 @@ mod tests {
             parent_id: None,
         });
 
-        let wm = ctrl.load_workspace_memory(&store, &ws_id, 5, None, 2).await.unwrap();
+        let wm = ctrl
+            .load_workspace_memory(&store, &ws_id, 5, None, 2)
+            .await
+            .unwrap();
         assert_eq!(wm.count, 1);
         assert!(wm.content.contains("# Memory"));
         assert!(wm.content.contains("### Added auth system"));
@@ -1061,7 +1060,10 @@ mod tests {
         }
 
         // Request only 2
-        let wm = ctrl.load_workspace_memory(&store, &ws_id, 2, None, 2).await.unwrap();
+        let wm = ctrl
+            .load_workspace_memory(&store, &ws_id, 2, None, 2)
+            .await
+            .unwrap();
         assert_eq!(wm.count, 2);
     }
 
@@ -1135,7 +1137,10 @@ mod tests {
             });
         }
 
-        let wm = ctrl.load_workspace_memory(&store, &ws_id, 20, None, 2).await.unwrap();
+        let wm = ctrl
+            .load_workspace_memory(&store, &ws_id, 20, None, 2)
+            .await
+            .unwrap();
         // Token limit should have kicked in, reducing entries below 20
         assert!(wm.tokens <= 100, "tokens {} should be <= 100", wm.tokens);
         assert!(wm.count < 20, "count {} should be < 20", wm.count);
@@ -1236,10 +1241,7 @@ mod tests {
             .unwrap();
 
         // FTS results include evt1 and a third event not in vectors
-        let fts = vec![
-            ("evt1".to_string(), 10.0),
-            ("evt3".to_string(), 5.0),
-        ];
+        let fts = vec![("evt1".to_string(), 10.0), ("evt3".to_string(), 5.0)];
         let hybrid_opts = HybridSearchOptions::default();
         let search_opts = SearchOptions {
             limit: 10,
@@ -1269,7 +1271,12 @@ mod tests {
         ctrl.set_vector_repo(make_repo(dims));
 
         let results = ctrl
-            .hybrid_search("", &[], &HybridSearchOptions::default(), &SearchOptions::default())
+            .hybrid_search(
+                "",
+                &[],
+                &HybridSearchOptions::default(),
+                &SearchOptions::default(),
+            )
             .await
             .unwrap();
         assert!(results.is_empty());
@@ -1296,8 +1303,8 @@ mod tests {
 
     // ── Semantic workspace memory tests ──
 
-    /// Create a controller with service + repo, event store with N memory.ledger
-    /// entries (each embedded), returning (controller, store, workspace_id, event_ids).
+    /// Create a controller with service + repo, event store with `N` `memory.ledger`
+    /// entries (each embedded), returning (`controller`, `store`, `workspace_id`, `event_ids`).
     /// Event IDs are in insertion order (oldest first).
     async fn setup_semantic_test(
         n: usize,
@@ -1370,10 +1377,19 @@ mod tests {
             .unwrap();
         assert_eq!(wm.count, 5);
         // Recency anchors (newest = Entry 4, Entry 3) must be present
-        assert!(wm.content.contains("Entry 4"), "missing recency anchor Entry 4");
-        assert!(wm.content.contains("Entry 3"), "missing recency anchor Entry 3");
+        assert!(
+            wm.content.contains("Entry 4"),
+            "missing recency anchor Entry 4"
+        );
+        assert!(
+            wm.content.contains("Entry 3"),
+            "missing recency anchor Entry 3"
+        );
         // Entry 0 should be present (semantically relevant)
-        assert!(wm.content.contains("Entry 0"), "missing semantic result Entry 0");
+        assert!(
+            wm.content.contains("Entry 0"),
+            "missing semantic result Entry 0"
+        );
     }
 
     #[tokio::test]
@@ -1460,7 +1476,11 @@ mod tests {
             .map(|l| l.trim_start_matches('\n').trim_start_matches("### "))
             .collect();
         let unique: std::collections::HashSet<&str> = titles.iter().copied().collect();
-        assert_eq!(titles.len(), unique.len(), "duplicate titles found: {titles:?}");
+        assert_eq!(
+            titles.len(),
+            unique.len(),
+            "duplicate titles found: {titles:?}"
+        );
     }
 
     #[tokio::test]

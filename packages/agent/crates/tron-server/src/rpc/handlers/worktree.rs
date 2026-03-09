@@ -33,9 +33,10 @@ fn require_coordinator(ctx: &RpcContext) -> Result<&tron_worktree::WorktreeCoord
 fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
     // Check coordinator for active worktree
     if let Some(ref coord) = ctx.worktree_coordinator
-        && let Some(dir) = coord.effective_working_dir(session_id) {
-            return Ok(dir);
-        }
+        && let Some(dir) = coord.effective_working_dir(session_id)
+    {
+        return Ok(dir);
+    }
 
     // Fall back to session's original working directory
     let session = ctx
@@ -301,9 +302,7 @@ impl MethodHandler for ListSessionBranchesHandler {
 
         let repo_root = std::path::Path::new(&repo_root_str);
         match coord.list_session_branches(repo_root).await {
-            Ok(branches) => {
-                Ok(serde_json::json!({ "branches": branches }))
-            }
+            Ok(branches) => Ok(serde_json::json!({ "branches": branches })),
             Err(e) => Err(RpcError::Internal {
                 message: format!("Failed to list session branches: {e}"),
             }),
@@ -324,11 +323,9 @@ impl MethodHandler for GetCommittedDiffHandler {
         let coord = require_coordinator(ctx)?;
 
         match coord.get_committed_diff(&session_id).await {
-            Ok(Some(result)) => {
-                serde_json::to_value(&result).map_err(|e| RpcError::Internal {
-                    message: format!("Serialization failed: {e}"),
-                })
-            }
+            Ok(Some(result)) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+                message: format!("Serialization failed: {e}"),
+            }),
             Ok(None) => Ok(serde_json::json!({
                 "commits": [],
                 "files": [],
@@ -415,12 +412,10 @@ impl MethodHandler for GetDiffHandler {
             }
         );
 
-        let branch = branch_out
-            .ok()
-            .and_then(|o| {
-                let b = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if b.is_empty() { None } else { Some(b) }
-            });
+        let branch = branch_out.ok().and_then(|o| {
+            let b = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if b.is_empty() { None } else { Some(b) }
+        });
 
         let status_str = status_out
             .map_err(|e| RpcError::Internal {
@@ -518,9 +513,7 @@ fn parse_porcelain(output: &str) -> Vec<FileEntry> {
                 let x = xy.as_bytes()[0];
                 let y = xy.as_bytes()[1];
                 // Check for unmerged states
-                if (x == b'U' || y == b'U')
-                    || (x == b'A' && y == b'A')
-                    || (x == b'D' && y == b'D')
+                if (x == b'U' || y == b'U') || (x == b'A' && y == b'A') || (x == b'D' && y == b'D')
                 {
                     "unmerged"
                 } else if x == b'R' || y == b'R' {
@@ -891,7 +884,25 @@ mod tests {
 
     // ── GetDiff handler tests ───────────────────────────────────────
 
-    /// Helper: create a temp git repo with initial commit, return (TempDir, dir_str).
+    fn git_output(args: &[&str]) -> std::process::Output {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    fn run_git(args: &[&str]) {
+        drop(git_output(args));
+    }
+
+    /// Helper: create a temp git repo with initial commit, return (`TempDir`, `dir_str`).
     fn make_git_repo() -> (tempfile::TempDir, String) {
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_str().unwrap().to_string();
@@ -900,20 +911,11 @@ mod tests {
             (vec!["-C", &dir, "config", "user.email", "t@t.com"], "email"),
             (vec!["-C", &dir, "config", "user.name", "T"], "name"),
         ] {
-            std::process::Command::new("git")
-                .args(&args)
-                .output()
-                .unwrap();
+            run_git(&args);
         }
         std::fs::write(tmp.path().join("init.txt"), "init").unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "add", "-A"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "commit", "-m", "init"])
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "add", "-A"]);
+        run_git(&["-C", &dir, "commit", "-m", "init"]);
         (tmp, dir)
     }
 
@@ -932,10 +934,7 @@ mod tests {
         let ctx = make_test_context();
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_str().unwrap();
-        let sid = ctx
-            .session_manager
-            .create_session("m", dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", dir, None).unwrap();
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -963,10 +962,7 @@ mod tests {
     async fn get_diff_clean_repo() {
         let ctx = make_test_context();
         let (_tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -983,10 +979,7 @@ mod tests {
     async fn get_diff_with_modified_file() {
         let ctx = make_test_context();
         let (tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         // Modify the committed file
         std::fs::write(tmp.path().join("init.txt"), "modified content").unwrap();
@@ -1007,10 +1000,7 @@ mod tests {
     async fn get_diff_with_new_file() {
         let ctx = make_test_context();
         let (tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
 
@@ -1029,10 +1019,7 @@ mod tests {
     async fn get_diff_with_deleted_file() {
         let ctx = make_test_context();
         let (tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
 
@@ -1050,17 +1037,11 @@ mod tests {
     async fn get_diff_with_staged_and_unstaged() {
         let ctx = make_test_context();
         let (tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         // Stage a change
         std::fs::write(tmp.path().join("init.txt"), "staged").unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "add", "init.txt"])
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "add", "init.txt"]);
 
         // Make another unstaged change
         std::fs::write(tmp.path().join("init.txt"), "unstaged on top").unwrap();
@@ -1081,16 +1062,10 @@ mod tests {
         let ctx = make_test_context();
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_str().unwrap();
-        std::process::Command::new("git")
-            .args(["init", dir])
-            .output()
-            .unwrap();
+        run_git(&["init", dir]);
         std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
 
-        let sid = ctx
-            .session_manager
-            .create_session("m", dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", dir, None).unwrap();
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -1106,15 +1081,9 @@ mod tests {
     async fn get_diff_branch_name() {
         let ctx = make_test_context();
         let (_tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
-        std::process::Command::new("git")
-            .args(["-C", &dir, "checkout", "-b", "feature/test"])
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "checkout", "-b", "feature/test"]);
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -1127,22 +1096,12 @@ mod tests {
     async fn get_diff_detached_head() {
         let ctx = make_test_context();
         let (_tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         // Get HEAD hash and checkout detached
-        let hash = std::process::Command::new("git")
-            .args(["-C", &dir, "rev-parse", "HEAD"])
-            .output()
-            .unwrap();
+        let hash = git_output(&["-C", &dir, "rev-parse", "HEAD"]);
         let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "checkout", &hash])
-            .stderr(std::process::Stdio::null())
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "checkout", &hash]);
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -1156,10 +1115,7 @@ mod tests {
         let ctx = make_test_context();
         let (_tmp, dir) = make_git_repo();
         // No worktree — should fall back to session working_directory
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         let result = GetDiffHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -1177,19 +1133,10 @@ mod tests {
         std::fs::write(tmp.path().join("a.txt"), "a").unwrap();
         std::fs::write(tmp.path().join("b.txt"), "b").unwrap();
         std::fs::write(tmp.path().join("c.txt"), "c").unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "add", "-A"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "commit", "-m", "add files"])
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "add", "-A"]);
+        run_git(&["-C", &dir, "commit", "-m", "add files"]);
 
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         // Modify 2 files, delete 1, add 1 new, leave 1 unchanged
         std::fs::write(tmp.path().join("a.txt"), "modified-a").unwrap();
@@ -1211,22 +1158,13 @@ mod tests {
     async fn get_diff_binary_file() {
         let ctx = make_test_context();
         let (tmp, dir) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", &dir, None)
-            .unwrap();
+        let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
 
         // Create a binary file with NUL bytes (git detects binary via NUL), commit it, then modify
         let bin_data: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x1A, 0x0A];
         std::fs::write(tmp.path().join("image.png"), &bin_data).unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "add", "-A"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["-C", &dir, "commit", "-m", "add binary"])
-            .output()
-            .unwrap();
+        run_git(&["-C", &dir, "add", "-A"]);
+        run_git(&["-C", &dir, "commit", "-m", "add binary"]);
 
         // Modify the binary
         let mut modified = bin_data.clone();

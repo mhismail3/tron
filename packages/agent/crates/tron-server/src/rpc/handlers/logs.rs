@@ -52,7 +52,10 @@ fn insert_client_logs(
         })?;
 
     let new_entries: Vec<&ClientLogEntry> = match watermark.as_deref() {
-        Some(wm) => entries.iter().filter(|e| e.timestamp.as_str() > wm).collect(),
+        Some(wm) => entries
+            .iter()
+            .filter(|e| e.timestamp.as_str() > wm)
+            .collect(),
         None => entries.iter().collect(),
     };
 
@@ -60,9 +63,11 @@ fn insert_client_logs(
         return Ok(0);
     }
 
-    let tx = conn.unchecked_transaction().map_err(|e| RpcError::Internal {
-        message: format!("Failed to begin transaction: {e}"),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| RpcError::Internal {
+            message: format!("Failed to begin transaction: {e}"),
+        })?;
 
     let inserted = {
         let mut stmt = tx
@@ -124,16 +129,17 @@ impl MethodHandler for IngestLogsHandler {
 
         if entries.len() > 10_000 {
             return Err(RpcError::InvalidParams {
-                message: format!(
-                    "Too many entries: {} (max 10000)",
-                    entries.len()
-                ),
+                message: format!("Too many entries: {} (max 10000)", entries.len()),
             });
         }
 
-        let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let conn = ctx
+            .event_store
+            .pool()
+            .get()
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to get DB connection: {e}"),
+            })?;
 
         let inserted = insert_client_logs(&conn, &entries)?;
 
@@ -219,8 +225,9 @@ mod tests {
             ]
         });
 
-        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
 
+        assert_eq!(result["inserted"], 5);
         let conn = ctx.event_store.pool().get().unwrap();
         let mut stmt = conn
             .prepare("SELECT level_num FROM logs WHERE origin = 'ios-client' ORDER BY timestamp")
@@ -243,8 +250,9 @@ mod tests {
             ]
         });
 
-        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
 
+        assert_eq!(result["inserted"], 1);
         let conn = ctx.event_store.pool().get().unwrap();
         let component: String = conn
             .query_row(
@@ -289,10 +297,7 @@ mod tests {
             .unwrap();
         assert_eq!(r1["inserted"], 3);
 
-        let r2 = IngestLogsHandler
-            .handle(Some(params), &ctx)
-            .await
-            .unwrap();
+        let r2 = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
         assert_eq!(r2["inserted"], 0);
     }
 
@@ -307,10 +312,11 @@ mod tests {
                 {"timestamp": "2026-03-03T14:30:05.300Z", "level": "info", "category": "A", "message": "c"},
             ]
         });
-        IngestLogsHandler
+        let r1 = IngestLogsHandler
             .handle(Some(first_batch), &ctx)
             .await
             .unwrap();
+        assert_eq!(r1["inserted"], 3);
 
         let second_batch = json!({
             "entries": [
@@ -347,8 +353,9 @@ mod tests {
             ]
         });
 
-        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
 
+        assert_eq!(result["inserted"], 1);
         let conn = ctx.event_store.pool().get().unwrap();
         let level_num: i32 = conn
             .query_row(

@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_parse_valid_frontmatter() {
-        let content = r#"---
+        let content = r"---
 name: My Skill
 description: A great skill
 version: 1.0.0
@@ -256,7 +256,7 @@ tags: [tag1, tag2]
 ---
 # My Skill
 
-This is the body."#;
+This is the body.";
 
         let result = parse_skill_md(content);
         assert_eq!(result.frontmatter.name.as_deref(), Some("My Skill"));
@@ -392,7 +392,11 @@ This is the body."#;
         let content = format!("# Header\n\n{emojis}");
         let result = parse_skill_md(&content);
         assert!(result.description.len() <= 200);
-        assert!(result.description.is_char_boundary(result.description.len()));
+        assert!(
+            result
+                .description
+                .is_char_boundary(result.description.len())
+        );
         // Should truncate to 50 emojis = 200 bytes
         assert_eq!(result.description.chars().count(), 50);
     }

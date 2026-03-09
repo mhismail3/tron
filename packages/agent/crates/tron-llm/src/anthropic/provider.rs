@@ -97,12 +97,13 @@ impl AnthropicProvider {
                 );
                 // API key: only add thinking beta for models that need it
                 if let Some(model_info) = get_claude_model(&self.config.model)
-                    && model_info.supports_thinking_beta_headers {
-                        let _ = headers.insert(
-                            "anthropic-beta",
-                            HeaderValue::from_static("interleaved-thinking-2025-05-14"),
-                        );
-                    }
+                    && model_info.supports_thinking_beta_headers
+                {
+                    let _ = headers.insert(
+                        "anthropic-beta",
+                        HeaderValue::from_static("interleaved-thinking-2025-05-14"),
+                    );
+                }
             }
             AnthropicAuth::OAuth { tokens, .. } => {
                 let auth_value = format!("Bearer {}", tokens.access_token);
@@ -247,12 +248,13 @@ impl AnthropicProvider {
 
         // Breakpoint 1: Last tool → 1h TTL (OAuth only)
         if self.is_oauth()
-            && let Some(last) = anthropic_tools.last_mut() {
-                last.cache_control = Some(CacheControl {
-                    cache_type: "ephemeral".into(),
-                    ttl: Some("1h".into()),
-                });
-            }
+            && let Some(last) = anthropic_tools.last_mut()
+        {
+            last.cache_control = Some(CacheControl {
+                cache_type: "ephemeral".into(),
+                ttl: Some("1h".into()),
+            });
+        }
 
         Some(anthropic_tools)
     }
@@ -308,9 +310,10 @@ impl AnthropicProvider {
         for msg in messages.iter_mut().rev() {
             if msg.role == "user" && !msg.content.is_empty() {
                 if let Some(last_block) = msg.content.last_mut()
-                    && let Some(obj) = last_block.as_object_mut() {
-                        let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
-                    }
+                    && let Some(obj) = last_block.as_object_mut()
+                {
+                    let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
+                }
                 break;
             }
         }
@@ -424,7 +427,11 @@ impl AnthropicProvider {
             });
         }
 
-        Ok(crate::stream_pipeline::sse_to_event_stream::<AnthropicSseEvent, _, _>(
+        Ok(crate::stream_pipeline::sse_to_event_stream::<
+            AnthropicSseEvent,
+            _,
+            _,
+        >(
             response,
             &SSE_OPTIONS,
             create_stream_state(),
@@ -495,7 +502,7 @@ mod tests {
             tokens: crate::auth::OAuthTokens {
                 access_token: "at-test".into(),
                 refresh_token: "rt-test".into(),
-                expires_at: 9999999999999,
+                expires_at: 9_999_999_999_999,
             },
             account_label: None,
         })
@@ -513,7 +520,10 @@ mod tests {
     #[test]
     fn provider_type_is_anthropic() {
         let provider = AnthropicProvider::new(api_key_config());
-        assert_eq!(provider.provider_type(), tron_core::messages::Provider::Anthropic);
+        assert_eq!(
+            provider.provider_type(),
+            tron_core::messages::Provider::Anthropic
+        );
     }
 
     #[test]
@@ -739,7 +749,7 @@ mod tests {
                     properties: None,
                     required: None,
                     description: None,
-                    extra: Default::default(),
+                    extra: serde_json::Map::default(),
                 },
             }]),
             ..Context::default()
@@ -763,7 +773,7 @@ mod tests {
                         properties: None,
                         required: None,
                         description: None,
-                        extra: Default::default(),
+                        extra: serde_json::Map::default(),
                     },
                 },
                 tron_core::tools::Tool {
@@ -774,7 +784,7 @@ mod tests {
                         properties: None,
                         required: None,
                         description: None,
-                        extra: Default::default(),
+                        extra: serde_json::Map::default(),
                     },
                 },
             ]),

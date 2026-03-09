@@ -91,28 +91,33 @@ pub async fn remove(
     let mut final_commit = None;
 
     // Auto-commit uncommitted changes
-    if config.auto_commit_on_release && info.worktree_path.exists()
-        && let Ok(true) = git.has_changes(&info.worktree_path).await {
-            match git
-                .commit_all(
-                    &info.worktree_path,
-                    &format!("[auto] session {} final commit", &info.session_id[..8.min(info.session_id.len())]),
-                )
-                .await
-            {
-                Ok(sha) => {
-                    debug!(session_id = %info.session_id, commit = %sha, "auto-committed changes");
-                    final_commit = Some(sha);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        session_id = %info.session_id,
-                        error = %e,
-                        "failed to auto-commit"
-                    );
-                }
+    if config.auto_commit_on_release
+        && info.worktree_path.exists()
+        && let Ok(true) = git.has_changes(&info.worktree_path).await
+    {
+        match git
+            .commit_all(
+                &info.worktree_path,
+                &format!(
+                    "[auto] session {} final commit",
+                    &info.session_id[..8.min(info.session_id.len())]
+                ),
+            )
+            .await
+        {
+            Ok(sha) => {
+                debug!(session_id = %info.session_id, commit = %sha, "auto-committed changes");
+                final_commit = Some(sha);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %info.session_id,
+                    error = %e,
+                    "failed to auto-commit"
+                );
             }
         }
+    }
 
     // Remove worktree directory
     let deleted = if config.delete_on_release && info.worktree_path.exists() {
@@ -142,10 +147,7 @@ pub async fn remove(
     // Delete branch if not preserving
     let branch_preserved = if config.preserve_branches {
         true
-    } else if let Err(e) = git
-        .branch_delete(&info.repo_root, &info.branch, true)
-        .await
-    {
+    } else if let Err(e) = git.branch_delete(&info.repo_root, &info.branch, true).await {
         tracing::warn!(branch = %info.branch, error = %e, "failed to delete branch");
         true // branch still exists
     } else {
@@ -265,9 +267,15 @@ mod tests {
             .unwrap();
 
         // Remove worktree so we can create another
-        let wt_path = dir.path().join(".worktrees").join("session").join("session-");
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("session-");
         let _ = git.worktree_remove(dir.path(), &wt_path, true).await;
-        let _ = git.branch_delete(dir.path(), "session/session-", true).await;
+        let _ = git
+            .branch_delete(dir.path(), "session/session-", true)
+            .await;
 
         let _ = create("session-bbbb5678", dir.path(), &config, &git)
             .await
@@ -317,8 +325,10 @@ mod tests {
     async fn remove_deletes_branch() {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
-        let mut config = WorktreeConfig::default();
-        config.preserve_branches = false;
+        let config = WorktreeConfig {
+            preserve_branches: false,
+            ..WorktreeConfig::default()
+        };
 
         let info = create("sess-delbranch", dir.path(), &config, &git)
             .await

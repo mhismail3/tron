@@ -326,11 +326,14 @@ mod tests {
     use async_trait::async_trait;
     use futures::stream;
     use serde_json::Map;
+    use std::time::Duration;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::ToolResultMessageContent;
+    use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
     use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+    use tron_tools::traits::{ExecutionMode, ToolContext, TronTool};
 
     // ── Mock Provider ──
 
@@ -374,7 +377,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock-model"
         }
         async fn stream(
@@ -394,25 +397,173 @@ mod tests {
         }
     }
 
+    fn test_context_manager(model: &str) -> ContextManager {
+        ContextManager::new(ContextManagerConfig {
+            model: model.into(),
+            system_prompt: None,
+            working_directory: None,
+            tools: vec![],
+            rules_content: None,
+            compaction: crate::context::types::CompactionConfig::default(),
+        })
+    }
+
+    struct SlowProvider;
+
+    #[async_trait]
+    impl Provider for SlowProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+
+        fn model(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn stream(
+            &self,
+            _context: &tron_core::messages::Context,
+            _options: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let stream = async_stream::stream! {
+                yield Ok(StreamEvent::Start);
+                yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                yield Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![],
+                        token_usage: None,
+                    },
+                    stop_reason: "end_turn".into(),
+                });
+            };
+            Ok(Box::pin(stream))
+        }
+    }
+
+    struct AuthErrorProvider {
+        message: &'static str,
+    }
+
+    #[async_trait]
+    impl Provider for AuthErrorProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+
+        fn model(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn stream(
+            &self,
+            _context: &tron_core::messages::Context,
+            _options: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Auth {
+                message: self.message.into(),
+            })
+        }
+    }
+
+    struct NoUsageProvider;
+
+    #[async_trait]
+    impl Provider for NoUsageProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+
+        fn model(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn stream(
+            &self,
+            _context: &tron_core::messages::Context,
+            _options: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let events = vec![
+                StreamEvent::Start,
+                StreamEvent::TextDelta { delta: "hi".into() },
+                StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text("hi")],
+                        token_usage: None,
+                    },
+                    stop_reason: "end_turn".into(),
+                },
+            ];
+            Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+        }
+    }
+
+    struct StaticTool {
+        name: &'static str,
+        category: ToolCategory,
+        description: &'static str,
+        response: &'static str,
+        stops_turn: bool,
+        interactive: bool,
+    }
+
+    #[async_trait]
+    impl TronTool for StaticTool {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn category(&self) -> ToolCategory {
+            self.category.clone()
+        }
+
+        fn stops_turn(&self) -> bool {
+            self.stops_turn
+        }
+
+        fn is_interactive(&self) -> bool {
+            self.interactive
+        }
+
+        fn definition(&self) -> Tool {
+            Tool {
+                name: self.name.into(),
+                description: self.description.into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: Map::new(),
+                },
+            }
+        }
+
+        async fn execute(
+            &self,
+            _params: serde_json::Value,
+            _ctx: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+            Ok(text_result(self.response, false))
+        }
+    }
+
     fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
         AgentDeps {
             provider: Arc::new(provider),
             registry: ToolRegistry::new(),
             guardrails: None,
             hooks: None,
-            context_manager: ContextManager::new(ContextManagerConfig {
-                model: "mock-model".into(),
-                system_prompt: None,
-                working_directory: None,
-                tools: vec![],
-                rules_content: None,
-                compaction: crate::context::types::CompactionConfig::default(),
-            }),
+            context_manager: test_context_manager("mock-model"),
         }
     }
 
     fn make_agent(provider: MockProvider) -> TronAgent {
-        TronAgent::new(AgentConfig::default(), make_deps(provider), "test-session".into())
+        TronAgent::new(
+            AgentConfig::default(),
+            make_deps(provider),
+            "test-session".into(),
+        )
     }
 
     #[tokio::test]
@@ -486,40 +637,14 @@ mod tests {
         let mut agent = make_agent(provider);
 
         // Register a mock tool so tool_not_found doesn't error
-        use async_trait::async_trait as at;
-        use tron_core::tools::{Tool, ToolParameterSchema, text_result};
-        struct ReadTool;
-        #[at]
-        impl tron_tools::traits::TronTool for ReadTool {
-            fn name(&self) -> &str {
-                "read"
-            }
-            fn category(&self) -> tron_core::tools::ToolCategory {
-                tron_core::tools::ToolCategory::Filesystem
-            }
-            fn definition(&self) -> Tool {
-                Tool {
-                    name: "read".into(),
-                    description: "Read file".into(),
-                    parameters: ToolParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::new(),
-                    },
-                }
-            }
-            async fn execute(
-                &self,
-                _p: serde_json::Value,
-                _c: &tron_tools::traits::ToolContext,
-            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
-            {
-                Ok(text_result("file contents", false))
-            }
-        }
-        agent.registry.register(Arc::new(ReadTool));
+        agent.registry.register(Arc::new(StaticTool {
+            name: "read",
+            category: ToolCategory::Filesystem,
+            description: "Read file",
+            response: "file contents",
+            stops_turn: false,
+            interactive: false,
+        }));
 
         let result = agent.run("Read the file", RunContext::default()).await;
 
@@ -542,7 +667,7 @@ mod tests {
                 },
                 StreamEvent::Done {
                     message: AssistantMessage {
-                        content: vec![AssistantContent::text(&format!("Turn {i}"))],
+                        content: vec![AssistantContent::text(format!("Turn {i}"))],
                         token_usage: Some(TokenUsage::default()),
                     },
                     stop_reason: "tool_use".into(), // pretend there are tool calls
@@ -582,39 +707,14 @@ mod tests {
         agent.config.max_turns = 2;
 
         // Register echo tool
-        use tron_core::tools::{Tool, ToolParameterSchema, text_result};
-        struct EchoTool;
-        #[async_trait]
-        impl tron_tools::traits::TronTool for EchoTool {
-            fn name(&self) -> &str {
-                "echo"
-            }
-            fn category(&self) -> tron_core::tools::ToolCategory {
-                tron_core::tools::ToolCategory::Custom
-            }
-            fn definition(&self) -> Tool {
-                Tool {
-                    name: "echo".into(),
-                    description: "Echo".into(),
-                    parameters: ToolParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::new(),
-                    },
-                }
-            }
-            async fn execute(
-                &self,
-                _p: serde_json::Value,
-                _c: &tron_tools::traits::ToolContext,
-            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
-            {
-                Ok(text_result("ok", false))
-            }
-        }
-        agent.registry.register(Arc::new(EchoTool));
+        agent.registry.register(Arc::new(StaticTool {
+            name: "echo",
+            category: ToolCategory::Custom,
+            description: "Echo",
+            response: "ok",
+            stops_turn: false,
+            interactive: false,
+        }));
 
         let result = agent.run("Go", RunContext::default()).await;
 
@@ -624,43 +724,6 @@ mod tests {
 
     #[tokio::test]
     async fn abort_mid_run() {
-        // Create a provider that takes a long time
-        struct SlowProvider;
-        #[async_trait]
-        impl Provider for SlowProvider {
-            fn provider_type(&self) -> ProviderKind {
-                ProviderKind::Anthropic
-            }
-            fn model(&self) -> &str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _context: &tron_core::messages::Context,
-                _options: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                // Return a stream that takes a while
-                let s = async_stream::stream! {
-                    yield Ok(StreamEvent::Start);
-                    yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    yield Ok(StreamEvent::Done {
-                        message: AssistantMessage { content: vec![], token_usage: None },
-                        stop_reason: "end_turn".into(),
-                    });
-                };
-                Ok(Box::pin(s))
-            }
-        }
-
-        let ctx_config = ContextManagerConfig {
-            model: "mock".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
             make_deps(SlowProvider),
@@ -698,37 +761,9 @@ mod tests {
 
     #[tokio::test]
     async fn is_running_reset_after_error() {
-        struct ErrorProvider;
-        #[async_trait]
-        impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderKind {
-                ProviderKind::Anthropic
-            }
-            fn model(&self) -> &str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _context: &tron_core::messages::Context,
-                _options: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth {
-                    message: "expired".into(),
-                })
-            }
-        }
-
-        let ctx_config = ContextManagerConfig {
-            model: "mock".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            make_deps(ErrorProvider),
+            make_deps(AuthErrorProvider { message: "expired" }),
             "test-session".into(),
         );
 
@@ -750,44 +785,6 @@ mod tests {
 
     #[tokio::test]
     async fn run_result_context_window_tokens_none_without_usage() {
-        // Provider that returns no token_usage → contextWindowTokens stays 0
-        struct NoUsageProvider;
-        #[async_trait]
-        impl Provider for NoUsageProvider {
-            fn provider_type(&self) -> ProviderKind {
-                ProviderKind::Anthropic
-            }
-            fn model(&self) -> &str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _context: &tron_core::messages::Context,
-                _options: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                let events = vec![
-                    StreamEvent::Start,
-                    StreamEvent::TextDelta { delta: "hi".into() },
-                    StreamEvent::Done {
-                        message: AssistantMessage {
-                            content: vec![AssistantContent::text("hi")],
-                            token_usage: None,
-                        },
-                        stop_reason: "end_turn".into(),
-                    },
-                ];
-                Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
-            }
-        }
-
-        let ctx_config = ContextManagerConfig {
-            model: "mock".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
             make_deps(NoUsageProvider),
@@ -837,37 +834,11 @@ mod tests {
 
     #[tokio::test]
     async fn provider_error_on_stream() {
-        struct ErrorProvider;
-        #[async_trait]
-        impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderKind {
-                ProviderKind::Anthropic
-            }
-            fn model(&self) -> &str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _context: &tron_core::messages::Context,
-                _options: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth {
-                    message: "Token expired".into(),
-                })
-            }
-        }
-
-        let ctx_config = ContextManagerConfig {
-            model: "mock".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
-            make_deps(ErrorProvider),
+            make_deps(AuthErrorProvider {
+                message: "Token expired",
+            }),
             "test-session".into(),
         );
 
@@ -893,41 +864,6 @@ mod tests {
 
     #[tokio::test]
     async fn external_abort_token_cancels_run() {
-        struct SlowProvider;
-        #[async_trait]
-        impl Provider for SlowProvider {
-            fn provider_type(&self) -> ProviderKind {
-                ProviderKind::Anthropic
-            }
-            fn model(&self) -> &str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _context: &tron_core::messages::Context,
-                _options: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                let s = async_stream::stream! {
-                    yield Ok(StreamEvent::Start);
-                    yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    yield Ok(StreamEvent::Done {
-                        message: AssistantMessage { content: vec![], token_usage: None },
-                        stop_reason: "end_turn".into(),
-                    });
-                };
-                Ok(Box::pin(s))
-            }
-        }
-
-        let ctx_config = ContextManagerConfig {
-            model: "mock".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
             make_deps(SlowProvider),
@@ -938,10 +874,10 @@ mod tests {
         agent.set_abort_token(token.clone());
 
         // Cancel the external token after a short delay
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             token.cancel();
-        });
+        }));
 
         let result = agent.run("Go", RunContext::default()).await;
         assert!(result.interrupted || result.turns_executed >= 1);
@@ -993,23 +929,14 @@ mod tests {
             .create_session("mock-model", "/tmp", Some("test"), None, None)
             .unwrap();
         let sid = session.session.id.clone();
-        let config = AgentConfig::default();
-        let ctx_config = ContextManagerConfig {
-            model: "mock-model".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
         let agent = TronAgent::new(
-            config,
+            AgentConfig::default(),
             AgentDeps {
                 provider: Arc::new(provider),
                 registry: ToolRegistry::new(),
                 guardrails: None,
                 hooks: None,
-                context_manager: ContextManager::new(ctx_config),
+                context_manager: test_context_manager("mock-model"),
             },
             sid.clone(),
         );
@@ -1129,40 +1056,14 @@ mod tests {
         ));
         agent.set_persister(Some(persister.clone()));
 
-        // Register read tool
-        use tron_core::tools::{Tool, ToolParameterSchema, text_result};
-        struct ReadTool;
-        #[async_trait]
-        impl tron_tools::traits::TronTool for ReadTool {
-            fn name(&self) -> &str {
-                "read"
-            }
-            fn category(&self) -> tron_core::tools::ToolCategory {
-                tron_core::tools::ToolCategory::Filesystem
-            }
-            fn definition(&self) -> Tool {
-                Tool {
-                    name: "read".into(),
-                    description: "Read file".into(),
-                    parameters: ToolParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::new(),
-                    },
-                }
-            }
-            async fn execute(
-                &self,
-                _p: serde_json::Value,
-                _c: &tron_tools::traits::ToolContext,
-            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
-            {
-                Ok(text_result("file contents", false))
-            }
-        }
-        agent.registry.register(Arc::new(ReadTool));
+        agent.registry.register(Arc::new(StaticTool {
+            name: "read",
+            category: ToolCategory::Filesystem,
+            description: "Read file",
+            response: "file contents",
+            stops_turn: false,
+            interactive: false,
+        }));
 
         let result = agent.run("Read the file", RunContext::default()).await;
         assert_eq!(result.turns_executed, 2);
@@ -1256,9 +1157,6 @@ mod tests {
 
     // ── Parallel tool execution tests ──
 
-    use std::time::Duration;
-    use tron_tools::traits::ExecutionMode;
-
     /// A tool that sleeps for a configurable duration.
     struct SlowTool {
         tool_name: &'static str,
@@ -1267,18 +1165,18 @@ mod tests {
     }
 
     #[async_trait]
-    impl tron_tools::traits::TronTool for SlowTool {
-        fn name(&self) -> &str {
+    impl TronTool for SlowTool {
+        fn name(&self) -> &'static str {
             self.tool_name
         }
-        fn category(&self) -> tron_core::tools::ToolCategory {
-            tron_core::tools::ToolCategory::Custom
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
         }
-        fn definition(&self) -> tron_core::tools::Tool {
-            tron_core::tools::Tool {
+        fn definition(&self) -> Tool {
+            Tool {
                 name: self.tool_name.into(),
                 description: String::new(),
-                parameters: tron_core::tools::ToolParameterSchema {
+                parameters: ToolParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -1290,15 +1188,15 @@ mod tests {
         async fn execute(
             &self,
             _params: serde_json::Value,
-            ctx: &tron_tools::traits::ToolContext,
-        ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            ctx: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
             tokio::select! {
                 () = tokio::time::sleep(Duration::from_millis(self.delay_ms)) => {},
                 () = ctx.cancellation.cancelled() => {
                     return Ok(tron_core::tools::error_result("cancelled"));
                 }
             }
-            Ok(tron_core::tools::text_result(self.response, false))
+            Ok(text_result(self.response, false))
         }
     }
 
@@ -1311,21 +1209,21 @@ mod tests {
     }
 
     #[async_trait]
-    impl tron_tools::traits::TronTool for SerializedSlowTool {
-        fn name(&self) -> &str {
+    impl TronTool for SerializedSlowTool {
+        fn name(&self) -> &'static str {
             self.tool_name
         }
-        fn category(&self) -> tron_core::tools::ToolCategory {
-            tron_core::tools::ToolCategory::Custom
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
         }
         fn execution_mode(&self) -> ExecutionMode {
             ExecutionMode::Serialized(self.group.into())
         }
-        fn definition(&self) -> tron_core::tools::Tool {
-            tron_core::tools::Tool {
+        fn definition(&self) -> Tool {
+            Tool {
                 name: self.tool_name.into(),
                 description: String::new(),
-                parameters: tron_core::tools::ToolParameterSchema {
+                parameters: ToolParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -1337,15 +1235,15 @@ mod tests {
         async fn execute(
             &self,
             _params: serde_json::Value,
-            ctx: &tron_tools::traits::ToolContext,
-        ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            ctx: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
             tokio::select! {
                 () = tokio::time::sleep(Duration::from_millis(self.delay_ms)) => {},
                 () = ctx.cancellation.cancelled() => {
                     return Ok(tron_core::tools::error_result("cancelled"));
                 }
             }
-            Ok(tron_core::tools::text_result(self.response, false))
+            Ok(text_result(self.response, false))
         }
     }
 
@@ -1401,30 +1299,18 @@ mod tests {
         ]
     }
 
-    fn make_agent_with_tools(
-        provider: MockProvider,
-        tools: Vec<Arc<dyn tron_tools::traits::TronTool>>,
-    ) -> TronAgent {
-        let config = AgentConfig::default();
-        let ctx_config = ContextManagerConfig {
-            model: "mock-model".into(),
-            system_prompt: None,
-            working_directory: None,
-            tools: vec![],
-            rules_content: None,
-            compaction: crate::context::types::CompactionConfig::default(),
-        };
+    fn make_agent_with_tools(provider: MockProvider, tools: Vec<Arc<dyn TronTool>>) -> TronAgent {
         let mut deps = AgentDeps {
             provider: Arc::new(provider),
             registry: ToolRegistry::new(),
             guardrails: None,
             hooks: None,
-            context_manager: ContextManager::new(ctx_config),
+            context_manager: test_context_manager("mock-model"),
         };
         for tool in tools {
             deps.registry.register(tool);
         }
-        TronAgent::new(config, deps, "test-session".into())
+        TronAgent::new(AgentConfig::default(), deps, "test-session".into())
     }
 
     #[tokio::test]
@@ -1516,13 +1402,10 @@ mod tests {
                     ..
                 } = m
                 {
-                    Some((
-                        tool_call_id.clone(),
-                        match content {
-                            ToolResultMessageContent::Text(t) => t.clone(),
-                            _ => String::new(),
-                        },
-                    ))
+                    let ToolResultMessageContent::Text(text) = content else {
+                        panic!("expected text tool result content");
+                    };
+                    Some((tool_call_id.clone(), text.clone()))
                 } else {
                     None
                 }
@@ -1648,43 +1531,6 @@ mod tests {
 
     #[tokio::test]
     async fn stops_turn_in_parallel_batch() {
-        use tron_core::tools::{Tool, ToolParameterSchema, text_result};
-
-        struct StopTool;
-        #[async_trait]
-        impl tron_tools::traits::TronTool for StopTool {
-            fn name(&self) -> &str {
-                "stop_tool"
-            }
-            fn category(&self) -> tron_core::tools::ToolCategory {
-                tron_core::tools::ToolCategory::Custom
-            }
-            fn stops_turn(&self) -> bool {
-                true
-            }
-            fn definition(&self) -> Tool {
-                Tool {
-                    name: "stop_tool".into(),
-                    description: String::new(),
-                    parameters: ToolParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: Map::new(),
-                    },
-                }
-            }
-            async fn execute(
-                &self,
-                _: serde_json::Value,
-                _: &tron_tools::traits::ToolContext,
-            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
-            {
-                Ok(text_result("stopped", false))
-            }
-        }
-
         let turn1 = make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "stop_tool")]);
         // No turn2 needed — stop_tool should end the run
         let provider = MockProvider::multi_turn(vec![turn1]);
@@ -1696,7 +1542,14 @@ mod tests {
                     delay_ms: 50,
                     response: "a",
                 }),
-                Arc::new(StopTool),
+                Arc::new(StaticTool {
+                    name: "stop_tool",
+                    category: ToolCategory::Custom,
+                    description: "",
+                    response: "stopped",
+                    stops_turn: true,
+                    interactive: false,
+                }),
             ],
         );
 

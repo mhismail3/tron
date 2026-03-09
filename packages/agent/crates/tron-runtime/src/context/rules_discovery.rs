@@ -398,7 +398,7 @@ mod tests {
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 2);
         let mut paths: Vec<_> = results.iter().map(|r| r.relative_path.as_str()).collect();
-        paths.sort();
+        paths.sort_unstable();
         assert_eq!(paths, vec![".claude/claude.md", ".tron/agents.md"]);
     }
 
@@ -432,7 +432,7 @@ mod tests {
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
         let mut paths: Vec<_> = results.iter().map(|r| r.relative_path.as_str()).collect();
-        paths.sort();
+        paths.sort_unstable();
         assert_eq!(
             paths,
             vec![

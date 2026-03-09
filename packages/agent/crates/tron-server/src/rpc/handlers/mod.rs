@@ -317,7 +317,9 @@ pub(crate) fn opt_u64(params: Option<&serde_json::Value>, key: &str, default: u6
 
 /// Extract an optional bool parameter.
 pub(crate) fn opt_bool(params: Option<&serde_json::Value>, key: &str) -> Option<bool> {
-    params.and_then(|p| p.get(key)).and_then(serde_json::Value::as_bool)
+    params
+        .and_then(|p| p.get(key))
+        .and_then(serde_json::Value::as_bool)
 }
 
 /// Extract an optional array parameter.
@@ -355,7 +357,7 @@ pub(crate) mod test_helpers {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock"
         }
         async fn stream(
@@ -481,7 +483,7 @@ pub(crate) mod test_helpers {
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
-            let _ = tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
+            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let store = Arc::new(EventStore::new(pool));

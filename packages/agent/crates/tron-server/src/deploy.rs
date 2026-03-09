@@ -115,7 +115,8 @@ pub enum DeployError {
 
 /// Read the deployed commit from `artifacts/deployment/deployed-commit`.
 pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
-    std::fs::read_to_string(artifacts_dir.join("deployed-commit")).map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
+    std::fs::read_to_string(artifacts_dir.join("deployed-commit"))
+        .map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
 }
 
 /// Read the restart sentinel if it exists.
@@ -128,8 +129,7 @@ pub fn read_sentinel(artifacts_dir: &Path) -> Option<RestartSentinel> {
 /// Write the restart sentinel.
 pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
     std::fs::create_dir_all(artifacts_dir)?;
-    let json = serde_json::to_string_pretty(sentinel)
-        .map_err(io::Error::other)?;
+    let json = serde_json::to_string_pretty(sentinel).map_err(io::Error::other)?;
     std::fs::write(artifacts_dir.join("restart-sentinel.json"), json)
 }
 
@@ -141,17 +141,15 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let mut sentinel: RestartSentinel = serde_json::from_str(&data)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut sentinel: RestartSentinel =
+        serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     if sentinel.status == "completed" {
         return Ok(Some(sentinel));
     }
     sentinel.status = "completed".to_string();
-    sentinel.completed_at = Some(
-        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    );
-    let json = serde_json::to_string_pretty(&sentinel)
-        .map_err(io::Error::other)?;
+    sentinel.completed_at =
+        Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+    let json = serde_json::to_string_pretty(&sentinel).map_err(io::Error::other)?;
     std::fs::write(&path, json)?;
     Ok(Some(sentinel))
 }
@@ -167,8 +165,7 @@ pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -
         "previousCommit": sentinel.previous_commit,
         "error": null,
     });
-    let pretty = serde_json::to_string_pretty(&json)
-        .map_err(io::Error::other)?;
+    let pretty = serde_json::to_string_pretty(&json).map_err(io::Error::other)?;
     std::fs::create_dir_all(artifacts_dir)?;
     std::fs::write(artifacts_dir.join("last-deployment.json"), pretty)
 }
@@ -272,9 +269,7 @@ pub async fn status_handler(State(state): State<AppState>) -> Json<DeployStatusR
         None
     };
 
-    let restart_initiated = state
-        .deploy_restart_initiated
-        .load(Ordering::Relaxed);
+    let restart_initiated = state.deploy_restart_initiated.load(Ordering::Relaxed);
 
     Json(DeployStatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -664,7 +659,10 @@ mod tests {
 
         let result = complete_sentinel(dir.path()).unwrap().unwrap();
         assert_eq!(result.status, "completed");
-        assert_eq!(result.completed_at.as_deref(), Some("2026-02-23T10:05:00.000Z"));
+        assert_eq!(
+            result.completed_at.as_deref(),
+            Some("2026-02-23T10:05:00.000Z")
+        );
     }
 
     #[test]
@@ -675,8 +673,7 @@ mod tests {
         s.completed_at = Some("2026-02-23T10:05:00.000Z".into());
         write_last_deployment(dir.path(), &s).unwrap();
 
-        let contents =
-            std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
         let v: Value = serde_json::from_str(&contents).unwrap();
         assert_eq!(v["status"], "completed");
         assert_eq!(v["commit"], "abc123");
@@ -718,8 +715,7 @@ mod tests {
 
     #[test]
     fn resolve_source_binary_explicit_overrides_workspace() {
-        let result =
-            resolve_source_binary(Some("/explicit"), Some(Path::new("/workspace")));
+        let result = resolve_source_binary(Some("/explicit"), Some(Path::new("/workspace")));
         assert_eq!(result.as_deref(), Some(Path::new("/explicit")));
     }
 
@@ -739,8 +735,9 @@ mod tests {
         let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"binary content here").unwrap();
 
-        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
+        assert!(backup.is_none());
         assert_eq!(std::fs::read(&tgt).unwrap(), b"binary content here");
     }
 
@@ -752,8 +749,9 @@ mod tests {
         let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"#!/bin/sh\necho hi").unwrap();
 
-        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
+        assert!(backup.is_none());
         let mode = std::fs::metadata(&tgt).unwrap().permissions().mode();
         assert_eq!(mode & 0o755, 0o755);
     }
@@ -795,7 +793,9 @@ mod tests {
         let tgt = dir.path().join("target");
         let bak_dir = dir.path().join("deployment");
 
-        let err = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap_err();
+        let err = atomic_binary_install(&src, &tgt, &bak_dir)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DeployError::SourceNotFound { .. }));
     }
 
@@ -809,8 +809,9 @@ mod tests {
         std::fs::write(&src, b"new binary").unwrap();
         std::fs::write(&stale_tmp, b"stale leftover").unwrap();
 
-        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
+        assert!(backup.is_none());
         assert_eq!(std::fs::read(&tgt).unwrap(), b"new binary");
         // .tmp should be gone (renamed to target)
         assert!(!stale_tmp.exists());
@@ -826,8 +827,9 @@ mod tests {
         let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
         std::fs::write(&src, &data).unwrap();
 
-        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
+        assert!(backup.is_none());
         assert_eq!(std::fs::read(&tgt).unwrap(), data);
     }
 
@@ -858,10 +860,7 @@ mod tests {
     }
 
     fn make_isolated_test_server(deploy_root: &Path) -> TronServer {
-        make_test_server().with_deploy_paths(
-            deploy_root.join("tron"),
-            deploy_root.join("deploy"),
-        )
+        make_test_server().with_deploy_paths(deploy_root.join("tron"), deploy_root.join("deploy"))
     }
 
     #[tokio::test]
@@ -955,11 +954,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
         // Flag should be reset so we can try again
-        assert!(
-            !server
-                .deploy_restart_initiated()
-                .load(Ordering::SeqCst)
-        );
+        assert!(!server.deploy_restart_initiated().load(Ordering::SeqCst));
     }
 
     #[tokio::test]

@@ -251,9 +251,10 @@ impl ApnsService {
         let mut cached = self.cached_token.lock();
 
         if let Some(ref token) = *cached
-            && token.created_at.elapsed() < TOKEN_VALIDITY {
-                return Ok(token.token.clone());
-            }
+            && token.created_at.elapsed() < TOKEN_VALIDITY
+        {
+            return Ok(token.token.clone());
+        }
 
         let jwt = self.generate_jwt()?;
         *cached = Some(CachedToken {
@@ -456,11 +457,11 @@ mod tests {
     fn jwt_claims_serialize() {
         let claims = ApnsClaims {
             iss: "TEAM123".to_string(),
-            iat: 1700000000,
+            iat: 1_700_000_000,
         };
         let json = serde_json::to_value(&claims).unwrap();
         assert_eq!(json["iss"], "TEAM123");
-        assert_eq!(json["iat"], 1700000000);
+        assert_eq!(json["iat"], 1_700_000_000);
     }
 
     #[test]

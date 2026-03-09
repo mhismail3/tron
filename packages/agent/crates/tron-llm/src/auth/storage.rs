@@ -379,16 +379,18 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
 
-        use crate::auth::types::GoogleOAuthEndpoint;
         let gpa = GoogleProviderAuth {
-            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
+            endpoint: Some(crate::auth::types::GoogleOAuthEndpoint::Antigravity),
             project_id: Some("proj-123".to_string()),
             ..Default::default()
         };
         save_google_provider_auth(&path, &gpa).unwrap();
 
         let loaded = get_google_provider_auth(&path).unwrap();
-        assert_eq!(loaded.endpoint, Some(GoogleOAuthEndpoint::Antigravity));
+        assert_eq!(
+            loaded.endpoint,
+            Some(crate::auth::types::GoogleOAuthEndpoint::Antigravity)
+        );
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
     }
 }

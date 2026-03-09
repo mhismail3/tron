@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn unknown_error_generic_message() {
-        let err = io::Error::new(io::ErrorKind::Other, "something broke");
+        let err = io::Error::other("something broke");
         let result = format_fs_error(&err, "/tmp/file", "writing");
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);

@@ -65,12 +65,13 @@ fn extract_title(doc: &Html) -> String {
     if let Some(og) = Selector::parse(r#"meta[property="og:title"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-        && let Some(content) = og.value().attr("content") {
-            let text = content.trim().to_string();
-            if !text.is_empty() {
-                return text;
-            }
+        && let Some(content) = og.value().attr("content")
+    {
+        let text = content.trim().to_string();
+        if !text.is_empty() {
+            return text;
         }
+    }
 
     if let Some(h1) = Selector::parse("h1")
         .ok()
@@ -90,22 +91,24 @@ fn extract_description(doc: &Html) -> Option<String> {
     if let Some(meta) = Selector::parse(r#"meta[name="description"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-        && let Some(content) = meta.value().attr("content") {
-            let text = content.trim().to_string();
-            if !text.is_empty() {
-                return Some(text);
-            }
+        && let Some(content) = meta.value().attr("content")
+    {
+        let text = content.trim().to_string();
+        if !text.is_empty() {
+            return Some(text);
         }
+    }
 
     if let Some(og) = Selector::parse(r#"meta[property="og:description"]"#)
         .ok()
         .and_then(|s| doc.select(&s).next())
-        && let Some(content) = og.value().attr("content") {
-            let text = content.trim().to_string();
-            if !text.is_empty() {
-                return Some(text);
-            }
+        && let Some(content) = og.value().attr("content")
+    {
+        let text = content.trim().to_string();
+        if !text.is_empty() {
+            return Some(text);
         }
+    }
 
     None
 }
@@ -135,7 +138,7 @@ mod tests {
 
     #[test]
     fn full_html_page_to_markdown() {
-        let html = r#"<html><head><title>Test Page</title></head><body><h1>Hello</h1><p>World</p></body></html>"#;
+        let html = r"<html><head><title>Test Page</title></head><body><h1>Hello</h1><p>World</p></body></html>";
         let r = parse_html(html, None);
         assert_eq!(r.title, "Test Page");
         assert!(r.markdown.contains("Hello"));
@@ -158,7 +161,7 @@ mod tests {
 
     #[test]
     fn h1_title_fallback() {
-        let html = r#"<html><body><h1>H1 Title</h1></body></html>"#;
+        let html = r"<html><body><h1>H1 Title</h1></body></html>";
         let r = parse_html(html, None);
         assert_eq!(r.title, "H1 Title");
     }
@@ -211,7 +214,7 @@ mod tests {
     fn special_characters_decoded() {
         let html = "<html><body><p>Hello &amp; World &lt;3&gt;</p></body></html>";
         let r = parse_html(html, None);
-        assert!(r.markdown.contains("&") || r.markdown.contains("Hello"));
+        assert!(r.markdown.contains('&') || r.markdown.contains("Hello"));
     }
 
     #[test]

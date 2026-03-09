@@ -63,8 +63,7 @@ impl TaskService {
                             let _ = conn.execute_batch("ROLLBACK");
                             if Self::is_sqlite_busy(&e) && attempts < BATCH_BUSY_MAX_RETRIES {
                                 attempts += 1;
-                                let backoff_ms =
-                                    u64::from(attempts).saturating_mul(10).min(500);
+                                let backoff_ms = u64::from(attempts).saturating_mul(10).min(500);
                                 std::thread::sleep(Duration::from_millis(backoff_ms));
                                 continue;
                             }
@@ -85,18 +84,32 @@ impl TaskService {
     fn is_sqlite_busy(err: &TaskError) -> bool {
         matches!(
             err,
-            TaskError::Database(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
-code: rusqlite::ffi::ErrorCode::DatabaseBusy, .. } | rusqlite::ffi::Error {
-code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _))
+            TaskError::Database(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
+                    ..
+                } | rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                    ..
+                },
+                _
+            ))
         )
     }
 
     fn is_rusqlite_busy(err: &rusqlite::Error) -> bool {
         matches!(
             err,
-            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
-code: rusqlite::ffi::ErrorCode::DatabaseBusy, .. } | rusqlite::ffi::Error {
-code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
+                    ..
+                } | rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                    ..
+                },
+                _
+            )
         )
     }
 
@@ -109,11 +122,12 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         // Validate 2-level hierarchy
         if let Some(ref parent_id) = params.parent_task_id
             && let Some(parent) = TaskRepository::get_task(conn, parent_id)?
-                && parent.parent_task_id.is_some() {
-                    return Err(TaskError::Hierarchy(
-                        "Cannot create subtask of a subtask (max 2-level hierarchy)".to_string(),
-                    ));
-                }
+            && parent.parent_task_id.is_some()
+        {
+            return Err(TaskError::Hierarchy(
+                "Cannot create subtask of a subtask (max 2-level hierarchy)".to_string(),
+            ));
+        }
 
         let task = TaskRepository::create_task(conn, params)?;
 
@@ -400,9 +414,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
                     detail: Some(format!("No longer blocks {blocked_id}")),
                     minutes_logged: None,
                 },
-            ) {
-                warn!(error = %e, "Failed to log dependency removal activity");
-            }
+            )
+        {
+            warn!(error = %e, "Failed to log dependency removal activity");
+        }
         Ok(removed)
     }
 
@@ -418,7 +433,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         session_id: Option<&str>,
     ) -> Result<BatchResult, TaskError> {
         if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
-            return Ok(BatchResult { affected: 0, dry_run });
+            return Ok(BatchResult {
+                affected: 0,
+                dry_run,
+            });
         }
         let resolved = Self::resolve_batch_target(target)?;
 
@@ -427,7 +445,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
                 ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
                 ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
             };
-            return Ok(BatchResult { affected: count, dry_run: true });
+            return Ok(BatchResult {
+                affected: count,
+                dry_run: true,
+            });
         }
 
         Self::with_immediate_txn(conn, |tx| {
@@ -460,7 +481,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
                 ResolvedTarget::Filter(f) => TaskRepository::delete_tasks_by_filter(tx, f)?,
             };
 
-            Ok(BatchResult { affected, dry_run: false })
+            Ok(BatchResult {
+                affected,
+                dry_run: false,
+            })
         })
     }
 
@@ -473,7 +497,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         session_id: Option<&str>,
     ) -> Result<BatchResult, TaskError> {
         if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
-            return Ok(BatchResult { affected: 0, dry_run });
+            return Ok(BatchResult {
+                affected: 0,
+                dry_run,
+            });
         }
         let resolved = Self::resolve_batch_target(target)?;
 
@@ -482,7 +509,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
                 ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
                 ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
             };
-            return Ok(BatchResult { affected: count, dry_run: true });
+            return Ok(BatchResult {
+                affected: count,
+                dry_run: true,
+            });
         }
 
         Self::with_immediate_txn(conn, |tx| {
@@ -492,9 +522,7 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
             };
 
             let affected = match &resolved {
-                ResolvedTarget::Ids(ids) => {
-                    TaskRepository::update_tasks_by_ids(tx, ids, updates)?
-                }
+                ResolvedTarget::Ids(ids) => TaskRepository::update_tasks_by_ids(tx, ids, updates)?,
                 ResolvedTarget::Filter(f) => {
                     TaskRepository::update_tasks_by_filter(tx, f, updates)?
                 }
@@ -521,7 +549,10 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
                 )?;
             }
 
-            Ok(BatchResult { affected, dry_run: false })
+            Ok(BatchResult {
+                affected,
+                dry_run: false,
+            })
         })
     }
 
@@ -595,18 +626,29 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         dry_run: bool,
     ) -> Result<BatchResult, TaskError> {
         if ids.is_empty() {
-            return Ok(BatchResult { affected: 0, dry_run });
+            return Ok(BatchResult {
+                affected: 0,
+                dry_run,
+            });
         }
         if dry_run {
             let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!("SELECT COUNT(*) FROM projects WHERE id IN ({placeholders})");
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-            return Ok(BatchResult { affected: count, dry_run: true });
+            return Ok(BatchResult {
+                affected: count,
+                dry_run: true,
+            });
         }
         let affected = TaskRepository::delete_projects_by_ids(conn, ids)?;
-        Ok(BatchResult { affected, dry_run: false })
+        Ok(BatchResult {
+            affected,
+            dry_run: false,
+        })
     }
 
     /// Batch delete areas by IDs.
@@ -616,18 +658,29 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         dry_run: bool,
     ) -> Result<BatchResult, TaskError> {
         if ids.is_empty() {
-            return Ok(BatchResult { affected: 0, dry_run });
+            return Ok(BatchResult {
+                affected: 0,
+                dry_run,
+            });
         }
         if dry_run {
             let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!("SELECT COUNT(*) FROM areas WHERE id IN ({placeholders})");
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-            return Ok(BatchResult { affected: count, dry_run: true });
+            return Ok(BatchResult {
+                affected: count,
+                dry_run: true,
+            });
         }
         let affected = TaskRepository::delete_areas_by_ids(conn, ids)?;
-        Ok(BatchResult { affected, dry_run: false })
+        Ok(BatchResult {
+            affected,
+            dry_run: false,
+        })
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -724,8 +777,7 @@ code: rusqlite::ffi::ErrorCode::DatabaseLocked, .. }, _)
         id: &str,
         updates: &AreaUpdateParams,
     ) -> Result<Area, TaskError> {
-        TaskRepository::update_area(conn, id, updates)?
-            .ok_or_else(|| TaskError::area_not_found(id))
+        TaskRepository::update_area(conn, id, updates)?.ok_or_else(|| TaskError::area_not_found(id))
     }
 
     /// Delete an area.
@@ -1356,8 +1408,12 @@ mod tests {
         for title in &["A", "B", "C", "D", "E"] {
             let t = TaskService::create_task(
                 &conn,
-                &TaskCreateParams { title: title.to_string(), ..Default::default() },
-            ).unwrap();
+                &TaskCreateParams {
+                    title: title.to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             ids.push(t.id);
         }
         let target = BatchTarget {
@@ -1370,9 +1426,16 @@ mod tests {
         // 2 remain
         let all = TaskService::list_tasks(
             &conn,
-            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
-            100, 0,
-        ).unwrap();
+            &TaskFilter {
+                include_completed: true,
+                include_backlog: true,
+                include_deferred: true,
+                ..Default::default()
+            },
+            100,
+            0,
+        )
+        .unwrap();
         assert_eq!(all.total, 2);
     }
 
@@ -1386,7 +1449,8 @@ mod tests {
                 status: Some(TaskStatus::Completed),
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
         TaskService::create_task(
             &conn,
             &TaskCreateParams {
@@ -1394,11 +1458,16 @@ mod tests {
                 status: Some(TaskStatus::Completed),
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
         TaskService::create_task(
             &conn,
-            &TaskCreateParams { title: "Active".into(), ..Default::default() },
-        ).unwrap();
+            &TaskCreateParams {
+                title: "Active".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let target = BatchTarget {
             ids: None,
@@ -1418,8 +1487,12 @@ mod tests {
         for title in &["A", "B", "C"] {
             let t = TaskService::create_task(
                 &conn,
-                &TaskCreateParams { title: title.to_string(), ..Default::default() },
-            ).unwrap();
+                &TaskCreateParams {
+                    title: title.to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             ids.push(t.id);
         }
         let target = BatchTarget {
@@ -1432,16 +1505,26 @@ mod tests {
         // All 3 still exist
         let all = TaskService::list_tasks(
             &conn,
-            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
-            100, 0,
-        ).unwrap();
+            &TaskFilter {
+                include_completed: true,
+                include_backlog: true,
+                include_deferred: true,
+                ..Default::default()
+            },
+            100,
+            0,
+        )
+        .unwrap();
         assert_eq!(all.total, 3);
     }
 
     #[test]
     fn test_batch_delete_tasks_empty_ids() {
         let conn = setup_db();
-        let target = BatchTarget { ids: Some(vec![]), filter: None };
+        let target = BatchTarget {
+            ids: Some(vec![]),
+            filter: None,
+        };
         let result = TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
         assert_eq!(result.affected, 0);
     }
@@ -1449,10 +1532,18 @@ mod tests {
     #[test]
     fn test_batch_delete_tasks_no_target() {
         let conn = setup_db();
-        let target = BatchTarget { ids: None, filter: None };
+        let target = BatchTarget {
+            ids: None,
+            filter: None,
+        };
         let result = TaskService::batch_delete_tasks(&conn, &target, false, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ids or filter required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ids or filter required")
+        );
     }
 
     #[test]
@@ -1460,10 +1551,16 @@ mod tests {
         let conn = setup_db();
         let t = TaskService::create_task(
             &conn,
-            &TaskCreateParams { title: "To Delete".into(), ..Default::default() },
-        ).unwrap();
-        let tid = t.id.clone();
-        let target = BatchTarget { ids: Some(vec![t.id]), filter: None };
+            &TaskCreateParams {
+                title: "To Delete".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let target = BatchTarget {
+            ids: Some(vec![t.id]),
+            filter: None,
+        };
         TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
         // Activity was logged before the delete (task_activity references task_id but cascades)
         // Just verify the method didn't error — the activity is cascade-deleted with the task
@@ -1476,11 +1573,18 @@ mod tests {
         for title in &["A", "B", "C"] {
             let t = TaskService::create_task(
                 &conn,
-                &TaskCreateParams { title: title.to_string(), ..Default::default() },
-            ).unwrap();
+                &TaskCreateParams {
+                    title: title.to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             ids.push(t.id);
         }
-        let target = BatchTarget { ids: Some(ids.clone()), filter: None };
+        let target = BatchTarget {
+            ids: Some(ids.clone()),
+            filter: None,
+        };
         let result = TaskService::batch_update_tasks(
             &conn,
             &target,
@@ -1490,7 +1594,8 @@ mod tests {
             },
             false,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.affected, 3);
 
         // Verify completed_at auto-set
@@ -1504,8 +1609,12 @@ mod tests {
         let conn = setup_db();
         let proj = TaskService::create_project(
             &conn,
-            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
-        ).unwrap();
+            &ProjectCreateParams {
+                title: "P1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         TaskService::create_task(
             &conn,
             &TaskCreateParams {
@@ -1513,11 +1622,16 @@ mod tests {
                 project_id: Some(proj.id.clone()),
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
         TaskService::create_task(
             &conn,
-            &TaskCreateParams { title: "Outside".into(), ..Default::default() },
-        ).unwrap();
+            &TaskCreateParams {
+                title: "Outside".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let target = BatchTarget {
             ids: None,
@@ -1535,7 +1649,8 @@ mod tests {
             },
             false,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.affected, 1);
     }
 
@@ -1544,9 +1659,16 @@ mod tests {
         let conn = setup_db();
         let t = TaskService::create_task(
             &conn,
-            &TaskCreateParams { title: "A".into(), ..Default::default() },
-        ).unwrap();
-        let target = BatchTarget { ids: Some(vec![t.id.clone()]), filter: None };
+            &TaskCreateParams {
+                title: "A".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let target = BatchTarget {
+            ids: Some(vec![t.id.clone()]),
+            filter: None,
+        };
         let result = TaskService::batch_update_tasks(
             &conn,
             &target,
@@ -1556,7 +1678,8 @@ mod tests {
             },
             true,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.affected, 1);
         assert!(result.dry_run);
         // Not actually updated
@@ -1567,11 +1690,17 @@ mod tests {
     #[test]
     fn test_batch_update_tasks_no_target() {
         let conn = setup_db();
-        let target = BatchTarget { ids: None, filter: None };
+        let target = BatchTarget {
+            ids: None,
+            filter: None,
+        };
         let result = TaskService::batch_update_tasks(
             &conn,
             &target,
-            &TaskUpdateParams { status: Some(TaskStatus::Completed), ..Default::default() },
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
             false,
             None,
         );
@@ -1582,9 +1711,18 @@ mod tests {
     fn test_batch_create_tasks() {
         let conn = setup_db();
         let items = vec![
-            TaskCreateParams { title: "A".into(), ..Default::default() },
-            TaskCreateParams { title: "B".into(), ..Default::default() },
-            TaskCreateParams { title: "C".into(), ..Default::default() },
+            TaskCreateParams {
+                title: "A".into(),
+                ..Default::default()
+            },
+            TaskCreateParams {
+                title: "B".into(),
+                ..Default::default()
+            },
+            TaskCreateParams {
+                title: "C".into(),
+                ..Default::default()
+            },
         ];
         let result = TaskService::batch_create_tasks(&conn, &items, None).unwrap();
         assert_eq!(result["affected"], 3);
@@ -1602,18 +1740,34 @@ mod tests {
     fn test_batch_create_tasks_invalid_item_rolls_back() {
         let conn = setup_db();
         let items = vec![
-            TaskCreateParams { title: "Good".into(), ..Default::default() },
-            TaskCreateParams { title: "".into(), ..Default::default() },
-            TaskCreateParams { title: "Also Good".into(), ..Default::default() },
+            TaskCreateParams {
+                title: "Good".into(),
+                ..Default::default()
+            },
+            TaskCreateParams {
+                title: String::new(),
+                ..Default::default()
+            },
+            TaskCreateParams {
+                title: "Also Good".into(),
+                ..Default::default()
+            },
         ];
         let result = TaskService::batch_create_tasks(&conn, &items, None);
         assert!(result.is_err());
         // Nothing created
         let all = TaskService::list_tasks(
             &conn,
-            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
-            100, 0,
-        ).unwrap();
+            &TaskFilter {
+                include_completed: true,
+                include_backlog: true,
+                include_deferred: true,
+                ..Default::default()
+            },
+            100,
+            0,
+        )
+        .unwrap();
         assert_eq!(all.total, 0);
     }
 
@@ -1622,12 +1776,20 @@ mod tests {
         let conn = setup_db();
         let p1 = TaskService::create_project(
             &conn,
-            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
-        ).unwrap();
+            &ProjectCreateParams {
+                title: "P1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let p2 = TaskService::create_project(
             &conn,
-            &ProjectCreateParams { title: "P2".into(), ..Default::default() },
-        ).unwrap();
+            &ProjectCreateParams {
+                title: "P2".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         // Create a task in P1 to verify orphaning
         TaskService::create_task(
             &conn,
@@ -1636,13 +1798,12 @@ mod tests {
                 project_id: Some(p1.id.clone()),
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
 
-        let result = TaskService::batch_delete_projects(
-            &conn,
-            &[p1.id.clone(), p2.id.clone()],
-            false,
-        ).unwrap();
+        let result =
+            TaskService::batch_delete_projects(&conn, &[p1.id.clone(), p2.id.clone()], false)
+                .unwrap();
         assert_eq!(result.affected, 2);
     }
 
@@ -1651,18 +1812,23 @@ mod tests {
         let conn = setup_db();
         let a1 = TaskService::create_area(
             &conn,
-            &AreaCreateParams { title: "A1".into(), ..Default::default() },
-        ).unwrap();
+            &AreaCreateParams {
+                title: "A1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let a2 = TaskService::create_area(
             &conn,
-            &AreaCreateParams { title: "A2".into(), ..Default::default() },
-        ).unwrap();
+            &AreaCreateParams {
+                title: "A2".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
-        let result = TaskService::batch_delete_areas(
-            &conn,
-            &[a1.id.clone(), a2.id.clone()],
-            false,
-        ).unwrap();
+        let result =
+            TaskService::batch_delete_areas(&conn, &[a1.id.clone(), a2.id.clone()], false).unwrap();
         assert_eq!(result.affected, 2);
     }
 
@@ -1674,7 +1840,7 @@ mod tests {
         let result = TaskService::create_area(
             &conn,
             &AreaCreateParams {
-                title: "".to_string(),
+                title: String::new(),
                 ..Default::default()
             },
         );

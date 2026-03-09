@@ -571,7 +571,7 @@ mod tests {
     fn tool_summary_empty_description() {
         let summary = ToolSummary {
             name: "stub".into(),
-            description: "".into(),
+            description: String::new(),
         };
         let json = serde_json::to_value(&summary).unwrap();
         assert_eq!(json["description"], "");

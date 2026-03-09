@@ -163,7 +163,7 @@ mod tests {
         fn provider_type(&self) -> ProviderKind {
             ProviderKind::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock"
         }
         async fn stream(
@@ -180,7 +180,7 @@ mod tests {
     struct InteractiveTool;
     #[async_trait]
     impl TronTool for InteractiveTool {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "ask_user"
         }
         fn category(&self) -> ToolCategory {
@@ -217,7 +217,7 @@ mod tests {
     struct NormalTool;
     #[async_trait]
     impl TronTool for NormalTool {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "bash"
         }
         fn category(&self) -> ToolCategory {
@@ -398,7 +398,7 @@ mod tests {
     struct FakeSpawnTool;
     #[async_trait]
     impl TronTool for FakeSpawnTool {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "SpawnSubagent"
         }
         fn category(&self) -> ToolCategory {

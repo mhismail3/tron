@@ -196,6 +196,13 @@ pub struct PricingTier {
 mod tests {
     use super::*;
 
+    fn assert_float_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
     #[test]
     fn token_source_serde_roundtrip() {
         let source = TokenSource {
@@ -295,7 +302,7 @@ mod tests {
         assert_eq!(acc.input_tokens, 0);
         assert_eq!(acc.output_tokens, 0);
         assert_eq!(acc.cache_read_tokens, 0);
-        assert_eq!(acc.cost, 0.0);
+        assert_float_eq(acc.cost, 0.0);
     }
 
     #[test]
@@ -303,7 +310,7 @@ mod tests {
         let cw = ContextWindowState::new(200_000);
         assert_eq!(cw.current_size, 0);
         assert_eq!(cw.max_size, 200_000);
-        assert_eq!(cw.percent_used, 0.0);
+        assert_float_eq(cw.percent_used, 0.0);
         assert_eq!(cw.tokens_remaining, 200_000);
     }
 
@@ -329,7 +336,7 @@ mod tests {
     fn context_window_zero_max() {
         let mut cw = ContextWindowState::new(0);
         cw.recalculate();
-        assert_eq!(cw.percent_used, 0.0);
+        assert_float_eq(cw.percent_used, 0.0);
         assert_eq!(cw.tokens_remaining, 0);
     }
 

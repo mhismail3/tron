@@ -40,7 +40,8 @@ pub async fn run_ws_session(
 ) {
     if pong_timeout <= ping_interval {
         warn!(
-            ?ping_interval, ?pong_timeout,
+            ?ping_interval,
+            ?pong_timeout,
             "pong_timeout should be > ping_interval for meaningful liveness detection"
         );
     }
@@ -164,10 +165,10 @@ pub async fn run_ws_session(
                 .as_ref()
                 .and_then(|r| r.get("sessionId"))
                 .and_then(|v| v.as_str())
-            {
-                connection.bind_session(sid);
-                debug!(client_id, session_id = sid, "session bound to client");
-            }
+        {
+            connection.bind_session(sid);
+            debug!(client_id, session_id = sid, "session bound to client");
+        }
 
         if !connection.send(Arc::new(result.response_json)) {
             debug!(
@@ -212,9 +213,12 @@ mod tests {
     fn session_uses_config_heartbeat_values() {
         // Verify the function signature accepts custom heartbeat parameters.
         // The compile-time check ensures the config values are properly threaded.
-        let ping = Duration::from_secs(10);
-        let pong = Duration::from_secs(45);
-        assert!(pong > ping, "pong_timeout should exceed ping_interval");
+        let ping_interval = Duration::from_secs(10);
+        let pong_timeout = Duration::from_secs(45);
+        assert!(
+            pong_timeout > ping_interval,
+            "pong_timeout should exceed ping_interval"
+        );
     }
 
     #[test]

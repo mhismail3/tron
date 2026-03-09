@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn longer_content_means_more_tokens() {
         let short = Message::user("hi");
-        let long = Message::user(&"a".repeat(1000));
+        let long = Message::user("a".repeat(1000));
         assert!(estimate_message_tokens(&long) > estimate_message_tokens(&short));
     }
 

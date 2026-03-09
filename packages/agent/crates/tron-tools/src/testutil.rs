@@ -35,7 +35,7 @@ pub fn extract_text(result: &TronToolResult) -> String {
             .iter()
             .filter_map(|b| match b {
                 tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
+                tron_core::content::ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(""),
@@ -108,7 +108,7 @@ impl FileSystemOps for MockFs {
     }
 
     async fn metadata(&self, _path: &Path) -> Result<std::fs::Metadata, io::Error> {
-        Err(io::Error::new(io::ErrorKind::Other, "mock"))
+        Err(io::Error::other("mock"))
     }
 
     async fn create_dir_all(&self, _path: &Path) -> Result<(), io::Error> {

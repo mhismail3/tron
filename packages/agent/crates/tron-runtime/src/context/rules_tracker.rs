@@ -374,16 +374,17 @@ impl RulesTracker {
             if event.event_type == "rules.loaded"
                 && let Ok(files) = serde_json::from_value::<Vec<RulesFileInfo>>(
                     event.payload.get("files").cloned().unwrap_or_default(),
-                ) {
-                    let merged_tokens = event
-                        .payload
-                        .get("mergedTokens")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
+                )
+            {
+                let merged_tokens = event
+                    .payload
+                    .get("mergedTokens")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
 
-                    #[allow(clippy::cast_possible_truncation)]
-                    tracker.set_rules(files, merged_tokens as u32, event.id.clone(), None);
-                }
+                #[allow(clippy::cast_possible_truncation)]
+                tracker.set_rules(files, merged_tokens as u32, event.id.clone(), None);
+            }
         }
 
         tracker
@@ -718,14 +719,14 @@ mod tests {
 
         let content = tracker.build_dynamic_rules_content().unwrap();
         let global_a_pos = content.find("# Global A").unwrap();
-        let global_b_pos = content.find("# Global B").unwrap();
+        let second_global_pos = content.find("# Global B").unwrap();
         let tools_pos = content.find("# Tools").unwrap();
         let context_pos = content.find("# Context").unwrap();
 
         // Globals sorted by relative_path (a < b)
-        assert!(global_a_pos < global_b_pos);
+        assert!(global_a_pos < second_global_pos);
         // Globals before scoped
-        assert!(global_b_pos < tools_pos);
+        assert!(second_global_pos < tools_pos);
         // Scoped in activation order (tools first, then context)
         assert!(tools_pos < context_pos);
     }

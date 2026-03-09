@@ -254,7 +254,10 @@ pub async fn execute_ledger_write(
         let transcript = if source == "cron" {
             let filtered = prepare_cron_transcript(&cycle.messages);
             if cron_assistant_text_len(&filtered) < 500 {
-                debug!(session_id, "cron session had no meaningful assistant output, skipping ledger");
+                debug!(
+                    session_id,
+                    "cron session had no meaningful assistant output, skipping ledger"
+                );
                 return tron_events::memory::types::LedgerWriteResult::skipped(
                     "cron session had no meaningful output",
                 );
@@ -295,9 +298,8 @@ pub async fn execute_ledger_write(
             tron_events::memory::types::LedgerWriteResult::skipped("trivial interaction")
         }
         Some(LedgerParseResult::Entry(entry)) => {
-            let payload = build_ledger_payload(
-                &cycle, &entry, deps, session_id, working_directory, source,
-            );
+            let payload =
+                build_ledger_payload(&cycle, &entry, deps, session_id, working_directory, source);
             persist_and_embed(deps, session_id, working_directory, &entry, payload)
         }
         None => tron_events::memory::types::LedgerWriteResult::skipped("LLM call failed"),
@@ -482,9 +484,11 @@ fn cron_assistant_text_len(messages: &[Message]) -> usize {
 fn user_message_len(content: &UserMessageContent) -> usize {
     match content {
         UserMessageContent::Text(t) => t.len(),
-        UserMessageContent::Blocks(blocks) => {
-            blocks.iter().filter_map(|c| c.as_text()).map(str::len).sum()
-        }
+        UserMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|c| c.as_text())
+            .map(str::len)
+            .sum(),
     }
 }
 
@@ -531,8 +535,12 @@ impl MethodHandler for GetLedgerHandler {
 
         let offset = i64::try_from(opt_u64(params.as_ref(), "offset", 0)).unwrap_or(0);
 
-        let tags_filter: Option<Vec<String>> = opt_array(params.as_ref(), "tags")
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect());
+        let tags_filter: Option<Vec<String>> = opt_array(params.as_ref(), "tags").map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        });
 
         // Fetch raw events — either workspace-scoped or global
         let (all_events_for_tags, count_and_page) = if let Some(ref dir) = working_dir {
@@ -555,7 +563,12 @@ impl MethodHandler for GetLedgerHandler {
             if tags_filter.is_some() {
                 let events = ctx
                     .event_store
-                    .get_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"], None, None)
+                    .get_events_by_workspaces_and_types(
+                        &workspace_ids,
+                        &["memory.ledger"],
+                        None,
+                        None,
+                    )
                     .unwrap_or_default();
                 (Some(events), None)
             } else {
@@ -565,7 +578,12 @@ impl MethodHandler for GetLedgerHandler {
                     .unwrap_or(0);
                 let events = ctx
                     .event_store
-                    .get_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"], Some(limit), Some(offset))
+                    .get_events_by_workspaces_and_types(
+                        &workspace_ids,
+                        &["memory.ledger"],
+                        Some(limit),
+                        Some(offset),
+                    )
                     .unwrap_or_default();
                 (None, Some((events, total_count)))
             }
@@ -792,8 +810,7 @@ impl MethodHandler for SearchMemoryHandler {
 
         let type_filter = opt_string(params.as_ref(), "type");
 
-        let limit =
-            usize::try_from(opt_u64(params.as_ref(), "limit", 20)).unwrap_or(usize::MAX);
+        let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 20)).unwrap_or(usize::MAX);
 
         let sessions = ctx
             .session_manager
@@ -864,8 +881,7 @@ pub struct GetHandoffsHandler;
 impl MethodHandler for GetHandoffsHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.getHandoffs"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let limit =
-            usize::try_from(opt_u64(params.as_ref(), "limit", 10)).unwrap_or(usize::MAX);
+        let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 10)).unwrap_or(usize::MAX);
 
         let sessions = ctx
             .session_manager
@@ -885,21 +901,22 @@ impl MethodHandler for GetHandoffsHandler {
                 .unwrap_or_default();
 
             if let Some(event) = events.first()
-                && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
-                    let summary = parsed
-                        .get("input")
-                        .and_then(Value::as_str)
-                        .or_else(|| parsed.get("summary").and_then(Value::as_str))
-                        .unwrap_or("");
-                    handoffs.push(serde_json::json!({
-                        "id": event.id,
-                        "sessionId": session.id,
-                        "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
-                        "createdAt": event.timestamp,
-                        "summary": summary,
-                        "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
-                    }));
-                }
+                && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload)
+            {
+                let summary = parsed
+                    .get("input")
+                    .and_then(Value::as_str)
+                    .or_else(|| parsed.get("summary").and_then(Value::as_str))
+                    .unwrap_or("");
+                handoffs.push(serde_json::json!({
+                    "id": event.id,
+                    "sessionId": session.id,
+                    "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
+                    "createdAt": event.timestamp,
+                    "summary": summary,
+                    "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
+                }));
+            }
 
             if handoffs.len() >= limit {
                 break;
@@ -1126,10 +1143,7 @@ mod tests {
     async fn get_ledger_unknown_workspace_returns_empty() {
         let ctx = make_test_context();
         let result = GetLedgerHandler
-            .handle(
-                Some(json!({"workingDirectory": "/nonexistent/path"})),
-                &ctx,
-            )
+            .handle(Some(json!({"workingDirectory": "/nonexistent/path"})), &ctx)
             .await
             .unwrap();
 
@@ -1190,8 +1204,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_includes_child_workspaces() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Parent entry"}));
-        seed_ledger_event(&ctx, "/tmp/proj/sub", json!({"title": "Child entry"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Parent entry"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/proj/sub", json!({"title": "Child entry"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
@@ -1206,8 +1220,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_excludes_unrelated_workspaces() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Included"}));
-        seed_ledger_event(&ctx, "/tmp/other", json!({"title": "Excluded"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Included"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/other", json!({"title": "Excluded"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
@@ -1222,8 +1236,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_prefix_requires_separator() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Match"}));
-        seed_ledger_event(&ctx, "/tmp/projOther", json!({"title": "No match"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Match"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/projOther", json!({"title": "No match"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
@@ -1238,8 +1252,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_parent_prefix() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/a/b", json!({"title": "B"}));
-        seed_ledger_event(&ctx, "/tmp/a/c", json!({"title": "C"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a/b", json!({"title": "B"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a/c", json!({"title": "C"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": "/tmp/a"})), &ctx)
@@ -1254,7 +1268,10 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_pagination_across_workspaces() {
         let ctx = make_test_context();
-        let sid1 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj", Some("test")).unwrap();
+        let sid1 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
         for i in 0..3 {
             let _ = ctx.event_store.append(&tron_events::AppendOptions {
                 session_id: &sid1,
@@ -1264,7 +1281,10 @@ mod tests {
             });
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let sid2 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test")).unwrap();
+        let sid2 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test"))
+            .unwrap();
         for i in 0..3 {
             let _ = ctx.event_store.append(&tron_events::AppendOptions {
                 session_id: &sid2,
@@ -1276,7 +1296,10 @@ mod tests {
         }
 
         let result = GetLedgerHandler
-            .handle(Some(json!({"workingDirectory": "/tmp/proj", "limit": 4})), &ctx)
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/proj", "limit": 4})),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -1288,14 +1311,20 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_tag_filter_across_workspaces() {
         let ctx = make_test_context();
-        let sid1 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj", Some("test")).unwrap();
+        let sid1 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid1,
             event_type: tron_events::EventType::MemoryLedger,
             payload: json!({"title": "Parent tagged", "tags": ["ios"]}),
             parent_id: None,
         });
-        let sid2 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test")).unwrap();
+        let sid2 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test"))
+            .unwrap();
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid2,
             event_type: tron_events::EventType::MemoryLedger,
@@ -1310,7 +1339,10 @@ mod tests {
         });
 
         let result = GetLedgerHandler
-            .handle(Some(json!({"workingDirectory": "/tmp/proj", "tags": ["ios"]})), &ctx)
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/proj", "tags": ["ios"]})),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -1354,9 +1386,9 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_no_working_dir_returns_all() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A1"}));
-        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A2"}));
-        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry B1"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A1"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A2"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry B1"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({})), &ctx)
@@ -1370,8 +1402,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_null_working_dir_returns_all() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
-        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": null})), &ctx)
@@ -1477,8 +1509,8 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_with_working_dir_still_filters() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "A entry"}));
-        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "B entry"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a", json!({"title": "A entry"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/b", json!({"title": "B entry"}));
 
         let result = GetLedgerHandler
             .handle(Some(json!({"workingDirectory": "/tmp/a"})), &ctx)
@@ -1493,13 +1525,10 @@ mod tests {
     #[tokio::test]
     async fn get_ledger_no_params_returns_all() {
         let ctx = make_test_context();
-        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
-        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
+        let _ = seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
 
-        let result = GetLedgerHandler
-            .handle(None, &ctx)
-            .await
-            .unwrap();
+        let result = GetLedgerHandler.handle(None, &ctx).await.unwrap();
 
         assert_eq!(result["entries"].as_array().unwrap().len(), 2);
         assert_eq!(result["totalCount"], 2);
@@ -1592,10 +1621,7 @@ mod tests {
         );
 
         let result = SearchMemoryHandler
-            .handle(
-                Some(json!({"searchText": "dark mode"})),
-                &ctx,
-            )
+            .handle(Some(json!({"searchText": "dark mode"})), &ctx)
             .await
             .unwrap();
 
@@ -2004,7 +2030,7 @@ mod tests {
         if let Message::User { ref content, .. } = cycle.messages[0] {
             match content {
                 UserMessageContent::Text(t) => assert_eq!(t, "Second request"),
-                _ => panic!("expected text content"),
+                UserMessageContent::Blocks(_) => panic!("expected text content"),
             }
         } else {
             panic!("expected user message first");
@@ -2044,7 +2070,7 @@ mod tests {
         fn provider_type(&self) -> LlmProvider {
             LlmProvider::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock-ledger"
         }
         async fn stream(
@@ -2076,10 +2102,7 @@ mod tests {
     struct LedgerMockProviderFactory;
     #[async_trait]
     impl ProviderFactory for LedgerMockProviderFactory {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(Arc::new(LedgerMockProvider))
         }
     }
@@ -2177,7 +2200,7 @@ mod tests {
             Message::User { content, timestamp } => {
                 match content {
                     UserMessageContent::Text(t) => assert!(t.contains("omitted")),
-                    _ => panic!("expected Text variant"),
+                    UserMessageContent::Blocks(_) => panic!("expected Text variant"),
                 }
                 assert_eq!(*timestamp, None);
             }
@@ -2200,7 +2223,7 @@ mod tests {
             Message::User { content, timestamp } => {
                 match content {
                     UserMessageContent::Text(t) => assert_eq!(t, short_text),
-                    _ => panic!("expected Text variant"),
+                    UserMessageContent::Blocks(_) => panic!("expected Text variant"),
                 }
                 assert_eq!(*timestamp, Some(2.0));
             }
@@ -2269,14 +2292,14 @@ mod tests {
         match &result[0] {
             Message::User { content, .. } => match content {
                 UserMessageContent::Text(t) => assert!(t.contains("omitted")),
-                _ => panic!("expected Text"),
+                UserMessageContent::Blocks(_) => panic!("expected Text"),
             },
             _ => panic!("expected User"),
         }
         match &result[1] {
             Message::User { content, .. } => match content {
                 UserMessageContent::Text(t) => assert_eq!(t, "short follow-up"),
-                _ => panic!("expected Text"),
+                UserMessageContent::Blocks(_) => panic!("expected Text"),
             },
             _ => panic!("expected User"),
         }
@@ -2301,7 +2324,7 @@ mod tests {
         match &result[0] {
             Message::User { content, .. } => match content {
                 UserMessageContent::Text(t) => assert!(t.contains("omitted")),
-                _ => panic!("expected Text replacement"),
+                UserMessageContent::Blocks(_) => panic!("expected Text replacement"),
             },
             _ => panic!("expected User"),
         }
@@ -2317,12 +2340,8 @@ mod tests {
     fn user_message_len_blocks() {
         use tron_core::content::UserContent;
         let content = UserMessageContent::Blocks(vec![
-            UserContent::Text {
-                text: "abc".into(),
-            },
-            UserContent::Text {
-                text: "de".into(),
-            },
+            UserContent::Text { text: "abc".into() },
+            UserContent::Text { text: "de".into() },
         ]);
         assert_eq!(user_message_len(&content), 5);
     }

@@ -179,6 +179,44 @@ impl<D: MemoryManagerDeps> std::fmt::Debug for MemoryManager<D> {
     }
 }
 
+// Implement MemoryManagerDeps for Arc<T> where T: MemoryManagerDeps
+#[async_trait]
+impl<T: MemoryManagerDeps> MemoryManagerDeps for Arc<T>
+where
+    T: Send + Sync,
+{
+    async fn execute_compaction(&self) -> Result<(), MemoryError> {
+        (**self).execute_compaction().await
+    }
+    async fn write_ledger_entry(&self, opts: &LedgerWriteOpts) -> LedgerWriteResult {
+        (**self).write_ledger_entry(opts).await
+    }
+    fn is_ledger_enabled(&self) -> bool {
+        (**self).is_ledger_enabled()
+    }
+    fn emit_memory_updating(&self, session_id: &str) {
+        (**self).emit_memory_updating(session_id);
+    }
+    fn emit_memory_updated(
+        &self,
+        session_id: &str,
+        title: Option<&str>,
+        entry_type: Option<&str>,
+        event_id: Option<&str>,
+    ) {
+        (**self).emit_memory_updated(session_id, title, entry_type, event_id);
+    }
+    fn on_memory_written(&self, payload: &serde_json::Value, title: &str) {
+        (**self).on_memory_written(payload, title);
+    }
+    fn session_id(&self) -> &str {
+        (**self).session_id()
+    }
+    fn workspace_id(&self) -> Option<&str> {
+        (**self).workspace_id()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,43 +561,5 @@ mod tests {
         let manager = make_manager(deps);
         let debug = format!("{manager:?}");
         assert!(debug.contains("MemoryManager"));
-    }
-}
-
-// Implement MemoryManagerDeps for Arc<T> where T: MemoryManagerDeps
-#[async_trait]
-impl<T: MemoryManagerDeps> MemoryManagerDeps for Arc<T>
-where
-    T: Send + Sync,
-{
-    async fn execute_compaction(&self) -> Result<(), MemoryError> {
-        (**self).execute_compaction().await
-    }
-    async fn write_ledger_entry(&self, opts: &LedgerWriteOpts) -> LedgerWriteResult {
-        (**self).write_ledger_entry(opts).await
-    }
-    fn is_ledger_enabled(&self) -> bool {
-        (**self).is_ledger_enabled()
-    }
-    fn emit_memory_updating(&self, session_id: &str) {
-        (**self).emit_memory_updating(session_id);
-    }
-    fn emit_memory_updated(
-        &self,
-        session_id: &str,
-        title: Option<&str>,
-        entry_type: Option<&str>,
-        event_id: Option<&str>,
-    ) {
-        (**self).emit_memory_updated(session_id, title, entry_type, event_id);
-    }
-    fn on_memory_written(&self, payload: &serde_json::Value, title: &str) {
-        (**self).on_memory_written(payload, title);
-    }
-    fn session_id(&self) -> &str {
-        (**self).session_id()
-    }
-    fn workspace_id(&self) -> Option<&str> {
-        (**self).workspace_id()
     }
 }

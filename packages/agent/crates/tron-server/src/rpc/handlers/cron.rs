@@ -16,7 +16,7 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::{to_json_value, RpcError};
+use crate::rpc::errors::{RpcError, to_json_value};
 use crate::rpc::handlers::{opt_array, opt_bool, opt_u64, require_param, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
@@ -55,17 +55,20 @@ impl MethodHandler for ListHandler {
             .values()
             .filter(|j| {
                 if let Some(enabled) = enabled_filter
-                    && j.enabled != enabled {
-                        return false;
-                    }
+                    && j.enabled != enabled
+                {
+                    return false;
+                }
                 if let Some(ref tags) = tag_filter
-                    && !tags.iter().any(|t| j.tags.contains(t)) {
-                        return false;
-                    }
+                    && !tags.iter().any(|t| j.tags.contains(t))
+                {
+                    return false;
+                }
                 if let Some(ws) = workspace_filter
-                    && j.workspace_id.as_deref() != Some(ws) {
-                        return false;
-                    }
+                    && j.workspace_id.as_deref() != Some(ws)
+                {
+                    return false;
+                }
                 true
             })
             .collect();
@@ -111,11 +114,11 @@ impl MethodHandler for GetHandler {
 
         let runtime_state = sched.get_runtime_state(&job_id);
         let (recent_runs, _total) =
-            tron_cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0).map_err(
-                |e| RpcError::Internal {
+            tron_cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0).map_err(|e| {
+                RpcError::Internal {
                     message: e.to_string(),
-                },
-            )?;
+                }
+            })?;
 
         Ok(serde_json::json!({
             "job": to_json_value(job)?,
@@ -148,12 +151,13 @@ impl MethodHandler for CreateHandler {
         let job_param = require_param(Some(&params), "job")?;
 
         // Parse partial job from params (sans id/timestamps)
-        let name = job_param
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or(RpcError::InvalidParams {
-                message: "Missing required field: name".into(),
-            })?;
+        let name =
+            job_param
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError::InvalidParams {
+                    message: "Missing required field: name".into(),
+                })?;
 
         let schedule: tron_cron::types::Schedule =
             serde_json::from_value(job_param.get("schedule").cloned().ok_or(
@@ -253,11 +257,11 @@ impl MethodHandler for CreateHandler {
         let _guard = sched.config_lock().lock().await;
 
         // Check name uniqueness
-        if tron_cron::store::name_exists(sched.pool(), &job.name, None)
-            .map_err(|e| RpcError::Internal {
+        if tron_cron::store::name_exists(sched.pool(), &job.name, None).map_err(|e| {
+            RpcError::Internal {
                 message: e.to_string(),
-            })?
-        {
+            }
+        })? {
             return Err(RpcError::Custom {
                 code: "ALREADY_EXISTS".into(),
                 message: format!("Job with name '{}' already exists", job.name),
@@ -265,18 +269,18 @@ impl MethodHandler for CreateHandler {
             });
         }
 
-        let mut config =
-            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let mut config = tron_cron::config::load_config(sched.config_path(), sched.backup_path())
+            .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?;
 
         config.jobs.push(job.clone());
 
-        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
-            RpcError::Internal {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
+            |e| RpcError::Internal {
                 message: e.to_string(),
-            }
-        })?;
+            },
+        )?;
 
         // Sync to SQLite
         tron_cron::store::upsert_job(sched.pool(), &job).map_err(|e| RpcError::Internal {
@@ -323,10 +327,10 @@ impl MethodHandler for UpdateHandler {
 
         let _guard = sched.config_lock().lock().await;
 
-        let mut config =
-            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let mut config = tron_cron::config::load_config(sched.config_path(), sched.backup_path())
+            .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?;
 
         let job = config
             .jobs
@@ -340,11 +344,11 @@ impl MethodHandler for UpdateHandler {
         // Apply partial updates
         if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
             // Check uniqueness (excluding self)
-            if tron_cron::store::name_exists(sched.pool(), name, Some(&job_id))
-                .map_err(|e| RpcError::Internal {
+            if tron_cron::store::name_exists(sched.pool(), name, Some(&job_id)).map_err(|e| {
+                RpcError::Internal {
                     message: e.to_string(),
-                })?
-            {
+                }
+            })? {
                 return Err(RpcError::Custom {
                     code: "ALREADY_EXISTS".into(),
                     message: format!("Job with name '{name}' already exists"),
@@ -360,11 +364,10 @@ impl MethodHandler for UpdateHandler {
             job.enabled = enabled;
         }
         if let Some(sched_val) = params.get("schedule") {
-            job.schedule = serde_json::from_value(sched_val.clone()).map_err(|e| {
-                RpcError::InvalidParams {
+            job.schedule =
+                serde_json::from_value(sched_val.clone()).map_err(|e| RpcError::InvalidParams {
                     message: format!("Invalid schedule: {e}"),
-                }
-            })?;
+                })?;
         }
         if let Some(payload_val) = params.get("payload") {
             job.payload = serde_json::from_value(payload_val.clone()).map_err(|e| {
@@ -381,26 +384,30 @@ impl MethodHandler for UpdateHandler {
             })?;
         }
         if let Some(v) = params.get("overlapPolicy") {
-            job.overlap_policy = serde_json::from_value(v.clone()).map_err(|e| {
-                RpcError::InvalidParams {
+            job.overlap_policy =
+                serde_json::from_value(v.clone()).map_err(|e| RpcError::InvalidParams {
                     message: format!("Invalid overlapPolicy: {e}"),
-                }
-            })?;
+                })?;
         }
         if let Some(v) = params.get("misfirePolicy") {
-            job.misfire_policy = serde_json::from_value(v.clone()).map_err(|e| {
-                RpcError::InvalidParams {
+            job.misfire_policy =
+                serde_json::from_value(v.clone()).map_err(|e| RpcError::InvalidParams {
                     message: format!("Invalid misfirePolicy: {e}"),
-                }
-            })?;
+                })?;
         }
         if let Some(v) = params.get("maxRetries").and_then(serde_json::Value::as_u64) {
             job.max_retries = v as u32;
         }
-        if let Some(v) = params.get("autoDisableAfter").and_then(serde_json::Value::as_u64) {
+        if let Some(v) = params
+            .get("autoDisableAfter")
+            .and_then(serde_json::Value::as_u64)
+        {
             job.auto_disable_after = v as u32;
         }
-        if let Some(v) = params.get("stuckTimeoutSecs").and_then(serde_json::Value::as_u64) {
+        if let Some(v) = params
+            .get("stuckTimeoutSecs")
+            .and_then(serde_json::Value::as_u64)
+        {
             job.stuck_timeout_secs = v;
         }
         if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {
@@ -423,11 +430,11 @@ impl MethodHandler for UpdateHandler {
         let updated_job = job.clone();
 
         // Save and sync
-        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
-            RpcError::Internal {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
+            |e| RpcError::Internal {
                 message: e.to_string(),
-            }
-        })?;
+            },
+        )?;
 
         tron_cron::store::upsert_job(sched.pool(), &updated_job).map_err(|e| {
             RpcError::Internal {
@@ -469,10 +476,10 @@ impl MethodHandler for DeleteHandler {
 
         let _guard = sched.config_lock().lock().await;
 
-        let mut config =
-            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let mut config = tron_cron::config::load_config(sched.config_path(), sched.backup_path())
+            .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?;
 
         let before_len = config.jobs.len();
         config.jobs.retain(|j| j.id != job_id);
@@ -483,17 +490,18 @@ impl MethodHandler for DeleteHandler {
             });
         }
 
-        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
+            |e| RpcError::Internal {
+                message: e.to_string(),
+            },
+        )?;
+
+        // Delete from SQLite (runs preserved via ON DELETE SET NULL)
+        let _ = tron_cron::store::delete_job(sched.pool(), &job_id).map_err(|e| {
             RpcError::Internal {
                 message: e.to_string(),
             }
         })?;
-
-        // Delete from SQLite (runs preserved via ON DELETE SET NULL)
-        let _ =
-            tron_cron::store::delete_job(sched.pool(), &job_id).map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
 
         // Remove from in-memory state
         sched.remove_job(&job_id);
@@ -582,16 +590,11 @@ impl MethodHandler for GetRunsHandler {
             .and_then(|p| p.get("status"))
             .and_then(|v| v.as_str());
 
-        let (runs, total) = tron_cron::store::get_runs(
-            sched.pool(),
-            Some(&job_id),
-            status_filter,
-            limit,
-            offset,
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let (runs, total) =
+            tron_cron::store::get_runs(sched.pool(), Some(&job_id), status_filter, limit, offset)
+                .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
 
         Ok(serde_json::json!({
             "runs": to_json_value(&runs)?,
@@ -639,10 +642,7 @@ mod tests {
     async fn delete_without_scheduler_returns_not_available() {
         let ctx = make_test_context();
         let params = serde_json::json!({"jobId": "cron_1"});
-        let err = DeleteHandler
-            .handle(Some(params), &ctx)
-            .await
-            .unwrap_err();
+        let err = DeleteHandler.handle(Some(params), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "NOT_AVAILABLE");
     }
 
@@ -658,10 +658,7 @@ mod tests {
     async fn get_runs_without_scheduler_returns_not_available() {
         let ctx = make_test_context();
         let params = serde_json::json!({"jobId": "cron_1"});
-        let err = GetRunsHandler
-            .handle(Some(params), &ctx)
-            .await
-            .unwrap_err();
+        let err = GetRunsHandler.handle(Some(params), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "NOT_AVAILABLE");
     }
 
@@ -669,22 +666,18 @@ mod tests {
     async fn update_without_scheduler_returns_not_available() {
         let ctx = make_test_context();
         let params = serde_json::json!({"jobId": "cron_1"});
-        let err = UpdateHandler
-            .handle(Some(params), &ctx)
-            .await
-            .unwrap_err();
+        let err = UpdateHandler.handle(Some(params), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "NOT_AVAILABLE");
     }
 
     // ── Tests with a real scheduler ─────────────────────────────────
 
     fn make_cron_context() -> (RpcContext, tempfile::TempDir) {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
-            let _ = tron_cron::migrations::run_migrations(&conn).unwrap();
+            tron_cron::migrations::run_migrations(&conn).unwrap();
         }
 
         let dir = tempfile::tempdir().unwrap();

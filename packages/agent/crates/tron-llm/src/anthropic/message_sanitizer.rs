@@ -70,7 +70,9 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                             thinking,
                             signature: Some(_),
                         } => {
-                            debug!("Converted signed thinking block to text (cross-model signature)");
+                            debug!(
+                                "Converted signed thinking block to text (cross-model signature)"
+                            );
                             filtered.push(AssistantContent::text(thinking.clone()));
                         }
                         _ => {
@@ -181,10 +183,15 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
 /// converter filters those out. If a message contains ONLY unsigned thinking,
 /// it would become empty after conversion.
 fn has_content_surviving_conversion(content: &[AssistantContent]) -> bool {
-    content.iter().any(|block| !matches!(
-        block,
-        AssistantContent::Thinking { signature: None, .. }
-    ))
+    content.iter().any(|block| {
+        !matches!(
+            block,
+            AssistantContent::Thinking {
+                signature: None,
+                ..
+            }
+        )
+    })
 }
 
 /// Check if user message content is non-empty.
@@ -484,7 +491,7 @@ mod tests {
             assert!(content[0].is_text());
             assert_eq!(content[0].as_text().unwrap(), "Let me search for that.");
             assert!(matches!(content[1], AssistantContent::ToolUse { .. }));
-            assert!(!content.iter().any(|b| b.is_thinking()));
+            assert!(!content.iter().any(AssistantContent::is_thinking));
         } else {
             panic!("Expected assistant message");
         }
@@ -627,10 +634,8 @@ mod tests {
         let first = sanitize_messages(messages);
         let second = sanitize_messages(first.clone());
         assert_eq!(first.len(), second.len());
-        if let (
-            Message::Assistant { content: c1, .. },
-            Message::Assistant { content: c2, .. },
-        ) = (&first[1], &second[1])
+        if let (Message::Assistant { content: c1, .. }, Message::Assistant { content: c2, .. }) =
+            (&first[1], &second[1])
         {
             assert_eq!(c1.len(), c2.len());
             for (a, b) in c1.iter().zip(c2.iter()) {

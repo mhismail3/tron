@@ -67,11 +67,7 @@ impl TronTool for NotifyAppTool {
         .build()
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let title = match validate_required_string(&params, "title", "notification title") {
             Ok(t) => t,
             Err(e) => return Ok(e),
@@ -99,10 +95,7 @@ impl TronTool for NotifyAppTool {
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
             let _ = obj.insert("sessionId".into(), Value::String(ctx.session_id.clone()));
-            let _ = obj.insert(
-                "toolCallId".into(),
-                Value::String(ctx.tool_call_id.clone()),
-            );
+            let _ = obj.insert("toolCallId".into(), Value::String(ctx.tool_call_id.clone()));
             Some(Value::Object(obj))
         };
 
@@ -283,9 +276,11 @@ mod tests {
         let mock = Arc::new(MockNotify::success());
         let tool = NotifyAppTool::new(mock.clone());
         let ctx = make_ctx();
-        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+        let result = tool
+            .execute(json!({"title": "t", "body": "b"}), &ctx)
             .await
             .unwrap();
+        assert!(result.is_error.is_none());
         let notif = mock.last_notification().unwrap();
         let data = notif.data.unwrap();
         assert_eq!(data["sessionId"], ctx.session_id);
@@ -296,9 +291,11 @@ mod tests {
         let mock = Arc::new(MockNotify::success());
         let tool = NotifyAppTool::new(mock.clone());
         let ctx = make_ctx();
-        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+        let result = tool
+            .execute(json!({"title": "t", "body": "b"}), &ctx)
             .await
             .unwrap();
+        assert!(result.is_error.is_none());
         let notif = mock.last_notification().unwrap();
         let data = notif.data.unwrap();
         assert_eq!(data["toolCallId"], ctx.tool_call_id);
@@ -309,12 +306,14 @@ mod tests {
         let mock = Arc::new(MockNotify::success());
         let tool = NotifyAppTool::new(mock.clone());
         let ctx = make_ctx();
-        tool.execute(
-            json!({"title": "t", "body": "b", "data": {"custom": "value"}}),
-            &ctx,
-        )
-        .await
-        .unwrap();
+        let result = tool
+            .execute(
+                json!({"title": "t", "body": "b", "data": {"custom": "value"}}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error.is_none());
         let notif = mock.last_notification().unwrap();
         let data = notif.data.unwrap();
         assert_eq!(data["custom"], "value");
@@ -327,9 +326,11 @@ mod tests {
         let mock = Arc::new(MockNotify::success());
         let tool = NotifyAppTool::new(mock.clone());
         let ctx = make_ctx();
-        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+        let result = tool
+            .execute(json!({"title": "t", "body": "b"}), &ctx)
             .await
             .unwrap();
+        assert!(result.is_error.is_none());
         let notif = mock.last_notification().unwrap();
         let data = notif.data.unwrap();
         let obj = data.as_object().unwrap();

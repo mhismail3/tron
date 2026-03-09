@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn server_start_time_allows_uptime_calc() {
         let ctx = make_test_context();
-        let uptime = std::time::Instant::now() - ctx.server_start_time;
+        let uptime = ctx.server_start_time.elapsed();
         assert!(uptime.as_secs() < 5);
     }
 

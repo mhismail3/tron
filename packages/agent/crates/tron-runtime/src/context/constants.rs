@@ -98,13 +98,6 @@ mod tests {
     }
 
     #[test]
-    fn thresholds_are_ordered() {
-        assert!(Thresholds::WARNING < Thresholds::ALERT);
-        assert!(Thresholds::ALERT < Thresholds::CRITICAL);
-        assert!(Thresholds::CRITICAL < Thresholds::EXCEEDED);
-    }
-
-    #[test]
     fn compaction_prefix_and_ack_non_empty() {
         assert!(!COMPACTION_SUMMARY_PREFIX.is_empty());
         assert!(!COMPACTION_ACK_TEXT.is_empty());

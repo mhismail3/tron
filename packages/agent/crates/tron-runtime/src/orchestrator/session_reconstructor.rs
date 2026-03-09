@@ -39,12 +39,13 @@ pub fn reconstruct(
 
     // Check for active worktree
     if let Ok(Some(event)) = event_store.get_active_worktree(session_id)
-        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
-            result.worktree_path = payload
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-        }
+        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
+    {
+        result.worktree_path = payload
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+    }
 
     Ok(result)
 }
@@ -163,7 +164,7 @@ mod tests {
         // but the reconstruction should not error
     }
 
-    /// Verify that assistant messages with tool_use blocks survive the serde
+    /// Verify that assistant messages with `tool_use` blocks survive the serde
     /// roundtrip. Persistence stores `"input"` (API wire format) but the typed
     /// `AssistantContent::ToolUse` expects `"arguments"`. The `#[serde(alias)]`
     /// on `arguments` makes this work.
@@ -226,7 +227,7 @@ mod tests {
             state
                 .messages
                 .iter()
-                .map(|m| format!("{:?}", m))
+                .map(|m| format!("{m:?}"))
                 .collect::<Vec<_>>()
         );
         assert!(state.messages[0].is_user());

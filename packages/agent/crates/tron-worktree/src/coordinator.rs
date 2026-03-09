@@ -21,8 +21,8 @@ use crate::errors::{Result, WorktreeError};
 use crate::git::GitExecutor;
 use crate::isolation;
 use crate::types::{
-    AcquireResult, CommitEntry, CommittedDiffResult, CommittedFileEntry, DiffSummary,
-    MergeResult, MergeStrategy, SessionBranchInfo, WorktreeConfig, WorktreeInfo,
+    AcquireResult, CommitEntry, CommittedDiffResult, CommittedFileEntry, DiffSummary, MergeResult,
+    MergeStrategy, SessionBranchInfo, WorktreeConfig, WorktreeInfo,
 };
 
 /// Worktree coordinator — manages worktree lifecycle across sessions.
@@ -95,9 +95,7 @@ impl WorktreeCoordinator {
         let repo_count = if is_git {
             if let Ok(root) = self.git.repo_root(working_dir).await {
                 let root_path = PathBuf::from(&root);
-                self.repo_sessions
-                    .get(&root_path)
-                    .map_or(0, |v| v.len())
+                self.repo_sessions.get(&root_path).map_or(0, |v| v.len())
             } else {
                 0
             }
@@ -159,8 +157,7 @@ impl WorktreeCoordinator {
             return Ok(());
         };
 
-        let release_info =
-            crate::lifecycle::remove(&info, &self.config, &self.git).await?;
+        let release_info = crate::lifecycle::remove(&info, &self.config, &self.git).await?;
 
         // Emit event
         let _ = self.event_store.append(&AppendOptions {
@@ -463,11 +460,7 @@ impl WorktreeCoordinator {
     /// IMPORTANT: Call `rebuild_from_events` first to avoid deleting valid worktrees.
     pub async fn recover_orphans(&self) -> usize {
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
-        let active_ids: HashSet<String> = self
-            .active
-            .iter()
-            .map(|r| r.key().clone())
-            .collect();
+        let active_ids: HashSet<String> = self.active.iter().map(|r| r.key().clone()).collect();
 
         let mut total = 0;
         for ws in &workspaces {
@@ -514,20 +507,21 @@ impl WorktreeCoordinator {
             };
 
             // Cross-reference with active map to get session_id, is_active, and base_branch
-            let (is_active, session_id, base_branch) = if let Some(entry) = self
-                .active
-                .iter()
-                .find(|r| r.value().branch == *branch)
-            {
-                (true, Some(entry.key().clone()), entry.value().base_branch.clone())
-            } else {
-                let event_base = event_base_branches.get(branch.as_str()).cloned();
-                let base = match event_base {
-                    Some(b) => b,
-                    None => self.detect_default_branch(repo_root).await,
+            let (is_active, session_id, base_branch) =
+                if let Some(entry) = self.active.iter().find(|r| r.value().branch == *branch) {
+                    (
+                        true,
+                        Some(entry.key().clone()),
+                        entry.value().base_branch.clone(),
+                    )
+                } else {
+                    let event_base = event_base_branches.get(branch.as_str()).cloned();
+                    let base = match event_base {
+                        Some(b) => b,
+                        None => self.detect_default_branch(repo_root).await,
+                    };
+                    (false, None, Some(base))
                 };
-                (false, None, Some(base))
-            };
 
             let commit_count = if let Some(ref base) = base_branch {
                 let mb = self.git.merge_base(repo_root, base, branch).await.ok();
@@ -571,9 +565,10 @@ impl WorktreeCoordinator {
                 && let (Some(branch), Some(base)) = (
                     payload.get("branch").and_then(|v| v.as_str()),
                     payload.get("baseBranch").and_then(|v| v.as_str()),
-                ) {
-                    map.insert(branch.to_string(), base.to_string());
-                }
+                )
+            {
+                map.insert(branch.to_string(), base.to_string());
+            }
         }
         map
     }
@@ -589,11 +584,7 @@ impl WorktreeCoordinator {
         // First check active worktrees
         if let Some(info) = self.active.get(session_id) {
             return self
-                .committed_diff_for_branch(
-                    &info.repo_root,
-                    &info.branch,
-                    &info.base_commit,
-                )
+                .committed_diff_for_branch(&info.repo_root, &info.branch, &info.base_commit)
                 .await
                 .map(Some);
         }
@@ -612,32 +603,28 @@ impl WorktreeCoordinator {
             .unwrap_or_default();
         if let Some(event) = events.first()
             && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-                && let (Some(branch), Some(base_branch)) = (
-                    payload.get("branch").and_then(|v| v.as_str()),
-                    payload.get("baseBranch").and_then(|v| v.as_str()),
-                ) {
-                    // Find the repo root from event payload or by scanning workspaces
-                    let repo_root = if let Some(root) =
-                        payload.get("repoRoot").and_then(|v| v.as_str())
-                    {
-                        PathBuf::from(root)
-                    } else {
-                        // Fallback: scan workspaces
-                        match self.find_repo_for_branch(branch).await {
-                            Some(root) => root,
-                            None => return Ok(None),
-                        }
-                    };
-
-                    let base = self
-                        .git
-                        .merge_base(&repo_root, base_branch, branch)
-                        .await?;
-                    return self
-                        .committed_diff_for_branch(&repo_root, branch, &base)
-                        .await
-                        .map(Some);
+            && let (Some(branch), Some(base_branch)) = (
+                payload.get("branch").and_then(|v| v.as_str()),
+                payload.get("baseBranch").and_then(|v| v.as_str()),
+            )
+        {
+            // Find the repo root from event payload or by scanning workspaces
+            let repo_root = if let Some(root) = payload.get("repoRoot").and_then(|v| v.as_str()) {
+                PathBuf::from(root)
+            } else {
+                // Fallback: scan workspaces
+                match self.find_repo_for_branch(branch).await {
+                    Some(root) => root,
+                    None => return Ok(None),
                 }
+            };
+
+            let base = self.git.merge_base(&repo_root, base_branch, branch).await?;
+            return self
+                .committed_diff_for_branch(&repo_root, branch, &base)
+                .await
+                .map(Some);
+        }
 
         // Fallback: scan workspaces for matching branch (for sessions before baseBranch was persisted)
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
@@ -912,7 +899,13 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -942,7 +935,13 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -962,8 +961,10 @@ mod tests {
         init_repo(dir.path()).await;
 
         let store = make_store();
-        let mut config = WorktreeConfig::default();
-        config.mode = tron_settings::types::IsolationMode::Never;
+        let config = WorktreeConfig {
+            mode: tron_settings::types::IsolationMode::Never,
+            ..WorktreeConfig::default()
+        };
         let coord = WorktreeCoordinator::new(config, store);
 
         let result = coord.maybe_acquire("test-never", dir.path()).await.unwrap();
@@ -984,7 +985,13 @@ mod tests {
 
         let store = make_store();
         let session = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let sid = &session.session.id;
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -1022,7 +1029,13 @@ mod tests {
 
         let store = make_store();
         let session = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let sid = &session.session.id;
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -1074,7 +1087,13 @@ mod tests {
 
         let store = make_store();
         let session = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let sid = &session.session.id;
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
@@ -1151,7 +1170,13 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -1172,15 +1197,20 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
         // Acquire then release (branch preserved by default)
         let result = coord.maybe_acquire("sess-2", dir.path()).await.unwrap();
-        let info = match result {
-            AcquireResult::Acquired(i) => i,
-            _ => panic!("expected Acquired"),
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
         };
         // Write something so there's a commit
         std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
@@ -1218,7 +1248,13 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -1239,14 +1275,19 @@ mod tests {
 
         let store = make_store();
         let _ = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
         let result = coord.maybe_acquire("sess-cd2", dir.path()).await.unwrap();
-        let info = match result {
-            AcquireResult::Acquired(i) => i,
-            _ => panic!("expected Acquired"),
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
         };
 
         std::fs::write(info.worktree_path.join("new.txt"), "hello\nworld\n").unwrap();
@@ -1275,18 +1316,20 @@ mod tests {
 
         let store = make_store();
         let session = store
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
             .unwrap();
         let sid = &session.session.id;
 
         // Create coordinator with broadcast channel
         let (tx, _) = tokio::sync::broadcast::channel(16);
         let mut rx = tx.subscribe();
-        let coord = WorktreeCoordinator::with_broadcast(
-            WorktreeConfig::default(),
-            store,
-            tx,
-        );
+        let coord = WorktreeCoordinator::with_broadcast(WorktreeConfig::default(), store, tx);
 
         // Acquire — should broadcast WorktreeAcquired
         let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();

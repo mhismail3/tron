@@ -379,7 +379,7 @@ mod tests {
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(
-            text.contains("A"),
+            text.contains('A'),
             "summary should contain option label A: {text}"
         );
     }

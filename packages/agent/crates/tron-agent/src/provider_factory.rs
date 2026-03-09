@@ -321,7 +321,9 @@ impl DefaultProviderFactory {
         let api_key = if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
             info!("using MINIMAX_API_KEY env var");
             key
-        } else if let Some(pa) = tron_llm::auth::storage::get_provider_auth(&self.auth_path, "minimax") {
+        } else if let Some(pa) =
+            tron_llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
+        {
             if let Some(key) = pa.api_key {
                 info!("using MiniMax API key from auth.json");
                 key
@@ -332,7 +334,8 @@ impl DefaultProviderFactory {
             }
         } else {
             return Err(ProviderError::Auth {
-                message: "no MiniMax auth available (set MINIMAX_API_KEY or add to auth.json)".into(),
+                message: "no MiniMax auth available (set MINIMAX_API_KEY or add to auth.json)"
+                    .into(),
             });
         };
 
@@ -369,11 +372,10 @@ impl ProviderFactory for DefaultProviderFactory {
         let bare_model = strip_provider_prefix(model);
         // INVARIANT: unknown model/provider → fail-fast with typed error.
         // No silent fallback or default provider substitution.
-        let provider_type = detect_provider_from_model(model).ok_or_else(|| {
-            ProviderError::UnsupportedModel {
+        let provider_type =
+            detect_provider_from_model(model).ok_or_else(|| ProviderError::UnsupportedModel {
                 model: model.to_string(),
-            }
-        })?;
+            })?;
 
         match provider_type {
             ProviderKind::Anthropic => self.create_anthropic(bare_model).await,
@@ -524,9 +526,8 @@ mod tests {
     async fn factory_unknown_model_returns_unsupported_model() {
         let factory = no_auth_factory();
 
-        let err = match factory.create_for_model("totally-unknown-model").await {
-            Err(e) => e,
-            Ok(_) => panic!("expected UnsupportedModel"),
+        let Err(err) = factory.create_for_model("totally-unknown-model").await else {
+            panic!("expected UnsupportedModel");
         };
         match err {
             ProviderError::UnsupportedModel { model } => {

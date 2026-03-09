@@ -15,13 +15,15 @@ use crate::anthropic::stream_handler::{create_stream_state_for, process_sse_even
 use crate::anthropic::types::{
     AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool,
 };
+use crate::compose_context_parts;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::compose_context_parts;
 use tron_core::messages::Context;
 
-use super::types::{DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model};
+use super::types::{
+    DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model,
+};
 
 /// API version header value (Anthropic-compatible).
 const API_VERSION: &str = "2023-06-01";
@@ -111,7 +113,9 @@ impl MiniMaxProvider {
             return None;
         }
 
-        let budget = options.thinking_budget.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS / 4);
+        let budget = options
+            .thinking_budget
+            .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS / 4);
         Some(json!({
             "type": "enabled",
             "budget_tokens": budget,
@@ -234,7 +238,11 @@ impl MiniMaxProvider {
             });
         }
 
-        Ok(crate::stream_pipeline::sse_to_event_stream::<AnthropicSseEvent, _, _>(
+        Ok(crate::stream_pipeline::sse_to_event_stream::<
+            AnthropicSseEvent,
+            _,
+            _,
+        >(
             response,
             &SSE_OPTIONS,
             create_stream_state_for(tron_core::messages::Provider::MiniMax),
@@ -301,7 +309,10 @@ mod tests {
     #[test]
     fn provider_type_is_minimax() {
         let provider = MiniMaxProvider::new(test_config());
-        assert_eq!(provider.provider_type(), tron_core::messages::Provider::MiniMax);
+        assert_eq!(
+            provider.provider_type(),
+            tron_core::messages::Provider::MiniMax
+        );
     }
 
     #[test]
@@ -386,7 +397,7 @@ mod tests {
                     properties: None,
                     required: None,
                     description: None,
-                    extra: Default::default(),
+                    extra: serde_json::Map::default(),
                 },
             }]),
             ..Context::default()

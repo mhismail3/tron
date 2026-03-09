@@ -145,13 +145,14 @@ impl SessionManager {
     pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         // Release worktree before ending the session
         if let Some(coord) = self.worktree_coordinator.get()
-            && let Err(e) = coord.release(session_id).await {
-                tracing::warn!(
-                    session_id,
-                    error = %e,
-                    "failed to release worktree during session end"
-                );
-            }
+            && let Err(e) = coord.release(session_id).await
+        {
+            tracing::warn!(
+                session_id,
+                error = %e,
+                "failed to release worktree during session end"
+            );
+        }
 
         if let Some((_, active)) = self.active_sessions.remove(session_id) {
             active.context.persister.flush().await?;
@@ -538,7 +539,9 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = SessionManager::new(store.clone()).with_origin("localhost:9847".to_string());
 
-        let sid = mgr.create_session("test-model", "/tmp", Some("origin test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("origin test"))
+            .unwrap();
         let session = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(session.origin.as_deref(), Some("localhost:9847"));
     }
@@ -546,7 +549,9 @@ mod tests {
     #[tokio::test]
     async fn create_session_without_origin() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("no origin")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("no origin"))
+            .unwrap();
         let session = mgr.get_session(&sid).unwrap().unwrap();
         assert!(session.origin.is_none());
     }
@@ -561,9 +566,13 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = SessionManager::new(store.clone());
 
-        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
-        let cron_sid = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
-        store.update_source(&cron_sid, "cron").unwrap();
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let cron_sid = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_sid, "cron").unwrap());
 
         let filtered = mgr
             .list_sessions(&SessionFilter {
@@ -585,9 +594,13 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = SessionManager::new(store.clone());
 
-        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
-        let cron_sid = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
-        store.update_source(&cron_sid, "cron").unwrap();
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let cron_sid = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_sid, "cron").unwrap());
 
         let all = mgr.list_sessions(&SessionFilter::default()).unwrap();
         assert_eq!(all.len(), 2);
@@ -604,12 +617,16 @@ mod tests {
         let mgr = SessionManager::new(store.clone());
 
         // First call creates
-        let (id1, created) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        let (id1, created) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
         assert!(created);
         assert!(!id1.is_empty());
 
         // Second call returns existing
-        let (id2, created2) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        let (id2, created2) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
         assert!(!created2);
         assert_eq!(id1, id2);
     }
@@ -624,10 +641,14 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = SessionManager::new(store.clone());
 
-        let (chat_id, _) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        let (chat_id, _) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
         assert!(mgr.is_chat_session(&chat_id));
 
-        let normal_id = mgr.create_session("test-model", "/tmp", Some("normal")).unwrap();
+        let normal_id = mgr
+            .create_session("test-model", "/tmp", Some("normal"))
+            .unwrap();
         assert!(!mgr.is_chat_session(&normal_id));
     }
 
@@ -641,10 +662,16 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = SessionManager::new(store.clone());
 
-        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
-        let (chat_id, _) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
-        let cron_id = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
-        store.update_source(&cron_id, "cron").unwrap();
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let (chat_id, _) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
+        let cron_id = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_id, "cron").unwrap());
 
         let filtered = mgr
             .list_sessions(&SessionFilter {

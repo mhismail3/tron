@@ -294,7 +294,7 @@ mod tests {
         bm.broadcast_to_session("sess_a", &event).await;
 
         let msg = rx.recv().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&*msg).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
         assert_eq!(parsed["type"], "agent.text_delta");
         assert_eq!(parsed["sessionId"], "sess_a");
         assert_eq!(parsed["data"]["text"], "hello");

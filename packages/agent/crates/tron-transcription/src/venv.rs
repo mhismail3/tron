@@ -34,16 +34,15 @@ pub fn find_system_python() -> Result<PathBuf, TranscriptionError> {
     ];
 
     for name in candidates {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(name)
-            .output()
-            && output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    debug!("found system python: {path}");
-                    return Ok(PathBuf::from(path));
-                }
+        if let Ok(output) = std::process::Command::new("which").arg(name).output()
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                debug!("found system python: {path}");
+                return Ok(PathBuf::from(path));
             }
+        }
     }
 
     Err(TranscriptionError::Setup(
@@ -156,11 +155,8 @@ mod tests {
     #[test]
     fn find_system_python_finds_something() {
         // This test will pass on any dev machine with Python installed
-        match find_system_python() {
-            Ok(path) => assert!(path.to_string_lossy().contains("python")),
-            Err(_) => {
-                // OK on systems without Python — test still validates the function runs
-            }
+        if let Ok(path) = find_system_python() {
+            assert!(path.to_string_lossy().contains("python"));
         }
     }
 }

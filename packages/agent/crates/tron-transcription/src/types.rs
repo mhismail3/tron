@@ -57,7 +57,7 @@ mod tests {
         };
         assert_eq!(r.text, "Hello world");
         assert_eq!(r.language, "en");
-        assert_eq!(r.duration_seconds, 2.5);
+        assert!((r.duration_seconds - 2.5).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -756,6 +756,13 @@ pub fn tool_result_block(tool_use_id: &str, content: &[Value], is_error: bool) -
 mod tests {
     use super::*;
 
+    fn assert_float_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
     // -- Model registry --
 
     #[test]
@@ -784,9 +791,9 @@ mod tests {
         assert!(info.supports_adaptive_thinking);
         assert!(info.supports_effort);
         assert!(info.supports_tools);
-        assert_eq!(info.input_cost_per_million, 3.0);
-        assert_eq!(info.output_cost_per_million, 15.0);
-        assert_eq!(info.cache_read_cost_per_million, 0.3);
+        assert_float_eq(info.input_cost_per_million, 3.0);
+        assert_float_eq(info.output_cost_per_million, 15.0);
+        assert_float_eq(info.cache_read_cost_per_million, 0.3);
         assert!(info.recommended);
         assert!(!info.legacy);
     }
@@ -818,7 +825,7 @@ mod tests {
         assert_eq!(info.name, "Claude Opus 4.1");
         assert_eq!(info.short_name, "Opus 4.1");
         assert_eq!(info.max_output, 32_000);
-        assert_eq!(info.input_cost_per_million, 15.0);
+        assert_float_eq(info.input_cost_per_million, 15.0);
         assert!(info.legacy);
     }
 

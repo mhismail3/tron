@@ -199,12 +199,13 @@ impl BrowserSession {
 
         // Check for navigation errors (e.g. net::ERR_ABORTED)
         if let Some(error_text) = result["errorText"].as_str()
-            && !error_text.is_empty() {
-                return Err(BrowserError::NavigationFailed {
-                    url: url.into(),
-                    reason: error_text.to_string(),
-                });
-            }
+            && !error_text.is_empty()
+        {
+            return Err(BrowserError::NavigationFailed {
+                url: url.into(),
+                reason: error_text.to_string(),
+            });
+        }
 
         // Best-effort wait for page load (10s timeout, non-fatal)
         let _ = tokio::time::timeout(Duration::from_secs(10), self.wait_for_load()).await;
@@ -217,9 +218,10 @@ impl BrowserSession {
     async fn wait_for_load(&self) -> Result<(), BrowserError> {
         for _ in 0..100 {
             if let Ok(val) = self.evaluate("document.readyState").await
-                && val.as_str() == Some("complete") {
-                    return Ok(());
-                }
+                && val.as_str() == Some("complete")
+            {
+                return Ok(());
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(()) // Timeout is non-fatal
@@ -254,16 +256,17 @@ impl BrowserSession {
         let idx = history["currentIndex"].as_u64().unwrap_or(0) as usize;
         let entries = history["entries"].as_array();
         if let Some(entries) = entries
-            && idx + 1 < entries.len() {
-                let entry_id = entries[idx + 1]["id"].as_i64().unwrap_or(0);
-                let _ = self
-                    .send_cdp(
-                        "Page.navigateToHistoryEntry",
-                        json!({ "entryId": entry_id }),
-                    )
-                    .await?;
-                self.update_url().await;
-            }
+            && idx + 1 < entries.len()
+        {
+            let entry_id = entries[idx + 1]["id"].as_i64().unwrap_or(0);
+            let _ = self
+                .send_cdp(
+                    "Page.navigateToHistoryEntry",
+                    json!({ "entryId": entry_id }),
+                )
+                .await?;
+            self.update_url().await;
+        }
         Ok(())
     }
 
@@ -428,9 +431,10 @@ impl BrowserSession {
             for node in nodes {
                 let role = node["role"]["value"].as_str().unwrap_or("unknown");
                 if let Some(name) = node["name"]["value"].as_str()
-                    && !name.is_empty() {
-                        let _ = writeln!(output, "[{role}] {name}");
-                    }
+                    && !name.is_empty()
+                {
+                    let _ = writeln!(output, "[{role}] {name}");
+                }
             }
         }
         Ok(output)
@@ -628,9 +632,10 @@ impl BrowserSession {
 
     async fn update_url(&self) {
         if let Ok(val) = self.evaluate("window.location.href").await
-            && let Some(url) = val.as_str() {
-                *self.current_url.write() = Some(url.into());
-            }
+            && let Some(url) = val.as_str()
+        {
+            *self.current_url.write() = Some(url.into());
+        }
     }
 }
 
@@ -659,9 +664,10 @@ async fn wait_for_ws_url(port: u16, child: &mut Child) -> Result<String, Browser
             continue;
         };
         if let Some(page) = pages.first()
-            && let Some(ws_url) = page["webSocketDebuggerUrl"].as_str() {
-                return Ok(ws_url.to_string());
-            }
+            && let Some(ws_url) = page["webSocketDebuggerUrl"].as_str()
+        {
+            return Ok(ws_url.to_string());
+        }
     }
 
     Err(BrowserError::LaunchFailed {
@@ -768,9 +774,7 @@ async fn handle_screencast_frame(
     // ACK the frame so Chrome keeps sending
     if let Some(cdp_session_id) = params.get("sessionId").and_then(Value::as_u64) {
         let ack = build_screencast_ack(cdp_session_id, next_id.fetch_add(1, Ordering::Relaxed));
-        let _ = ws_tx
-            .send(Message::Text(ack.to_string().into()))
-            .await;
+        let _ = ws_tx.send(Message::Text(ack.to_string().into())).await;
     }
 
     let metadata = params.get("metadata").map(parse_frame_metadata);
@@ -922,7 +926,7 @@ mod tests {
             session_id: "s1".into(),
             data: "/9j/4AAQ".into(),
             frame_id: 1,
-            timestamp: 1707999045123,
+            timestamp: 1_707_999_045_123,
             metadata: Some(parse_frame_metadata(&json!({
                 "offsetTop": 0,
                 "pageScaleFactor": 1,
@@ -965,15 +969,13 @@ mod tests {
 
     #[test]
     fn screencast_session_id_starts_none() {
-        let id: Arc<parking_lot::RwLock<Option<String>>> =
-            Arc::new(parking_lot::RwLock::new(None));
+        let id: Arc<parking_lot::RwLock<Option<String>>> = Arc::new(parking_lot::RwLock::new(None));
         assert!(id.read().is_none());
     }
 
     #[test]
     fn screencast_session_id_set_and_clear() {
-        let id: Arc<parking_lot::RwLock<Option<String>>> =
-            Arc::new(parking_lot::RwLock::new(None));
+        let id: Arc<parking_lot::RwLock<Option<String>>> = Arc::new(parking_lot::RwLock::new(None));
         *id.write() = Some("s1".into());
         assert_eq!(*id.read(), Some("s1".to_string()));
         *id.write() = None;

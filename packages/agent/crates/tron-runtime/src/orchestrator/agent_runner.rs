@@ -127,7 +127,7 @@ mod tests {
         fn provider_type(&self) -> Provider {
             Provider::Anthropic
         }
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "mock"
         }
         async fn stream(
@@ -277,7 +277,7 @@ mod tests {
             fn provider_type(&self) -> Provider {
                 Provider::Anthropic
             }
-            fn model(&self) -> &str {
+            fn model(&self) -> &'static str {
                 "mock"
             }
             async fn stream(
@@ -335,7 +335,7 @@ mod tests {
             fn provider_type(&self) -> Provider {
                 Provider::Anthropic
             }
-            fn model(&self) -> &str {
+            fn model(&self) -> &'static str {
                 "mock"
             }
             async fn stream(

@@ -55,14 +55,13 @@ impl MethodHandler for ListDirHandler {
                 });
 
                 // Add size and modifiedAt for files
-                if !is_dir
-                    && let Ok(meta) = e.metadata() {
-                        entry["size"] = serde_json::json!(meta.len());
-                        if let Ok(modified) = meta.modified() {
-                            let dt: chrono::DateTime<chrono::Utc> = modified.into();
-                            entry["modifiedAt"] = serde_json::json!(dt.to_rfc3339());
-                        }
+                if !is_dir && let Ok(meta) = e.metadata() {
+                    entry["size"] = serde_json::json!(meta.len());
+                    if let Ok(modified) = meta.modified() {
+                        let dt: chrono::DateTime<chrono::Utc> = modified.into();
+                        entry["modifiedAt"] = serde_json::json!(dt.to_rfc3339());
                     }
+                }
 
                 Some(entry)
             })
@@ -259,9 +258,10 @@ mod tests {
             if !is_dir {
                 seen_file = true;
             }
-            if seen_file && is_dir {
-                panic!("directory appeared after file — not sorted correctly");
-            }
+            assert!(
+                !(seen_file && is_dir),
+                "directory appeared after file - not sorted correctly"
+            );
         }
     }
 

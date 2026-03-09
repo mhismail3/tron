@@ -679,6 +679,13 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn assert_float_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
     // ── Model registry ─────────────────────────────────────────────────
 
     #[test]
@@ -695,7 +702,10 @@ mod tests {
         assert!(m.supports_tools);
         assert!(m.supports_tool_search);
         assert!(m.supports_computer_use);
-        assert_eq!(m.reasoning_levels, &["none", "low", "medium", "high", "xhigh"]);
+        assert_eq!(
+            m.reasoning_levels,
+            &["none", "low", "medium", "high", "xhigh"]
+        );
         assert_eq!(m.default_reasoning_level, "medium");
     }
 
@@ -707,8 +717,8 @@ mod tests {
         assert!(m.supports_tool_search);
         assert!(m.supports_computer_use);
         assert_eq!(m.default_reasoning_level, "high");
-        assert_eq!(m.input_cost_per_million, 4.0);
-        assert_eq!(m.output_cost_per_million, 32.0);
+        assert_float_eq(m.input_cost_per_million, 4.0);
+        assert_float_eq(m.output_cost_per_million, 32.0);
     }
 
     #[test]
@@ -736,9 +746,9 @@ mod tests {
         assert_eq!(m.max_output, 128_000);
         assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
         assert_eq!(m.default_reasoning_level, "low");
-        assert_eq!(m.input_cost_per_million, 0.25);
-        assert_eq!(m.output_cost_per_million, 2.0);
-        assert_eq!(m.cache_read_cost_per_million, 0.025);
+        assert_float_eq(m.input_cost_per_million, 0.25);
+        assert_float_eq(m.output_cost_per_million, 2.0);
+        assert_float_eq(m.cache_read_cost_per_million, 0.025);
     }
 
     #[test]
@@ -751,25 +761,25 @@ mod tests {
         assert!(m.supports_tools);
         assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
         assert_eq!(m.default_reasoning_level, "low");
-        assert_eq!(m.input_cost_per_million, 1.75);
-        assert_eq!(m.output_cost_per_million, 14.0);
-        assert_eq!(m.cache_read_cost_per_million, 0.175);
+        assert_float_eq(m.input_cost_per_million, 1.75);
+        assert_float_eq(m.output_cost_per_million, 14.0);
+        assert_float_eq(m.cache_read_cost_per_million, 0.175);
     }
 
     #[test]
     fn model_gpt_52_codex_pricing() {
         let m = get_openai_model("gpt-5.2-codex").unwrap();
-        assert_eq!(m.input_cost_per_million, 1.75);
-        assert_eq!(m.output_cost_per_million, 14.0);
-        assert_eq!(m.cache_read_cost_per_million, 0.175);
+        assert_float_eq(m.input_cost_per_million, 1.75);
+        assert_float_eq(m.output_cost_per_million, 14.0);
+        assert_float_eq(m.cache_read_cost_per_million, 0.175);
     }
 
     #[test]
     fn model_gpt_51_codex_max_pricing() {
         let m = get_openai_model("gpt-5.1-codex-max").unwrap();
-        assert_eq!(m.input_cost_per_million, 1.25);
-        assert_eq!(m.output_cost_per_million, 10.0);
-        assert_eq!(m.cache_read_cost_per_million, 0.125);
+        assert_float_eq(m.input_cost_per_million, 1.25);
+        assert_float_eq(m.output_cost_per_million, 10.0);
+        assert_float_eq(m.cache_read_cost_per_million, 0.125);
     }
 
     #[test]
@@ -843,7 +853,10 @@ mod tests {
     #[test]
     fn api_endpoint_default_base_url() {
         assert_eq!(ApiEndpoint::Codex.default_base_url(), DEFAULT_BASE_URL);
-        assert_eq!(ApiEndpoint::Platform.default_base_url(), DEFAULT_PLATFORM_BASE_URL);
+        assert_eq!(
+            ApiEndpoint::Platform.default_base_url(),
+            DEFAULT_PLATFORM_BASE_URL
+        );
     }
 
     #[test]
@@ -868,7 +881,11 @@ mod tests {
             "gpt-5.1-codex-mini",
         ] {
             let m = get_openai_model(id).unwrap();
-            assert_eq!(m.api_endpoint, ApiEndpoint::Codex, "expected Codex for {id}");
+            assert_eq!(
+                m.api_endpoint,
+                ApiEndpoint::Codex,
+                "expected Codex for {id}"
+            );
         }
     }
 

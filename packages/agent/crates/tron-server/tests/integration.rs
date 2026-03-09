@@ -22,7 +22,6 @@ use tron_llm::provider::{
 };
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
-use tron_runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
 use tron_server::config::ServerConfig;
 use tron_server::rpc::context::{AgentDeps, RpcContext};
 use tron_server::rpc::registry::MethodRegistry;
@@ -118,7 +117,7 @@ impl Provider for TextOnlyProvider {
     fn provider_type(&self) -> ProviderKind {
         ProviderKind::Anthropic
     }
-    fn model(&self) -> &str {
+    fn model(&self) -> &'static str {
         "mock"
     }
     async fn stream(
@@ -154,7 +153,7 @@ impl Provider for ErrorProvider {
     fn provider_type(&self) -> ProviderKind {
         ProviderKind::Anthropic
     }
-    fn model(&self) -> &str {
+    fn model(&self) -> &'static str {
         "mock"
     }
     async fn stream(
@@ -174,7 +173,7 @@ impl Provider for SlowProvider {
     fn provider_type(&self) -> ProviderKind {
         ProviderKind::Anthropic
     }
-    fn model(&self) -> &str {
+    fn model(&self) -> &'static str {
         "mock"
     }
     async fn stream(
@@ -1138,7 +1137,7 @@ async fn create_and_bind_session(ws: &mut WsStream, id: u64) -> String {
 
 /// Try to read a JSON message within timeout. Returns None on timeout.
 async fn try_read_json(ws: &mut WsStream, dur: Duration) -> Option<Value> {
-    match timeout(dur, async {
+    timeout(dur, async {
         loop {
             if let Some(Ok(Message::Text(text))) = ws.next().await {
                 return serde_json::from_str::<Value>(&text).ok();
@@ -1146,10 +1145,7 @@ async fn try_read_json(ws: &mut WsStream, dur: Duration) -> Option<Value> {
         }
     })
     .await
-    {
-        Ok(val) => val,
-        Err(_) => None,
-    }
+    .unwrap_or_default()
 }
 
 /// Read until we see a specific event type. Returns the matching event.
@@ -1381,12 +1377,11 @@ async fn e2e_event_ordering_preserved() {
     // Collect events and verify order
     let mut received = Vec::new();
     for _ in 0..20 {
-        if let Some(evt) = try_read_json(&mut ws, Duration::from_secs(3)).await {
-            if evt.get("type").and_then(|v| v.as_str()) == Some("agent.text_delta") {
-                if let Some(data) = evt.get("data") {
-                    received.push(data["delta"].as_str().unwrap_or("").to_string());
-                }
-            }
+        if let Some(evt) = try_read_json(&mut ws, Duration::from_secs(3)).await
+            && evt.get("type").and_then(|v| v.as_str()) == Some("agent.text_delta")
+            && let Some(data) = evt.get("data")
+        {
+            received.push(data["delta"].as_str().unwrap_or("").to_string());
         }
     }
 
@@ -2579,15 +2574,14 @@ async fn e2e_prompt_events_scoped_to_session() {
 
     // All agent events should have the correct session ID
     for evt in &events {
-        if let Some(event_type) = evt.get("type").and_then(|v| v.as_str()) {
-            if event_type.starts_with("agent.") {
-                if let Some(evt_sid) = evt.get("sessionId").and_then(|v| v.as_str()) {
-                    assert_eq!(
-                        evt_sid, sid,
-                        "event {event_type} should be scoped to session {sid}"
-                    );
-                }
-            }
+        if let Some(event_type) = evt.get("type").and_then(|v| v.as_str())
+            && event_type.starts_with("agent.")
+            && let Some(evt_sid) = evt.get("sessionId").and_then(|v| v.as_str())
+        {
+            assert_eq!(
+                evt_sid, sid,
+                "event {event_type} should be scoped to session {sid}"
+            );
         }
     }
 

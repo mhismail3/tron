@@ -23,14 +23,13 @@ pub use types::{
 mod tests {
     use super::*;
     use crate::guardrails::audit::AuditLogger;
-    use crate::guardrails::core_rules::{default_rules, is_core_rule};
     use crate::guardrails::rules::RuleBase;
     use crate::guardrails::rules::composite::{CompositeOperator, CompositeRule};
     use crate::guardrails::rules::context::ContextRule;
     use crate::guardrails::rules::pattern::PatternRule;
     use crate::guardrails::rules::resource::ResourceRule;
     use crate::guardrails::types::{
-        AuditEntry, AuditEntryParams, AuditStats, GuardrailEvaluation, RuleEvaluationResult,
+        AuditEntry, AuditEntryParams, GuardrailEvaluation, RuleEvaluationResult,
     };
     use std::collections::HashMap;
 
@@ -465,7 +464,7 @@ mod tests {
     fn resource_timeout_exceeds_max_blocked() {
         let ctx = EvaluationContext {
             tool_name: "Bash".into(),
-            tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 700000}),
+            tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 700_000}),
             session_id: None,
             tool_call_id: None,
         };
@@ -483,7 +482,7 @@ mod tests {
     fn resource_timeout_within_limit_not_blocked() {
         let ctx = EvaluationContext {
             tool_name: "Bash".into(),
-            tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 500000}),
+            tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 500_000}),
             session_id: None,
             tool_call_id: None,
         };
@@ -501,7 +500,7 @@ mod tests {
     fn resource_timeout_exact_max_not_blocked() {
         let ctx = EvaluationContext {
             tool_name: "Bash".into(),
-            tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 600000}),
+            tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 600_000}),
             session_id: None,
             tool_call_id: None,
         };

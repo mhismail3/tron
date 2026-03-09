@@ -1,4 +1,4 @@
-//! Tests for SessionEvent, typed_payload, type guards, and state types.
+//! Tests for `SessionEvent`, `typed_payload`, type guards, and state types.
 
 #[cfg(test)]
 mod session_event_tests {
@@ -657,10 +657,7 @@ mod type_guard_tests {
             EventType::ConfigReasoningLevel,
             EventType::ConfigReasoningLevel
         );
-        assert_eq!(
-            EventType::ConfigPromptUpdate,
-            EventType::ConfigPromptUpdate
-        );
+        assert_eq!(EventType::ConfigPromptUpdate, EventType::ConfigPromptUpdate);
     }
 
     #[test]

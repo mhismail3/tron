@@ -321,9 +321,9 @@ mod tests {
         DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production").unwrap();
         DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production").unwrap();
 
-        let tokens = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].device_token, token1);
+        let session_tokens = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
+        assert_eq!(session_tokens.len(), 1);
+        assert_eq!(session_tokens[0].device_token, token1);
     }
 
     #[test]

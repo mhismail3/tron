@@ -189,7 +189,8 @@ mod tests {
     use crate::sqlite::migrations::run_migrations;
     use crate::sqlite::repositories::workspace::{CreateWorkspaceOptions, WorkspaceRepo};
 
-    /// Sets up an in-memory DB with migrations and returns (conn, workspace_id, session_id, event_id).
+    /// Sets up an in-memory DB with migrations and returns
+    /// (`conn`, `workspace_id`, `session_id`, `event_id`).
     fn setup() -> (Connection, String, String, String) {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")

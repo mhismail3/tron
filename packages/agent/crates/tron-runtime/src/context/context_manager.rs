@@ -58,9 +58,10 @@ impl ContextManager {
     pub fn new(mut config: ContextManagerConfig) -> Self {
         // Default working_directory to $HOME/Workspace/ rather than /tmp
         if config.working_directory.is_none()
-            && let Ok(home) = std::env::var("HOME") {
-                config.working_directory = Some(format!("{home}/Workspace"));
-            }
+            && let Ok(home) = std::env::var("HOME")
+        {
+            config.working_directory = Some(format!("{home}/Workspace"));
+        }
 
         let system_prompt = config
             .system_prompt
@@ -457,9 +458,10 @@ impl ContextManager {
     /// Check and trigger compaction callback if needed.
     pub fn trigger_compaction_if_needed(&self) {
         if self.should_compact()
-            && let Some(cb) = &self.on_compaction_needed {
-                cb();
-            }
+            && let Some(cb) = &self.on_compaction_needed
+        {
+            cb();
+        }
     }
 
     // ── Tool result processing ──────────────────────────────────────────
@@ -1238,9 +1240,9 @@ mod tests {
         // Better: use a manager where estimate is high
         let mut cm2 = ContextManager::new(test_config());
         let called2 = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let called2_clone = called2.clone();
+        let compaction_triggered = called2.clone();
         cm2.on_compaction_needed(move || {
-            called2_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            compaction_triggered.store(true, std::sync::atomic::Ordering::SeqCst);
         });
 
         // Add enough messages to get estimated tokens high
@@ -1413,18 +1415,8 @@ mod tests {
     #[test]
     fn touch_file_path_returns_only_new_activations() {
         let mut cm = ContextManager::new(test_config());
-        let scope_a = make_discovered(
-            "src/a",
-            "src/a/.claude/CLAUDE.md",
-            false,
-            "# Scope A rules",
-        );
-        let scope_b = make_discovered(
-            "src/b",
-            "src/b/.claude/CLAUDE.md",
-            false,
-            "# Scope B rules",
-        );
+        let scope_a = make_discovered("src/a", "src/a/.claude/CLAUDE.md", false, "# Scope A rules");
+        let scope_b = make_discovered("src/b", "src/b/.claude/CLAUDE.md", false, "# Scope B rules");
         cm.set_rules_index(RulesIndex::new(vec![scope_a, scope_b]));
 
         // First touch activates scope A
@@ -1434,7 +1426,11 @@ mod tests {
 
         // Second touch activates scope B — must NOT include scope A again
         let r2 = cm.touch_file_path("src/b/bar.rs");
-        assert_eq!(r2.len(), 1, "should return only newly activated rules, got {r2:?}");
+        assert_eq!(
+            r2.len(),
+            1,
+            "should return only newly activated rules, got {r2:?}"
+        );
         assert_eq!(r2[0].scope_dir, "src/b");
     }
 }

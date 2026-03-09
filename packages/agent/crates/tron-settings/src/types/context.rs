@@ -258,8 +258,10 @@ mod tests {
 
     #[test]
     fn compactor_omits_none_fields() {
-        let mut c = CompactorSettings::default();
-        c.force_always = None;
+        let c = CompactorSettings {
+            force_always: None,
+            ..CompactorSettings::default()
+        };
         let json = serde_json::to_value(&c).unwrap();
         assert!(json.get("forceAlways").is_none());
     }

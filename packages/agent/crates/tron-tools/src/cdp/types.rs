@@ -148,14 +148,14 @@ mod tests {
             session_id: "sess_abc".into(),
             data: "AQID".into(),
             frame_id: 42,
-            timestamp: 1707999045123,
+            timestamp: 1_707_999_045_123,
             metadata: Some(FrameMetadata::default()),
         };
         let json = serde_json::to_value(&frame).unwrap();
         assert_eq!(json["sessionId"], "sess_abc");
         assert_eq!(json["data"], "AQID");
         assert_eq!(json["frameId"], 42);
-        assert_eq!(json["timestamp"], 1707999045123u64);
+        assert_eq!(json["timestamp"], 1_707_999_045_123_u64);
         assert!(json["metadata"].is_object());
     }
 
@@ -192,7 +192,7 @@ mod tests {
             session_id: "s1".into(),
             data: "AA==".into(),
             frame_id: 1,
-            timestamp: 1707999045123,
+            timestamp: 1_707_999_045_123,
             metadata: None,
         };
         let json = serde_json::to_value(&frame).unwrap();
@@ -282,7 +282,7 @@ mod tests {
         };
         match event {
             BrowserEvent::Frame { session_id, .. } => assert_eq!(session_id, "s1"),
-            _ => panic!("expected Frame"),
+            BrowserEvent::Closed { .. } => panic!("expected Frame"),
         }
     }
 
@@ -293,7 +293,7 @@ mod tests {
         };
         match event {
             BrowserEvent::Closed { session_id } => assert_eq!(session_id, "s2"),
-            _ => panic!("expected Closed"),
+            BrowserEvent::Frame { .. } => panic!("expected Closed"),
         }
     }
 
@@ -317,14 +317,14 @@ mod tests {
             session_id: "s1".into(),
             data: "/9j/4AAQ".into(),
             frame_id: 42,
-            timestamp: 1707999045123,
+            timestamp: 1_707_999_045_123,
             metadata: Some(FrameMetadata::default()),
         };
         let json = serde_json::to_string(&frame).unwrap();
         let decoded: BrowserFrame = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.session_id, "s1");
         assert_eq!(decoded.frame_id, 42);
-        assert_eq!(decoded.timestamp, 1707999045123);
+        assert_eq!(decoded.timestamp, 1_707_999_045_123);
     }
 
     #[test]

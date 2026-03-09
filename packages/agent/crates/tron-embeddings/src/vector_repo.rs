@@ -160,10 +160,9 @@ impl VectorRepository {
             )));
         }
         let blob = f32_slice_to_blob(embedding);
-        let _ = self.conn.execute(
-            "DELETE FROM memory_vectors WHERE id = ?1",
-            params![id],
-        )?;
+        let _ = self
+            .conn
+            .execute("DELETE FROM memory_vectors WHERE id = ?1", params![id])?;
         let _ = self.conn.execute(
             "INSERT INTO memory_vectors (id, event_id, workspace_id, chunk_type, chunk_index, entry_type, created_at, embedding) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -246,8 +245,10 @@ impl VectorRepository {
         }
 
         let mut stmt = self.conn.prepare_cached(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = param_values
+            .iter()
+            .map(|v| v as &dyn rusqlite::types::ToSql)
+            .collect();
 
         let rows = stmt
             .query_map(params.as_slice(), |row| {
@@ -280,20 +281,22 @@ impl VectorRepository {
     ) -> Vec<VectorSearchResult> {
         let mut results: Vec<VectorSearchResult> = rows
             .into_iter()
-            .filter_map(|(_id, event_id, workspace_id, chunk_type, chunk_index, blob)| {
-                let embedding = blob_as_f32_slice(&blob)?;
-                let similarity = cosine_similarity(query, embedding)?;
-                if similarity < min_similarity {
-                    return None;
-                }
-                Some(VectorSearchResult {
-                    event_id,
-                    workspace_id,
-                    similarity,
-                    chunk_type,
-                    chunk_index,
-                })
-            })
+            .filter_map(
+                |(_id, event_id, workspace_id, chunk_type, chunk_index, blob)| {
+                    let embedding = blob_as_f32_slice(&blob)?;
+                    let similarity = cosine_similarity(query, embedding)?;
+                    if similarity < min_similarity {
+                        return None;
+                    }
+                    Some(VectorSearchResult {
+                        event_id,
+                        workspace_id,
+                        similarity,
+                        chunk_type,
+                        chunk_index,
+                    })
+                },
+            )
             .collect();
 
         results.sort_unstable_by(|a, b| {
@@ -411,22 +414,67 @@ mod tests {
     #[test]
     fn store_multiple_chunks_per_event() {
         let repo = make_repo(4);
-        repo.store("e1-summary", "e1", "ws1", "summary", 0, None, None, &random_vector(4, 1))
-            .unwrap();
-        repo.store("e1-lesson-1", "e1", "ws1", "lesson", 1, None, None, &random_vector(4, 2))
-            .unwrap();
-        repo.store("e1-lesson-2", "e1", "ws1", "lesson", 2, None, None, &random_vector(4, 3))
-            .unwrap();
+        repo.store(
+            "e1-summary",
+            "e1",
+            "ws1",
+            "summary",
+            0,
+            None,
+            None,
+            &random_vector(4, 1),
+        )
+        .unwrap();
+        repo.store(
+            "e1-lesson-1",
+            "e1",
+            "ws1",
+            "lesson",
+            1,
+            None,
+            None,
+            &random_vector(4, 2),
+        )
+        .unwrap();
+        repo.store(
+            "e1-lesson-2",
+            "e1",
+            "ws1",
+            "lesson",
+            2,
+            None,
+            None,
+            &random_vector(4, 3),
+        )
+        .unwrap();
         assert_eq!(repo.count().unwrap(), 3);
     }
 
     #[test]
     fn delete_by_event_removes_all_chunks() {
         let repo = make_repo(4);
-        repo.store("e1-summary", "e1", "ws1", "summary", 0, None, None, &random_vector(4, 1))
-            .unwrap();
-        repo.store("e1-lesson-1", "e1", "ws1", "lesson", 1, None, None, &random_vector(4, 2))
-            .unwrap();
+        repo.store(
+            "e1-summary",
+            "e1",
+            "ws1",
+            "summary",
+            0,
+            None,
+            None,
+            &random_vector(4, 1),
+        )
+        .unwrap();
+        repo.store(
+            "e1-lesson-1",
+            "e1",
+            "ws1",
+            "lesson",
+            1,
+            None,
+            None,
+            &random_vector(4, 2),
+        )
+        .unwrap();
         repo.delete_by_event("e1").unwrap();
         assert_eq!(repo.count().unwrap(), 0);
     }
@@ -994,7 +1042,7 @@ mod tests {
     #[test]
     fn search_options_default_min_similarity() {
         let opts = SearchOptions::default();
-        assert_eq!(opts.min_similarity, -1.0);
+        assert_eq!(opts.min_similarity.to_bits(), (-1.0_f32).to_bits());
     }
 
     #[test]

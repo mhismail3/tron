@@ -66,17 +66,18 @@ impl SearchRepo {
             param_values.push(Box::new(sess_id.to_string()));
         }
         if let Some(types) = opts.types
-            && !types.is_empty() {
-                let placeholders: Vec<String> = types
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
-                    .collect();
-                let _ = write!(sql, " AND events_fts.type IN ({})", placeholders.join(", "));
-                for t in types {
-                    param_values.push(Box::new(t.to_string()));
-                }
+            && !types.is_empty()
+        {
+            let placeholders: Vec<String> = types
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
+                .collect();
+            let _ = write!(sql, " AND events_fts.type IN ({})", placeholders.join(", "));
+            for t in types {
+                param_values.push(Box::new(t.to_string()));
             }
+        }
 
         sql.push_str(" ORDER BY score");
 
@@ -428,10 +429,10 @@ mod tests {
         workspace_id: &str,
         seq: i64,
         event_type: &str,
-        payload: serde_json::Value,
+        payload: &serde_json::Value,
         tool_name: Option<&str>,
     ) {
-        let payload_str = serde_json::to_string(&payload).unwrap();
+        let payload_str = serde_json::to_string(payload).unwrap();
         conn.execute(
             "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name)
              VALUES (?1, ?2, ?3, ?4, datetime('now'), ?5, ?6, ?7)",
@@ -450,7 +451,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello world"}),
+            &json!({"content": "hello world"}),
             None,
         );
 
@@ -467,7 +468,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello world"}),
+            &json!({"content": "hello world"}),
             None,
         );
         assert!(SearchRepo::is_indexed(&conn, "evt_1").unwrap());
@@ -487,7 +488,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "rust programming language"}),
+            &json!({"content": "rust programming language"}),
             None,
         );
         insert_event(
@@ -497,7 +498,7 @@ mod tests {
             &ws_id,
             2,
             "message.assistant",
-            json!({"content": "python scripting language"}),
+            &json!({"content": "python scripting language"}),
             None,
         );
 
@@ -516,7 +517,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "programming in rust"}),
+            &json!({"content": "programming in rust"}),
             None,
         );
         insert_event(
@@ -526,7 +527,7 @@ mod tests {
             &ws_id,
             2,
             "message.assistant",
-            json!({"content": "programming in python"}),
+            &json!({"content": "programming in python"}),
             None,
         );
 
@@ -544,7 +545,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello world"}),
+            &json!({"content": "hello world"}),
             None,
         );
 
@@ -563,7 +564,7 @@ mod tests {
                 &ws_id,
                 i,
                 "message.user",
-                json!({"content": format!("test message number {i}")}),
+                &json!({"content": format!("test message number {i}")}),
                 None,
             );
         }
@@ -598,7 +599,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello from session one"}),
+            &json!({"content": "hello from session one"}),
             None,
         );
         insert_event(
@@ -608,7 +609,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello from session two"}),
+            &json!({"content": "hello from session two"}),
             None,
         );
 
@@ -643,7 +644,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello from workspace one"}),
+            &json!({"content": "hello from workspace one"}),
             None,
         );
         insert_event(
@@ -653,7 +654,7 @@ mod tests {
             &ws2.id,
             1,
             "message.user",
-            json!({"content": "hello from workspace two"}),
+            &json!({"content": "hello from workspace two"}),
             None,
         );
 
@@ -672,7 +673,7 @@ mod tests {
             &ws_id,
             1,
             "tool.call",
-            json!({"toolName": "Bash", "input": {"command": "ls"}}),
+            &json!({"toolName": "Bash", "input": {"command": "ls"}}),
             Some("Bash"),
         );
         insert_event(
@@ -682,7 +683,7 @@ mod tests {
             &ws_id,
             2,
             "tool.call",
-            json!({"toolName": "Read", "input": {"path": "/tmp/file"}}),
+            &json!({"toolName": "Read", "input": {"path": "/tmp/file"}}),
             Some("Read"),
         );
 
@@ -702,7 +703,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "test message"}),
+            &json!({"content": "test message"}),
             None,
         );
         insert_event(
@@ -712,7 +713,7 @@ mod tests {
             &ws_id,
             2,
             "message.assistant",
-            json!({"content": "test response"}),
+            &json!({"content": "test response"}),
             None,
         );
 
@@ -739,7 +740,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "the quick brown fox jumps over the lazy dog"}),
+            &json!({"content": "the quick brown fox jumps over the lazy dog"}),
             None,
         );
 
@@ -758,7 +759,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "rust rust rust"}),
+            &json!({"content": "rust rust rust"}),
             None,
         );
         insert_event(
@@ -768,7 +769,7 @@ mod tests {
             &ws_id,
             2,
             "message.user",
-            json!({"content": "rust once"}),
+            &json!({"content": "rust once"}),
             None,
         );
 
@@ -789,7 +790,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello world"}),
+            &json!({"content": "hello world"}),
             None,
         );
 
@@ -814,7 +815,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello"}),
+            &json!({"content": "hello"}),
             None,
         );
         insert_event(
@@ -824,7 +825,7 @@ mod tests {
             &ws_id,
             2,
             "message.user",
-            json!({"content": "world"}),
+            &json!({"content": "world"}),
             None,
         );
 
@@ -845,7 +846,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello"}),
+            &json!({"content": "hello"}),
             None,
         );
         insert_event(
@@ -855,7 +856,7 @@ mod tests {
             &ws_id,
             2,
             "message.user",
-            json!({"content": "world"}),
+            &json!({"content": "world"}),
             None,
         );
 
@@ -872,7 +873,7 @@ mod tests {
             &ws_id,
             1,
             "message.user",
-            json!({"content": "hello world"}),
+            &json!({"content": "hello world"}),
             None,
         );
         insert_event(
@@ -882,7 +883,7 @@ mod tests {
             &ws_id,
             2,
             "message.user",
-            json!({"content": "foo bar"}),
+            &json!({"content": "foo bar"}),
             None,
         );
 
@@ -911,7 +912,7 @@ mod tests {
             &ws_id,
             1,
             "message.assistant",
-            json!({
+            &json!({
                 "content": [
                     {"type": "text", "text": "hello from the assistant"},
                     {"type": "tool_use", "id": "tool_1", "name": "Bash"}
