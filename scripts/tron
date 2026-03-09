@@ -740,12 +740,110 @@ write_deployment_result() {
 RESULT
 }
 
+cmd_preflight() {
+    require_project_dir
+
+    print_header "Deploy Pre-flight Check"
+    local all_ok=true
+
+    # 1. Rust workspace
+    if [ -f "$RUST_WORKSPACE/Cargo.toml" ]; then
+        print_success "Rust workspace found"
+    else
+        print_error "Rust workspace not found at $RUST_WORKSPACE"
+        all_ok=false
+    fi
+
+    # 2. Working tree clean
+    if git -C "$PROJECT_DIR" diff-index --quiet HEAD -- 2>/dev/null; then
+        print_success "Working tree clean"
+    else
+        print_warning "Uncommitted changes"
+    fi
+
+    # 3. Release binary exists
+    if [ -f "$RELEASE_BINARY" ] && file "$RELEASE_BINARY" | grep -q "Mach-O"; then
+        print_success "Release binary exists ($(ls -lh "$RELEASE_BINARY" | awk '{print $5}'))"
+    else
+        print_warning "No release binary — build required"
+    fi
+
+    # 4. Service installed
+    if [ -f "$PLIST_PATH" ]; then
+        print_success "Launchd service installed"
+    else
+        print_error "Service not installed (run: tron install)"
+        all_ok=false
+    fi
+
+    # 5. Service running
+    if service_is_running; then
+        local pid
+        pid=$(get_service_pid)
+        print_success "Service is running (PID: ${pid:-unknown})"
+    else
+        print_warning "Service not running"
+    fi
+
+    # 6. Health check
+    if health_check; then
+        print_success "Server healthy"
+    else
+        print_warning "Health check failed (server may be starting)"
+    fi
+
+    # 7. No dev takeover
+    if ! service_is_running; then
+        local dev_pid
+        dev_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$dev_pid" ]; then
+            print_error "Dev takeover active (PID: $dev_pid) — stop with: tron dev --stop"
+            all_ok=false
+        fi
+    fi
+
+    # 8. No stuck sentinel
+    local sentinel_file="$DEPLOY_DIR/restart-sentinel.json"
+    if [ -f "$sentinel_file" ]; then
+        local sentinel_status
+        sentinel_status=$(python3 -c "import json; print(json.load(open('$sentinel_file')).get('status',''))" 2>/dev/null || true)
+        if [ "$sentinel_status" = "restarting" ]; then
+            print_error "Stuck sentinel (status=restarting) — previous deploy may have failed"
+            all_ok=false
+        else
+            print_success "No stuck deploy sentinel"
+        fi
+    fi
+
+    # 9. Disk space
+    local free_mb
+    free_mb=$(df -m "$TRON_HOME" | awk 'NR==2 {print $4}')
+    if [ "$free_mb" -gt 500 ]; then
+        print_success "Disk space: ${free_mb}MB free"
+    elif [ "$free_mb" -gt 100 ]; then
+        print_warning "Low disk: ${free_mb}MB free"
+    else
+        print_error "Critical disk: ${free_mb}MB free"
+        all_ok=false
+    fi
+
+    echo ""
+    if $all_ok; then
+        print_success "Pre-flight passed. Ready to build and deploy."
+    else
+        print_error "Pre-flight FAILED. Fix issues before deploying."
+        return 1
+    fi
+}
+
 cmd_deploy() {
     local force=false
+    local ci_mode=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force) force=true; shift ;;
+            --ci)    ci_mode=true; shift ;;
             *) shift ;;
         esac
     done
@@ -770,6 +868,10 @@ cmd_deploy() {
 
     # Check for uncommitted changes
     if ! git -C "$PROJECT_DIR" diff-index --quiet HEAD -- 2>/dev/null; then
+        if $ci_mode; then
+            print_error "Uncommitted changes — cannot deploy in --ci mode"
+            exit 1
+        fi
         print_warning "You have uncommitted changes!"
         echo ""
         git -C "$PROJECT_DIR" status --short
@@ -784,6 +886,10 @@ cmd_deploy() {
     build_rust
 
     if ! run_tests; then
+        if $ci_mode; then
+            print_error "Tests failed — cannot deploy in --ci mode"
+            exit 1
+        fi
         print_error "Tests failed"
         if ! $force && ! confirm_action "Continue deployment anyway?"; then
             print_error "Deployment cancelled."
@@ -1635,7 +1741,8 @@ cmd_help() {
     echo "  status          Show service status"
     echo ""
     echo "Deployment:"
-    echo "  deploy          Build, test, deploy (--force to skip confirmations)"
+    echo "  preflight       Pre-deploy infrastructure check"
+    echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
     echo "  install         Initial setup (launchd + CLI)"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  uninstall       Remove service (preserves data)"
@@ -1671,6 +1778,7 @@ case "$1" in
     dev)       shift; cmd_dev "$@" ;;
     ci)        shift; cmd_ci "$@" ;;
     bench)     shift; cmd_bench "$@" ;;
+    preflight) cmd_preflight ;;
     deploy)    shift; cmd_deploy "$@" ;;
     install)   cmd_install ;;
     rollback)  shift; cmd_rollback "$@" ;;

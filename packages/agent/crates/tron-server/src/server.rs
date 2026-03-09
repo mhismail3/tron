@@ -134,6 +134,7 @@ impl TronServer {
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
             .route("/ws", get(ws_upgrade_handler))
+            .route("/health/deep", get(deep_health_handler))
             .route("/deploy/status", get(crate::deploy::status_handler))
             .route("/deploy/restart", post(crate::deploy::restart_handler))
             .with_state(state)
@@ -222,6 +223,25 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.broadcast.connection_count();
     let sessions = state.rpc_context.orchestrator.active_session_count();
     let resp = health::health_check(state.start_time, connections, sessions);
+    Json(resp)
+}
+
+/// GET /health/deep — Deep health check with per-subsystem results.
+async fn deep_health_handler(
+    State(state): State<AppState>,
+) -> Json<health::DeepHealthResponse> {
+    let connections = state.broadcast.connection_count();
+    let sessions = state.rpc_context.orchestrator.active_session_count();
+    let pool = state.rpc_context.event_store.pool();
+    let tron_home = tron_settings::tron_home_dir();
+    let resp = health::deep_health_check(
+        state.start_time,
+        connections,
+        sessions,
+        pool,
+        &tron_home,
+        &state.deploy_dir,
+    );
     Json(resp)
 }
 
@@ -500,5 +520,28 @@ mod tests {
 
         server.shutdown().shutdown();
         let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn deep_health_endpoint_returns_200() {
+        let server = make_server();
+        let app = server.router();
+
+        let req = Request::builder()
+            .uri("/health/deep")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 10_000)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(["healthy", "degraded", "unhealthy"]
+            .contains(&parsed["status"].as_str().unwrap()));
+        assert!(parsed["checks"].is_array());
+        assert!(parsed["uptimeSecs"].is_number());
     }
 }

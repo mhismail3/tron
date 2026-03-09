@@ -30,11 +30,42 @@ pub struct RestartSentinel {
     pub commit: String,
     /// Git commit hash of the previous deployment.
     pub previous_commit: String,
-    /// Current status ("pending", "completed", "failed").
+    /// Current status ("restarting", "completed", "rolled_back", "failed").
     pub status: String,
     /// ISO-8601 timestamp of when the restart completed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+    /// Who initiated the deploy (session ID or "cli").
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub initiated_by: Option<String>,
+    /// Self-test results (populated after startup self-test runs).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub self_test: Option<SelfTestResult>,
+}
+
+/// Result of the post-deploy startup self-test.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfTestResult {
+    /// Whether all checks passed.
+    pub passed: bool,
+    /// Individual check results.
+    pub checks: Vec<SelfTestCheck>,
+    /// ISO-8601 timestamp.
+    pub timestamp: String,
+}
+
+/// A single self-test check result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfTestCheck {
+    /// Check name (e.g. "database", "settings", "auth", "binary", "disk").
+    pub name: String,
+    /// Whether this check passed.
+    pub passed: bool,
+    /// Optional detail message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// GET /deploy/status response.
@@ -68,6 +99,8 @@ pub struct DeployRestartRequest {
     pub delay_ms: u64,
     /// Path to the new binary to deploy. Uses current binary if `None`.
     pub source_binary: Option<String>,
+    /// Session ID of the initiator (for audit trail).
+    pub session_id: Option<String>,
 }
 
 fn default_delay() -> u64 {
@@ -133,7 +166,10 @@ pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::R
     std::fs::write(artifacts_dir.join("restart-sentinel.json"), json)
 }
 
-/// Mark an existing sentinel as completed. Returns the updated sentinel.
+/// Mark a "restarting" sentinel as completed. Returns the updated sentinel
+/// only when a transition actually occurs (restarting → completed).
+/// Returns `None` if no sentinel exists or if it's already in a terminal state
+/// (completed, rolled_back, failed).
 pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSentinel>> {
     let path = artifacts_dir.join("restart-sentinel.json");
     let data = match std::fs::read_to_string(&path) {
@@ -143,8 +179,9 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
     };
     let mut sentinel: RestartSentinel =
         serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    if sentinel.status == "completed" {
-        return Ok(Some(sentinel));
+    if sentinel.status != "restarting" {
+        // Already in a terminal state — no transition needed
+        return Ok(None);
     }
     sentinel.status = "completed".to_string();
     sentinel.completed_at =
@@ -158,16 +195,316 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
 ///
 /// `artifacts_dir` should be `~/.tron/artifacts/deployment/`.
 pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
+    write_last_deployment_inner(artifacts_dir, sentinel, None)
+}
+
+/// Write `last-deployment.json` with an error message (for rollback/failure cases).
+pub fn write_last_deployment_with_error(
+    artifacts_dir: &Path,
+    sentinel: &RestartSentinel,
+    error: &str,
+) -> io::Result<()> {
+    write_last_deployment_inner(artifacts_dir, sentinel, Some(error))
+}
+
+fn write_last_deployment_inner(
+    artifacts_dir: &Path,
+    sentinel: &RestartSentinel,
+    error: Option<&str>,
+) -> io::Result<()> {
     let json = json!({
         "status": sentinel.status,
         "timestamp": sentinel.completed_at.as_deref().unwrap_or(&sentinel.timestamp),
         "commit": sentinel.commit,
         "previousCommit": sentinel.previous_commit,
-        "error": null,
+        "initiatedBy": sentinel.initiated_by,
+        "selfTest": sentinel.self_test,
+        "error": error,
     });
     let pretty = serde_json::to_string_pretty(&json).map_err(io::Error::other)?;
     std::fs::create_dir_all(artifacts_dir)?;
     std::fs::write(artifacts_dir.join("last-deployment.json"), pretty)
+}
+
+// ── Self-test & auto-rollback ─────────────────────────────────────────────
+
+/// Run post-deploy self-test checks against critical infrastructure.
+///
+/// Checks: database connectivity, settings parsability, auth file existence,
+/// binary existence + executable bit, and available disk space.
+pub fn run_self_test(
+    db_path: &Path,
+    settings_path: &Path,
+    auth_path: &Path,
+    binary_path: &Path,
+) -> SelfTestResult {
+    let mut checks = Vec::new();
+
+    // 1. Database: open + SELECT 1 + verify events table exists
+    checks.push(check_database(db_path));
+
+    // 2. Settings: read + parse
+    checks.push(check_settings(settings_path));
+
+    // 3. Auth: file exists with content
+    checks.push(check_auth(auth_path));
+
+    // 4. Binary: exists + executable
+    checks.push(check_binary(binary_path));
+
+    // 5. Disk space
+    checks.push(check_disk_space(binary_path));
+
+    let passed = checks.iter().all(|c| c.passed);
+    SelfTestResult {
+        passed,
+        checks,
+        timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    }
+}
+
+fn check_database(db_path: &Path) -> SelfTestCheck {
+    if !db_path.exists() {
+        return SelfTestCheck {
+            name: "database".into(),
+            passed: false,
+            detail: Some(format!("not found: {}", db_path.display())),
+        };
+    }
+    match rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => {
+            // Verify basic connectivity
+            if let Err(e) = conn.execute_batch("SELECT 1") {
+                return SelfTestCheck {
+                    name: "database".into(),
+                    passed: false,
+                    detail: Some(format!("SELECT 1 failed: {e}")),
+                };
+            }
+            // Verify events table exists
+            let has_events: bool = conn
+                .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'")
+                .and_then(|mut s| s.exists([]))
+                .unwrap_or(false);
+            if !has_events {
+                return SelfTestCheck {
+                    name: "database".into(),
+                    passed: false,
+                    detail: Some("events table missing".into()),
+                };
+            }
+            SelfTestCheck {
+                name: "database".into(),
+                passed: true,
+                detail: None,
+            }
+        }
+        Err(e) => SelfTestCheck {
+            name: "database".into(),
+            passed: false,
+            detail: Some(format!("open failed: {e}")),
+        },
+    }
+}
+
+fn check_settings(settings_path: &Path) -> SelfTestCheck {
+    match std::fs::read_to_string(settings_path) {
+        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(_) => SelfTestCheck {
+                name: "settings".into(),
+                passed: true,
+                detail: None,
+            },
+            Err(e) => SelfTestCheck {
+                name: "settings".into(),
+                passed: false,
+                detail: Some(format!("parse error: {e}")),
+            },
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => SelfTestCheck {
+            name: "settings".into(),
+            passed: true,
+            detail: Some("not found (using defaults)".into()),
+        },
+        Err(e) => SelfTestCheck {
+            name: "settings".into(),
+            passed: false,
+            detail: Some(format!("read error: {e}")),
+        },
+    }
+}
+
+fn check_auth(auth_path: &Path) -> SelfTestCheck {
+    match std::fs::read_to_string(auth_path) {
+        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(v) => {
+                let key_count = v.as_object().map_or(0, |o| o.len());
+                if key_count == 0 {
+                    SelfTestCheck {
+                        name: "auth".into(),
+                        passed: false,
+                        detail: Some("auth.json is empty".into()),
+                    }
+                } else {
+                    SelfTestCheck {
+                        name: "auth".into(),
+                        passed: true,
+                        detail: Some(format!("{key_count} provider(s)")),
+                    }
+                }
+            }
+            Err(e) => SelfTestCheck {
+                name: "auth".into(),
+                passed: false,
+                detail: Some(format!("parse error: {e}")),
+            },
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => SelfTestCheck {
+            name: "auth".into(),
+            passed: false,
+            detail: Some("auth.json not found".into()),
+        },
+        Err(e) => SelfTestCheck {
+            name: "auth".into(),
+            passed: false,
+            detail: Some(format!("read error: {e}")),
+        },
+    }
+}
+
+fn check_binary(binary_path: &Path) -> SelfTestCheck {
+    match std::fs::metadata(binary_path) {
+        Ok(meta) => {
+            let mode = meta.permissions().mode();
+            if mode & 0o111 == 0 {
+                SelfTestCheck {
+                    name: "binary".into(),
+                    passed: false,
+                    detail: Some("not executable".into()),
+                }
+            } else {
+                SelfTestCheck {
+                    name: "binary".into(),
+                    passed: true,
+                    detail: None,
+                }
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => SelfTestCheck {
+            name: "binary".into(),
+            passed: false,
+            detail: Some("binary not found".into()),
+        },
+        Err(e) => SelfTestCheck {
+            name: "binary".into(),
+            passed: false,
+            detail: Some(format!("stat error: {e}")),
+        },
+    }
+}
+
+fn check_disk_space(reference_path: &Path) -> SelfTestCheck {
+    let dir = reference_path
+        .parent()
+        .unwrap_or(Path::new("/"))
+        .to_string_lossy();
+    // Use `df -m` to get available space in MB
+    match std::process::Command::new("df")
+        .args(["-m", &dir])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            // Second line, fourth column = available MB
+            let free_mb: Option<u64> = text
+                .lines()
+                .nth(1)
+                .and_then(|line| line.split_whitespace().nth(3))
+                .and_then(|s| s.parse().ok());
+            match free_mb {
+                Some(mb) if mb < 100 => SelfTestCheck {
+                    name: "disk".into(),
+                    passed: false,
+                    detail: Some(format!("{mb}MB free (< 100MB)")),
+                },
+                Some(mb) => SelfTestCheck {
+                    name: "disk".into(),
+                    passed: true,
+                    detail: Some(format!("{mb}MB free")),
+                },
+                None => SelfTestCheck {
+                    name: "disk".into(),
+                    passed: true,
+                    detail: Some("could not parse df output (non-fatal)".into()),
+                },
+            }
+        }
+        _ => SelfTestCheck {
+            name: "disk".into(),
+            passed: true,
+            detail: Some("df command failed (non-fatal)".into()),
+        },
+    }
+}
+
+/// Auto-rollback: restore backup binary, update sentinel, and exit.
+///
+/// This function never returns — it calls `std::process::exit(43)`.
+pub fn auto_rollback(artifacts_dir: &Path, binary_path: &Path, reason: &str) -> ! {
+    let backup_path = artifacts_dir.join("tron.bak");
+
+    if backup_path.exists() {
+        // Restore backup
+        if let Err(e) = std::fs::copy(&backup_path, binary_path) {
+            eprintln!("DEPLOY SAFETY: backup restore failed: {e}");
+        } else if let Err(e) =
+            std::fs::set_permissions(binary_path, std::fs::Permissions::from_mode(0o755))
+        {
+            eprintln!("DEPLOY SAFETY: chmod failed after restore: {e}");
+        }
+
+        // Update sentinel to rolled_back
+        if let Some(mut sentinel) = read_sentinel(artifacts_dir) {
+            sentinel.status = "rolled_back".into();
+            sentinel.completed_at =
+                Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+            let _ = write_sentinel(artifacts_dir, &sentinel);
+            let _ = write_last_deployment_with_error(artifacts_dir, &sentinel, reason);
+        }
+    } else {
+        eprintln!("DEPLOY SAFETY: no backup available for rollback");
+        // Mark sentinel as failed to break deploy logic on next start
+        if let Some(mut sentinel) = read_sentinel(artifacts_dir) {
+            sentinel.status = "failed".into();
+            sentinel.completed_at =
+                Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+            let _ = write_sentinel(artifacts_dir, &sentinel);
+            let _ = write_last_deployment_with_error(artifacts_dir, &sentinel, reason);
+        }
+    }
+
+    // Clean up attempt counter
+    let _ = std::fs::remove_file(artifacts_dir.join("startup-attempts"));
+
+    // Write pending notification for the next startup to send
+    if let Some(sentinel) = read_sentinel(artifacts_dir) {
+        let notification = json!({
+            "type": if backup_path.exists() { "deploy.rolled_back" } else { "deploy.failed" },
+            "commit": sentinel.commit,
+            "previousCommit": sentinel.previous_commit,
+            "reason": reason,
+        });
+        let _ = std::fs::write(
+            artifacts_dir.join("deploy-notification-pending.json"),
+            serde_json::to_string_pretty(&notification).unwrap_or_default(),
+        );
+    }
+
+    eprintln!("DEPLOY SAFETY: auto-rollback complete: {reason}");
+    std::process::exit(43)
 }
 
 /// Resolve the workspace root from `TRON_REPO_ROOT` environment variable.
@@ -365,6 +702,8 @@ pub async fn restart_handler(
         previous_commit: previous_commit.clone(),
         status: "restarting".to_string(),
         completed_at: None,
+        initiated_by: req.session_id.or_else(|| Some("api".to_string())),
+        self_test: None,
     };
     if let Err(e) = write_sentinel(deploy_dir, &sentinel) {
         warn!(error = %e, "failed to write restart sentinel (non-fatal)");
@@ -445,6 +784,8 @@ mod tests {
             previous_commit: "def456".into(),
             status: "restarting".into(),
             completed_at: None,
+            initiated_by: None,
+            self_test: None,
         }
     }
 
@@ -650,19 +991,29 @@ mod tests {
     }
 
     #[test]
-    fn complete_sentinel_already_completed() {
+    fn complete_sentinel_already_completed_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = sample_sentinel();
         s.status = "completed".into();
         s.completed_at = Some("2026-02-23T10:05:00.000Z".into());
         write_sentinel(dir.path(), &s).unwrap();
 
-        let result = complete_sentinel(dir.path()).unwrap().unwrap();
-        assert_eq!(result.status, "completed");
-        assert_eq!(
-            result.completed_at.as_deref(),
-            Some("2026-02-23T10:05:00.000Z")
-        );
+        // Already terminal — no transition, returns None
+        assert!(complete_sentinel(dir.path()).unwrap().is_none());
+
+        // Sentinel on disk unchanged
+        let on_disk = read_sentinel(dir.path()).unwrap();
+        assert_eq!(on_disk.status, "completed");
+    }
+
+    #[test]
+    fn complete_sentinel_rolled_back_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = sample_sentinel();
+        s.status = "rolled_back".into();
+        write_sentinel(dir.path(), &s).unwrap();
+
+        assert!(complete_sentinel(dir.path()).unwrap().is_none());
     }
 
     #[test]
@@ -1093,5 +1444,199 @@ mod tests {
         assert_eq!(after.modified().unwrap(), before_modified);
 
         server.shutdown().shutdown();
+    }
+
+    // ── Self-test tests ───────────────────────────────────────────────
+
+    #[test]
+    fn self_test_all_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("tron.db");
+        let settings = dir.path().join("settings.json");
+        let auth = dir.path().join("auth.json");
+        let binary = dir.path().join("tron");
+
+        // Create a valid SQLite DB with events table
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE events (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY);",
+        )
+        .unwrap();
+        drop(conn);
+
+        std::fs::write(&settings, r#"{"server": {}}"#).unwrap();
+        std::fs::write(&auth, r#"{"anthropic": "sk-test"}"#).unwrap();
+        std::fs::write(&binary, b"#!/bin/sh").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = run_self_test(&db, &settings, &auth, &binary);
+        assert!(result.passed);
+        assert!(result.checks.iter().all(|c| c.passed));
+    }
+
+    #[test]
+    fn self_test_missing_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = run_self_test(
+            &dir.path().join("missing.db"),
+            &dir.path().join("s.json"),
+            &dir.path().join("a.json"),
+            &dir.path().join("bin"),
+        );
+        assert!(!result.passed);
+        assert!(!result.checks[0].passed); // database
+    }
+
+    #[test]
+    fn self_test_missing_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("tron.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE events (id TEXT); CREATE TABLE sessions (id TEXT);")
+            .unwrap();
+        drop(conn);
+
+        let binary = dir.path().join("tron");
+        std::fs::write(&binary, b"bin").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = run_self_test(
+            &db,
+            &dir.path().join("missing.json"),
+            &dir.path().join("missing-auth.json"),
+            &binary,
+        );
+        assert!(!result.passed);
+        let auth_check = result.checks.iter().find(|c| c.name == "auth").unwrap();
+        assert!(!auth_check.passed);
+    }
+
+    #[test]
+    fn self_test_non_executable_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("tron.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE events (id TEXT); CREATE TABLE sessions (id TEXT);")
+            .unwrap();
+        drop(conn);
+
+        let settings = dir.path().join("settings.json");
+        let auth = dir.path().join("auth.json");
+        let binary = dir.path().join("tron");
+        std::fs::write(&settings, "{}").unwrap();
+        std::fs::write(&auth, r#"{"a":"b"}"#).unwrap();
+        std::fs::write(&binary, b"bin").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let result = run_self_test(&db, &settings, &auth, &binary);
+        assert!(!result.passed);
+        let bin_check = result.checks.iter().find(|c| c.name == "binary").unwrap();
+        assert!(!bin_check.passed);
+    }
+
+    #[test]
+    fn self_test_result_serialization() {
+        let result = SelfTestResult {
+            passed: true,
+            checks: vec![SelfTestCheck {
+                name: "database".into(),
+                passed: true,
+                detail: None,
+            }],
+            timestamp: "2026-03-09T10:00:00.000Z".into(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let back: SelfTestResult = serde_json::from_str(&json).unwrap();
+        assert!(back.passed);
+        assert_eq!(back.checks.len(), 1);
+    }
+
+    #[test]
+    fn sentinel_with_new_fields_roundtrip() {
+        let s = RestartSentinel {
+            action: "deploy".into(),
+            timestamp: "2026-03-09T10:00:00.000Z".into(),
+            commit: "abc123".into(),
+            previous_commit: "def456".into(),
+            status: "completed".into(),
+            completed_at: Some("2026-03-09T10:01:00.000Z".into()),
+            initiated_by: Some("session-123".into()),
+            self_test: Some(SelfTestResult {
+                passed: true,
+                checks: vec![SelfTestCheck {
+                    name: "database".into(),
+                    passed: true,
+                    detail: None,
+                }],
+                timestamp: "2026-03-09T10:00:30.000Z".into(),
+            }),
+        };
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let back: RestartSentinel = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.initiated_by.as_deref(), Some("session-123"));
+        assert!(back.self_test.unwrap().passed);
+    }
+
+    #[test]
+    fn sentinel_backward_compatible_without_new_fields() {
+        // Old sentinel JSON without initiatedBy or selfTest
+        let json = r#"{
+            "action": "deploy",
+            "timestamp": "2026-02-23T10:00:00.000Z",
+            "commit": "abc123",
+            "previousCommit": "def456",
+            "status": "completed"
+        }"#;
+        let s: RestartSentinel = serde_json::from_str(json).unwrap();
+        assert!(s.initiated_by.is_none());
+        assert!(s.self_test.is_none());
+    }
+
+    #[test]
+    fn restart_request_with_session_id() {
+        let req: DeployRestartRequest =
+            serde_json::from_str(r#"{"sessionId": "sess-abc"}"#).unwrap();
+        assert_eq!(req.session_id.as_deref(), Some("sess-abc"));
+    }
+
+    #[test]
+    fn restart_request_without_session_id() {
+        let req: DeployRestartRequest = serde_json::from_str("{}").unwrap();
+        assert!(req.session_id.is_none());
+    }
+
+    #[test]
+    fn write_last_deployment_with_error_includes_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = RestartSentinel {
+            action: "deploy".into(),
+            timestamp: "2026-03-09T10:00:00.000Z".into(),
+            commit: "abc123".into(),
+            previous_commit: "def456".into(),
+            status: "rolled_back".into(),
+            completed_at: Some("2026-03-09T10:01:00.000Z".into()),
+            initiated_by: Some("api".into()),
+            self_test: None,
+        };
+        write_last_deployment_with_error(dir.path(), &s, "self-test failed: database").unwrap();
+        let contents =
+            std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
+        let v: Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(v["status"], "rolled_back");
+        assert_eq!(v["error"], "self-test failed: database");
+        assert_eq!(v["initiatedBy"], "api");
+    }
+
+    #[test]
+    fn write_last_deployment_no_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = sample_sentinel();
+        s.status = "completed".into();
+        s.completed_at = Some("2026-03-09T10:01:00.000Z".into());
+        write_last_deployment(dir.path(), &s).unwrap();
+        let contents =
+            std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
+        let v: Value = serde_json::from_str(&contents).unwrap();
+        assert!(v["error"].is_null());
     }
 }

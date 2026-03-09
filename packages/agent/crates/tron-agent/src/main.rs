@@ -359,6 +359,42 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
+    // INVARIANT: Deploy crash-loop protection runs FIRST (pure filesystem, no dependencies).
+    // If the previous deploy crashed the process before self-test could run, this catches it
+    // after MAX_DEPLOY_STARTUP_ATTEMPTS and auto-rolls back to the backup binary.
+    {
+        const MAX_DEPLOY_STARTUP_ATTEMPTS: u32 = 3;
+        let deploy_dir = tron_settings::deploy_dir();
+        let sentinel = tron_server::deploy::read_sentinel(&deploy_dir);
+
+        if let Some(ref s) = sentinel {
+            if s.status == "restarting" {
+                let attempts_path = deploy_dir.join("startup-attempts");
+                let attempt = std::fs::read_to_string(&attempts_path)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                    .unwrap_or(0);
+
+                if attempt >= MAX_DEPLOY_STARTUP_ATTEMPTS {
+                    eprintln!(
+                        "DEPLOY SAFETY: {} startup attempts exceeded, auto-rolling back",
+                        MAX_DEPLOY_STARTUP_ATTEMPTS
+                    );
+                    let binary_path = tron_settings::tron_home_dir().join("tron");
+                    tron_server::deploy::auto_rollback(
+                        &deploy_dir,
+                        &binary_path,
+                        &format!("exceeded {} startup attempts", MAX_DEPLOY_STARTUP_ATTEMPTS),
+                    );
+                    // auto_rollback never returns
+                }
+
+                let _ = std::fs::create_dir_all(&deploy_dir);
+                let _ = std::fs::write(&attempts_path, (attempt + 1).to_string());
+            }
+        }
+    }
+
     // Database (events + tasks share one SQLite file) — set up before logging
     // so that tracing events are persisted from the start.
     let db_path = resolve_production_db_path(args.db_path)?;
@@ -558,6 +594,9 @@ async fn main() -> Result<()> {
     let device_broker_cell: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>> =
         Arc::new(std::sync::OnceLock::new());
 
+    // Clone before move into ToolRegistryConfig
+    let apns_for_deploy = apns_service.clone();
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -737,6 +776,8 @@ async fn main() -> Result<()> {
 
     // RPC context
     let session_manager_for_startup = session_manager.clone();
+    let settings_path_for_selftest = settings_path.clone();
+    let task_pool_for_deploy = task_pool.clone();
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
         session_manager,
@@ -817,6 +858,48 @@ async fn main() -> Result<()> {
     // Start cron scheduler (scheduler loop + config file watcher)
     let (cron_sched_handle, cron_watcher_handle) = cron_scheduler.clone().start();
 
+    // Post-deploy self-test (after DB/settings/APNS init, before port binding).
+    // If self-test fails, auto-rollback to backup binary immediately.
+    {
+        let deploy_dir = tron_settings::deploy_dir();
+        if let Some(sentinel) = tron_server::deploy::read_sentinel(&deploy_dir) {
+            if sentinel.status == "restarting" {
+                let auth = auth_path();
+                let binary_path = tron_settings::tron_home_dir().join("tron");
+                let test_result = tron_server::deploy::run_self_test(
+                    &db_path, &settings_path_for_selftest, &auth, &binary_path,
+                );
+
+                if !test_result.passed {
+                    let failed: Vec<&str> = test_result
+                        .checks
+                        .iter()
+                        .filter(|c| !c.passed)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    let reason = format!("self-test failed: {}", failed.join(", "));
+                    eprintln!("DEPLOY SAFETY: {reason}");
+                    tron_server::deploy::auto_rollback(&deploy_dir, &binary_path, &reason);
+                    // auto_rollback never returns
+                }
+
+                tracing::info!(
+                    checks = test_result.checks.len(),
+                    "post-deploy self-test passed"
+                );
+
+                // Clear attempt counter — self-test passed
+                let _ = std::fs::remove_file(deploy_dir.join("startup-attempts"));
+
+                // Store self-test result in sentinel for audit
+                if let Some(mut s) = tron_server::deploy::read_sentinel(&deploy_dir) {
+                    s.self_test = Some(test_result);
+                    let _ = tron_server::deploy::write_sentinel(&deploy_dir, &s);
+                }
+            }
+        }
+    }
+
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
 
     tracing::info!("Tron agent listening on http://{addr} ({method_count} RPC methods registered)");
@@ -843,12 +926,110 @@ async fn main() -> Result<()> {
                     previous = sentinel.previous_commit.as_str(),
                     "post-deploy restart completed successfully"
                 );
-                if let Err(e) = tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
+                if let Err(e) =
+                    tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel)
+                {
                     tracing::warn!(error = %e, "failed to write last-deployment.json");
+                }
+
+                // Send APNS push notification for successful deploy
+                if let Some(ref apns) = apns_for_deploy {
+                    let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
+                    let tokens: Vec<String> = task_pool_for_deploy
+                        .get()
+                        .ok()
+                        .and_then(|conn| {
+                            conn.prepare(
+                                "SELECT device_token FROM device_tokens WHERE is_active = 1",
+                            )
+                            .ok()
+                            .and_then(|mut stmt| {
+                                stmt.query_map([], |row| row.get::<_, String>(0))
+                                    .ok()
+                                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                            })
+                        })
+                        .unwrap_or_default();
+                    if !tokens.is_empty() {
+                        let notification =
+                            tron_server::platform::apns::ApnsNotification {
+                                title: "Deploy Complete".into(),
+                                body: format!("Tron updated to {short_commit}"),
+                                data: std::collections::HashMap::from([
+                                    ("type".into(), "deploy.completed".into()),
+                                    ("commit".into(), sentinel.commit.clone()),
+                                ]),
+                                priority: "high".into(),
+                                sound: None,
+                                badge: None,
+                                thread_id: None,
+                            };
+                        let apns = apns.clone();
+                        let _ = tokio::spawn(async move {
+                            let _ = apns.send_to_many(&tokens, &notification).await;
+                        });
+                    }
                 }
             }
             Ok(None) => {}
             Err(e) => tracing::warn!(error = %e, "failed to process restart sentinel"),
+        }
+
+        // Send pending rollback notification (written by auto_rollback on previous startup)
+        let pending_path = deploy_dir.join("deploy-notification-pending.json");
+        if pending_path.exists() {
+            if let Some(ref apns) = apns_for_deploy {
+                if let Ok(content) = std::fs::read_to_string(&pending_path) {
+                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let tokens: Vec<String> = task_pool_for_deploy
+                            .get()
+                            .ok()
+                            .and_then(|conn| {
+                                conn.prepare(
+                                    "SELECT device_token FROM device_tokens WHERE is_active = 1",
+                                )
+                                .ok()
+                                .and_then(|mut stmt| {
+                                    stmt.query_map([], |row| row.get::<_, String>(0))
+                                        .ok()
+                                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                                })
+                            })
+                            .unwrap_or_default();
+                        if !tokens.is_empty() {
+                            let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
+                            let reason =
+                                data["reason"].as_str().unwrap_or("unknown");
+                            let notification =
+                                tron_server::platform::apns::ApnsNotification {
+                                    title: "Deploy Rolled Back".into(),
+                                    body: format!("Tron restored: {reason}"),
+                                    data: std::collections::HashMap::from([
+                                        ("type".into(), ntype.into()),
+                                        (
+                                            "commit".into(),
+                                            data["commit"]
+                                                .as_str()
+                                                .unwrap_or("unknown")
+                                                .into(),
+                                        ),
+                                        ("reason".into(), reason.into()),
+                                    ]),
+                                    priority: "high".into(),
+                                    sound: None,
+                                    badge: None,
+                                    thread_id: None,
+                                };
+                            let apns = apns.clone();
+                            let _ = tokio::spawn(async move {
+                                let _ =
+                                    apns.send_to_many(&tokens, &notification).await;
+                            });
+                        }
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(&pending_path);
         }
     }
 
