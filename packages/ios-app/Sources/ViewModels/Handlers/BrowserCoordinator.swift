@@ -52,6 +52,11 @@ final class BrowserCoordinator {
     ///   - frameData: Base64-encoded JPEG frame data
     ///   - context: The context providing access to state and dependencies
     func handleBrowserFrame(frameData: String, context: BrowserEventContext) {
+        // Reject frames after the session has been explicitly closed (abort/completion).
+        // Late screencast frames buffered in the WebSocket pipeline must not
+        // re-establish browserStatus/browserFrame and resurrect the globe icon.
+        guard !context.browserState.isClosed else { return }
+
         // Support data URI prefixes and whitespace/newlines in base64 payloads.
         let cleanedFrameData: String
         if let commaIndex = frameData.firstIndex(of: ","),
@@ -141,12 +146,16 @@ final class BrowserCoordinator {
     /// - Parameter context: The context providing access to state and dependencies
     func closeBrowserSession(context: BrowserEventContext) async {
         context.logInfo("Closing browser session")
-        // Stop streaming first (handles its own errors internally)
-        await stopBrowserStream(context: context)
-        // Clear all browser state
-        context.browserState.browserFrame = nil
-        context.browserState.browserStatus = nil
-        context.browserState.showBrowserWindow = false
+        // Clear all browser state immediately so UI updates (globe icon disappears).
+        // This also sets isClosed=true, preventing late frames from re-establishing state.
+        context.browserState.clearAll()
+        // Best-effort: tell the server to stop the screencast stream.
+        guard context.currentSessionId != nil else { return }
+        do {
+            try await context.stopBrowserStreamRPC()
+        } catch {
+            context.logDebug("Failed to stop browser stream during close: \(error)")
+        }
         context.logDebug("Browser session closed successfully")
     }
 

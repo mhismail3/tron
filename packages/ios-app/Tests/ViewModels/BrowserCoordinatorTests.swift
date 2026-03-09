@@ -246,6 +246,60 @@ final class BrowserCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.browserState.browserFrame)
         XCTAssertNil(mockContext.browserState.browserStatus)
         XCTAssertFalse(mockContext.browserState.showBrowserWindow)
+        XCTAssertTrue(mockContext.browserState.isClosed)
+    }
+
+    func testCloseBrowserSessionClearsStateBeforeRPC() async {
+        // Given: Active browser state
+        mockContext.browserState.browserFrame = UIImage()
+        mockContext.browserState.browserStatus = BrowserGetStatusResult(
+            hasBrowser: true,
+            isStreaming: true,
+            currentUrl: nil
+        )
+
+        // When: Closing browser session
+        // (clearAll runs before stopBrowserStreamRPC)
+        await coordinator.closeBrowserSession(context: mockContext)
+
+        // Then: Globe should not be visible
+        XCTAssertFalse(coordinator.hasBrowserSession(context: mockContext))
+    }
+
+    func testLateFrameAfterCloseIsIgnored() async {
+        // Given: Browser was active then closed
+        let testImageData = createTestJPEGImage()
+        let frameData = testImageData.base64EncodedString()
+        coordinator.handleBrowserFrame(frameData: frameData, context: mockContext)
+        XCTAssertNotNil(mockContext.browserState.browserFrame)
+
+        await coordinator.closeBrowserSession(context: mockContext)
+        XCTAssertNil(mockContext.browserState.browserFrame)
+        XCTAssertTrue(mockContext.browserState.isClosed)
+
+        // When: A late frame arrives after close
+        coordinator.handleBrowserFrame(frameData: frameData, context: mockContext)
+
+        // Then: Frame should be rejected — state stays cleared
+        XCTAssertNil(mockContext.browserState.browserFrame)
+        XCTAssertNil(mockContext.browserState.browserStatus)
+        XCTAssertFalse(coordinator.hasBrowserSession(context: mockContext))
+    }
+
+    func testResetForNewTurnAllowsFramesAgain() async {
+        // Given: Browser was closed
+        await coordinator.closeBrowserSession(context: mockContext)
+        XCTAssertTrue(mockContext.browserState.isClosed)
+
+        // When: New turn starts
+        mockContext.browserState.resetForNewTurn()
+
+        // Then: Frames should be accepted again
+        XCTAssertFalse(mockContext.browserState.isClosed)
+        let testImageData = createTestJPEGImage()
+        let frameData = testImageData.base64EncodedString()
+        coordinator.handleBrowserFrame(frameData: frameData, context: mockContext)
+        XCTAssertNotNil(mockContext.browserState.browserFrame)
     }
 
     // MARK: - Browser API Tests

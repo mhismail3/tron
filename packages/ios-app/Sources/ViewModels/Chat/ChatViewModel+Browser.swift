@@ -70,6 +70,11 @@ extension ChatViewModel {
 
     /// Close the browser session entirely (stops streaming and clears state)
     func closeBrowserSession() {
+        // Clear state immediately so globe icon disappears without waiting for RPC.
+        // Also sets isClosed=true, preventing late screencast frames from
+        // re-establishing browserStatus and resurrecting the globe.
+        browserState.clearAll()
+        // Async server-side cleanup (best-effort)
         Task {
             await browserCoordinator.closeBrowserSession(context: self)
         }

@@ -32,6 +32,10 @@ final class BrowserState {
     /// URL to open in native Safari (set by OpenBrowser tool)
     var safariURL: URL?
 
+    /// Whether the browser session has been explicitly closed (abort/completion).
+    /// Prevents late screencast frames from re-establishing browser state.
+    var isClosed = false
+
     /// Whether browser toolbar button should be visible
     /// Shows if we have an active browser status OR a browser frame to display
     var hasBrowserSession: Bool {
@@ -43,6 +47,7 @@ final class BrowserState {
     /// Reset turn-specific state (called at turn start)
     func resetForNewTurn() {
         dismissal = .none
+        isClosed = false
     }
 
     /// Clear all browser state (called when browser session closes)
@@ -52,5 +57,6 @@ final class BrowserState {
         showBrowserWindow = false
         safariURL = nil
         dismissal = .none
+        isClosed = true
     }
 }
