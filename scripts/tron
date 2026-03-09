@@ -938,6 +938,21 @@ cmd_deploy() {
     new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
     echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
 
+    # Write restart sentinel so the new binary runs self-test + sends APNS notification
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    cat > "$DEPLOY_DIR/restart-sentinel.json" <<SENTINEL
+{
+  "action": "deploy",
+  "timestamp": "$now",
+  "commit": "$new_commit",
+  "previousCommit": "$previous_commit",
+  "status": "restarting",
+  "completedAt": null,
+  "initiatedBy": "cli"
+}
+SENTINEL
+
     # Start service
     print_status "Starting service..."
     launchctl load "$PLIST_PATH"
