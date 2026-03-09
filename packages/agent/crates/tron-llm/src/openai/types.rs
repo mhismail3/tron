@@ -196,7 +196,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             family: "GPT-5.4",
             tier: "flagship",
             api_endpoint: ApiEndpoint::Platform,
-            context_window: 1_000_000,
+            context_window: 272_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
@@ -219,7 +219,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             family: "GPT-5.4",
             tier: "flagship",
             api_endpoint: ApiEndpoint::Platform,
-            context_window: 1_000_000,
+            context_window: 272_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
@@ -696,7 +696,7 @@ mod tests {
     #[test]
     fn model_gpt_54() {
         let m = get_openai_model("gpt-5.4").unwrap();
-        assert_eq!(m.context_window, 1_000_000);
+        assert_eq!(m.context_window, 272_000);
         assert_eq!(m.max_output, 128_000);
         assert!(m.supports_reasoning);
         assert!(m.supports_tools);
@@ -712,7 +712,7 @@ mod tests {
     #[test]
     fn model_gpt_54_pro() {
         let m = get_openai_model("gpt-5.4-pro").unwrap();
-        assert_eq!(m.context_window, 1_000_000);
+        assert_eq!(m.context_window, 272_000);
         assert_eq!(m.max_output, 128_000);
         assert!(m.supports_tool_search);
         assert!(m.supports_computer_use);

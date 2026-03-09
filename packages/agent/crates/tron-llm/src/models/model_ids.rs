@@ -41,10 +41,10 @@ pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 // OpenAI / GPT (Codex)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// GPT 5.4 — latest `OpenAI` flagship with 1M context and tool search.
+/// GPT 5.4 — latest `OpenAI` flagship with 272K context (1M with extended context opt-in) and tool search.
 pub const GPT_5_4: &str = "gpt-5.4";
 
-/// GPT 5.4 Pro — highest capability tier with 1M context and tool search.
+/// GPT 5.4 Pro — highest capability tier with 272K context (1M with extended context opt-in) and tool search.
 pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
 
 /// GPT 5.3 Codex — `OpenAI` flagship.
