@@ -98,6 +98,27 @@ pub fn model_supports_images(model_id: &str) -> bool {
     true
 }
 
+/// Get the context window size (in tokens) for a model.
+///
+/// Looks up the provider-specific model registry (authoritative source of truth).
+/// Unknown models default to 200,000 (Anthropic-equivalent fallback).
+pub fn model_context_window(model_id: &str) -> u64 {
+    let bare = strip_provider_prefix(model_id);
+    if let Some(m) = get_claude_model(bare) {
+        return m.context_window;
+    }
+    if let Some(m) = get_openai_model(bare) {
+        return m.context_window;
+    }
+    if let Some(m) = get_gemini_model(bare) {
+        return m.context_window;
+    }
+    if let Some(m) = get_minimax_model(bare) {
+        return m.context_window;
+    }
+    200_000
+}
+
 /// Get all known model IDs across all providers.
 pub fn all_model_ids() -> Vec<&'static str> {
     let mut ids = Vec::with_capacity(
@@ -376,6 +397,48 @@ mod tests {
     #[test]
     fn minimax_no_image_support() {
         assert!(!model_supports_images("MiniMax-M2.5"));
+    }
+
+    // ── model_context_window ─────────────────────────────────────────────
+
+    #[test]
+    fn context_window_anthropic() {
+        assert_eq!(model_context_window(CLAUDE_OPUS_4_6), 200_000);
+    }
+
+    #[test]
+    fn context_window_openai() {
+        assert_eq!(model_context_window(GPT_5_3_CODEX), 400_000);
+    }
+
+    #[test]
+    fn context_window_gpt_54() {
+        assert_eq!(model_context_window(GPT_5_4), 272_000);
+    }
+
+    #[test]
+    fn context_window_gpt_54_pro() {
+        assert_eq!(model_context_window(GPT_5_4_PRO), 272_000);
+    }
+
+    #[test]
+    fn context_window_google() {
+        assert_eq!(model_context_window(GEMINI_2_5_FLASH), 1_048_576);
+    }
+
+    #[test]
+    fn context_window_minimax() {
+        assert_eq!(model_context_window(MINIMAX_M2_5), 204_800);
+    }
+
+    #[test]
+    fn context_window_prefixed_model() {
+        assert_eq!(model_context_window("openai/gpt-5.4"), 272_000);
+    }
+
+    #[test]
+    fn context_window_unknown_defaults_200k() {
+        assert_eq!(model_context_window("unknown-model"), 200_000);
     }
 
     // ── all_model_ids ────────────────────────────────────────────────────

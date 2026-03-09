@@ -50,8 +50,8 @@ pub use health::ProviderHealthTracker;
 pub use id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 pub use models::model_ids;
 pub use models::registry::{
-    all_model_ids, detect_provider_from_model, is_model_supported, model_supports_images,
-    strip_provider_prefix,
+    all_model_ids, detect_provider_from_model, is_model_supported, model_context_window,
+    model_supports_images, strip_provider_prefix,
 };
 pub use provider::{
     AnthropicEffortLevel, Provider, ProviderError, ProviderFactory, ProviderResult,

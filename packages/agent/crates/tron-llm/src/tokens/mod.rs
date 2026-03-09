@@ -6,5 +6,5 @@ pub mod pricing;
 pub mod types;
 
 pub use errors::{Result, TokenError};
-pub use pricing::{calculate_cost, get_context_limit};
+pub use pricing::calculate_cost;
 pub use types::{PricingTier, TokenMeta, TokenRecord, TokenSource, TokenState};

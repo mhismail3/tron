@@ -138,25 +138,6 @@ pub fn detect_provider(model: &str) -> tron_core::messages::Provider {
     }
 }
 
-/// Get the default context window limit for a model.
-#[must_use]
-pub fn get_context_limit(model: &str) -> u64 {
-    let m = model.to_lowercase();
-    if m.contains("minimax") {
-        204_800
-    } else if m.contains("claude") {
-        200_000
-    } else if m.contains("gemini") {
-        1_048_576
-    } else if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
-        200_000
-    } else if m.contains("gpt-4") {
-        128_000
-    } else {
-        200_000
-    }
-}
-
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /// Create an Anthropic pricing tier.
@@ -574,11 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn minimax_context_limit() {
-        assert_eq!(get_context_limit("MiniMax-M2.5"), 204_800);
-    }
-
-    #[test]
     fn pricing_minimax_m2_5() {
         let tier = get_pricing_tier("MiniMax-M2.5").unwrap();
         assert!((tier.input_per_million - 0.3).abs() < f64::EPSILON);
@@ -590,25 +566,4 @@ mod tests {
         assert_eq!(detect_provider("some-unknown-model"), Provider::Anthropic);
     }
 
-    // ── Context limit ──
-
-    #[test]
-    fn context_limit_claude() {
-        assert_eq!(get_context_limit("claude-opus-4-6"), 200_000);
-    }
-
-    #[test]
-    fn context_limit_gemini() {
-        assert_eq!(get_context_limit("gemini-2-5-pro"), 1_048_576);
-    }
-
-    #[test]
-    fn context_limit_gpt4() {
-        assert_eq!(get_context_limit("gpt-4-turbo"), 128_000);
-    }
-
-    #[test]
-    fn context_limit_unknown() {
-        assert_eq!(get_context_limit("unknown"), 200_000);
-    }
 }

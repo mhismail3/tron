@@ -76,7 +76,7 @@ fn build_context_manager_for_session(
         .unwrap_or_default();
 
     // 4. Build ContextManager
-    let context_limit = tron_llm::tokens::get_context_limit(&state.model);
+    let context_limit = tron_llm::model_context_window(&state.model);
     let compactor_settings = &settings.context.compactor;
     let mut cm = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
@@ -734,7 +734,7 @@ mod tests {
         let limit = result["contextLimit"].as_u64().unwrap();
         assert_eq!(
             limit,
-            tron_llm::tokens::get_context_limit("claude-opus-4-6")
+            tron_llm::model_context_window("claude-opus-4-6")
         );
     }
 

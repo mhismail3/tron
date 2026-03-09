@@ -277,7 +277,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             return Ok(());
         }
 
-        let context_limit = tron_llm::tokens::get_context_limit(&state.state.model);
+        let context_limit = tron_llm::model_context_window(&state.state.model);
         let tools = Vec::new(); // Tool defs not needed for compaction summary
         let mut cm = tron_runtime::context::context_manager::ContextManager::new(
             tron_runtime::context::types::ContextManagerConfig {
@@ -841,7 +841,7 @@ impl MethodHandler for PromptHandler {
                     compaction: tron_runtime::context::types::CompactionConfig {
                         threshold: cs.compaction_threshold,
                         preserve_ratio: cs.preserve_ratio,
-                        context_limit: tron_llm::tokens::get_context_limit(&model),
+                        context_limit: tron_llm::model_context_window(&model),
                     },
                     retry: Some(tron_core::retry::RetryConfig {
                         max_retries: settings.retry.max_retries,
@@ -1115,7 +1115,7 @@ impl MethodHandler for PromptHandler {
                         .flatten()
                         .map(|s| s.latest_model.clone())
                         .unwrap_or_default();
-                    let context_limit = tron_llm::tokens::get_context_limit(&session_model);
+                    let context_limit = tron_llm::model_context_window(&session_model);
                     let last_context_window = result.last_context_window_tokens.unwrap_or(0);
                     #[allow(clippy::cast_precision_loss)] // token counts never exceed 2^52
                     let token_ratio = if context_limit > 0 {

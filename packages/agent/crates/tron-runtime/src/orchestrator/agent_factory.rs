@@ -82,7 +82,7 @@ impl AgentFactory {
             }
         }
 
-        let context_limit = tron_llm::tokens::get_context_limit(&config.model);
+        let context_limit = tron_llm::model_context_window(&config.model);
         let mut compaction = config.compaction.clone();
         compaction.context_limit = context_limit;
 
@@ -348,7 +348,7 @@ mod tests {
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),
-            tron_llm::tokens::get_context_limit("claude-opus-4-6")
+            tron_llm::model_context_window("claude-opus-4-6")
         );
     }
 
@@ -362,7 +362,7 @@ mod tests {
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),
-            tron_llm::tokens::get_context_limit("gemini-2.5-pro")
+            tron_llm::model_context_window("gemini-2.5-pro")
         );
     }
 
