@@ -466,6 +466,9 @@ pub fn auto_rollback(artifacts_dir: &Path, binary_path: &Path, reason: &str) -> 
             eprintln!("DEPLOY SAFETY: chmod failed after restore: {e}");
         }
 
+        // Re-sign restored binary for TCC persistence
+        codesign_binary(binary_path);
+
         // Update sentinel to rolled_back
         if let Some(mut sentinel) = read_sentinel(artifacts_dir) {
             sentinel.status = "rolled_back".into();
@@ -580,7 +583,62 @@ pub async fn atomic_binary_install(
         return Err(DeployError::RenameFailed(e));
     }
 
+    // Re-sign so macOS TCC permissions persist across binary updates
+    codesign_binary(target);
+
     Ok(backup)
+}
+
+/// Sign a binary with the first available code signing identity.
+///
+/// Uses `security find-identity` to locate a signing cert, then `codesign --force --sign`.
+/// This ensures macOS TCC (Full Disk Access, folder access) persists across binary updates
+/// since permissions are tied to code signing identity, not binary hash.
+/// Failures are logged but non-fatal — the binary still works unsigned.
+pub fn codesign_binary(path: &Path) {
+    // Find the first valid codesigning identity
+    let identity = std::process::Command::new("security")
+        .args(["find-identity", "-v", "-p", "codesigning"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if !o.status.success() {
+                return None;
+            }
+            String::from_utf8(o.stdout).ok().and_then(|out| {
+                // Parse first identity line: "  1) HEXHASH \"Name (ID)\""
+                out.lines().find(|l| l.contains(')') && l.contains('"')).and_then(|line| {
+                    let start = line.find('"')?;
+                    let end = line.rfind('"')?;
+                    if end > start {
+                        Some(line[start + 1..end].to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+        });
+
+    let Some(identity) = identity else {
+        debug!("no codesigning identity found, skipping binary signing");
+        return;
+    };
+
+    match std::process::Command::new("codesign")
+        .args(["--force", "--sign", &identity, &path.to_string_lossy()])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            info!(identity = identity.as_str(), "binary signed for TCC persistence");
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            warn!(%stderr, "codesign failed (non-fatal)");
+        }
+        Err(e) => {
+            warn!(error = %e, "codesign command failed (non-fatal)");
+        }
+    }
 }
 
 // ── Axum handlers ──────────────────────────────────────────────────────────

@@ -210,6 +210,7 @@ ensure_prod_binary() {
         print_status "Restoring from backup..."
         cp "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
         chmod +x "$INSTALLED_BINARY"
+        codesign_binary "$INSTALLED_BINARY"
         print_success "Restored from backup"
         return 0
     fi
@@ -218,6 +219,7 @@ ensure_prod_binary() {
         print_status "Restoring from release build..."
         cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
         chmod +x "$INSTALLED_BINARY"
+        codesign_binary "$INSTALLED_BINARY"
         print_success "Restored from release build"
         return 0
     fi
@@ -271,6 +273,20 @@ health_check() {
     local response
     response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PROD_PORT/health" 2>/dev/null || echo "000")
     [ "$response" = "200" ]
+}
+
+# Sign binary with first available codesigning identity so macOS TCC
+# permissions (Full Disk Access, folder access) persist across updates.
+codesign_binary() {
+    local binary="$1"
+    local identity
+    identity=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed -n 's/.*"\(.*\)".*/\1/p')
+    if [ -z "$identity" ]; then
+        return 0
+    fi
+    if codesign --force --sign "$identity" "$binary" 2>/dev/null; then
+        print_status "Signed binary (${identity})"
+    fi
 }
 
 create_launchd_plist() {
@@ -922,6 +938,7 @@ cmd_deploy() {
     print_status "Installing new binary..."
     cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
     chmod +x "$INSTALLED_BINARY"
+    codesign_binary "$INSTALLED_BINARY"
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
@@ -985,6 +1002,7 @@ SENTINEL
 
     if [ -f "$DEPLOY_DIR/tron.bak" ]; then
         mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
+        codesign_binary "$INSTALLED_BINARY"
         echo "$previous_commit" > "$DEPLOYED_COMMIT_FILE"
         launchctl load "$PLIST_PATH"
         write_deployment_result "rolled_back" "Health check failed after 5 attempts"
@@ -1018,6 +1036,7 @@ cmd_install() {
     print_status "Installing binary to $INSTALLED_BINARY..."
     cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
     chmod +x "$INSTALLED_BINARY"
+    codesign_binary "$INSTALLED_BINARY"
     print_success "Installed binary"
 
     # Deploy transcription sidecar
@@ -1106,6 +1125,7 @@ cmd_rollback() {
     # Restore backup
     print_status "Restoring backup..."
     mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
+    codesign_binary "$INSTALLED_BINARY"
 
     # Start service
     launchctl load "$PLIST_PATH"
