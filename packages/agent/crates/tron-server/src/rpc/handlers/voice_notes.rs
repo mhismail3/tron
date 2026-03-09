@@ -34,7 +34,7 @@ impl MethodHandler for SaveHandler {
         let _ = std::fs::create_dir_all(&dir);
 
         let now = chrono::Utc::now();
-        let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S"));
+        let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S-%3f"));
         let filepath = format!("{dir}/{filename}");
 
         // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")

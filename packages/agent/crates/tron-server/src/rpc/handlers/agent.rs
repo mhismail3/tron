@@ -329,6 +329,21 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             parent_id: None,
         });
 
+        // Persist compact.boundary marker (scopes gather_recent_events)
+        let _ = self.event_store.append(&tron_events::AppendOptions {
+            session_id: &self.session_id,
+            event_type: tron_events::EventType::CompactBoundary,
+            payload: serde_json::json!({
+                "originalTokens": result.tokens_before,
+                "compactedTokens": result.tokens_after,
+                "compressionRatio": result.compression_ratio,
+                "reason": "auto",
+            }),
+            parent_id: None,
+        });
+
+        let estimated_context = cm.get_current_tokens();
+
         // Broadcast compaction complete
         let _ = self
             .broadcast
@@ -340,7 +355,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
                 compression_ratio: result.compression_ratio,
                 reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
                 summary: Some(result.summary),
-                estimated_context_tokens: None,
+                estimated_context_tokens: Some(estimated_context),
             });
 
         // Invalidate cached session
@@ -419,11 +434,18 @@ fn gather_recent_events(
     event_store: &tron_events::EventStore,
     session_id: &str,
 ) -> (Vec<String>, Vec<String>) {
-    // Find last compact.boundary event
+    // Find last compact.boundary event (fetch all, take last for correct ordering)
     let boundary = event_store
-        .get_events_by_type(session_id, &["compact.boundary"], Some(1))
+        .get_events_by_type(session_id, &["compact.boundary"], None)
         .ok()
-        .and_then(|rows| rows.into_iter().last());
+        .and_then(|rows| rows.into_iter().last())
+        .or_else(|| {
+            // Fallback: use compact.summary if no boundary exists (legacy sessions)
+            event_store
+                .get_events_by_type(session_id, &["compact.summary"], None)
+                .ok()
+                .and_then(|rows| rows.into_iter().last())
+        });
 
     // Get events after boundary (or all events if no boundary)
     let events = if let Some(ref b) = boundary {
@@ -3811,5 +3833,267 @@ mod tests {
         let skills: Vec<Value> = vec![];
         let payload = build_user_event_payload("hi", None, None, Some(&skills), None);
         assert!(payload.get("skills").is_none());
+    }
+
+    // ── Fix: spurious auto-compaction in persistent chat sessions ──
+
+    #[tokio::test]
+    async fn gather_recent_events_uses_latest_boundary() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        // Progress signal before first boundary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolCall,
+            payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
+            parent_id: None,
+        });
+        // First boundary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::CompactBoundary,
+            payload: json!({"originalTokens": 1000, "compactedTokens": 100, "reason": "auto"}),
+            parent_id: None,
+        });
+        // Progress signal between boundaries (should also be excluded)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolCall,
+            payload: json!({"toolCallId": "tc-2", "name": "Bash", "arguments": {"command": "cargo test"}, "turn": 2}),
+            parent_id: None,
+        });
+        // Second (latest) boundary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::CompactBoundary,
+            payload: json!({"originalTokens": 2000, "compactedTokens": 200, "reason": "auto"}),
+            parent_id: None,
+        });
+        // Events after latest boundary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"text": "new prompt"}),
+            parent_id: None,
+        });
+
+        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        // Only the message.user after the latest boundary
+        assert!(types.contains(&"message.user".to_string()));
+        assert!(!types.contains(&"tool.call".to_string()), "stale tool calls leaked through");
+        assert!(calls.is_empty(), "stale bash commands leaked through: {calls:?}");
+    }
+
+    #[tokio::test]
+    async fn gather_recent_events_falls_back_to_compact_summary() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        // Progress signal before summary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolCall,
+            payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
+            parent_id: None,
+        });
+        // Only a compact.summary (no boundary — legacy session)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::CompactSummary,
+            payload: json!({"summary": "...", "tokensBefore": 1000, "tokensAfter": 100, "compressionRatio": 0.9}),
+            parent_id: None,
+        });
+        // Events after summary
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"text": "new prompt"}),
+            parent_id: None,
+        });
+
+        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        assert!(types.contains(&"message.user".to_string()));
+        assert!(!types.contains(&"tool.call".to_string()), "pre-summary tool call leaked");
+        assert!(calls.is_empty(), "pre-summary bash commands leaked: {calls:?}");
+    }
+
+    #[tokio::test]
+    async fn stale_git_push_excluded_after_boundary() {
+        // Regression test: git push from prior interaction should not trigger compaction
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        // Prior interaction: git push
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolCall,
+            payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
+            parent_id: None,
+        });
+        // Compaction boundary after that interaction
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::CompactBoundary,
+            payload: json!({"originalTokens": 5000, "compactedTokens": 500, "reason": "auto"}),
+            parent_id: None,
+        });
+        // New interaction: simple message exchange (no progress signals)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"text": "what time is it?"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({"content": []}),
+            parent_id: None,
+        });
+
+        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        // The stale git push must not appear
+        assert!(!calls.iter().any(|c| c.contains("git push")),
+            "stale git push should not be visible after boundary: {calls:?}");
+        assert!(types.contains(&"message.user".to_string()));
+        assert!(types.contains(&"message.assistant".to_string()));
+        assert!(!types.contains(&"tool.call".to_string()));
+    }
+
+    #[tokio::test]
+    async fn auto_compaction_persists_boundary_event() {
+        use tron_events::memory::manager::MemoryManagerDeps;
+
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None)
+            .unwrap();
+
+        // Seed messages so compaction has something to work with
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "hello"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "hi there"}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
+        let deps = super::RuntimeMemoryDeps {
+            subagent_manager: None, // Uses KeywordSummarizer
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            broadcast: broadcast.clone(),
+            session_id: sid.clone(),
+            workspace_id: "/tmp".to_string(),
+            embedding_controller: None,
+            shutdown_coordinator: None,
+            ledger_enabled: false,
+        };
+
+        deps.execute_compaction().await.unwrap();
+
+        // Verify both compact.summary and compact.boundary were persisted
+        let summaries = ctx
+            .event_store
+            .get_events_by_type(&sid, &["compact.summary"], None)
+            .unwrap();
+        assert_eq!(summaries.len(), 1, "expected exactly 1 compact.summary event");
+
+        let boundaries = ctx
+            .event_store
+            .get_events_by_type(&sid, &["compact.boundary"], None)
+            .unwrap();
+        assert_eq!(boundaries.len(), 1, "expected exactly 1 compact.boundary event");
+
+        // Verify boundary payload has expected fields
+        let bp: Value = serde_json::from_str(&boundaries[0].payload).unwrap();
+        assert!(bp["originalTokens"].is_number());
+        assert!(bp["compactedTokens"].is_number());
+        assert_eq!(bp["reason"], "auto");
+    }
+
+    #[tokio::test]
+    async fn auto_compaction_broadcast_includes_estimated_context_tokens() {
+        use tron_events::memory::manager::MemoryManagerDeps;
+
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None)
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "hello"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "hi there"}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let deps = super::RuntimeMemoryDeps {
+            subagent_manager: None,
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            broadcast: broadcast.clone(),
+            session_id: sid.clone(),
+            workspace_id: "/tmp".to_string(),
+            embedding_controller: None,
+            shutdown_coordinator: None,
+            ledger_enabled: false,
+        };
+
+        deps.execute_compaction().await.unwrap();
+
+        // Drain broadcast events to find CompactionComplete
+        let mut found_context_tokens = false;
+        while let Ok(event) = rx.try_recv() {
+            if let tron_core::events::TronEvent::CompactionComplete {
+                estimated_context_tokens,
+                ..
+            } = event
+            {
+                assert!(
+                    estimated_context_tokens.is_some(),
+                    "estimated_context_tokens must be Some, got None"
+                );
+                found_context_tokens = true;
+            }
+        }
+        assert!(found_context_tokens, "no CompactionComplete event found in broadcast");
     }
 }
