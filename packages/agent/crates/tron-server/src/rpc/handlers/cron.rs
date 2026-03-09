@@ -240,6 +240,13 @@ impl MethodHandler for CreateHandler {
                         .collect()
                 })
                 .unwrap_or_default(),
+            tool_restrictions: job_param
+                .get("toolRestrictions")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| RpcError::InvalidParams {
+                    message: format!("Invalid toolRestrictions: {e}"),
+                })?,
             workspace_id: job_param
                 .get("workspaceId")
                 .and_then(|v| v.as_str())
@@ -418,6 +425,17 @@ impl MethodHandler for UpdateHandler {
         }
         if let Some(ws) = params.get("workspaceId") {
             job.workspace_id = ws.as_str().map(String::from);
+        }
+        if let Some(tr_val) = params.get("toolRestrictions") {
+            if tr_val.is_null() {
+                job.tool_restrictions = None;
+            } else {
+                job.tool_restrictions = Some(
+                    serde_json::from_value(tr_val.clone()).map_err(|e| RpcError::InvalidParams {
+                        message: format!("Invalid toolRestrictions: {e}"),
+                    })?,
+                );
+            }
         }
 
         job.updated_at = chrono::Utc::now();
@@ -906,6 +924,146 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list_disabled["jobs"].as_array().unwrap().len(), 1);
+    }
+
+    // ── Tool restrictions via RPC ──────────────────────────────────
+
+    #[tokio::test]
+    async fn create_job_with_tool_restrictions() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Restricted",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+                "toolRestrictions": {
+                    "deniedTools": ["Bash", "Write"]
+                }
+            }
+        });
+        let result = CreateHandler.handle(Some(params), &ctx).await.unwrap();
+        let job_id = result["job"]["id"].as_str().unwrap().to_string();
+        assert!(result["job"]["toolRestrictions"]["deniedTools"].is_array());
+
+        // Get should return the restrictions
+        let get_result = GetHandler
+            .handle(Some(serde_json::json!({"jobId": job_id})), &ctx)
+            .await
+            .unwrap();
+        let tr = &get_result["job"]["toolRestrictions"];
+        assert_eq!(tr["deniedTools"][0], "Bash");
+        assert_eq!(tr["deniedTools"][1], "Write");
+    }
+
+    #[tokio::test]
+    async fn create_job_with_both_restrictions_rejected() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Bad",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+                "toolRestrictions": {
+                    "allowedTools": ["Read"],
+                    "deniedTools": ["Bash"]
+                }
+            }
+        });
+        let err = CreateHandler.handle(Some(params), &ctx).await.unwrap_err();
+        assert!(err.to_string().contains("cannot set both"));
+    }
+
+    #[tokio::test]
+    async fn update_job_add_tool_restrictions() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Updatable TR",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+            }
+        });
+        let result = CreateHandler.handle(Some(params), &ctx).await.unwrap();
+        let job_id = result["job"]["id"].as_str().unwrap().to_string();
+
+        // Job should have no restrictions
+        assert!(result["job"]["toolRestrictions"].is_null());
+
+        // Add restrictions
+        let update_params = serde_json::json!({
+            "jobId": job_id,
+            "toolRestrictions": {"deniedTools": ["Bash"]}
+        });
+        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        assert_eq!(updated["job"]["toolRestrictions"]["deniedTools"][0], "Bash");
+    }
+
+    #[tokio::test]
+    async fn update_job_remove_tool_restrictions() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Remove TR",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+                "toolRestrictions": {"deniedTools": ["Bash"]}
+            }
+        });
+        let result = CreateHandler.handle(Some(params), &ctx).await.unwrap();
+        let job_id = result["job"]["id"].as_str().unwrap().to_string();
+
+        // Remove restrictions with null
+        let update_params = serde_json::json!({
+            "jobId": job_id,
+            "toolRestrictions": null
+        });
+        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        assert!(updated["job"]["toolRestrictions"].is_null());
+    }
+
+    #[tokio::test]
+    async fn update_job_change_tool_restrictions() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Change TR",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+                "toolRestrictions": {"deniedTools": ["Bash"]}
+            }
+        });
+        let result = CreateHandler.handle(Some(params), &ctx).await.unwrap();
+        let job_id = result["job"]["id"].as_str().unwrap().to_string();
+
+        // Change from denied to allowed
+        let update_params = serde_json::json!({
+            "jobId": job_id,
+            "toolRestrictions": {"allowedTools": ["Read", "Grep"]}
+        });
+        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        let tr = &updated["job"]["toolRestrictions"];
+        assert_eq!(tr["allowedTools"][0], "Read");
+        assert_eq!(tr["allowedTools"][1], "Grep");
+        assert!(tr.get("deniedTools").is_none() || tr["deniedTools"].is_null());
+    }
+
+    #[tokio::test]
+    async fn list_includes_tool_restrictions() {
+        let (ctx, _dir) = make_cron_context();
+        let params = serde_json::json!({
+            "job": {
+                "name": "Listed TR",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"},
+                "toolRestrictions": {"allowedTools": ["Read"]}
+            }
+        });
+        let _ = CreateHandler.handle(Some(params), &ctx).await.unwrap();
+
+        let list = ListHandler.handle(None, &ctx).await.unwrap();
+        let jobs = list["jobs"].as_array().unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0]["toolRestrictions"]["allowedTools"][0], "Read");
     }
 
     #[tokio::test]

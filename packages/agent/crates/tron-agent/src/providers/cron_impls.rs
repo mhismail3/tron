@@ -102,6 +102,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         model: Option<&str>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
+        tool_restrictions: Option<&tron_cron::ToolRestrictions>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<tron_cron::AgentTurnResult, CronError> {
         // Resolve model (fall back to settings default)
@@ -162,7 +163,18 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // 4. Create tools
         let tools = (self.tool_factory)();
 
-        // 5. Create agent via factory
+        // 5. Build denied tools list: user restrictions + always-denied interactive tools
+        let tool_names: Vec<String> = tools.names();
+        let mut denied_tools = tool_restrictions
+            .map(|r| r.resolve_denied_tools(&tool_names))
+            .unwrap_or_default();
+        for always_denied in ["AskUserQuestion", "RenderAppUI"] {
+            if !denied_tools.iter().any(|t| t == always_denied) {
+                denied_tools.push(always_denied.into());
+            }
+        }
+
+        // 6. Create agent via factory
         let mut agent = tron_runtime::AgentFactory::create_agent(
             agent_config,
             session_id.clone(),
@@ -172,11 +184,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
                 guardrails: None,
                 hooks: None,
                 is_subagent: false,
-                denied_tools: vec![
-                    // Deny interactive tools that don't make sense for background runs
-                    "AskUserQuestion".into(),
-                    "RenderAppUI".into(),
-                ],
+                denied_tools,
                 subagent_depth: 0,
                 subagent_max_depth: 0,
                 rules_content: None,
@@ -187,7 +195,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             },
         );
 
-        // 6. Wire abort token + persister
+        // 7. Wire abort token + persister
         agent.set_abort_token(cancel.clone());
 
         let active = self
@@ -196,7 +204,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             .map_err(|e| CronError::Execution(format!("resume session: {e}")))?;
         agent.set_persister(Some(active.context.persister.clone()));
 
-        // 7. Persist the user message event
+        // 8. Persist the user message event
         let _ = self
             .event_store
             .append(&tron_events::AppendOptions {
@@ -207,7 +215,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             })
             .map_err(|e| CronError::Execution(format!("persist user message: {e}")))?;
 
-        // 8. Run agent with timeout
+        // 9. Run agent with timeout
         let broadcast = Arc::new(tron_runtime::EventEmitter::new());
         let run_ctx = tron_runtime::RunContext::default();
 
@@ -227,15 +235,15 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             }
         };
 
-        // 9. Check for agent errors
+        // 10. Check for agent errors
         if let Some(ref error) = result.error {
             return Err(CronError::Execution(format!("agent error: {error}")));
         }
 
-        // 10. Extract output
+        // 11. Extract output
         let (output, output_truncated) = Self::extract_output(&agent);
 
-        // 11. Flush persister then invalidate cached session state.
+        // 12. Flush persister then invalidate cached session state.
         //     Invalidation forces compute_cycle_messages() to reconstruct from
         //     persisted events instead of returning the stale empty snapshot
         //     cached at create_session() time (before the agent ran).
@@ -244,7 +252,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         }
         self.session_manager.invalidate_session(&session_id);
 
-        // 12. Write memory ledger entry (fail-silent — never blocks the result)
+        // 13. Write memory ledger entry (fail-silent — never blocks the result)
         let _ = write_cron_ledger(
             &session_id,
             &workspace_path,

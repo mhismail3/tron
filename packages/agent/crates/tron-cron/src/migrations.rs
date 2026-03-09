@@ -12,6 +12,21 @@ use crate::errors::CronError;
 /// Idempotent — safe to call multiple times (uses `IF NOT EXISTS`).
 pub fn run_migrations(conn: &Connection) -> Result<(), CronError> {
     conn.execute_batch(CRON_SCHEMA)?;
+    run_v2_migrations(conn)?;
+    Ok(())
+}
+
+/// V2 migrations: add `tool_restrictions_json` column.
+fn run_v2_migrations(conn: &Connection) -> Result<(), CronError> {
+    // Check if column already exists
+    let has_column: bool = conn
+        .prepare("SELECT COUNT(*) FROM pragma_table_info('cron_jobs') WHERE name = 'tool_restrictions_json'")?
+        .query_row([], |row| row.get(0))?;
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE cron_jobs ADD COLUMN tool_restrictions_json TEXT;"
+        )?;
+    }
     Ok(())
 }
 

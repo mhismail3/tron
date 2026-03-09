@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tron_events::ConnectionPool;
 
 use crate::errors::CronError;
-use crate::types::{CronJob, CronRun, ExecutionOutput, Payload, RunStatus};
+use crate::types::{CronJob, CronRun, ExecutionOutput, Payload, RunStatus, ToolRestrictions};
 
 /// Execute an isolated agent turn. Implemented in `tron-agent/main.rs`.
 #[async_trait]
@@ -26,6 +26,7 @@ pub trait AgentTurnExecutor: Send + Sync {
         model: Option<&str>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
+        tool_restrictions: Option<&ToolRestrictions>,
         cancel: CancellationToken,
     ) -> Result<AgentTurnResult, CronError>;
 }
@@ -83,12 +84,35 @@ pub struct ExecutorDeps {
     pub pool: ConnectionPool,
 }
 
+/// Map a payload to its capability name for restriction checks.
+fn payload_capability_name(payload: &Payload) -> &'static str {
+    match payload {
+        Payload::ShellCommand { .. } => "ShellCommand",
+        Payload::Webhook { .. } => "Webhook",
+        Payload::SystemEvent { .. } => "SystemEvent",
+        Payload::AgentTurn { .. } => "AgentTurn",
+    }
+}
+
 /// Execute a job payload and return the result.
 pub async fn execute_payload(
     job: &CronJob,
     deps: &ExecutorDeps,
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
+    // Check capability restrictions for non-AgentTurn payloads.
+    // AgentTurn restrictions are applied inside the agent (tool-level filtering).
+    if !matches!(&job.payload, Payload::AgentTurn { .. }) {
+        if let Some(ref tr) = job.tool_restrictions {
+            let cap = payload_capability_name(&job.payload);
+            if !tr.is_capability_allowed(cap) {
+                return Err(CronError::Execution(format!(
+                    "{cap} blocked by job tool restrictions"
+                )));
+            }
+        }
+    }
+
     match &job.payload {
         Payload::ShellCommand {
             command,
@@ -137,6 +161,7 @@ pub async fn execute_payload(
                     model.as_deref(),
                     workspace_id.as_deref(),
                     system_prompt.as_deref(),
+                    job.tool_restrictions.as_ref(),
                     cancel,
                 )
                 .await?;
@@ -527,6 +552,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
+            tool_restrictions: None,
             workspace_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -719,6 +745,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_id: Option<&str>,
             _system_prompt: Option<&str>,
+            _tool_restrictions: Option<&ToolRestrictions>,
             _cancel: CancellationToken,
         ) -> Result<AgentTurnResult, CronError> {
             let mut guard = self.response.lock();
@@ -913,6 +940,129 @@ mod tests {
             .unwrap();
         // Store doesn't auto-disable; the scheduler does. So it's still enabled.
         assert!(enabled);
+    }
+
+    // ── Tool restriction enforcement ─────────────────────────────────
+
+    #[tokio::test]
+    async fn shell_command_blocked_by_denied_tools() {
+        let deps = make_test_deps();
+        let mut job = make_shell_job("echo hi");
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["ShellCommand".into()]),
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ShellCommand blocked"));
+    }
+
+    #[tokio::test]
+    async fn shell_command_blocked_by_allowed_tools_missing() {
+        let deps = make_test_deps();
+        let mut job = make_shell_job("echo hi");
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: Some(vec!["Webhook".into()]),
+            denied_tools: None,
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ShellCommand blocked"));
+    }
+
+    #[tokio::test]
+    async fn shell_command_allowed_when_no_restrictions() {
+        let output = execute_shell("echo hi", Some("/tmp"), 10, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(output.stdout.trim(), "hi");
+    }
+
+    #[tokio::test]
+    async fn shell_command_allowed_when_in_allowed_list() {
+        let deps = make_test_deps();
+        let mut job = make_shell_job("echo allowed");
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: Some(vec!["ShellCommand".into()]),
+            denied_tools: None,
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn shell_command_allowed_when_not_in_denied_list() {
+        let deps = make_test_deps();
+        let mut job = make_shell_job("echo ok");
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Webhook".into()]),
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn webhook_blocked_by_denied_tools() {
+        let deps = make_test_deps();
+        let mut job = CronJob {
+            payload: Payload::Webhook {
+                url: "https://example.com".into(),
+                method: "POST".into(),
+                headers: None,
+                body: None,
+                timeout_secs: 5,
+            },
+            ..make_shell_job("echo")
+        };
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Webhook".into()]),
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Webhook blocked"));
+    }
+
+    #[tokio::test]
+    async fn system_event_blocked_by_denied_tools() {
+        let deps = make_test_deps();
+        let mut job = CronJob {
+            payload: Payload::SystemEvent {
+                session_id: "sess_1".into(),
+                message: "hello".into(),
+            },
+            ..make_shell_job("echo")
+        };
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["SystemEvent".into()]),
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("SystemEvent blocked"));
+    }
+
+    #[tokio::test]
+    async fn agent_turn_not_blocked_by_payload_capability() {
+        let mut deps = make_test_deps();
+        deps.agent_executor = Some(Arc::new(MockAgentExecutor::success("ok")));
+        let mut job = CronJob {
+            payload: Payload::AgentTurn {
+                prompt: "hello".into(),
+                model: None,
+                workspace_id: None,
+                system_prompt: None,
+            },
+            ..make_shell_job("echo")
+        };
+        // Even with restrictions that don't mention AgentTurn, it should dispatch
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["ShellCommand".into()]),
+        });
+        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

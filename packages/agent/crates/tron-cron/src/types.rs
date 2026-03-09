@@ -218,6 +218,58 @@ impl MisfirePolicy {
     }
 }
 
+// ── Tool Restrictions ──────────────────────────────────────────────
+
+/// Per-job tool restrictions for cron automations.
+///
+/// Controls which tools/capabilities are available when executing a job.
+/// For `AgentTurn` payloads, tool names map to LLM tool names (`Bash`, `Write`, etc.).
+/// For other payloads, the payload type name (`ShellCommand`, `Webhook`, `SystemEvent`)
+/// is the capability that gets checked.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRestrictions {
+    /// If set, ONLY these tools/capabilities are available (allowlist).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    /// If set, these tools/capabilities are blocked (denylist).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denied_tools: Option<Vec<String>>,
+}
+
+impl ToolRestrictions {
+    /// Check if a capability name is allowed under these restrictions.
+    ///
+    /// - Both `None` → all allowed
+    /// - Empty lists → treated as no restriction (all allowed)
+    /// - `allowed_tools` set → only those names are allowed
+    /// - `denied_tools` set → those names are blocked, everything else allowed
+    pub fn is_capability_allowed(&self, name: &str) -> bool {
+        match (&self.allowed_tools, &self.denied_tools) {
+            (Some(allowed), _) if !allowed.is_empty() => allowed.iter().any(|t| t == name),
+            (_, Some(denied)) if !denied.is_empty() => !denied.iter().any(|t| t == name),
+            _ => true,
+        }
+    }
+
+    /// Convert restrictions to a denied-tools list suitable for `CreateAgentOpts`.
+    ///
+    /// - `denied_tools` set → returns that list directly
+    /// - `allowed_tools` set → inverts: everything in `all_tool_names` NOT in the allow list
+    /// - Both `None` / empty → returns empty vec
+    pub fn resolve_denied_tools(&self, all_tool_names: &[String]) -> Vec<String> {
+        match (&self.allowed_tools, &self.denied_tools) {
+            (_, Some(denied)) if !denied.is_empty() => denied.clone(),
+            (Some(allowed), _) if !allowed.is_empty() => all_tool_names
+                .iter()
+                .filter(|name| !allowed.iter().any(|a| a == *name))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 // ── CronJob ─────────────────────────────────────────────────────────
 
 /// Complete cron job definition.
@@ -259,6 +311,9 @@ pub struct CronJob {
     /// Tags for filtering.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Per-job tool/capability restrictions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_restrictions: Option<ToolRestrictions>,
     /// Workspace scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
@@ -574,6 +629,7 @@ mod tests {
             auto_disable_after: 5,
             stuck_timeout_secs: 7200,
             tags: vec!["test".into()],
+            tool_restrictions: None,
             workspace_id: None,
             created_at: now,
             updated_at: now,
@@ -718,5 +774,188 @@ mod tests {
         let c = CronConfig::default();
         assert_eq!(c.version, 1);
         assert!(c.jobs.is_empty());
+    }
+
+    // ── ToolRestrictions tests ────────────────────────────────────────
+
+    #[test]
+    fn tool_restrictions_serde_roundtrip_denied() {
+        let tr = ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into(), "Write".into()]),
+        };
+        let json = serde_json::to_string(&tr).unwrap();
+        let back: ToolRestrictions = serde_json::from_str(&json).unwrap();
+        assert_eq!(tr, back);
+    }
+
+    #[test]
+    fn tool_restrictions_serde_roundtrip_allowed() {
+        let tr = ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into(), "Grep".into()]),
+            denied_tools: None,
+        };
+        let json = serde_json::to_string(&tr).unwrap();
+        let back: ToolRestrictions = serde_json::from_str(&json).unwrap();
+        assert_eq!(tr, back);
+    }
+
+    #[test]
+    fn tool_restrictions_serde_none_omitted() {
+        let tr = ToolRestrictions::default();
+        let json = serde_json::to_string(&tr).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn tool_restrictions_default_is_empty() {
+        let tr = ToolRestrictions::default();
+        assert!(tr.allowed_tools.is_none());
+        assert!(tr.denied_tools.is_none());
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_no_restrictions() {
+        let tr = ToolRestrictions::default();
+        assert!(tr.is_capability_allowed("Bash"));
+        assert!(tr.is_capability_allowed("ShellCommand"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_denied() {
+        let tr = ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into(), "Write".into()]),
+        };
+        assert!(!tr.is_capability_allowed("Bash"));
+        assert!(!tr.is_capability_allowed("Write"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_denied_not_in_list() {
+        let tr = ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into()]),
+        };
+        assert!(tr.is_capability_allowed("Read"));
+        assert!(tr.is_capability_allowed("ShellCommand"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_allowed() {
+        let tr = ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into(), "Grep".into()]),
+            denied_tools: None,
+        };
+        assert!(tr.is_capability_allowed("Read"));
+        assert!(tr.is_capability_allowed("Grep"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_not_in_allowed() {
+        let tr = ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into()]),
+            denied_tools: None,
+        };
+        assert!(!tr.is_capability_allowed("Bash"));
+        assert!(!tr.is_capability_allowed("Write"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_empty_allowed() {
+        let tr = ToolRestrictions {
+            allowed_tools: Some(vec![]),
+            denied_tools: None,
+        };
+        assert!(tr.is_capability_allowed("Bash"));
+    }
+
+    #[test]
+    fn tool_restrictions_is_capability_allowed_empty_denied() {
+        let tr = ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec![]),
+        };
+        assert!(tr.is_capability_allowed("Bash"));
+    }
+
+    #[test]
+    fn tool_restrictions_resolve_denied_tools_from_denied() {
+        let tr = ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into(), "Write".into()]),
+        };
+        let all = vec!["Bash".into(), "Write".into(), "Read".into(), "Grep".into()];
+        let denied = tr.resolve_denied_tools(&all);
+        assert_eq!(denied, vec!["Bash".to_string(), "Write".to_string()]);
+    }
+
+    #[test]
+    fn tool_restrictions_resolve_denied_tools_from_allowed() {
+        let tr = ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into()]),
+            denied_tools: None,
+        };
+        let all = vec!["Bash".into(), "Write".into(), "Read".into(), "Grep".into()];
+        let denied = tr.resolve_denied_tools(&all);
+        assert_eq!(denied, vec!["Bash".to_string(), "Write".to_string(), "Grep".to_string()]);
+    }
+
+    #[test]
+    fn tool_restrictions_resolve_denied_tools_none() {
+        let tr = ToolRestrictions::default();
+        let all = vec!["Bash".into(), "Read".into()];
+        assert!(tr.resolve_denied_tools(&all).is_empty());
+    }
+
+    #[test]
+    fn cron_job_with_tool_restrictions_serde() {
+        let now = Utc::now();
+        let job = CronJob {
+            id: "cron_tr".into(),
+            name: "Restricted".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            tool_restrictions: Some(ToolRestrictions {
+                allowed_tools: None,
+                denied_tools: Some(vec!["Bash".into()]),
+            }),
+            workspace_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let json = serde_json::to_string(&job).unwrap();
+        assert!(json.contains("toolRestrictions"));
+        let back: CronJob = serde_json::from_str(&json).unwrap();
+        assert!(back.tool_restrictions.is_some());
+        let tr = back.tool_restrictions.unwrap();
+        assert_eq!(tr.denied_tools, Some(vec!["Bash".to_string()]));
+    }
+
+    #[test]
+    fn cron_job_without_tool_restrictions_backward_compat() {
+        let json = r#"{
+            "id": "cron_old",
+            "name": "Old Job",
+            "schedule": {"type": "every", "intervalSecs": 60},
+            "payload": {"type": "shellCommand", "command": "echo ok"},
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z"
+        }"#;
+        let job: CronJob = serde_json::from_str(json).unwrap();
+        assert!(job.tool_restrictions.is_none());
     }
 }

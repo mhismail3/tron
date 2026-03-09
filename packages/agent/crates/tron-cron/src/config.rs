@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::errors::CronError;
 use crate::schedule::CronExpression;
-use crate::types::{CronConfig, CronJob, Payload, Schedule};
+use crate::types::{CronConfig, CronJob, Payload, Schedule, ToolRestrictions};
 
 /// Load the cron config from a JSON file.
 ///
@@ -170,6 +170,23 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
         }
     }
 
+    // Validate tool restrictions
+    if let Some(ref tr) = job.tool_restrictions {
+        validate_tool_restrictions(tr)?;
+    }
+
+    Ok(())
+}
+
+/// Validate tool restrictions: `allowed_tools` and `denied_tools` are mutually exclusive.
+fn validate_tool_restrictions(tr: &ToolRestrictions) -> Result<(), CronError> {
+    if let (Some(allowed), Some(denied)) = (&tr.allowed_tools, &tr.denied_tools) {
+        if !allowed.is_empty() && !denied.is_empty() {
+            return Err(CronError::Validation(
+                "cannot set both allowedTools and deniedTools".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -233,6 +250,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
+            tool_restrictions: None,
             workspace_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -457,6 +475,56 @@ mod tests {
             message: "hello".into(),
         };
         assert!(validate_job(&job).is_err());
+    }
+
+    // ── Tool restrictions validation ─────────────────────────────────
+
+    #[test]
+    fn validate_job_tool_restrictions_denied_only() {
+        let mut job = make_valid_job();
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into()]),
+        });
+        validate_job(&job).unwrap();
+    }
+
+    #[test]
+    fn validate_job_tool_restrictions_allowed_only() {
+        let mut job = make_valid_job();
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into()]),
+            denied_tools: None,
+        });
+        validate_job(&job).unwrap();
+    }
+
+    #[test]
+    fn validate_job_tool_restrictions_both_set_rejected() {
+        let mut job = make_valid_job();
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: Some(vec!["Read".into()]),
+            denied_tools: Some(vec!["Bash".into()]),
+        });
+        let err = validate_job(&job).unwrap_err();
+        assert!(err.to_string().contains("cannot set both"));
+    }
+
+    #[test]
+    fn validate_job_tool_restrictions_none() {
+        let mut job = make_valid_job();
+        job.tool_restrictions = None;
+        validate_job(&job).unwrap();
+    }
+
+    #[test]
+    fn validate_job_tool_restrictions_empty_lists() {
+        let mut job = make_valid_job();
+        job.tool_restrictions = Some(ToolRestrictions {
+            allowed_tools: Some(vec![]),
+            denied_tools: Some(vec![]),
+        });
+        validate_job(&job).unwrap();
     }
 
     #[test]

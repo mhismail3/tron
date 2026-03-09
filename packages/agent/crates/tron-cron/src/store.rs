@@ -18,6 +18,11 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let payload_json = serde_json::to_string(&job.payload)?;
     let delivery_json = serde_json::to_string(&job.delivery)?;
     let tags_json = serde_json::to_string(&job.tags)?;
+    let tool_restrictions_json = job
+        .tool_restrictions
+        .as_ref()
+        .map(|tr| serde_json::to_string(tr))
+        .transpose()?;
     let overlap = job.overlap_policy.as_sql();
     let misfire = job.misfire_policy.as_sql();
 
@@ -25,9 +30,9 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
         "INSERT INTO cron_jobs (
             id, name, description, enabled, schedule_json, payload_json,
             delivery_json, overlap_policy, misfire_policy, max_retries,
-            auto_disable_after, stuck_timeout_secs, tags, workspace_id,
-            created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            auto_disable_after, stuck_timeout_secs, tags, tool_restrictions_json,
+            workspace_id, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             description = excluded.description,
@@ -41,6 +46,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             auto_disable_after = excluded.auto_disable_after,
             stuck_timeout_secs = excluded.stuck_timeout_secs,
             tags = excluded.tags,
+            tool_restrictions_json = excluded.tool_restrictions_json,
             workspace_id = excluded.workspace_id,
             updated_at = excluded.updated_at",
         params![
@@ -57,6 +63,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             job.auto_disable_after,
             job.stuck_timeout_secs,
             tags_json,
+            tool_restrictions_json,
             job.workspace_id,
             job.created_at.to_rfc3339(),
             job.updated_at.to_rfc3339(),
@@ -72,7 +79,7 @@ pub fn get_job(pool: &ConnectionPool, job_id: &str) -> Result<Option<CronJob>, C
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
                 auto_disable_after, stuck_timeout_secs, tags, workspace_id,
-                created_at, updated_at
+                created_at, updated_at, tool_restrictions_json
          FROM cron_jobs WHERE id = ?1",
     )?;
     let result = stmt.query_row(params![job_id], row_to_job);
@@ -101,7 +108,7 @@ pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
                 auto_disable_after, stuck_timeout_secs, tags, workspace_id,
-                created_at, updated_at
+                created_at, updated_at, tool_restrictions_json
          FROM cron_jobs",
     )?;
     let jobs = stmt
@@ -507,6 +514,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let tags_json: String = row.get(12)?;
     let created_str: String = row.get(14)?;
     let updated_str: String = row.get(15)?;
+    let tool_restrictions_json: Option<String> = row.get(16)?;
 
     Ok(CronJob {
         name: row.get(1)?,
@@ -532,6 +540,12 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         tags: serde_json::from_str(&tags_json).unwrap_or_else(|e| {
             tracing::warn!(error = %e, job_id = %id, "corrupt tags_json in DB, using default");
             Vec::new()
+        }),
+        tool_restrictions: tool_restrictions_json.and_then(|s| {
+            serde_json::from_str(&s).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, job_id = %id, "corrupt tool_restrictions_json in DB, ignoring");
+                None
+            })
         }),
         workspace_id: row.get(13)?,
         created_at: DateTime::parse_from_rfc3339(&created_str).map_or_else(
@@ -658,6 +672,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec!["test".into()],
+            tool_restrictions: None,
             workspace_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1046,6 +1061,46 @@ mod tests {
 
         let updated = complete_stuck_runs(&pool, "cron_1", Utc::now(), "stuck").unwrap();
         assert_eq!(updated, 0);
+    }
+
+    // ── Tool restrictions persistence ───────────────────────────────
+
+    #[test]
+    fn upsert_job_with_tool_restrictions() {
+        let pool = setup_pool();
+        let mut job = make_job("cron_tr", "Restricted");
+        job.tool_restrictions = Some(crate::types::ToolRestrictions {
+            allowed_tools: None,
+            denied_tools: Some(vec!["Bash".into(), "Write".into()]),
+        });
+        upsert_job(&pool, &job).unwrap();
+
+        let loaded = get_job(&pool, "cron_tr").unwrap().unwrap();
+        assert!(loaded.tool_restrictions.is_some());
+        let tr = loaded.tool_restrictions.unwrap();
+        assert_eq!(tr.denied_tools, Some(vec!["Bash".to_string(), "Write".to_string()]));
+        assert!(tr.allowed_tools.is_none());
+    }
+
+    #[test]
+    fn upsert_job_without_tool_restrictions_backward_compat() {
+        let pool = setup_pool();
+        let job = make_job("cron_no_tr", "No Restrictions");
+        upsert_job(&pool, &job).unwrap();
+
+        let loaded = get_job(&pool, "cron_no_tr").unwrap().unwrap();
+        assert!(loaded.tool_restrictions.is_none());
+    }
+
+    #[test]
+    fn upsert_job_null_tool_restrictions() {
+        let pool = setup_pool();
+        let mut job = make_job("cron_null_tr", "Null TR");
+        job.tool_restrictions = None;
+        upsert_job(&pool, &job).unwrap();
+
+        let loaded = get_job(&pool, "cron_null_tr").unwrap().unwrap();
+        assert!(loaded.tool_restrictions.is_none());
     }
 
     #[test]

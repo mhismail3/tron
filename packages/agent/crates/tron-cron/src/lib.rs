@@ -38,5 +38,5 @@ pub use executor::{
 pub use scheduler::CronScheduler;
 pub use types::{
     CronConfig, CronJob, CronRun, Delivery, ExecutionOutput, JobRuntimeState, MisfirePolicy,
-    OverlapPolicy, Payload, RunStatus, Schedule,
+    OverlapPolicy, Payload, RunStatus, Schedule, ToolRestrictions,
 };

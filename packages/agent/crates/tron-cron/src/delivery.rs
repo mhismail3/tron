@@ -210,6 +210,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
+            tool_restrictions: None,
             workspace_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
