@@ -935,6 +935,28 @@ async fn main() -> Result<()> {
                 // Send APNS push notification for successful deploy
                 if let Some(ref apns) = apns_for_deploy {
                     let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
+                    let commit_subject = tron_server::deploy::resolve_workspace_root()
+                        .and_then(|root| {
+                            std::process::Command::new("git")
+                                .args(["log", "-1", "--format=%s", &sentinel.commit])
+                                .current_dir(root)
+                                .output()
+                                .ok()
+                                .and_then(|o| {
+                                    if o.status.success() {
+                                        String::from_utf8(o.stdout)
+                                            .ok()
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty())
+                                    } else {
+                                        None
+                                    }
+                                })
+                        });
+                    let body = match commit_subject {
+                        Some(subject) => format!("{short_commit}: {subject}"),
+                        None => format!("Tron updated to {short_commit}"),
+                    };
                     let tokens: Vec<String> = task_pool_for_deploy
                         .get()
                         .ok()
@@ -954,7 +976,7 @@ async fn main() -> Result<()> {
                         let notification =
                             tron_server::platform::apns::ApnsNotification {
                                 title: "Deploy Complete".into(),
-                                body: format!("Tron updated to {short_commit}"),
+                                body,
                                 data: std::collections::HashMap::from([
                                     ("type".into(), "deploy.completed".into()),
                                     ("commit".into(), sentinel.commit.clone()),
