@@ -551,6 +551,7 @@ impl MethodHandler for PromptHandler {
             let raw_skills_clone = raw_skills_json.clone();
             let raw_spells_clone = raw_spells_json.clone();
             let server_origin = ctx.origin.clone();
+            let browser_service = ctx.browser_service.clone();
 
             let handle = tokio::spawn(async move {
                 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
@@ -1078,7 +1079,17 @@ impl MethodHandler for PromptHandler {
                     let _ = persister.flush().await;
                 }
 
-                // 8b. Emit agent.error if the run failed
+                // 8b. Close browser session so Chrome is cleaned up and iOS
+                //     hides the globe icon. Emits BrowserEvent::Closed over
+                //     WebSocket if a session existed.
+                if let Some(ref svc) = browser_service {
+                    if let Err(e) = svc.close_session(&session_id_clone).await {
+                        tracing::debug!(session_id = %session_id_clone, error = %e,
+                            "failed to close browser session after run");
+                    }
+                }
+
+                // 8c. Emit agent.error if the run failed
                 if let Some(ref error_msg) = result.error {
                     let parsed = tron_core::errors::parse::parse_error(error_msg);
                     let _ = broadcast.emit(tron_core::events::TronEvent::Error {
