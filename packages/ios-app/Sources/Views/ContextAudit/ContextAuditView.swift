@@ -81,7 +81,14 @@ struct ContextAuditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { leadingToolbarContent }
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    if isAutoLedgerEnabled {
+                        clearButton(iconOnly: false)
+                    } else {
+                        clearButton(iconOnly: true)
+                        compactButton(iconOnly: true)
+                    }
+                }
                 ToolbarItem(placement: .principal) { principalToolbarContent }
                 ToolbarItem(placement: .topBarTrailing) { trailingToolbarContent }
             }
@@ -112,20 +119,6 @@ struct ContextAuditView: View {
     }
 
     // MARK: - Toolbar Content
-
-    @ViewBuilder
-    private var leadingToolbarContent: some View {
-        if isAutoLedgerEnabled {
-            // Auto-ledger ON: Clear button with icon + text
-            clearButton(iconOnly: false)
-        } else {
-            // Auto-ledger OFF: icon-only Clear + icon-only Compact
-            HStack(spacing: 12) {
-                clearButton(iconOnly: true)
-                compactButton(iconOnly: true)
-            }
-        }
-    }
 
     private var principalToolbarContent: some View {
         Text("Context")
