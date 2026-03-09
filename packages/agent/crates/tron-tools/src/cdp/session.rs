@@ -87,7 +87,7 @@ impl BrowserSession {
                 .arg("--no-sandbox")
                 .arg("--disable-dev-shm-usage")
                 .arg(format!("--remote-debugging-port={port}"))
-                .arg("--window-size=1280,800")
+                .arg("--window-size=1280,960")
                 .arg("about:blank")
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -803,7 +803,7 @@ fn parse_frame_metadata(val: &Value) -> FrameMetadata {
         offset_top: val["offsetTop"].as_f64().unwrap_or(0.0),
         page_scale_factor: val["pageScaleFactor"].as_f64().unwrap_or(1.0),
         device_width: val["deviceWidth"].as_u64().unwrap_or(1280) as u32,
-        device_height: val["deviceHeight"].as_u64().unwrap_or(800) as u32,
+        device_height: val["deviceHeight"].as_u64().unwrap_or(960) as u32,
         scroll_offset_x: val["scrollOffsetX"].as_f64().unwrap_or(0.0),
         scroll_offset_y: val["scrollOffsetY"].as_f64().unwrap_or(0.0),
     }

@@ -97,13 +97,13 @@ final class MediaClient {
     ///   - sessionId: The session to stream from
     ///   - quality: JPEG quality (0-100, default 60)
     ///   - maxWidth: Max frame width (default 1280)
-    ///   - maxHeight: Max frame height (default 800)
+    ///   - maxHeight: Max frame height (default 960)
     ///   - everyNthFrame: Skip frames for battery savings (default 1 = ~10 FPS)
     func startBrowserStream(
         sessionId: String,
         quality: Int = 60,
         maxWidth: Int = 1280,
-        maxHeight: Int = 800,
+        maxHeight: Int = 960,
         everyNthFrame: Int = 1
     ) async throws -> BrowserStartStreamResult {
         let ws = try transport.requireConnection()

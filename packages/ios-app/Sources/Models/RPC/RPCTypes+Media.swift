@@ -15,7 +15,7 @@ struct BrowserStartStreamParams: Encodable {
         sessionId: String,
         quality: Int? = 60,
         maxWidth: Int? = 1280,
-        maxHeight: Int? = 800,
+        maxHeight: Int? = 960,
         format: String? = "jpeg",
         everyNthFrame: Int? = 1
     ) {

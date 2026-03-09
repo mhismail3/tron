@@ -56,7 +56,7 @@ impl Default for FrameMetadata {
             offset_top: 0.0,
             page_scale_factor: 1.0,
             device_width: 1280,
-            device_height: 800,
+            device_height: 960,
             scroll_offset_x: 0.0,
             scroll_offset_y: 0.0,
         }
@@ -84,7 +84,7 @@ impl Default for ScreencastOptions {
             quality: 60,
             format: ScreencastFormat::Jpeg,
             max_width: 1280,
-            max_height: 800,
+            max_height: 960,
             every_nth_frame: 6,
         }
     }
