@@ -235,7 +235,7 @@ mod tests {
     fn frame_metadata_default_values() {
         let meta = FrameMetadata::default();
         assert_eq!(meta.device_width, 1280);
-        assert_eq!(meta.device_height, 800);
+        assert_eq!(meta.device_height, 960);
         assert!((meta.page_scale_factor - 1.0).abs() < f64::EPSILON);
         assert!((meta.offset_top - 0.0).abs() < f64::EPSILON);
         assert!((meta.scroll_offset_x - 0.0).abs() < f64::EPSILON);
@@ -248,7 +248,7 @@ mod tests {
         assert_eq!(opts.quality, 60);
         assert_eq!(opts.format, ScreencastFormat::Jpeg);
         assert_eq!(opts.max_width, 1280);
-        assert_eq!(opts.max_height, 800);
+        assert_eq!(opts.max_height, 960);
         assert_eq!(opts.every_nth_frame, 6);
     }
 

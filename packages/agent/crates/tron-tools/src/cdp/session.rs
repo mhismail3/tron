@@ -868,7 +868,7 @@ mod tests {
         assert!((meta.offset_top - 0.0).abs() < f64::EPSILON);
         assert!((meta.page_scale_factor - 1.0).abs() < f64::EPSILON);
         assert_eq!(meta.device_width, 640);
-        assert_eq!(meta.device_height, 800); // default
+        assert_eq!(meta.device_height, 960); // default
     }
 
     #[test]
@@ -876,7 +876,7 @@ mod tests {
         let val = json!({});
         let meta = parse_frame_metadata(&val);
         assert_eq!(meta.device_width, 1280);
-        assert_eq!(meta.device_height, 800);
+        assert_eq!(meta.device_height, 960);
         assert!((meta.page_scale_factor - 1.0).abs() < f64::EPSILON);
     }
 
