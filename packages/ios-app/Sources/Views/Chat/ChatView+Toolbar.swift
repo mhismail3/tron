@@ -51,50 +51,44 @@ extension ChatView {
     /// Trailing toolbar item (browser button and menu)
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 20) {
-                // Browser button - only visible when browser session is active
-                if viewModel.hasBrowserSession {
-                    Button {
-                        viewModel.toggleBrowserWindow()
-                    } label: {
-                        Image(systemName: "globe")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-
-                // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
-                Menu {
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
-                        Label("Session History", systemImage: "clock.arrow.circlepath")
-                    }
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
-                        Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
-                    }
-                    if viewModel.taskState.hasTasks {
-                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
-                            Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
-                        }
-                    }
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "changes") } label: {
-                        Label {
-                            Text("Source Control")
-                        } icon: {
-                            Image("IconGit")
-                                .renderingMode(.template)
-                        }
-                    }
-                    Divider()
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if viewModel.hasBrowserSession {
+                Button {
+                    viewModel.toggleBrowserWindow()
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "globe")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
-                        .padding(.horizontal, 4)
                 }
+            }
+            Menu {
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
+                    Label("Session History", systemImage: "clock.arrow.circlepath")
+                }
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
+                    Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
+                }
+                if viewModel.taskState.hasTasks {
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
+                        Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
+                    }
+                }
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "changes") } label: {
+                    Label {
+                        Text("Source Control")
+                    } icon: {
+                        Image("IconGit")
+                            .renderingMode(.template)
+                    }
+                }
+                Divider()
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
             }
         }
     }

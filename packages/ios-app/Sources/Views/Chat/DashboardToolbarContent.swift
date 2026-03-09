@@ -40,17 +40,14 @@ struct DashboardToolbarContent: ToolbarContent {
                 .font(TronTypography.mono(size: 20, weight: .bold))
                 .foregroundStyle(accent)
         }
-        if actions.notificationUnreadCount > 0 {
-            ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if actions.notificationUnreadCount > 0 {
                 NotificationBellButton(
                     unreadCount: actions.notificationUnreadCount,
                     accent: accent,
                     action: { actions.onNotificationBell() }
                 )
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
             Button(action: actions.onSettings) {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
