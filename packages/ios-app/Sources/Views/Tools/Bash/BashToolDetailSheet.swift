@@ -250,7 +250,7 @@ struct BashToolDetailSheet: View {
                 Text("\(hiddenLineCount) more lines")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
             }
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity)

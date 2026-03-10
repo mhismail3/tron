@@ -17,7 +17,7 @@ struct NotificationBellButton: View {
                 .foregroundStyle(accent)
                 .overlay(alignment: .topTrailing) {
                     Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(Circle().fill(Color.red))

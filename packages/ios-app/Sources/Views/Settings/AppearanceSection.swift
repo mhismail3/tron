@@ -58,7 +58,7 @@ struct AppearanceSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: appearanceSettings.thinkingIndicatorStyle.icon)
-                    .font(.system(size: 24))
+                    .font(TronTypography.sans(size: TronTypography.sizeHero))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 32, alignment: .center)
 

@@ -176,7 +176,7 @@ struct SourceChangesSheet: View {
                         if hasWorktree && uncommittedFiles.isEmpty && committedFiles.isEmpty {
                             VStack(spacing: 12) {
                                 Image(systemName: "checkmark.circle")
-                                    .font(.system(size: 32))
+                                    .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                                     .foregroundStyle(.tronSuccess)
                                 Text("No changes")
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
@@ -273,7 +273,7 @@ struct SourceChangesSheet: View {
         } else if branches.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 32))
+                    .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                     .foregroundStyle(.tronTextMuted)
                 Text("No session branches found")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
@@ -432,7 +432,7 @@ struct SourceChangesSheet: View {
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                 .foregroundStyle(.tronError)
             Text(message)
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
@@ -449,7 +449,7 @@ struct SourceChangesSheet: View {
     private var notGitRepoView: some View {
         VStack(spacing: 12) {
             Image(systemName: "info.circle")
-                .font(.system(size: 32))
+                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                 .foregroundStyle(.tronTextMuted)
             Text("Not a Git Repository")
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
@@ -477,7 +477,7 @@ struct SourceChangesSheet: View {
 
             VStack(spacing: 12) {
                 Image(systemName: "checkmark.circle")
-                    .font(.system(size: 32))
+                    .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                     .foregroundStyle(.tronSuccess)
                 Text("No uncommitted changes")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))

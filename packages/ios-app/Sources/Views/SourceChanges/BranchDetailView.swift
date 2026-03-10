@@ -299,7 +299,7 @@ struct BranchDetailView: View {
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                 .foregroundStyle(.tronError)
             Text(message)
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
@@ -316,7 +316,7 @@ struct BranchDetailView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 32))
+                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                 .foregroundStyle(.tronSuccess)
             Text(branch.commitCount == 0 ? "No commits yet" : "Already merged")
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))

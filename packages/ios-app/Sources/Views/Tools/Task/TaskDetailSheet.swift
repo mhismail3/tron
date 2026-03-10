@@ -152,7 +152,7 @@ struct TaskDetailSheet: View {
                     if let due = item.dueDate {
                         HStack(spacing: 3) {
                             Image(systemName: "calendar")
-                                .font(.system(size: 9))
+                                .font(TronTypography.sans(size: TronTypography.sizeSM))
                             Text(due)
                         }
                         .font(TronTypography.mono(size: 10, weight: .regular))
@@ -295,7 +295,7 @@ struct TaskDetailSheet: View {
                             if let pc = item.projectCount {
                                 HStack(spacing: 3) {
                                     Image(systemName: "folder")
-                                        .font(.system(size: 9))
+                                        .font(TronTypography.sans(size: TronTypography.sizeSM))
                                     Text("\(pc) project\(pc == 1 ? "" : "s")")
                                 }
                                 .font(TronTypography.mono(size: 10, weight: .regular))
@@ -305,7 +305,7 @@ struct TaskDetailSheet: View {
                             if let tc = item.taskCount, let ac = item.activeTaskCount {
                                 HStack(spacing: 3) {
                                     Image(systemName: "checklist")
-                                        .font(.system(size: 9))
+                                        .font(TronTypography.sans(size: TronTypography.sizeSM))
                                     Text("\(tc) task\(tc == 1 ? "" : "s") (\(ac) active)")
                                 }
                                 .font(TronTypography.mono(size: 10, weight: .regular))
@@ -424,7 +424,7 @@ struct TaskDetailSheet: View {
         glassCard {
             HStack(spacing: 10) {
                 Image(systemName: "tray")
-                    .font(.system(size: 18))
+                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                     .foregroundStyle(.tronTextMuted.opacity(0.5))
                 Text(message)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))

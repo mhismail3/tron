@@ -88,7 +88,7 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
         }
 
         return Image(systemName: icon)
-            .font(.system(size: 15))
+            .font(TronTypography.sans(size: TronTypography.sizeBodyLG))
             .foregroundStyle(color)
             .frame(width: 20)
     }

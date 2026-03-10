@@ -19,7 +19,7 @@ struct TaskDetailSheetLegacy: View {
                 } else if taskState.tasks.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "checklist")
-                            .font(.system(size: 48))
+                            .font(TronTypography.sans(size: 48))
                             .foregroundStyle(.gray)
                         Text("No Tasks")
                             .font(.headline)

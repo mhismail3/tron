@@ -244,7 +244,7 @@ extension RememberToolDetailSheet {
     func statCard(_ stat: RememberStatEntry) -> some View {
         VStack(spacing: 6) {
             Image(systemName: stat.icon)
-                .font(.system(size: 18))
+                .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                 .foregroundStyle(accentColor)
 
             Text(stat.value)
