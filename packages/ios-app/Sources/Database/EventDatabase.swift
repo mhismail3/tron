@@ -32,12 +32,11 @@ final class EventDatabase: DatabaseTransport {
 
     // MARK: - Initialization
 
-    init() {
-        // Store in app's documents directory
+    /// Failable initializer — returns nil if Documents directory is inaccessible.
+    init?() {
         let fileManager = FileManager.default
         guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            // This should never happen on iOS, but provide clear diagnostics if it does
-            fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
+            return nil
         }
         let tronDir = documentsURL.appendingPathComponent(".tron", isDirectory: true)
         let dbDir = tronDir.appendingPathComponent("database", isDirectory: true)

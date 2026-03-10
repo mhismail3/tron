@@ -1113,6 +1113,8 @@ final class ToolEventCoordinatorTests: XCTestCase {
 final class MockToolEventContext: ToolEventContext {
     // MARK: - State
     var messages: [ChatMessage] = []
+    let messageIndex = MessageIndex()
+    var runningToolCount: Int = 0
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var currentTurnToolCalls: [ToolCallRecord] = []
 

@@ -184,7 +184,7 @@ final class TurnLifecycleCoordinator {
         // Remove catching-up notification at natural breakpoint (turn end)
         if let catchUpId = context.catchingUpMessageId {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                context.messages.removeAll { $0.id == catchUpId }
+                context.removeFromMessages { $0.id == catchUpId }
             }
             context.catchingUpMessageId = nil
             context.logInfo("Catch-up complete - removed notification")
@@ -253,7 +253,7 @@ final class TurnLifecycleCoordinator {
 
         // Remove catching-up notification if still present
         if let catchUpId = context.catchingUpMessageId {
-            context.messages.removeAll { $0.id == catchUpId }
+            context.removeFromMessages { $0.id == catchUpId }
             context.catchingUpMessageId = nil
         }
 

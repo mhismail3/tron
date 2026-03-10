@@ -92,7 +92,7 @@ final class UICanvasCoordinator {
                 status: .rendering,
                 errorMessage: nil
             )))
-            context.messages.append(message)
+            context.appendToMessages(message)
 
             // Track in tracker (single source of truth, returns placeholder toolCallId)
             let placeholderToolCallId = context.renderAppUIChipTracker.createChipFromChunk(

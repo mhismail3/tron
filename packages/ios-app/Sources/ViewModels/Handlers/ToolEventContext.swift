@@ -6,16 +6,17 @@ import Foundation
 /// Inherits from:
 /// - LoggingContext: Logging and error display
 /// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
+/// - MessageMutating: Centralized message array mutations with automatic index sync
 ///
 /// Note: Streaming methods (flushPendingTextUpdates, finalizeStreamingMessage) are declared
 /// directly rather than inheriting StreamingManaging, since resetStreamingManager is not needed.
 @MainActor
-protocol ToolEventContext: LoggingContext, ToolStateTracking {
+protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
 
     // MARK: - Messages State
 
-    /// Messages array to append tool messages to
-    var messages: [ChatMessage] { get set }
+    /// Running tool counter for O(1) hasRunningTools check
+    var runningToolCount: Int { get set }
 
     // MARK: - State Objects
 

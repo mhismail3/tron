@@ -473,6 +473,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
 final class MockUICanvasContext: UICanvasContext {
     // MARK: - State
     var messages: [ChatMessage] = []
+    let messageIndex = MessageIndex()
     var renderAppUIChipTracker = RenderAppUIChipTracker()
     var uiCanvasState = UICanvasState()
     var animationCoordinator = AnimationCoordinator()

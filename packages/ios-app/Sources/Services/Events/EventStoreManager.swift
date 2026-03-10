@@ -363,8 +363,33 @@ final class EventStoreManager {
 
     // MARK: - Session List (from EventDatabase)
 
-    /// Load sessions from local EventDatabase
+    /// Debounce task for loadSessions — coalesces rapid calls
+    @ObservationIgnored
+    private var loadSessionsDebounceTask: Task<Void, Never>?
+    /// Whether this is the first loadSessions call (skip debounce for initialize)
+    @ObservationIgnored
+    private var hasLoadedSessionsOnce = false
+
+    /// Load sessions from local EventDatabase.
+    /// Debounced: rapid calls within 100ms are coalesced into a single execution.
+    /// First call (during initialize) executes immediately.
     func loadSessions() {
+        if !hasLoadedSessionsOnce {
+            hasLoadedSessionsOnce = true
+            _loadSessionsImmediate()
+            return
+        }
+
+        loadSessionsDebounceTask?.cancel()
+        loadSessionsDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            self?._loadSessionsImmediate()
+        }
+    }
+
+    /// Actual loadSessions implementation (called directly or after debounce).
+    private func _loadSessionsImmediate() {
         do {
             // Preserve existing transient state before reloading
             var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, isProcessing: Bool?)] = [:]

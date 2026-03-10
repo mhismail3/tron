@@ -154,9 +154,12 @@ final class RPCClient: RPCTransport {
         // Observe connection state via @Observable property
         startConnectionStateObservation()
 
-        // Set event handler callback
-        ws.onEvent = { [weak self] data in
-            self?.handleEventData(data)
+        // Set event handler callback — receives pre-extracted type and sessionId
+        ws.onEvent = { [weak self] data, eventType, _ in
+            if let eventType {
+                self?.handleEventData(data, preExtractedType: eventType)
+            }
+            // RPC responses (eventType == nil) already handled by WebSocketService via pendingRequests
         }
 
         await ws.connect()
@@ -258,14 +261,10 @@ final class RPCClient: RPCTransport {
 
     // MARK: - Event Handling
 
-    private func handleEventData(_ data: Data) {
-        // Extract event type for plugin dispatch
-        guard let eventType = Self.extractEventType(from: data) else {
-            logger.warning("Failed to extract event type from data", category: .events)
-            return
-        }
+    private func handleEventData(_ data: Data, preExtractedType: String) {
+        let eventType = preExtractedType
 
-        // Parse event using plugin system
+        // Parse event using plugin system (no re-parsing of JSON for type extraction)
         guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: data) else {
             logger.warning("Failed to parse event: \(eventType)", category: .events)
             return
@@ -289,15 +288,7 @@ final class RPCClient: RPCTransport {
         _eventStream.send(eventV2)
     }
 
-    /// Extract event type string from raw JSON data without full parsing.
-    /// Used for efficient plugin dispatch.
-    private static func extractEventType(from data: Data) -> String? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else {
-            return nil
-        }
-        return type
-    }
+    // extractEventType removed — type is now pre-extracted by WebSocketService.handleMessage
 
     // MARK: - State Accessors
 

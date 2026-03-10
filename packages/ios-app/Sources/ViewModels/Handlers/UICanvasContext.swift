@@ -6,12 +6,7 @@ import Foundation
 /// Inherits from:
 /// - LoggingContext: Logging and error display
 @MainActor
-protocol UICanvasContext: LoggingContext {
-
-    // MARK: - Messages State
-
-    /// Messages array to update with chip status
-    var messages: [ChatMessage] { get set }
+protocol UICanvasContext: LoggingContext, MessageMutating {
 
     // MARK: - Canvas State Objects
 

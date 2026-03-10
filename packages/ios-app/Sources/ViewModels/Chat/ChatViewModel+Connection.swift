@@ -35,7 +35,7 @@ extension ChatViewModel: ConnectionContext {
 
     func appendCatchingUpMessage() -> UUID {
         let catchingUpMessage = ChatMessage.catchingUp()
-        messages.append(catchingUpMessage)
+        appendToMessages(catchingUpMessage)
         catchingUpMessageId = catchingUpMessage.id
         return catchingUpMessage.id
     }
@@ -47,7 +47,7 @@ extension ChatViewModel: ConnectionContext {
     func removeCatchingUpMessage() {
         guard let catchUpId = catchingUpMessageId else { return }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            messages.removeAll { $0.id == catchUpId }
+            removeFromMessages { $0.id == catchUpId }
         }
         catchingUpMessageId = nil
         logger.info("Removed catching-up notification after processing", category: .session)
@@ -59,15 +59,15 @@ extension ChatViewModel: ConnectionContext {
         streamingManager.reset()
         // Remove any in-flight streaming message
         if let streamingId {
-            messages.removeAll { $0.id == streamingId }
+            removeFromMessages { $0.id == streamingId }
         }
         // Remove in-flight thinking message (will be re-created from catch-up)
         if let thinkingId = thinkingMessageId {
-            messages.removeAll { $0.id == thinkingId }
+            removeFromMessages { $0.id == thinkingId }
         }
         // Remove running tool messages (will be re-created from catch-up)
         let runningToolIds = currentToolMessages.keys
-        messages.removeAll { runningToolIds.contains($0.id) }
+        removeFromMessages { runningToolIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
         currentTurnToolCalls.removeAll()
@@ -93,6 +93,12 @@ extension ChatViewModel {
     /// Connect and resume the session
     func connectAndResume() async {
         await connectionCoordinator.connectAndResume(context: self)
+        // Cache haptics settings on connection to avoid RPC per haptic event
+        if cachedHapticsSettings == nil {
+            if let settings = try? await rpcClient.settings.get() {
+                cachedHapticsSettings = settings.integrations.haptics
+            }
+        }
     }
 
     /// Reconnect to server and resume streaming state after app returns to foreground
@@ -132,6 +138,7 @@ extension ChatViewModel {
         // Track all messages created during catch-up so the preservation filter
         // can retain them across DB reloads (in-progress turn content has no DB counterpart)
         catchUpMessageIds = Set(messages[preCount...].map { $0.id })
+        messageIndex.rebuild(from: messages) // Bulk rebuild after catch-up mutations
         logger.debug("Catch-up created \(catchUpMessageIds.count) messages for preservation tracking", category: .session)
     }
 

@@ -82,6 +82,8 @@ final class ChatViewModel: ChatEventContext {
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)
     let worktreeState = WorktreeIsolationState()
+    /// Cached haptics settings — populated from server settings, avoids RPC per haptic event
+    var cachedHapticsSettings: ServerSettings.IntegrationSettings.HapticsSettings?
 
     // MARK: - Protocol Conformance (ChatEventContext)
     // These are thin wrappers for protocol conformance only
@@ -191,6 +193,8 @@ final class ChatViewModel: ChatEventContext {
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates event dispatch - routes plugin events to handlers
     let eventDispatchCoordinator = EventDispatchCoordinator()
+    /// O(1) message lookup index — kept in sync with `messages` array
+    let messageIndex = MessageIndex()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
@@ -284,6 +288,8 @@ final class ChatViewModel: ChatEventContext {
                     self.streamingManager.reset()
                     self.isCompacting = false
                     self.compactionInProgressMessageId = nil
+                    self.runningToolCount = 0
+                    DeviceRequestDispatcher.clearDeduplicationState()
                 }
             }
         }
@@ -335,10 +341,8 @@ final class ChatViewModel: ChatEventContext {
     private func setupStreamingManagerCallbacks() {
         streamingManager.onTextUpdate = { [weak self] messageId, text in
             guard let self = self else { return }
-            // Find and update the streaming message
-            if let index = MessageFinder.indexById(messageId, in: self.messages) {
+            if let index = self.messageIndex.index(for: messageId) {
                 self.messages[index].content = .streaming(text)
-                // Increment version to trigger SwiftUI onChange reliably
                 self.messages[index].streamingVersion += 1
             }
         }
@@ -346,23 +350,20 @@ final class ChatViewModel: ChatEventContext {
         streamingManager.onCreateStreamingMessage = { [weak self] in
             guard let self = self else { return UUID() }
             let message = ChatMessage.streaming()
-            self.messages.append(message)
-            // Sync to MessageWindowManager
+            self.appendToMessages(message)
             self.messageWindowManager.appendMessage(message)
             return message.id
         }
 
         streamingManager.onFinalizeMessage = { [weak self] messageId, finalText in
             guard let self = self else { return }
-            if let index = MessageFinder.indexById(messageId, in: self.messages) {
+            if let index = self.messageIndex.index(for: messageId) {
                 if finalText.isEmpty {
-                    self.messages.remove(at: index)
-                    // Sync removal to MessageWindowManager
+                    self.removeFromMessages(at: index)
                     self.messageWindowManager.removeMessage(id: messageId)
                 } else {
                     self.messages[index].content = .text(finalText)
                     self.messages[index].isStreaming = false
-                    // Sync to MessageWindowManager
                     self.messageWindowManager.updateMessage(self.messages[index])
                 }
             }
@@ -405,8 +406,9 @@ final class ChatViewModel: ChatEventContext {
 
     /// Process a tool end update that has been ordered by UIUpdateQueue
     private func processOrderedToolEnd(_ data: UIUpdateQueue.ToolEndData) {
-        // Find the tool message by toolCallId
-        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: data.toolCallId, in: messages) {
+        // Find the tool message by toolCallId (O(1) via index, fallback to linear scan)
+        if let index = messageIndex.index(forToolCallId: data.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: data.toolCallId, in: messages) {
             if case .toolUse(var tool) = messages[index].content {
                 tool.status = data.success ? .success : .error
                 tool.result = data.result
@@ -414,9 +416,11 @@ final class ChatViewModel: ChatEventContext {
                 tool.details = data.details
                 tool.streamingOutput = nil
                 messages[index].content = .toolUse(tool)
-
-                // Sync to MessageWindowManager
+                messageIndex.didUpdate(messages[index], at: index)
                 messageWindowManager.updateMessage(messages[index])
+
+                // Decrement running tool counter (clamp to 0 for catch-up scenarios)
+                runningToolCount = max(0, runningToolCount - 1)
             }
         }
     }
@@ -438,12 +442,30 @@ final class ChatViewModel: ChatEventContext {
         }
     }
 
+    /// Tracked fire-and-forget tasks — cancelled in deinit to prevent leaks
+    @ObservationIgnored
+    private var backgroundTasks: [Task<Void, Never>] = []
+    /// Debounced refreshTasks task — cancel-and-replace pattern
+    @ObservationIgnored
+    var refreshTasksDebounceTask: Task<Void, Never>?
+
+    /// Launch a tracked background task. Removed from tracking on completion.
+    func launchBackground(_ operation: @escaping @Sendable @MainActor () async -> Void) {
+        let task = Task { @MainActor [weak self] in
+            await operation()
+            self?.backgroundTasks.removeAll { $0.isCancelled }
+        }
+        backgroundTasks.append(task)
+    }
+
     deinit {
         // MainActor classes always deinit on the main actor.
         // assumeIsolated lets the compiler see we can safely access isolated state.
         MainActor.assumeIsolated {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
+            for task in backgroundTasks { task.cancel() }
+            refreshTasksDebounceTask?.cancel()
         }
     }
 
@@ -494,7 +516,7 @@ final class ChatViewModel: ChatEventContext {
 
     func updateStreamingMessage(with content: MessageContent) {
         guard let id = streamingManager.streamingMessageId,
-              let index = MessageFinder.indexById(id, in: messages) else {
+              let index = messageIndex.index(for: id) else {
             return
         }
         messages[index].content = content
@@ -511,7 +533,7 @@ final class ChatViewModel: ChatEventContext {
     /// Mark the current thinking message as no longer streaming (if present)
     func markThinkingMessageCompleteIfNeeded() {
         guard let id = thinkingMessageId,
-              let index = MessageFinder.indexById(id, in: messages),
+              let index = messageIndex.index(for: id),
               case .thinking(let visible, let isExpanded, let isStreaming) = messages[index].content,
               isStreaming else {
             return
@@ -570,7 +592,7 @@ final class ChatViewModel: ChatEventContext {
     // MARK: - Commands
 
     func clearMessages() {
-        messages = []
+        clearAllMessages()
         renderAppUIChipTracker.clearAll()
     }
 
@@ -580,7 +602,7 @@ final class ChatViewModel: ChatEventContext {
             from: previousModel.shortModelName,
             to: newModel.shortModelName
         )
-        messages.append(notification)
+        appendToMessages(notification)
         logger.info("Model switched from \(previousModel) to \(newModel)", category: .session)
     }
 
@@ -590,7 +612,7 @@ final class ChatViewModel: ChatEventContext {
             from: previousLevel.capitalized,
             to: newLevel.capitalized
         )
-        messages.append(notification)
+        appendToMessages(notification)
         logger.info("Reasoning level changed from \(previousLevel) to \(newLevel)", category: .session)
     }
 
@@ -628,8 +650,8 @@ final class ChatViewModel: ChatEventContext {
             // Remove the message from local state immediately for responsive UI
             // The server will also send an event.new notification which we handle in Events extension
             await MainActor.run {
-                if let index = MessageFinder.indexByEventId(eventId, in: messages) {
-                    messages.remove(at: index)
+                if let index = MessageFinder.indexByEventId(eventId, in: self.messages) {
+                    self.removeFromMessages(at: index)
                 }
             }
         } catch {
@@ -662,22 +684,20 @@ final class ChatViewModel: ChatEventContext {
 
     private var isThinkingActivelyStreaming: Bool {
         guard let id = thinkingMessageId,
-              let index = MessageFinder.indexById(id, in: messages),
+              let index = messageIndex.index(for: id),
               case .thinking(_, _, let isStreaming) = messages[index].content else {
             return false
         }
         return isStreaming
     }
 
+    /// Counter-based running tool detection — O(1) instead of O(n*m) scan.
+    /// Incremented in tool start handler, decremented in processOrderedToolEnd and tool end handler.
+    /// Reset on turn start and disconnect.
+    var runningToolCount: Int = 0
+
     private var hasRunningTools: Bool {
-        for (id, _) in currentToolMessages {
-            if let index = MessageFinder.indexById(id, in: messages),
-               case .toolUse(let tool) = messages[index].content,
-               tool.status == .running {
-                return true
-            }
-        }
-        return false
+        runningToolCount > 0
     }
 
     var canSend: Bool {

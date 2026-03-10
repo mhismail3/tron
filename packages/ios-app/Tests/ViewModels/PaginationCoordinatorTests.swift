@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class MockPaginationContext: PaginationContext {
     var messages: [ChatMessage] = []
+    let messageIndex = MessageIndex()
     var allReconstructedMessages: [ChatMessage] = []
     var hasMoreMessages: Bool = false
     var isLoadingMoreMessages: Bool = false

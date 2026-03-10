@@ -14,12 +14,7 @@ import Foundation
 /// Note: streamingText removed - passed as parameter to handleComplete instead.
 /// Note: updateTotalTokenUsage removed - not called by coordinator.
 @MainActor
-protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging {
-
-    // MARK: - Messages State
-
-    /// Messages array to update with metadata
-    var messages: [ChatMessage] { get set }
+protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging, MessageMutating {
 
     // MARK: - Turn Tracking State
 

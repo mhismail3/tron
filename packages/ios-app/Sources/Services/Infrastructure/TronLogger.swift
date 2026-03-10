@@ -60,14 +60,25 @@ enum LogCategory: String, CaseIterable {
 final class TronLogger: @unchecked Sendable {
     static let shared = TronLogger()
 
-    // Current minimum log level (can be changed at runtime)
-    var minimumLevel: LogLevel = .verbose
+    // Thread-safe configuration properties — protected by bufferLock
+    private var _minimumLevel: LogLevel = .verbose
+    private var _categoryLevels: [LogCategory: LogLevel] = [:]
+    private var _enabledCategories: Set<LogCategory> = Set(LogCategory.allCases)
 
-    // Category-specific log levels (optional override)
-    var categoryLevels: [LogCategory: LogLevel] = [:]
+    var minimumLevel: LogLevel {
+        get { bufferLock.withLock { _minimumLevel } }
+        set { bufferLock.withLock { _minimumLevel = newValue } }
+    }
 
-    // Enable/disable categories entirely
-    var enabledCategories: Set<LogCategory> = Set(LogCategory.allCases)
+    var categoryLevels: [LogCategory: LogLevel] {
+        get { bufferLock.withLock { _categoryLevels } }
+        set { bufferLock.withLock { _categoryLevels = newValue } }
+    }
+
+    var enabledCategories: Set<LogCategory> {
+        get { bufferLock.withLock { _enabledCategories } }
+        set { bufferLock.withLock { _enabledCategories = newValue } }
+    }
 
     // In-memory log buffers - separate per category to prevent chatty categories from pushing out quieter ones
     private var categoryBuffers: [LogCategory: [(Date, LogCategory, LogLevel, String)]] = [:]
@@ -122,11 +133,11 @@ final class TronLogger: @unchecked Sendable {
     // MARK: - Logging Methods
 
     func log(_ level: LogLevel, category: LogCategory = .general, _ message: String, file: String = #file, function: String = #function, line: Int = #line) {
-        // Check if category is enabled
-        guard enabledCategories.contains(category) else { return }
-
-        // Check log level (category-specific or global)
-        let effectiveLevel = categoryLevels[category] ?? minimumLevel
+        // Read config atomically under lock
+        let (isEnabled, effectiveLevel) = bufferLock.withLock {
+            (_enabledCategories.contains(category), _categoryLevels[category] ?? _minimumLevel)
+        }
+        guard isEnabled else { return }
         guard level >= effectiveLevel else { return }
 
         let fileName = file.filename

@@ -50,8 +50,9 @@ final class ToolEventCoordinator {
                 result: nil
             )
             let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
-            context.messages.append(message)
+            context.appendToMessages(message)
             context.currentToolMessages[message.id] = message
+            context.runningToolCount += 1
             context.makeToolVisible(pluginResult.toolCallId)
             context.appendToMessageWindow(message)
 
@@ -73,8 +74,9 @@ final class ToolEventCoordinator {
         )
         let message = ChatMessage(role: .assistant, content: .toolUse(tool))
 
-        context.messages.append(message)
+        context.appendToMessages(message)
         context.currentToolMessages[message.id] = message
+        context.runningToolCount += 1
         context.makeToolVisible(pluginResult.toolCallId)
         context.appendToMessageWindow(message)
 
@@ -118,7 +120,8 @@ final class ToolEventCoordinator {
         // When resuming an in-progress session, catch-up creates tool messages for running/completed tools.
         // tool_generating also pre-creates chips before tool_start arrives.
         // The server then continues streaming those same tools, which would cause duplicates.
-        if let existingIndex = MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
+        if let existingIndex = context.messageIndex.index(forToolCallId: pluginResult.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
             context.logInfo("Updating existing tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) with arguments")
             // Still make the tool visible (in case it wasn't)
             context.makeToolVisible(pluginResult.toolCallId)
@@ -194,8 +197,9 @@ final class ToolEventCoordinator {
         }
 
         // Append message to chat
-        context.messages.append(message)
+        context.appendToMessages(message)
         context.currentToolMessages[message.id] = message
+        context.runningToolCount += 1
 
         // Make tool immediately visible for rendering
         context.makeToolVisible(pluginResult.toolCallId)
@@ -342,7 +346,7 @@ final class ToolEventCoordinator {
                 status: .running
             )
             let message = ChatMessage(role: .assistant, content: .toolUse(tool))
-            context.messages.append(message)
+            context.appendToMessages(message)
             context.makeToolVisible(pluginResult.toolCallId)
             return
         }
@@ -357,7 +361,7 @@ final class ToolEventCoordinator {
         )
 
         let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
-        context.messages.append(message)
+        context.appendToMessages(message)
 
         // Track tool call for persistence
         let record = ToolCallRecord(

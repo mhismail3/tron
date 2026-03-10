@@ -53,7 +53,8 @@ final class EventRepository {
         }
     }
 
-    /// Insert multiple events in a transaction
+    /// Insert multiple events in a transaction.
+    /// Reuses a single prepared statement (prepare once, rebind per iteration).
     func insertBatch(_ events: [SessionEvent]) throws {
         guard !events.isEmpty else { return }
         guard let transport = transport else {
@@ -61,10 +62,29 @@ final class EventRepository {
         }
 
         logger.debug("Starting batch insert of \(events.count) events", category: .database)
+
+        let sql = """
+            INSERT OR REPLACE INTO events
+            (id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
         try transport.execute("BEGIN TRANSACTION")
         do {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(transport.db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(transport.errorMessage)
+            }
+            defer { sqlite3_finalize(stmt) }
+
             for event in events {
-                try insert(event)
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+                try bindEvent(event, to: stmt, transport: transport)
+
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    throw EventDatabaseError.insertFailed(transport.errorMessage)
+                }
             }
             try transport.execute("COMMIT")
             logger.info("Batch insert committed: \(events.count) events", category: .database)
@@ -104,22 +124,7 @@ final class EventRepository {
             for event in events {
                 sqlite3_reset(stmt)
                 sqlite3_clear_bindings(stmt)
-
-                sqlite3_bind_text(stmt, 1, event.id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                if let parentId = event.parentId {
-                    sqlite3_bind_text(stmt, 2, parentId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                } else {
-                    sqlite3_bind_null(stmt, 2)
-                }
-                sqlite3_bind_text(stmt, 3, event.sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                sqlite3_bind_text(stmt, 4, event.workspaceId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                sqlite3_bind_text(stmt, 5, event.type, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                sqlite3_bind_text(stmt, 6, event.timestamp, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                sqlite3_bind_int(stmt, 7, Int32(event.sequence))
-
-                let payloadData = try JSONEncoder().encode(event.payload)
-                let payloadString = String(data: payloadData, encoding: .utf8) ?? "{}"
-                sqlite3_bind_text(stmt, 8, payloadString, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                try bindEvent(event, to: stmt, transport: transport)
 
                 guard sqlite3_step(stmt) == SQLITE_DONE else {
                     throw EventDatabaseError.insertFailed(transport.errorMessage)
@@ -138,6 +143,25 @@ final class EventRepository {
         }
 
         return insertedCount
+    }
+
+    /// Bind event fields to a prepared statement (shared by insert, insertBatch, insertIgnoringDuplicates).
+    private func bindEvent(_ event: SessionEvent, to stmt: OpaquePointer?, transport: DatabaseTransport) throws {
+        sqlite3_bind_text(stmt, 1, event.id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        if let parentId = event.parentId {
+            sqlite3_bind_text(stmt, 2, parentId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        } else {
+            sqlite3_bind_null(stmt, 2)
+        }
+        sqlite3_bind_text(stmt, 3, event.sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 4, event.workspaceId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 5, event.type, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 6, event.timestamp, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_int(stmt, 7, Int32(event.sequence))
+
+        let payloadData = try JSONEncoder().encode(event.payload)
+        let payloadString = String(data: payloadData, encoding: .utf8) ?? "{}"
+        sqlite3_bind_text(stmt, 8, payloadString, -1, SQLITE_TRANSIENT_DESTRUCTOR)
     }
 
     // MARK: - Query Operations

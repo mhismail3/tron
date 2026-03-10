@@ -5,8 +5,8 @@ import Foundation
 /// This protocol allows PaginationCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with message pagination state.
 @MainActor
-protocol PaginationContext: AnyObject {
-    /// The displayed messages array
+protocol PaginationContext: MessageMutating {
+    /// The displayed messages array (inherited from MessageMutating, redeclared for docs)
     var messages: [ChatMessage] { get set }
 
     /// All reconstructed messages from history (for pagination)

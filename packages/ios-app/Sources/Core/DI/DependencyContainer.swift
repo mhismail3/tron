@@ -124,7 +124,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let tls = UserDefaults.standard.bool(forKey: "useTLS")
 
         // Initialize core services that persist across server changes
-        let db = EventDatabase()
+        guard let db = EventDatabase() else {
+            fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
+        }
         eventDatabase = db
         pushNotificationService = PushNotificationService()
         deepLinkRouter = DeepLinkRouter()

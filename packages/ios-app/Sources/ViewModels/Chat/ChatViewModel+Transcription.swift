@@ -36,11 +36,11 @@ extension ChatViewModel: TranscriptionContext {
     }
 
     func appendTranscriptionFailedNotification() {
-        messages.append(.transcriptionFailed())
+        appendToMessages(.transcriptionFailed())
     }
 
     func appendNoSpeechDetectedNotification() {
-        messages.append(.transcriptionNoSpeech())
+        appendToMessages(.transcriptionNoSpeech())
     }
 }
 

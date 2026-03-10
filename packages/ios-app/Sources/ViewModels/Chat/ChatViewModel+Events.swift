@@ -46,20 +46,20 @@ extension ChatViewModel {
             let thinkingMessage = ChatMessage.thinking(result.thinkingText, isStreaming: true)
 
             if let streamingId = streamingManager.streamingMessageId,
-               let streamingIndex = MessageFinder.indexById(streamingId, in: messages) {
+               let streamingIndex = messageIndex.index(for: streamingId) {
                 // Streaming message already exists (adaptive thinking sent text first)
                 // Insert thinking BEFORE it so thinking appears above text visually
-                messages.insert(thinkingMessage, at: streamingIndex)
+                insertInMessages(thinkingMessage, at: streamingIndex)
                 messageWindowManager.insertMessage(thinkingMessage, before: streamingId)
                 logger.debug("Inserted thinking message before streaming: \(thinkingMessage.id)", category: .events)
             } else {
-                messages.append(thinkingMessage)
+                appendToMessages(thinkingMessage)
                 messageWindowManager.appendMessage(thinkingMessage)
                 logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
             }
             thinkingMessageId = thinkingMessage.id
         } else if let id = thinkingMessageId,
-                  let index = MessageFinder.indexById(id, in: messages) {
+                  let index = messageIndex.index(for: id) {
             // Update existing thinking message with accumulated content
             messages[index].content = .thinking(visible: result.thinkingText, isExpanded: false, isStreaming: true)
         }
@@ -83,9 +83,8 @@ extension ChatViewModel {
     }
 
     func handleToolOutput(_ result: ToolOutputPlugin.Result) {
-        guard let index = MessageFinder.lastIndexOfToolUse(
-            toolCallId: result.toolCallId, in: messages
-        ) else { return }
+        guard let index = messageIndex.index(forToolCallId: result.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) else { return }
 
         if case .toolUse(var tool) = messages[index].content {
             let accumulated = (tool.streamingOutput ?? "") + result.output
@@ -102,7 +101,8 @@ extension ChatViewModel {
 
         // Check if this is a browser tool result with screenshot data
         // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
-        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
+        if let index = messageIndex.index(forToolCallId: result.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
                 if ToolKind(toolName: tool.toolName) == .browseTheWeb {
                     // Pass plugin result for screenshot extraction (needs result.details)
@@ -135,6 +135,7 @@ extension ChatViewModel {
         // A turn starting means the agent is actively processing.
         // Also clears any stale postProcessing state from a previous cycle.
         agentPhase = .processing
+        runningToolCount = 0
 
         if isCompacting {
             isCompacting = false
@@ -233,7 +234,7 @@ extension ChatViewModel {
 
         // Add spinning "Compacting..." pill to chat
         let inProgressMessage = ChatMessage.compactionInProgress(reason: pluginResult.reason)
-        messages.append(inProgressMessage)
+        appendToMessages(inProgressMessage)
         compactionInProgressMessageId = inProgressMessage.id
     }
 
@@ -257,7 +258,7 @@ extension ChatViewModel {
 
         // Replace the in-progress pill with the final compaction pill
         if let inProgressId = compactionInProgressMessageId,
-           let index = MessageFinder.indexById(inProgressId, in: messages) {
+           let index = messageIndex.index(for: inProgressId) {
             let compactionMessage = ChatMessage.compaction(
                 tokensBefore: result.tokensBefore,
                 tokensAfter: result.tokensAfter,
@@ -274,12 +275,12 @@ extension ChatViewModel {
                 reason: result.reason,
                 summary: result.summary
             )
-            messages.append(compactionMessage)
+            appendToMessages(compactionMessage)
         }
 
         // Refresh context from server to ensure context limit is also current
-        Task {
-            await refreshContextFromServer()
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
         }
 
         // Compaction finished — if queue was waiting, drain now
@@ -293,7 +294,7 @@ extension ChatViewModel {
         finalizeStreamingMessage()
 
         let inProgressMessage = ChatMessage.memoryUpdating()
-        messages.append(inProgressMessage)
+        appendToMessages(inProgressMessage)
         memoryUpdatingInProgressMessageId = inProgressMessage.id
 
         // Defensive timeout: if memory_updated never arrives, remove the spinner
@@ -304,9 +305,9 @@ extension ChatViewModel {
             guard let self, !Task.isCancelled else { return }
             guard self.memoryUpdatingInProgressMessageId == messageId else { return }
             self.logWarning("Memory updating timeout — memory_updated never arrived, removing spinner")
-            if let idx = MessageFinder.indexById(messageId, in: self.messages) {
+            if let idx = self.messageIndex.index(for: messageId) {
                 _ = withAnimation(.smooth(duration: 0.3)) {
-                    self.messages.remove(at: idx)
+                    self.removeFromMessages(at: idx)
                 }
             }
             self.memoryUpdatingInProgressMessageId = nil
@@ -322,7 +323,7 @@ extension ChatViewModel {
         // Error case: database or server error — show briefly, then auto-dismiss
         if pluginResult.entryType == "error" {
             if let inProgressId = memoryUpdatingInProgressMessageId,
-               let index = MessageFinder.indexById(inProgressId, in: messages) {
+               let index = messageIndex.index(for: inProgressId) {
                 withAnimation(.smooth(duration: 0.35)) {
                     messages[index].content = .memoryUpdated(
                         title: pluginResult.title.isEmpty ? "Memory update failed" : pluginResult.title,
@@ -332,9 +333,9 @@ extension ChatViewModel {
                 let messageId = inProgressId
                 Task { @MainActor in
                     try? await Task.sleep(for: .seconds(5))
-                    if let idx = MessageFinder.indexById(messageId, in: messages) {
+                    if let idx = messageIndex.index(for: messageId) {
                         _ = withAnimation(.smooth(duration: 0.3)) {
-                            messages.remove(at: idx)
+                            removeFromMessages(at: idx)
                         }
                     }
                 }
@@ -347,16 +348,16 @@ extension ChatViewModel {
         // Transition spinner → "Nothing new to retain" briefly, then auto-remove
         if pluginResult.entryType == "skipped" {
             if let inProgressId = memoryUpdatingInProgressMessageId,
-               let index = MessageFinder.indexById(inProgressId, in: messages) {
+               let index = messageIndex.index(for: inProgressId) {
                 withAnimation(.smooth(duration: 0.35)) {
                     messages[index].content = .memoryUpdated(title: "Nothing new to retain", entryType: "skipped")
                 }
                 let messageId = inProgressId
                 Task { @MainActor in
                     try? await Task.sleep(for: .seconds(3))
-                    if let idx = MessageFinder.indexById(messageId, in: messages) {
+                    if let idx = messageIndex.index(for: messageId) {
                         _ = withAnimation(.smooth(duration: 0.3)) {
-                            messages.remove(at: idx)
+                            removeFromMessages(at: idx)
                         }
                     }
                 }
@@ -367,7 +368,7 @@ extension ChatViewModel {
 
         // Mutate content in-place to keep the same message identity → smooth animation
         if let inProgressId = memoryUpdatingInProgressMessageId,
-           let index = MessageFinder.indexById(inProgressId, in: messages) {
+           let index = messageIndex.index(for: inProgressId) {
             withAnimation(.smooth(duration: 0.35)) {
                 messages[index].content = .memoryUpdated(title: pluginResult.title, entryType: pluginResult.entryType, eventId: pluginResult.eventId)
             }
@@ -379,7 +380,7 @@ extension ChatViewModel {
                 entryType: pluginResult.entryType,
                 eventId: pluginResult.eventId
             )
-            messages.append(message)
+            appendToMessages(message)
         }
     }
 
@@ -401,11 +402,11 @@ extension ChatViewModel {
             tokensBefore: result.tokensBefore,
             tokensAfter: result.tokensAfter
         )
-        messages.append(clearedMessage)
+        appendToMessages(clearedMessage)
 
         // Refresh context from server to ensure context limit is also current
-        Task {
-            await refreshContextFromServer()
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
         }
     }
 
@@ -416,7 +417,7 @@ extension ChatViewModel {
 
         // Add message deleted notification pill to chat
         let deletedMessage = ChatMessage.messageDeleted(targetType: result.targetType)
-        messages.append(deletedMessage)
+        appendToMessages(deletedMessage)
     }
 
     func handleSkillRemoved(_ pluginResult: SkillRemovedPlugin.Result) {
@@ -426,12 +427,11 @@ extension ChatViewModel {
 
         // Add skill removed notification pill to chat
         let skillRemovedMessage = ChatMessage.skillRemoved(skillName: result.skillName)
-        messages.append(skillRemovedMessage)
+        appendToMessages(skillRemovedMessage)
 
         // Refresh context from server - skill removal changes context size
-        // Server is authoritative source for accurate token counts after context changes
-        Task {
-            await refreshContextFromServer()
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
         }
     }
 
@@ -443,10 +443,10 @@ extension ChatViewModel {
             rules: pluginResult.rules,
             totalActivated: pluginResult.totalActivated
         )
-        messages.append(message)
+        appendToMessages(message)
 
-        Task {
-            await refreshContextFromServer()
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
         }
     }
 
@@ -484,11 +484,11 @@ extension ChatViewModel {
                 errorType: result.errorType,
                 model: result.model
             )
-            messages.append(.providerError(data))
+            appendToMessages(.providerError(data))
             logger.error("Provider error [\(category)]: \(result.message)", category: .events)
         } else {
             // Legacy (un-enriched server): fall back to plain error text
-            messages.append(.error(result.message))
+            appendToMessages(.error(result.message))
             logger.error("Agent error: \(result.message)", category: .events)
         }
 
@@ -523,7 +523,7 @@ extension ChatViewModel {
             lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
         )
         finalizeStreamingMessage()
-        messages.append(.error(result.message))
+        appendToMessages(.error(result.message))
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)
@@ -584,12 +584,12 @@ extension ChatViewModel {
 
     func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {
         logger.debug("Task created: \(result.taskId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result) {
         logger.debug("Task updated: \(result.taskId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
@@ -599,27 +599,37 @@ extension ChatViewModel {
 
     func handleProjectCreated(_ result: ProjectCreatedPlugin.Result) {
         logger.debug("Project created: \(result.projectId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleProjectDeleted(_ result: ProjectDeletedPlugin.Result) {
         logger.debug("Project deleted: \(result.projectId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleAreaCreated(_ result: AreaCreatedPlugin.Result) {
         logger.debug("Area created: \(result.areaId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleAreaUpdated(_ result: AreaUpdatedPlugin.Result) {
         logger.debug("Area updated: \(result.areaId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
     }
 
     func handleAreaDeleted(_ result: AreaDeletedPlugin.Result) {
         logger.debug("Area deleted: \(result.areaId)", category: .events)
-        Task { await refreshTasks() }
+        debouncedRefreshTasks()
+    }
+
+    /// Debounced refreshTasks — cancel-and-replace to coalesce rapid task/project/area events.
+    private func debouncedRefreshTasks() {
+        refreshTasksDebounceTask?.cancel()
+        refreshTasksDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            await self?.refreshTasks()
+        }
     }
 
     private func refreshTasks() async {
@@ -696,8 +706,8 @@ extension ChatViewModel {
 
         // Trigger sync AFTER caching content
         logger.info("Triggering sync after caching agent turn content", category: .events)
-        Task {
-            await syncSessionEventsFromServer()
+        launchBackground { [weak self] in
+            await self?.syncSessionEventsFromServer()
         }
     }
 
@@ -808,7 +818,7 @@ extension ChatViewModel {
                 success: result.success
             ))
         )
-        messages.append(notification)
+        appendToMessages(notification)
         messageWindowManager.appendMessage(notification)
         logger.info("Added subagent result notification to chat: \(result.subagentSessionId)", category: .chat)
     }
@@ -892,11 +902,9 @@ extension ChatViewModel {
 
     // MARK: - Haptics
 
-    /// Fire-and-forget haptic trigger that fetches settings asynchronously.
+    /// Haptic trigger using locally cached settings — no RPC round-trip per event.
     func triggerHaptic(_ event: HapticEvent) {
-        Task {
-            guard let settings = try? await rpcClient.settings.get() else { return }
-            HapticService.shared.trigger(for: event, settings: settings.integrations.haptics)
-        }
+        guard let cached = cachedHapticsSettings else { return }
+        HapticService.shared.trigger(for: event, settings: cached)
     }
 }

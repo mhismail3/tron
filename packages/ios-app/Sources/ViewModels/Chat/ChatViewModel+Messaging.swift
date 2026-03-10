@@ -47,7 +47,7 @@ extension ChatViewModel: MessagingContext {
     }
 
     func appendInterruptedMessage() {
-        messages.append(.interrupted())
+        appendToMessages(.interrupted())
     }
 
     func finalizeThinkingMessage() {
@@ -94,7 +94,7 @@ extension ChatViewModel: MessagingContext {
 
         if !pendingIds.isEmpty {
             let pendingSet = Set(pendingIds)
-            messages.removeAll { msg in
+            removeFromMessages { msg in
                 if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
                     return pendingSet.contains(sid)
                 }

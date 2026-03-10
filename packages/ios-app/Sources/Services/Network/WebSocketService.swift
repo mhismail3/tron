@@ -92,7 +92,9 @@ final class WebSocketService {
 
     private(set) var connectionState: ConnectionState = .disconnected
 
-    var onEvent: ((Data) -> Void)?
+    /// Event callback with pre-extracted type and sessionId to avoid double JSON parsing.
+    /// Parameters: (rawData, eventType, sessionId) — type/sessionId are nil for RPC responses.
+    var onEvent: ((Data, String?, String?) -> Void)?
 
     // MARK: - Background State
 
@@ -415,11 +417,11 @@ final class WebSocketService {
                 logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
             }
         } else if let type = json["type"] as? String {
-            // This is an event
+            // This is an event — pass pre-extracted type and sessionId to avoid re-parsing
             let sessionId = json["sessionId"] as? String
             let eventData = json["data"]
             logger.logEvent(type: type, sessionId: sessionId, data: eventData.map { String(describing: $0).prefix(300).description })
-            onEvent?(data)
+            onEvent?(data, type, sessionId)
         } else {
             logger.debug("Received message without id or type: \(String(describing: json.keys))", category: .websocket)
         }

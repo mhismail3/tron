@@ -360,12 +360,12 @@ class CameraPreviewUIView: UIView {
     var session: AVCaptureSession? {
         didSet {
             guard let session = session else { return }
-            previewLayer.session = session
+            previewLayer?.session = session
         }
     }
 
-    private var previewLayer: AVCaptureVideoPreviewLayer {
-        layer as! AVCaptureVideoPreviewLayer
+    private var previewLayer: AVCaptureVideoPreviewLayer? {
+        layer as? AVCaptureVideoPreviewLayer
     }
 
     override class var layerClass: AnyClass {
@@ -374,7 +374,7 @@ class CameraPreviewUIView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer?.videoGravity = .resizeAspectFill
     }
 
     required init?(coder: NSCoder) {
@@ -383,6 +383,6 @@ class CameraPreviewUIView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        previewLayer.frame = bounds
+        previewLayer?.frame = bounds
     }
 }

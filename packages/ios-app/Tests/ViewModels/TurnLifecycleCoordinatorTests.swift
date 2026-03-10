@@ -637,6 +637,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 final class MockTurnLifecycleContext: TurnLifecycleContext {
     // MARK: - State
     var messages: [ChatMessage] = []
+    let messageIndex = MessageIndex()
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var currentTurnToolCalls: [ToolCallRecord] = []
     var askUserQuestionCalledInTurn: Bool = false

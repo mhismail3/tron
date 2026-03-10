@@ -10,13 +10,19 @@ import Foundation
 /// 3. Sends the result back via `device.respond` RPC
 @MainActor
 final class DeviceRequestDispatcher {
-    private unowned let rpcClient: RPCClient
+    private weak var rpcClient: RPCClient?
 
     /// Tracks handled request IDs to prevent duplicate dispatch.
     /// device.request events are global (nil sessionId) and delivered to ALL
     /// session subscribers, so multiple ChatViewModels receive the same event.
     /// Static because each ChatViewModel creates its own dispatcher instance.
+    /// Cleared on disconnect to prevent unbounded growth.
     private static var handledRequestIds = Set<String>()
+
+    /// Clear deduplication state. Called on disconnect since IDs won't be reused across connections.
+    static func clearDeduplicationState() {
+        handledRequestIds.removeAll()
+    }
 
     /// Active device request tasks, keyed by requestId.
     private var activeTasks: [String: Task<Void, Never>] = [:]
@@ -99,6 +105,10 @@ final class DeviceRequestDispatcher {
     // MARK: - Response
 
     private func respond(requestId: String, result: [String: AnyCodable]) async throws {
+        guard let rpcClient else {
+            logger.warning("RPCClient deallocated, dropping device response for \(requestId)", category: .general)
+            return
+        }
         try await rpcClient.misc.deviceRespond(requestId: requestId, result: result)
     }
 }

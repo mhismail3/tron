@@ -237,9 +237,9 @@ extension ChatViewModel {
 
             if batchSize > 0 {
                 let startIndex = allReconstructedMessages.count - batchSize
-                messages = Array(allReconstructedMessages[startIndex...])
+                replaceAllMessages(with: Array(allReconstructedMessages[startIndex...]))
             } else {
-                messages = []
+                clearAllMessages()
             }
 
             // Restore catch-up messages at the end, with final deduplication.
@@ -303,7 +303,7 @@ extension ChatViewModel {
                 }
 
                 if !filteredCatchUp.isEmpty {
-                    messages.append(contentsOf: filteredCatchUp)
+                    appendToMessages(contentsOf: filteredCatchUp)
                 }
                 logger.info("Restored \(filteredCatchUp.count)/\(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
@@ -361,7 +361,7 @@ extension ChatViewModel {
             let startIndex = max(0, endIndex - batchToLoad)
             let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
 
-            messages.insert(contentsOf: olderMessages, at: 0)
+            insertAtFrontOfMessages(olderMessages)
             displayedMessageCount += batchToLoad
 
             logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
@@ -378,7 +378,7 @@ extension ChatViewModel {
         do {
             let state = try manager.getReconstructedState(sessionId: sessionId)
             allReconstructedMessages = state.messages
-            messages = state.messages
+            replaceAllMessages(with: state.messages)
 
             currentTurn = state.currentTurn
 
@@ -403,10 +403,10 @@ extension ChatViewModel {
     }
 
     /// Append a new message to the display (streaming messages during active session)
-    /// Also syncs to MessageWindowManager for virtual scrolling
+    /// Also syncs to MessageWindowManager and MessageIndex for virtual scrolling
     /// Required by ChatEventContext protocol
     func appendMessage(_ message: ChatMessage) {
-        messages.append(message)
+        appendToMessages(message)
         messageWindowManager.appendMessage(message)
     }
 }

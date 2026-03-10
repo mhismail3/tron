@@ -44,6 +44,11 @@ final class LocationService: NSObject, @unchecked Sendable {
         }
         // Status is .notDetermined — show dialog and wait for delegate callback
         return await withCheckedContinuation { continuation in
+            // Guard re-entrancy: if called twice before delegate fires,
+            // resume the first continuation immediately to prevent hanging.
+            if let existing = self.permissionContinuation {
+                existing.resume(returning: manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways)
+            }
             self.permissionContinuation = continuation
             manager.requestWhenInUseAuthorization()
         }

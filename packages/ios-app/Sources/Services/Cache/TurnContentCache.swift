@@ -3,6 +3,7 @@ import Foundation
 /// TTL-based cache for turn content used to enrich server events.
 /// Server sync events may arrive with truncated tool content - this cache preserves
 /// the full content from agent.turn events for enrichment during sync.
+@MainActor
 final class TurnContentCache {
 
     // MARK: - Types

@@ -60,6 +60,8 @@ enum DatabaseSchema {
 
         // Indexes for common queries
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)")
+        // Covering index for getBySession ORDER BY sequence — eliminates temp B-tree sort
+        try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_events_parent ON events(parent_id)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
     }

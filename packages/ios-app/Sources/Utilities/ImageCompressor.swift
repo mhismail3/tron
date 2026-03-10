@@ -58,13 +58,13 @@ struct ImageCompressor {
         )
     }
 
-    /// Resize an image to the specified size
+    /// Resize an image to the specified size.
+    /// Uses UIGraphicsImageRenderer (non-deprecated) which respects device scale.
     private static func resize(_ image: UIImage, to size: CGSize) -> UIImage {
-        UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
-        defer { UIGraphicsEndImageContext() }
-
-        image.draw(in: CGRect(origin: .zero, size: size))
-        return UIGraphicsGetImageFromCurrentImageContext() ?? image
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 
     /// Format bytes into human-readable string
