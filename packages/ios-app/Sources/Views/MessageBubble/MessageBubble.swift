@@ -53,6 +53,8 @@ struct MessageBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
+        .accessibilityElement(children: isUserMessage ? .ignore : .combine)
+        .accessibilityLabel(isUserMessage ? "You: \(String(message.content.textContent.prefix(200)))" : "")
     }
 
     // MARK: - Content

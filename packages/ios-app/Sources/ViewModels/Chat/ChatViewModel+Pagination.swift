@@ -246,6 +246,20 @@ extension ChatViewModel {
             // Even after filtering above, a tool might have completed between catch-up
             // and sync, so we still check for duplicates by toolCallId.
             if !catchUpMessagesToRestore.isEmpty {
+                // Pre-compute sets for O(1) dedup lookups (thinking + system events scan all messages)
+                let existingThinkingTexts: Set<String> = Set(
+                    messages.compactMap { msg in
+                        if case .thinking(let visible, _, _) = msg.content { return visible }
+                        return nil
+                    }
+                )
+                let existingSystemEvents: Set<SystemEvent> = Set(
+                    messages.compactMap { msg in
+                        if case .systemEvent(let event) = msg.content { return event }
+                        return nil
+                    }
+                )
+
                 let filteredCatchUp = catchUpMessagesToRestore.filter { catchUpMsg in
                     // Tool messages: check if tool already in history (includes .subagent after conversion)
                     if let toolCallId = catchUpMsg.toolCallId {
@@ -277,26 +291,14 @@ extension ChatViewModel {
                         }
                     }
 
-                    // Thinking: deduplicate against DB reconstructed thinking
-                    // (thinking_complete events reconstruct thinking messages after turn ends)
+                    // Thinking: O(1) lookup via pre-computed set
                     if case .thinking(let visible, _, _) = catchUpMsg.content {
-                        return !messages.contains { msg in
-                            if case .thinking(let existingVisible, _, _) = msg.content {
-                                return existingVisible == visible
-                            }
-                            return false
-                        }
+                        return !existingThinkingTexts.contains(visible)
                     }
 
-                    // System events: deduplicate against history (persisted events reconstruct from DB)
-                    // Only keep transient system events that don't exist in history
+                    // System events: O(1) lookup via pre-computed set
                     if case .systemEvent(let catchUpEvent) = catchUpMsg.content {
-                        return !messages.contains { msg in
-                            if case .systemEvent(let historyEvent) = msg.content {
-                                return catchUpEvent == historyEvent
-                            }
-                            return false
-                        }
+                        return !existingSystemEvents.contains(catchUpEvent)
                     }
 
                     return true

@@ -4,7 +4,7 @@ import Foundation
 
 /// System events are non-content notifications displayed in the chat
 /// (model changes, context operations, status updates, etc.)
-enum SystemEvent: Equatable {
+enum SystemEvent: Equatable, Hashable {
     /// Model was switched during the session
     case modelChange(from: String, to: String)
     /// Reasoning level was changed

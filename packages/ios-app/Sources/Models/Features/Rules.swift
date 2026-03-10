@@ -146,7 +146,7 @@ struct LoadedRules: Codable, Equatable {
 // MARK: - Activated Rule Entry
 
 /// A single dynamically activated scoped rule
-struct ActivatedRuleEntry: Equatable {
+struct ActivatedRuleEntry: Equatable, Hashable {
     let relativePath: String
     let scopeDir: String
 }

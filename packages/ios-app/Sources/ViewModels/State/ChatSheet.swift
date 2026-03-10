@@ -17,7 +17,7 @@ struct MemoryDetailData: Equatable {
 }
 
 /// Data for provider error detail sheet
-struct ProviderErrorDetailData: Equatable {
+struct ProviderErrorDetailData: Equatable, Hashable {
     let provider: String
     let category: String
     let message: String

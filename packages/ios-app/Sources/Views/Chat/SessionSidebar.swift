@@ -316,6 +316,9 @@ struct CachedSessionSidebarRow: View {
         )
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
         .hoverEffect(.highlight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
+        .accessibilityAddTraits(.isButton)
     }
 
     /// Token stats with SF Symbols (matching chat view MessageMetadataBadge style)
