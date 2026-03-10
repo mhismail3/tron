@@ -146,7 +146,7 @@ struct EntitySnapshotCard: View {
     private func metadataRow(icon: String, label: String, value: String, valueColor: Color?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                 .foregroundStyle(.tronTextMuted)
                 .frame(width: 16)
 
@@ -215,7 +215,7 @@ struct EntitySnapshotCard: View {
             if !entity.blockedBy.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "lock")
-                        .font(.system(size: 10))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronWarning)
                     Text("Blocked by:")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
@@ -229,7 +229,7 @@ struct EntitySnapshotCard: View {
             if !entity.blocks.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "lock.open")
-                        .font(.system(size: 10))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                     Text("Blocks:")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))

@@ -18,10 +18,12 @@ extension EventStoreManager {
         }
     }
 
-    /// Restore processing session IDs from persistence
+    /// Restore processing session IDs from persistence, pruning stale entries
     func restoreProcessingSessionIds() {
         if let ids = UserDefaults.standard.array(forKey: "tron.processingSessionIds") as? [String] {
-            processingSessionIds = Set(ids)
+            // Prune stale IDs that no longer correspond to known sessions
+            let knownSessionIds = Set(sessions.map(\.id))
+            processingSessionIds = Set(ids).intersection(knownSessionIds)
             // Update session flags
             for sessionId in processingSessionIds {
                 if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
@@ -67,7 +69,8 @@ extension EventStoreManager {
             (session.isProcessing == true || processingSessionIds.contains(session.id))
         }
 
-        let shouldCheckAll = Int.random(in: 0..<10) == 0
+        pollCycleCounter += 1
+        let shouldCheckAll = pollCycleCounter % 10 == 0
         let candidates = shouldCheckAll
             ? sessions.filter { $0.id != connectedSessionId }
             : (sessionsToCheck.isEmpty ? Array(sessions.filter { $0.id != connectedSessionId }.prefix(3)) : sessionsToCheck)

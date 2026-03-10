@@ -8,6 +8,22 @@ enum CommandToolStatus: Equatable {
     case running
     case success
     case error
+
+    var label: String {
+        switch self {
+        case .running: "Running"
+        case .success: "Completed"
+        case .error: "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .running: ""
+        case .success: "checkmark.circle.fill"
+        case .error: "xmark.circle.fill"
+        }
+    }
 }
 
 // MARK: - Result Truncation

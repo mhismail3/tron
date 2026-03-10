@@ -118,7 +118,7 @@ struct NotificationInboxDetailSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 8) {
                             Image(systemName: "doc.text")
-                                .font(.system(size: 12))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.tronSlate)
                             Text("Details")
                                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))

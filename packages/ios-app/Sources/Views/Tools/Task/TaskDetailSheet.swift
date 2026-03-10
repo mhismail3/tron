@@ -104,7 +104,7 @@ struct TaskDetailSheet: View {
                 // Header
                 HStack(spacing: 6) {
                     Image(systemName: "list.bullet")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted)
                     Text("Tasks")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -174,7 +174,7 @@ struct TaskDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted)
                     Text("Search Results")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -219,7 +219,7 @@ struct TaskDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted)
                     Text("Projects")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -265,7 +265,7 @@ struct TaskDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted)
                     Text("Areas")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -328,7 +328,7 @@ struct TaskDetailSheet: View {
                 // Header with icon and action
                 HStack(spacing: 8) {
                     Image(systemName: batchIcon(result.action))
-                        .font(.system(size: 14, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(batchColor(result.action))
 
                     Text(batchTitle(result))
@@ -442,7 +442,7 @@ struct TaskDetailSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Result")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -565,77 +565,4 @@ struct TaskDetailSheet: View {
             .padding(.top, 5)
     }
 
-}
-
-// MARK: - Legacy Fallback
-
-struct TaskDetailSheetLegacy: View {
-    let rpcClient: RPCClient
-    @Bindable var taskState: TaskState
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                if taskState.isLoading {
-                    ProgressView()
-                        .tint(.green)
-                } else if taskState.tasks.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "checklist")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.gray)
-                        Text("No Tasks")
-                            .font(.headline)
-                            .foregroundStyle(.tronTextPrimary)
-                    }
-                } else {
-                    List {
-                        ForEach(taskState.tasks) { task in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(task.status == .inProgress ? (task.activeForm ?? task.title) : task.title)
-                                    .font(.body)
-                                    .foregroundStyle(task.status == .completed ? .gray : .tronTextPrimary)
-                                HStack {
-                                    Text(task.source.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.gray)
-                                    Text(task.status.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.gray)
-                                }
-                            }
-                            .listRowBackground(Color.gray.opacity(0.2))
-                        }
-                    }
-                    .listStyle(.plain)
-                }
-            }
-            .navigationTitle("Tasks")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .task {
-                await loadTasks()
-            }
-        }
-    }
-
-    private func loadTasks() async {
-        taskState.startLoading()
-        do {
-            let result = try await rpcClient.misc.listTasks()
-            taskState.updateTasks(result.tasks)
-        } catch {
-            taskState.setError(error.localizedDescription)
-        }
-    }
 }

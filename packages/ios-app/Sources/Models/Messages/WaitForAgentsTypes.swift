@@ -12,6 +12,33 @@ enum WaitForAgentsStatus: Equatable {
     case completed
     case timedOut
     case error
+
+    var color: Color {
+        switch self {
+        case .waiting: .tronTeal
+        case .completed: .tronTeal
+        case .timedOut: .tronAmber
+        case .error: .tronError
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .waiting: "Waiting"
+        case .completed: "Completed"
+        case .timedOut: "Timed Out"
+        case .error: "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .waiting: ""
+        case .completed: "checkmark.circle.fill"
+        case .timedOut: "clock.badge.exclamationmark"
+        case .error: "xmark.circle.fill"
+        }
+    }
 }
 
 struct WaitForAgentsChipData: Equatable, Identifiable {

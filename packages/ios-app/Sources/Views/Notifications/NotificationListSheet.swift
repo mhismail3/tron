@@ -84,7 +84,7 @@ struct NotificationListSheet: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "bell.slash")
-                .font(.system(size: 40))
+                .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.tronTextMuted)
             Text("No notifications")
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))

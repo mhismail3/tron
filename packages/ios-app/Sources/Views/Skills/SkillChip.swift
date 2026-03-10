@@ -8,11 +8,10 @@ enum ChipMode {
     case spell   // Pink color, wand.and.stars icon (ephemeral)
 }
 
-// MARK: - Skill Chip (iOS 26 Liquid Glass)
+// MARK: - Skill Chip
 
-/// Compact glassy chip for displaying a skill or spell reference
+/// Compact chip for displaying a skill or spell reference
 /// Used in InputBar (before sending) and MessageBubble (after sending)
-@available(iOS 26.0, *)
 struct SkillChip: View {
     let skill: Skill
     var mode: ChipMode = .skill
@@ -28,25 +27,21 @@ struct SkillChip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            // Chip icon based on mode
             Image(systemName: chipIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                 .foregroundStyle(tint.accent)
 
-            // Skill/spell name
             Text(skill.name)
                 .font(TronTypography.filePath)
                 .foregroundStyle(tint.name)
                 .lineLimit(1)
 
-            // Source indicator (subtle) - only for skills
             if mode == .skill && skill.source == .project {
                 Image(systemName: "folder.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeXXS))
                     .foregroundStyle(.tronEmerald.opacity(0.6))
             }
 
-            // Remove button (only in input bar mode)
             if showRemoveButton {
                 Button {
                     onRemove?()
@@ -61,14 +56,14 @@ struct SkillChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .glassEffect(
-            .regular.tint(tint.accent.opacity(0.4)).interactive(),
-            in: .capsule
-        )
+        .chipStyleMaterial(tint.accent, tintOpacity: 0.4)
         .contentShape(Capsule())
         .onTapGesture {
             onTap?()
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(mode == .skill ? "Skill" : "Spell"), \(skill.name)")
+        .accessibilityAddTraits(.isButton)
     }
 
     private var chipIcon: String {
@@ -82,7 +77,6 @@ struct SkillChip: View {
 // MARK: - Skill Chip Row (for InputBar)
 
 /// Horizontal scrollable row of skill chips for display above input bar
-@available(iOS 26.0, *)
 struct SkillChipRow: View {
     let skills: [Skill]
     var mode: ChipMode = .skill
@@ -111,7 +105,6 @@ struct SkillChipRow: View {
 // MARK: - Spell Chip Row (for InputBar - ephemeral spells)
 
 /// Horizontal scrollable row of spell chips for display above input bar
-@available(iOS 26.0, *)
 struct SpellChipRow: View {
     let spells: [Skill]
     let onRemove: (Skill) -> Void
@@ -131,7 +124,6 @@ struct SpellChipRow: View {
 
 /// Row of skill chips displayed in sent messages (no remove button)
 /// Aligned to trailing edge for user messages
-@available(iOS 26.0, *)
 struct MessageSkillChips: View {
     let skills: [Skill]
     var mode: ChipMode = .skill
@@ -154,7 +146,6 @@ struct MessageSkillChips: View {
 // MARK: - Message Spell Chips (for MessageBubble - read-only)
 
 /// Row of spell chips displayed in sent messages (no remove button)
-@available(iOS 26.0, *)
 struct MessageSpellChips: View {
     let spells: [Skill]
     let onTap: (Skill) -> Void
@@ -168,77 +159,10 @@ struct MessageSpellChips: View {
     }
 }
 
-// MARK: - Fallback for older iOS
-
-struct SkillChipFallback: View {
-    let skill: Skill
-    var mode: ChipMode = .skill
-    var showRemoveButton: Bool = false
-    var onRemove: (() -> Void)?
-    var onTap: (() -> Void)?
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var tint: TintedColors {
-        TintedColors(mode: mode, colorScheme: colorScheme)
-    }
-
-    private var iconName: String {
-        switch mode {
-        case .skill: return "sparkles"
-        case .spell: return "wand.and.stars"
-        }
-    }
-
-    var body: some View {
-        Button {
-            onTap?()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: iconName)
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(tint.accent)
-
-                Text(skill.name)
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(tint.name)
-                    .lineLimit(1)
-
-                if skill.source == .project {
-                    Image(systemName: "folder.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeXXS))
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
-                }
-
-                if showRemoveButton {
-                    Button {
-                        onRemove?()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(tint.dismiss)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.tronOverlay(0.2), lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Preview
 
-@available(iOS 26.0, *)
 #Preview {
     VStack(spacing: 20) {
-        // Single skill chips
         HStack {
             SkillChip(
                 skill: Skill(
@@ -261,7 +185,6 @@ struct SkillChipFallback: View {
             )
         }
 
-        // Row with remove buttons (InputBar style)
         SkillChipRow(
             skills: [
                 Skill(name: "api-design", displayName: "API Design", description: "API design patterns", source: .global, tags: nil),
@@ -272,7 +195,6 @@ struct SkillChipFallback: View {
             onTap: { _ in }
         )
 
-        // Message chips (read-only)
         MessageSkillChips(
             skills: [
                 Skill(name: "swift-style", displayName: "Swift Style", description: "Swift coding style", source: .global, tags: nil)

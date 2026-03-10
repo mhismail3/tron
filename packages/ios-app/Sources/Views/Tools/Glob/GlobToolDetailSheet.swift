@@ -53,39 +53,37 @@ struct GlobToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    patternSection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                patternSection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if isNoResults {
-                            noResultsSection
-                                .padding(.horizontal)
-                        } else if !parsedFiles.isEmpty {
-                            resultsSection
-                                .padding(.horizontal)
-                        } else {
-                            noResultsSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            errorSection(result)
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if isNoResults {
+                        noResultsSection
+                            .padding(.horizontal)
+                    } else if !parsedFiles.isEmpty {
+                        resultsSection
+                            .padding(.horizontal)
+                    } else {
+                        noResultsSection
                             .padding(.horizontal)
                     }
+                case .error:
+                    if let result = data.result {
+                        errorSection(result)
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -103,7 +101,7 @@ struct GlobToolDetailSheet: View {
                 if searchPath != "." {
                     HStack(spacing: 4) {
                         Image(systemName: "folder")
-                            .font(.system(size: 11))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody2))
                             .foregroundStyle(tint.subtle)
                         Text(searchPath)
                             .font(TronTypography.codeCaption)
@@ -178,7 +176,7 @@ struct GlobToolDetailSheet: View {
 
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: entry.isDirectory ? "folder.fill" : FileDisplayHelpers.fileIcon(for: entry.fileName))
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(entry.isDirectory ? .tronAmber : langColor)
                 .frame(width: 16, alignment: .center)
 
@@ -228,7 +226,7 @@ struct GlobToolDetailSheet: View {
         ToolDetailSection(title: "Results", accent: .cyan, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 28))
+                    .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text("No files found")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))
@@ -251,7 +249,7 @@ struct GlobToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronError)
 
                     Text("Search Failed")

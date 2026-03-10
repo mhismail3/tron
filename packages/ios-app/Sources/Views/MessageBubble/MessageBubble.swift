@@ -24,39 +24,17 @@ struct MessageBubble: View {
                 AttachedFileThumbnails(attachments: attachments)
             }
 
-            // Show skills above text for user messages (iOS 26 glass chips)
+            // Show skills above text for user messages
             if let skills = message.skills, !skills.isEmpty {
-                if #available(iOS 26.0, *) {
-                    MessageSkillChips(skills: skills) { skill in
-                        onTap?(.skill(skill))
-                    }
-                } else {
-                    // Fallback for older iOS
-                    HStack(spacing: 6) {
-                        ForEach(skills) { skill in
-                            SkillChipFallback(skill: skill) {
-                                onTap?(.skill(skill))
-                            }
-                        }
-                    }
+                MessageSkillChips(skills: skills) { skill in
+                    onTap?(.skill(skill))
                 }
             }
 
             // Show spells above text for user messages (pink chips for ephemeral skills)
             if let spells = message.spells, !spells.isEmpty {
-                if #available(iOS 26.0, *) {
-                    MessageSpellChips(spells: spells) { spell in
-                        onTap?(.spell(spell))
-                    }
-                } else {
-                    // Fallback for older iOS
-                    HStack(spacing: 6) {
-                        ForEach(spells) { spell in
-                            SkillChipFallback(skill: spell, mode: .spell) {
-                                onTap?(.spell(spell))
-                            }
-                        }
-                    }
+                MessageSpellChips(spells: spells) { spell in
+                    onTap?(.spell(spell))
                 }
             }
 
@@ -97,127 +75,67 @@ struct MessageBubble: View {
             // Handle subagent tools specially using ToolResultParser
             switch ToolKind(toolName: tool.toolName) {
             case .spawnSubagent:
-                // Convert SpawnSubagent tool to SubagentChip
                 if let chipData = ToolResultParser.parseSpawnSubagent(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        SubagentChip(data: chipData) {
-                            onTap?(.subagent(chipData))
-                        }
-                    } else {
-                        SubagentChipFallback(data: chipData) {
-                            onTap?(.subagent(chipData))
-                        }
+                    SubagentChip(data: chipData) {
+                        onTap?(.subagent(chipData))
                     }
                 } else {
-                    // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
             case .waitForSubagent:
-                // Show WaitForSubagent as completion chip with result
                 if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        SubagentChip(data: chipData) {
-                            onTap?(.subagent(chipData))
-                        }
-                    } else {
-                        SubagentChipFallback(data: chipData) {
-                            onTap?(.subagent(chipData))
-                        }
+                    SubagentChip(data: chipData) {
+                        onTap?(.subagent(chipData))
                     }
                 } else {
-                    // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
             case .renderAppUI:
-                // Show RenderAppUI as chip with canvas status
                 if let chipData = ToolResultParser.parseRenderAppUI(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        RenderAppUIChip(data: chipData) {
-                            onTap?(.renderAppUI(chipData))
-                        }
-                    } else {
-                        RenderAppUIChipFallback(data: chipData) {
-                            onTap?(.renderAppUI(chipData))
-                        }
+                    RenderAppUIChip(data: chipData) {
+                        onTap?(.renderAppUI(chipData))
                     }
                 } else {
-                    // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
             case .taskManager:
-                // Show TaskManager as compact chip with action/result summary
                 if let chipData = ToolResultParser.parseTaskManager(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        TaskManagerChip(data: chipData) {
-                            onTap?(.taskManager(chipData))
-                        }
-                    } else {
-                        TaskManagerChipFallback(data: chipData) {
-                            onTap?(.taskManager(chipData))
-                        }
+                    TaskManagerChip(data: chipData) {
+                        onTap?(.taskManager(chipData))
                     }
                 } else {
-                    // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
             case .notifyApp:
-                // Show NotifyApp as compact chip with notification status
                 if let chipData = ToolResultParser.parseNotifyApp(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        NotifyAppChip(data: chipData) {
-                            onTap?(.notifyApp(chipData))
-                        }
-                    } else {
-                        NotifyAppChipFallback(data: chipData) {
-                            onTap?(.notifyApp(chipData))
-                        }
+                    NotifyAppChip(data: chipData) {
+                        onTap?(.notifyApp(chipData))
                     }
                 } else {
-                    // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
             case .queryAgent:
                 if let chipData = ToolResultParser.parseQueryAgent(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        QueryAgentChip(data: chipData) {
-                            onTap?(.queryAgent(chipData))
-                        }
-                    } else {
-                        QueryAgentChipFallback(data: chipData) {
-                            onTap?(.queryAgent(chipData))
-                        }
+                    QueryAgentChip(data: chipData) {
+                        onTap?(.queryAgent(chipData))
                     }
                 } else {
                     ToolResultRouter(tool: tool)
                 }
             case .waitForAgents:
                 if let chipData = ToolResultParser.parseWaitForAgents(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        WaitForAgentsChip(data: chipData) {
-                            onTap?(.waitForAgents(chipData))
-                        }
-                    } else {
-                        WaitForAgentsChipFallback(data: chipData) {
-                            onTap?(.waitForAgents(chipData))
-                        }
+                    WaitForAgentsChip(data: chipData) {
+                        onTap?(.waitForAgents(chipData))
                     }
                 } else {
                     ToolResultRouter(tool: tool)
                 }
             case .askUserQuestion:
-                // AskUserQuestion is handled in its own case
                 ToolResultRouter(tool: tool)
             default:
-                // All other tools use CommandToolChip (always succeeds, uses gear icon for unknown)
                 let chipData = CommandToolChipData(from: tool)
-                if #available(iOS 26.0, *) {
-                    CommandToolChip(data: chipData) {
-                        onTap?(.commandTool(chipData))
-                    }
-                } else {
-                    CommandToolChipFallback(data: chipData) {
-                        onTap?(.commandTool(chipData))
-                    }
+                CommandToolChip(data: chipData) {
+                    onTap?(.commandTool(chipData))
                 }
             }
 
@@ -258,25 +176,13 @@ struct MessageBubble: View {
             AnsweredQuestionsChipView(questionCount: count)
 
         case .subagent(let data):
-            if #available(iOS 26.0, *) {
-                SubagentChip(data: data) {
-                    onTap?(.subagent(data))
-                }
-            } else {
-                SubagentChipFallback(data: data) {
-                    onTap?(.subagent(data))
-                }
+            SubagentChip(data: data) {
+                onTap?(.subagent(data))
             }
 
         case .renderAppUI(let data):
-            if #available(iOS 26.0, *) {
-                RenderAppUIChip(data: data) {
-                    onTap?(.renderAppUI(data))
-                }
-            } else {
-                RenderAppUIChipFallback(data: data) {
-                    onTap?(.renderAppUI(data))
-                }
+            RenderAppUIChip(data: data) {
+                onTap?(.renderAppUI(data))
             }
         }
     }

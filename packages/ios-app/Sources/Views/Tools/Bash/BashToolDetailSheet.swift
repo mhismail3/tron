@@ -96,44 +96,42 @@ struct BashToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    commandSection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                commandSection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if outputLines.isEmpty {
-                            emptyOutputSection
-                                .padding(.horizontal)
-                        } else {
-                            outputSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if isBlocked {
-                            blockedSection
-                                .padding(.horizontal)
-                        } else if outputLines.isEmpty {
-                            if let result = data.result {
-                                errorFallbackSection(result)
-                                    .padding(.horizontal)
-                            }
-                        } else {
-                            outputSection
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if outputLines.isEmpty {
+                        emptyOutputSection
+                            .padding(.horizontal)
+                    } else {
+                        outputSection
                             .padding(.horizontal)
                     }
+                case .error:
+                    if isBlocked {
+                        blockedSection
+                            .padding(.horizontal)
+                    } else if outputLines.isEmpty {
+                        if let result = data.result {
+                            errorFallbackSection(result)
+                                .padding(.horizontal)
+                        }
+                    } else {
+                        outputSection
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -248,7 +246,7 @@ struct BashToolDetailSheet: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text("\(hiddenLineCount) more lines")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
                 Image(systemName: "chevron.down")
@@ -272,7 +270,7 @@ struct BashToolDetailSheet: View {
         ToolDetailSection(title: "Output", accent: .tronEmerald, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "text.page.slash")
-                    .font(.system(size: 28))
+                    .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text("No output")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))
@@ -296,7 +294,7 @@ struct BashToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "shield.slash.fill")
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronError)
 
                     Text("Command Blocked")
@@ -325,7 +323,7 @@ struct BashToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronError)
 
                     Text("Command Failed")
@@ -399,91 +397,6 @@ struct BashToolDetailSheet: View {
             .padding(14)
             .sectionFill(.tronEmerald)
         }
-    }
-}
-
-// MARK: - Bash Output Helpers
-
-/// Utility functions for cleaning and formatting Bash command output for display.
-enum BashOutputHelpers {
-
-    /// Maximum characters to display per line before visual truncation.
-    static let maxLineDisplayLength = 500
-
-    /// Lines of output above which visual collapsing kicks in.
-    static let collapseThreshold = 150
-
-    /// Number of leading lines to show when collapsed.
-    static let headLines = 100
-
-    /// Number of trailing lines to show when collapsed.
-    static let tailLines = 30
-
-    /// Strip ANSI escape codes (colors, formatting) from terminal output.
-    static func stripAnsiCodes(_ text: String) -> String {
-        text.replacingOccurrences(
-            of: "\u{1B}\\[[0-9;]*[A-Za-z]",
-            with: "",
-            options: .regularExpression
-        )
-    }
-
-    /// Strip the iOS-side truncation marker from result text.
-    static func stripTruncationMarker(_ text: String) -> String {
-        // Handle various truncation message formats
-        var result = text
-        if let range = result.range(of: "\n\n... [Output truncated for performance]") {
-            result = String(result[..<range.lowerBound])
-        }
-        if let range = result.range(of: "\n... [Output truncated") {
-            result = String(result[..<range.lowerBound])
-        }
-        return result
-    }
-
-    /// Full cleaning pipeline: strip truncation markers, ANSI codes.
-    static func cleanForDisplay(_ text: String) -> String {
-        let stripped = stripTruncationMarker(text)
-        return stripAnsiCodes(stripped)
-    }
-
-    /// Cap a line's display length, preserving the full text for copy operations.
-    static func capLineLength(_ line: String, maxLength: Int = maxLineDisplayLength) -> String {
-        if line.count > maxLength {
-            return String(line.prefix(maxLength)) + " ..."
-        }
-        return line.isEmpty ? " " : line
-    }
-
-    /// Extract exit code from error result text (e.g., "Command failed with exit code 1:")
-    static func extractExitCode(from result: String?) -> Int? {
-        guard let result else { return nil }
-        if let match = result.firstMatch(of: /exit code (\d+)/) {
-            return Int(match.1)
-        }
-        return nil
-    }
-
-    /// Calculate line number gutter width based on total line count.
-    static func lineNumberWidth(lineCount: Int) -> CGFloat {
-        let digits = max(String(lineCount).count, 1)
-        return CGFloat(max(digits * 8, 16))
-    }
-
-    /// Produce a collapsed view: first N lines + last M lines, with indices preserved.
-    static func collapsedLines(from lines: [String]) -> [(index: Int, content: String)] {
-        guard lines.count > collapseThreshold else {
-            return lines.enumerated().map { ($0.offset, $0.element) }
-        }
-        var result: [(index: Int, content: String)] = []
-        for i in 0..<headLines {
-            result.append((i, lines[i]))
-        }
-        let tailStart = lines.count - tailLines
-        for i in tailStart..<lines.count {
-            result.append((i, lines[i]))
-        }
-        return result
     }
 }
 

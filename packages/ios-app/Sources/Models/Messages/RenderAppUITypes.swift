@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - RenderAppUI Types
 
@@ -7,6 +8,30 @@ enum RenderAppUIStatus: String, Equatable {
     case rendering
     case complete
     case error
+
+    var color: Color {
+        switch self {
+        case .rendering: .tronAmber
+        case .complete: .tronSuccess
+        case .error: .tronError
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .rendering: "Rendering"
+        case .complete: "Completed"
+        case .error: "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .rendering: ""
+        case .complete: "checkmark.circle.fill"
+        case .error: "xmark.circle.fill"
+        }
+    }
 }
 
 /// Data for tracking a RenderAppUI tool call (rendered as a chip in chat)

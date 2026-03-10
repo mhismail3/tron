@@ -21,7 +21,7 @@ final class TurnContentCache {
 
     // MARK: - Initialization
 
-    init(maxEntries: Int = 10, expiry: TimeInterval = 120) {
+    init(maxEntries: Int = 10, expiry: TimeInterval = 300) {
         self.maxEntries = maxEntries
         self.expiry = expiry
     }

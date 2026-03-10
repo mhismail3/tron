@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - TaskManager Types
 
@@ -8,6 +9,20 @@ enum TaskManagerChipStatus: Equatable {
     case running
     /// Tool completed with result
     case completed
+
+    var label: String {
+        switch self {
+        case .running: "Running"
+        case .completed: "Completed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .running: ""
+        case .completed: "checklist"
+        }
+    }
 }
 
 /// Data for rendering a TaskManager tool call as a compact chip

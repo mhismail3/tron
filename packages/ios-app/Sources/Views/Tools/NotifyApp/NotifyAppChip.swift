@@ -1,11 +1,10 @@
 import SwiftUI
 
-// MARK: - NotifyApp Chip (iOS 26)
+// MARK: - NotifyApp Chip
 
 /// Compact chip for NotifyApp tool calls
 /// Shows "Notified User" with status indicator
 /// Tappable to open NotifyAppDetailSheet
-@available(iOS 26.0, *)
 struct NotifyAppChip: View {
     let data: NotifyAppChipData
     let onTap: () -> Void
@@ -17,12 +16,12 @@ struct NotifyAppChip: View {
 
                 Text("Notified User")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(statusColor)
+                    .foregroundStyle(data.status.color)
                     .lineLimit(1)
 
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(statusColor.opacity(0.6))
+                    .foregroundStyle(data.status.color.opacity(0.6))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -30,10 +29,8 @@ struct NotifyAppChip: View {
             .animation(.smooth(duration: 0.3), value: data.status)
         }
         .buttonStyle(.plain)
-        .glassEffect(
-            .regular.tint(statusColor.opacity(0.35)).interactive(),
-            in: .capsule
-        )
+        .chipStyle(data.status.color)
+        .chipAccessibility(tool: "Notify", status: data.status.label)
     }
 
     @ViewBuilder
@@ -46,80 +43,13 @@ struct NotifyAppChip: View {
                 .frame(width: iconSize, height: iconSize)
                 .tint(.tronAmber)
         case .sent:
-            Image(systemName: "bell.badge.fill")
+            Image(systemName: data.status.iconName)
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
-            Image(systemName: "bell.slash.fill")
+            Image(systemName: data.status.iconName)
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
-        }
-    }
-
-    private var statusColor: Color {
-        switch data.status {
-        case .sending: .tronAmber
-        case .sent: .tronSuccess
-        case .failed: .tronError
-        }
-    }
-}
-
-// MARK: - NotifyApp Chip Fallback (iOS < 26)
-
-/// Fallback chip without glass effect for older iOS versions
-struct NotifyAppChipFallback: View {
-    let data: NotifyAppChipData
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                statusIcon
-
-                Text("Notified User")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(statusColor)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(statusColor.opacity(0.6))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .chipFill(statusColor)
-            .contentShape(Capsule())
-            .animation(.smooth(duration: 0.3), value: data.status)
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        let iconSize = TronTypography.sizeBodySM
-        switch data.status {
-        case .sending:
-            ProgressView()
-                .scaleEffect(0.6)
-                .frame(width: iconSize, height: iconSize)
-                .tint(.tronAmber)
-        case .sent:
-            Image(systemName: "bell.badge.fill")
-                .font(TronTypography.sans(size: iconSize, weight: .medium))
-                .foregroundStyle(.tronSuccess)
-        case .failed:
-            Image(systemName: "bell.slash.fill")
-                .font(TronTypography.sans(size: iconSize, weight: .medium))
-                .foregroundStyle(.tronError)
-        }
-    }
-
-    private var statusColor: Color {
-        switch data.status {
-        case .sending: .tronAmber
-        case .sent: .tronSuccess
-        case .failed: .tronError
         }
     }
 }
@@ -127,10 +57,8 @@ struct NotifyAppChipFallback: View {
 // MARK: - Preview
 
 #if DEBUG
-@available(iOS 26.0, *)
 #Preview("NotifyApp Chip States") {
     VStack(spacing: 16) {
-        // Sending
         NotifyAppChip(
             data: NotifyAppChipData(
                 toolCallId: "call_1",
@@ -142,7 +70,6 @@ struct NotifyAppChipFallback: View {
             onTap: { }
         )
 
-        // Sent
         NotifyAppChip(
             data: NotifyAppChipData(
                 toolCallId: "call_2",
@@ -155,7 +82,6 @@ struct NotifyAppChipFallback: View {
             onTap: { }
         )
 
-        // Failed
         NotifyAppChip(
             data: NotifyAppChipData(
                 toolCallId: "call_3",

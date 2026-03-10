@@ -26,7 +26,7 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                     statusIcon(for: file.displayChangeStatus)
 
                     Image(systemName: FileDisplayHelpers.fileIcon(for: file.displayFileName))
-                        .font(.system(size: 13))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(langColor)
                         .frame(width: 18)
 
@@ -54,7 +54,7 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                     }
 
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
                         .foregroundStyle(.tronTextMuted)
                         .frame(width: 16)
                 }

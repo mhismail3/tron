@@ -34,6 +34,30 @@ enum QueryAgentStatus: Equatable {
     case querying
     case success
     case error
+
+    var color: Color {
+        switch self {
+        case .querying: .tronIndigo
+        case .success: .tronIndigo
+        case .error: .tronError
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .querying: "Querying"
+        case .success: "Completed"
+        case .error: "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .querying: ""
+        case .success: "checkmark.circle.fill"
+        case .error: "xmark.circle.fill"
+        }
+    }
 }
 
 struct QueryAgentChipData: Equatable, Identifiable {

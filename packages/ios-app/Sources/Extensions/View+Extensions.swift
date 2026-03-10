@@ -53,7 +53,7 @@ extension View {
                     Button(action: action) {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                             Text("Back")
                         }
                         .foregroundStyle(.tronMint)

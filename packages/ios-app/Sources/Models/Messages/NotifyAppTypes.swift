@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - NotifyApp Types
 
@@ -7,6 +8,30 @@ enum NotifyAppStatus: String, Equatable, Codable {
     case sending
     case sent
     case failed
+
+    var color: Color {
+        switch self {
+        case .sending: .tronAmber
+        case .sent: .tronSuccess
+        case .failed: .tronError
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .sending: "Sending"
+        case .sent: "Sent"
+        case .failed: "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .sending: ""
+        case .sent: "bell.badge.fill"
+        case .failed: "bell.slash.fill"
+        }
+    }
 }
 
 /// Data for rendering a NotifyApp tool call as a compact chip

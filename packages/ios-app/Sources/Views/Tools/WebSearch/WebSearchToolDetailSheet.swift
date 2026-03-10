@@ -55,39 +55,37 @@ struct WebSearchToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    querySection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                querySection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if let error = parsed.error {
-                            searchErrorSection(error)
-                                .padding(.horizontal)
-                        } else if parsed.results.isEmpty {
-                            noResultsSection
-                                .padding(.horizontal)
-                        } else {
-                            resultsSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            searchErrorSection(WebSearchDetailParser.extractError(from: result))
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if let error = parsed.error {
+                        searchErrorSection(error)
+                            .padding(.horizontal)
+                    } else if parsed.results.isEmpty {
+                        noResultsSection
+                            .padding(.horizontal)
+                    } else {
+                        resultsSection
                             .padding(.horizontal)
                     }
+                case .error:
+                    if let result = data.result {
+                        searchErrorSection(WebSearchDetailParser.extractError(from: result))
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -106,7 +104,7 @@ struct WebSearchToolDetailSheet: View {
                     if let ep = endpoint, ep != "web" {
                         HStack(spacing: 4) {
                             Image(systemName: endpointIcon(ep))
-                                .font(.system(size: 11))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(ep.capitalized)
                                 .font(TronTypography.codeCaption)
@@ -117,7 +115,7 @@ struct WebSearchToolDetailSheet: View {
                     if let fresh = freshness {
                         HStack(spacing: 4) {
                             Image(systemName: "clock")
-                                .font(.system(size: 11))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(freshnessLabel(fresh))
                                 .font(TronTypography.codeCaption)
@@ -128,7 +126,7 @@ struct WebSearchToolDetailSheet: View {
                     if let domains = allowedDomains, !domains.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "line.3.horizontal.decrease")
-                                .font(.system(size: 11))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(domains.joined(separator: ", "))
                                 .font(TronTypography.codeCaption)
@@ -253,7 +251,7 @@ struct WebSearchToolDetailSheet: View {
         ToolDetailSection(title: "Results", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 28))
+                    .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text("No results found")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))

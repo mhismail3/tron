@@ -78,7 +78,7 @@ struct SubagentDetailSheet: View {
                                 Text("Send")
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                                 Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)

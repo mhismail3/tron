@@ -35,7 +35,7 @@ struct CommandToolDetailSheet: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "safari")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 Text("Open")
                             }
                         }
@@ -46,7 +46,7 @@ struct CommandToolDetailSheet: View {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: data.icon)
-                            .font(.system(size: 14))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(data.iconColor)
                         Text(data.displayName)
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
@@ -116,7 +116,7 @@ struct CommandToolDetailSheet: View {
             if let duration = data.formattedDuration {
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     Text(duration)
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 }
@@ -136,11 +136,11 @@ struct CommandToolDetailSheet: View {
                 .tint(statusColor)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(statusColor)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(statusColor)
         }
     }
@@ -167,7 +167,7 @@ struct CommandToolDetailSheet: View {
             // Section Header
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Arguments")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -221,7 +221,7 @@ struct CommandToolDetailSheet: View {
             // Section Header with truncation indicator
             HStack(spacing: 6) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Results")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -231,7 +231,7 @@ struct CommandToolDetailSheet: View {
                     Spacer()
                     HStack(spacing: 4) {
                         Image(systemName: "scissors")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         Text("Truncated")
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                     }
@@ -279,7 +279,7 @@ struct CommandToolDetailSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Results")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))

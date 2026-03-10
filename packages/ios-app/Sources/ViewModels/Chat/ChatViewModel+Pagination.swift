@@ -328,9 +328,13 @@ extension ChatViewModel {
             contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
             logger.info("[TOKEN-FIX] RESUME from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
-            // Get cost from iOS DB session cache (this is fine as it's just for display)
-            if let session = try? manager.eventDB.sessions.get(sessionId) {
-                contextState.accumulatedCost = session.cost
+            // Get cost from iOS DB session cache (just for display)
+            do {
+                if let session = try manager.eventDB.sessions.get(sessionId) {
+                    contextState.accumulatedCost = session.cost
+                }
+            } catch {
+                logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
             }
 
             logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
@@ -392,8 +396,12 @@ extension ChatViewModel {
             logger.info("[TOKEN-FIX] RESUME (sync) from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
             // Get cost from iOS DB session cache (just for display)
-            if let session = try? manager.eventDB.sessions.get(sessionId) {
-                contextState.accumulatedCost = session.cost
+            do {
+                if let session = try manager.eventDB.sessions.get(sessionId) {
+                    contextState.accumulatedCost = session.cost
+                }
+            } catch {
+                logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
             }
 
             logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)

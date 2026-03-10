@@ -63,37 +63,35 @@ struct WriteToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    fileInfoSection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                fileInfoSection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if let result = data.result, !result.isEmpty {
-                            resultNote(result)
-                                .padding(.horizontal)
-                        }
-                        if !writtenContent.isEmpty {
-                            contentPreviewSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            errorSection(result)
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if let result = data.result, !result.isEmpty {
+                        resultNote(result)
                             .padding(.horizontal)
                     }
+                    if !writtenContent.isEmpty {
+                        contentPreviewSection
+                            .padding(.horizontal)
+                    }
+                case .error:
+                    if let result = data.result {
+                        errorSection(result)
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -103,7 +101,7 @@ struct WriteToolDetailSheet: View {
         ToolDetailSection(title: "File", accent: .tronPink, tint: tint) {
             HStack(spacing: 8) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(.system(size: 16))
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle))
                     .foregroundStyle(langColor)
 
                 Text(fileName)
@@ -155,7 +153,7 @@ struct WriteToolDetailSheet: View {
     private func resultNote(_ result: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.tronSuccess)
 
             Text(result)

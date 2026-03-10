@@ -47,36 +47,34 @@ struct ReadToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    fileInfoSection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                fileInfoSection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if let result = data.result, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            contentSection(result)
-                                .padding(.horizontal)
-                        } else {
-                            emptyFileSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            errorSection(result)
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if let result = data.result, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        contentSection(result)
+                            .padding(.horizontal)
+                    } else {
+                        emptyFileSection
                             .padding(.horizontal)
                     }
+                case .error:
+                    if let result = data.result {
+                        errorSection(result)
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -86,7 +84,7 @@ struct ReadToolDetailSheet: View {
         ToolDetailSection(title: "File", accent: .tronSlate, tint: tint) {
             HStack(spacing: 8) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(.system(size: 16))
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle))
                     .foregroundStyle(langColor)
 
                 Text(fileName)
@@ -210,7 +208,7 @@ struct ReadToolDetailSheet: View {
         ToolDetailSection(title: "Content", accent: .tronSlate, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "doc")
-                    .font(.system(size: 28))
+                    .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text("File is empty")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))

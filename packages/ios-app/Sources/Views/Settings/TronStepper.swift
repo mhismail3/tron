@@ -43,7 +43,7 @@ struct TronStepper: View {
             action()
         } label: {
             Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(enabled ? .tronEmerald : .tronTextDisabled)
                 .frame(width: 44, height: 30)
                 .contentShape(Rectangle())

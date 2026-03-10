@@ -7,7 +7,7 @@ struct InitializationErrorView: View {
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
+                .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.red)
 
             Text("Failed to Initialize")

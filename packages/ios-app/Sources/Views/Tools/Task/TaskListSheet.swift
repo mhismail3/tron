@@ -24,7 +24,7 @@ struct TaskListSheet: View {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "checklist")
-                            .font(.system(size: 14))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(.tronSlate)
                         Text("Task Manager")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
@@ -55,7 +55,7 @@ struct TaskListSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "list.bullet")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Tasks")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -143,7 +143,7 @@ struct TaskListSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(iconColor)
                 Text(title)
                     .font(TronTypography.mono(size: 11, weight: .semibold))
@@ -190,7 +190,7 @@ struct TaskListSheet: View {
     private var emptyTasksView: some View {
         HStack(spacing: 8) {
             Image(systemName: "checklist")
-                .font(.system(size: 14))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextMuted)
             Text("No tasks")
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))

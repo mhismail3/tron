@@ -49,45 +49,43 @@ struct WebFetchToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    sourceSection
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                sourceSection
+                    .padding(.horizontal)
+
+                if !prompt.isEmpty {
+                    promptSection
                         .padding(.horizontal)
-
-                    if !prompt.isEmpty {
-                        promptSection
-                            .padding(.horizontal)
-                    }
-
-                    statusRow
-                        .padding(.horizontal)
-
-                    switch data.status {
-                    case .success:
-                        if let error = parsed.error {
-                            fetchErrorSection(error)
-                                .padding(.horizontal)
-                        } else if !parsed.answer.isEmpty {
-                            answerSection
-                                .padding(.horizontal)
-                        } else {
-                            emptyResultSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            fetchErrorSection(WebFetchDetailParser.extractError(from: result))
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
-                            .padding(.horizontal)
-                    }
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
+
+                statusRow
+                    .padding(.horizontal)
+
+                switch data.status {
+                case .success:
+                    if let error = parsed.error {
+                        fetchErrorSection(error)
+                            .padding(.horizontal)
+                    } else if !parsed.answer.isEmpty {
+                        answerSection
+                            .padding(.horizontal)
+                    } else {
+                        emptyResultSection
+                            .padding(.horizontal)
+                    }
+                case .error:
+                    if let result = data.result {
+                        fetchErrorSection(WebFetchDetailParser.extractError(from: result))
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
+                }
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -98,7 +96,7 @@ struct WebFetchToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "globe")
-                        .font(.system(size: 16))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle))
                         .foregroundStyle(.tronInfo)
 
                     if let source = parsed.source, !source.title.isEmpty {
@@ -192,7 +190,7 @@ struct WebFetchToolDetailSheet: View {
         ToolDetailSection(title: "Answer", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 28))
+                    .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text("No content returned")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))

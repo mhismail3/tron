@@ -94,7 +94,7 @@ struct AppearanceSection: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: style.icon)
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 Text(style.displayName)
                     .font(TronTypography.caption)
             }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Subagent Types
 
@@ -7,6 +8,30 @@ enum SubagentStatus: String, Codable, Equatable {
     case running
     case completed
     case failed
+
+    var color: Color {
+        switch self {
+        case .running: .tronAmber
+        case .completed: .tronSuccess
+        case .failed: .tronError
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .running: "Agent running"
+        case .completed: "Agent completed"
+        case .failed: "Agent failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .running: ""
+        case .completed: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        }
+    }
 }
 
 /// Tracks whether completed results need user action

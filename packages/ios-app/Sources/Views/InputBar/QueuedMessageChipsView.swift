@@ -32,7 +32,7 @@ struct QueuedMessageChipsView: View {
                         }
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                             .foregroundStyle(.tronEmerald.opacity(0.4))
                             .frame(width: 20, height: 20)
                             .contentShape(Circle())

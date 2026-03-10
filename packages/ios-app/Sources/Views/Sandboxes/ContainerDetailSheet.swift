@@ -49,7 +49,7 @@ struct ContainerDetailSheet: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "safari")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 Text("Open")
                             }
                         }

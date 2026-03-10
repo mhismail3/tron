@@ -72,7 +72,7 @@ struct AutomationRunDetailSheet: View {
                             }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 Text(output)
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                     .foregroundStyle(.tronTextPrimary)
                                     .textSelection(.enabled)
                             }
@@ -90,7 +90,7 @@ struct AutomationRunDetailSheet: View {
                                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                                 .foregroundStyle(.red)
                             Text(error)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.red.opacity(0.9))
                                 .textSelection(.enabled)
                                 .padding(12)

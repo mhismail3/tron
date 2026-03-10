@@ -302,6 +302,58 @@ extension View {
     }
 }
 
+// MARK: - Chip Style (iOS 26 Glass / Fallback)
+
+private struct ChipStyleModifier: ViewModifier {
+    let tintColor: Color
+    let tintOpacity: Double
+    let strokeOpacity: Double
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(
+                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+                in: .capsule
+            )
+        } else {
+            content.chipFill(tintColor, strokeOpacity: strokeOpacity)
+        }
+    }
+}
+
+private struct ChipStyleMaterialModifier: ViewModifier {
+    let tintColor: Color
+    let tintOpacity: Double
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(
+                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+                in: .capsule
+            )
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.tronOverlay(0.2), lineWidth: 0.5)
+                )
+        }
+    }
+}
+
+extension View {
+    /// Applies glass effect on iOS 26+, chipFill on older iOS.
+    func chipStyle(_ tintColor: Color, tintOpacity: Double = 0.35, strokeOpacity: Double = 0.4) -> some View {
+        modifier(ChipStyleModifier(tintColor: tintColor, tintOpacity: tintOpacity, strokeOpacity: strokeOpacity))
+    }
+
+    /// Applies glass effect on iOS 26+, ultraThinMaterial on older iOS.
+    func chipStyleMaterial(_ tintColor: Color, tintOpacity: Double = 0.35) -> some View {
+        modifier(ChipStyleMaterialModifier(tintColor: tintColor, tintOpacity: tintOpacity))
+    }
+}
+
 private struct ChipFillModifier: ViewModifier {
     let color: Color
     let strokeOpacity: Double

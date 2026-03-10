@@ -53,15 +53,16 @@ struct ToolDetailSheetContainer<Content: View>: View {
                             UIPasteboard.general.string = copyContent
                         } label: {
                             Image(systemName: "doc.on.doc")
-                                .font(.system(size: 14))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 .foregroundStyle(accent.opacity(0.6))
                         }
+                        .accessibilityLabel("Copy output")
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: iconName)
-                            .font(.system(size: 14))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(accent)
                         Text(toolName)
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
@@ -74,6 +75,7 @@ struct ToolDetailSheetContainer<Content: View>: View {
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(accent)
+                    .accessibilityLabel("Close")
                 }
             }
         }

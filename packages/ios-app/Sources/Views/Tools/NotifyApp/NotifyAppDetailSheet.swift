@@ -65,7 +65,7 @@ struct NotifyAppDetailSheet: View {
             // Section Header
             HStack(spacing: 8) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronSlate)
                 Text("Details")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
@@ -90,7 +90,7 @@ struct NotifyAppDetailSheet: View {
             // Section Header
             HStack(spacing: 8) {
                 Image(systemName: data.status == .sent ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(data.status == .sent ? .tronSuccess : .tronError)
                 Text("DELIVERY STATUS")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))

@@ -395,6 +395,7 @@ struct InputBar: View {
                 .lineLimit(1...8)
                 .focused($isFocused)
                 .disabled(config.readOnly)
+                .accessibilityLabel("Message input")
                 .onSubmit {
                     if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
                         actions.onSend()

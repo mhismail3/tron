@@ -54,7 +54,7 @@ struct OpenURLToolDetailSheet: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "safari")
-                                    .font(.system(size: 13))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
                                 Text("Open")
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             }
@@ -65,7 +65,7 @@ struct OpenURLToolDetailSheet: View {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "safari")
-                            .font(.system(size: 14))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(.blue)
                         Text("Open URL")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
@@ -96,36 +96,34 @@ struct OpenURLToolDetailSheet: View {
 
     @ViewBuilder
     private var contentBody: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    urlSection
-                        .padding(.horizontal)
-                    statusRow
-                        .padding(.horizontal)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                urlSection
+                    .padding(.horizontal)
+                statusRow
+                    .padding(.horizontal)
 
-                    switch data.status {
-                    case .success:
-                        if let result = data.result, OpenURLDetailParser.isError(result) {
-                            errorSection(OpenURLDetailParser.extractError(from: result))
-                                .padding(.horizontal)
-                        } else {
-                            resultSection
-                                .padding(.horizontal)
-                        }
-                    case .error:
-                        if let result = data.result {
-                            errorSection(OpenURLDetailParser.extractError(from: result))
-                                .padding(.horizontal)
-                        }
-                    case .running:
-                        runningSection
+                switch data.status {
+                case .success:
+                    if let result = data.result, OpenURLDetailParser.isError(result) {
+                        errorSection(OpenURLDetailParser.extractError(from: result))
+                            .padding(.horizontal)
+                    } else {
+                        resultSection
                             .padding(.horizontal)
                     }
+                case .error:
+                    if let result = data.result {
+                        errorSection(OpenURLDetailParser.extractError(from: result))
+                            .padding(.horizontal)
+                    }
+                case .running:
+                    runningSection
+                        .padding(.horizontal)
                 }
-                .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
+            .padding(.vertical)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -136,7 +134,7 @@ struct OpenURLToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "globe")
-                        .font(.system(size: 16))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle))
                         .foregroundStyle(.blue)
 
                     Text(domain)
@@ -170,7 +168,7 @@ struct OpenURLToolDetailSheet: View {
                                     .lineLimit(3)
                                     .multilineTextAlignment(.leading)
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 10))
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.blue.opacity(0.6))
                             }
                         }
@@ -200,7 +198,7 @@ struct OpenURLToolDetailSheet: View {
         ToolDetailSection(title: "Result", accent: .blue, tint: tint) {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL))
                     .foregroundStyle(.tronEmerald)
 
                 VStack(alignment: .leading, spacing: 4) {

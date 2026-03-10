@@ -43,6 +43,7 @@ struct GlassActionButton: View {
         .disabled(!showStop && !canSend)
         .animation(.easeInOut(duration: 0.2), value: showStop)
         .animation(.easeInOut(duration: 0.2), value: canSend)
+        .accessibilityLabel(showStop ? "Stop agent" : "Send message")
     }
 }
 
@@ -138,6 +139,7 @@ struct GlassMicButton: View {
         .onChange(of: isTranscribing) { _, _ in
             updateMicPulse(shouldPulse: shouldPulseMicTint)
         }
+        .accessibilityLabel(isRecording ? "Stop recording" : isTranscribing ? "Transcribing" : "Record voice note")
     }
 
     private func updateMicPulse(shouldPulse: Bool) {
@@ -224,6 +226,7 @@ struct GlassAttachmentButton: View {
             .frame(width: buttonSize, height: buttonSize)
             .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
             .opacity(isMenuDisabled ? 0.5 : 1.0)
+            .accessibilityLabel("Add attachment")
             .overlay {
                 // Invisible Menu overlay handles interaction only
                 Menu {

@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Main content area showing skills, spells, attachments (with wrapping), and status pills
 /// All items in one wrapping container - skills and spells at bottom, attachments wrap above
-@available(iOS 26.0, *)
 struct ContentAreaView: View {
     let selectedSkills: [Skill]
     let selectedSpells: [Skill]
@@ -72,7 +71,6 @@ struct ContentAreaView: View {
 // MARK: - Skill Chips Row (Inline)
 
 /// Skills chips displayed inline in a horizontal scroll view
-@available(iOS 26.0, *)
 struct SkillChipsRowInline: View {
     let skills: [Skill]
     let onRemove: (Skill) -> Void

@@ -64,22 +64,6 @@ struct ToolStatusBadge: View {
         }
     }
 
-    private var statusText: String {
-        switch status {
-        case .running: return "Running"
-        case .success: return "Completed"
-        case .error: return "Failed"
-        }
-    }
-
-    private var statusIcon: String {
-        switch status {
-        case .running: return ""
-        case .success: return "checkmark.circle.fill"
-        case .error: return "xmark.circle.fill"
-        }
-    }
-
     var body: some View {
         HStack(spacing: 5) {
             if status == .running {
@@ -87,11 +71,11 @@ struct ToolStatusBadge: View {
                     .scaleEffect(0.55)
                     .tint(statusColor)
             } else {
-                Image(systemName: statusIcon)
-                    .font(.system(size: 11))
+                Image(systemName: status.iconName)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(statusColor)
             }
-            Text(statusText)
+            Text(status.label)
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(statusColor)
         }
@@ -102,6 +86,7 @@ struct ToolStatusBadge: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(statusColor.opacity(0.25)), in: Capsule())
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -115,7 +100,7 @@ struct ToolDurationBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
-                .font(.system(size: 11))
+                .font(TronTypography.sans(size: TronTypography.sizeBody2))
             Text(DurationFormatter.format(durationMs, style: .compact))
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
         }
@@ -142,7 +127,7 @@ struct ToolInfoPill: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
             Text(label)
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
         }
@@ -154,6 +139,7 @@ struct ToolInfoPill: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(color.opacity(0.2)), in: Capsule())
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -420,7 +406,7 @@ struct ToolClassifiedErrorSection<AdditionalContent: View>: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: classification.icon)
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronError)
 
                     Text(classification.title)
@@ -468,7 +454,7 @@ struct ToolErrorView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 20))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL))
                     .foregroundStyle(.tronError)
 
                 Text(title)

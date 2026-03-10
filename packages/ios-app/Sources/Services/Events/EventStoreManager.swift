@@ -79,6 +79,9 @@ final class EventStoreManager {
 
     // MARK: - Processing State
 
+    /// Deterministic counter for full-scan polling (triggers every 10th cycle)
+    var pollCycleCounter: Int = 0
+
     var processingSessionIds: Set<String> = [] {
         didSet {
             if processingSessionIds != oldValue {

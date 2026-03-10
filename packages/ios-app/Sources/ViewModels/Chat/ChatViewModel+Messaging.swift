@@ -33,7 +33,13 @@ extension ChatViewModel: MessagingContext {
 
     /// Collect device context line from DeviceContextService if enabled.
     private func collectDeviceContext() async -> String? {
-        guard let settings = try? await rpcClient.settings.get() else { return nil }
+        let settings: ServerSettings
+        do {
+            settings = try await rpcClient.settings.get()
+        } catch {
+            logger.warning("Failed to fetch settings for device context: \(error.localizedDescription)", category: .session)
+            return nil
+        }
         let integrations = settings.integrations
         guard integrations.deviceContext.enabled else { return nil }
         return DeviceContextService.shared.formatContextLine(
