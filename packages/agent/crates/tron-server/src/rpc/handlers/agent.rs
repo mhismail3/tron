@@ -886,7 +886,7 @@ impl MethodHandler for PromptHandler {
                         tools,
                         guardrails,
                         hooks: hooks.clone(),
-                        is_subagent: false,
+                        is_unattended: false,
                         denied_tools: vec![],
                         subagent_depth: 0,
                         subagent_max_depth: settings.agent.subagent_max_depth,

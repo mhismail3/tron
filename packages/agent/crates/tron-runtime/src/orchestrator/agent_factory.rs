@@ -24,9 +24,12 @@ pub struct CreateAgentOpts {
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Hook engine (optional).
     pub hooks: Option<Arc<HookEngine>>,
-    /// Whether this is a subagent.
-    pub is_subagent: bool,
-    /// Tools to deny for subagents.
+    /// Whether this agent runs without direct user oversight.
+    /// When true, interactive tools are removed, spawn tools are gated
+    /// by max_depth, and all denied_tools are enforced.
+    /// Set to true for: subagents, cron agents, system subsessions.
+    pub is_unattended: bool,
+    /// Tools to remove from the registry before agent creation.
     pub denied_tools: Vec<String>,
     /// Current subagent nesting depth (0 = top-level agent).
     pub subagent_depth: u32,
@@ -59,12 +62,14 @@ impl AgentFactory {
 
         let mut registry = opts.tools;
 
-        // Remove denied tools for subagents
-        if opts.is_subagent {
-            for tool_name in &opts.denied_tools {
-                let _ = registry.remove(tool_name);
-            }
-            // Remove interactive tools from subagents
+        // Remove denied tools (applies to both cron agent turns and subagents)
+        for tool_name in &opts.denied_tools {
+            let _ = registry.remove(tool_name);
+        }
+
+        // Unattended agent restrictions (subagents, cron, system subsessions)
+        if opts.is_unattended {
+            // Remove interactive tools (no user to interact with)
             let interactive_tools: Vec<String> = registry
                 .list()
                 .iter()
@@ -74,7 +79,7 @@ impl AgentFactory {
             for name in &interactive_tools {
                 let _ = registry.remove(name);
             }
-            // Deny subagent spawning tools when at max nesting depth
+            // Remove spawn tools when at max nesting depth
             if opts.subagent_max_depth == 0 {
                 for name in &["SpawnSubagent", "WaitForAgents"] {
                     let _ = registry.remove(name);
@@ -145,7 +150,7 @@ mod tests {
             tools,
             guardrails: None,
             hooks: None,
-            is_subagent: false,
+            is_unattended: false,
             denied_tools: vec![],
             subagent_depth: 0,
             subagent_max_depth: 0,
@@ -261,30 +266,34 @@ mod tests {
     }
 
     #[test]
-    fn factory_removes_denied_tools_for_subagent() {
+    fn factory_removes_denied_tools_for_unattended_agent() {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(NormalTool));
         registry.register(Arc::new(InteractiveTool));
 
         let mut opts = default_opts(Arc::new(MockProvider), registry);
-        opts.is_subagent = true;
+        opts.is_unattended = true;
         opts.denied_tools = vec!["bash".into()];
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
-        assert_eq!(agent.session_id(), "s1");
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"bash".into()));
+        assert!(!names.contains(&"ask_user".into())); // interactive also removed
     }
 
     #[test]
-    fn factory_removes_interactive_tools_for_subagent() {
+    fn factory_removes_interactive_tools_for_unattended_agent() {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(NormalTool));
         registry.register(Arc::new(InteractiveTool));
 
         let mut opts = default_opts(Arc::new(MockProvider), registry);
-        opts.is_subagent = true;
+        opts.is_unattended = true;
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
-        assert_eq!(agent.session_id(), "s1");
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"ask_user".into()));
+        assert!(names.contains(&"bash".into()));
     }
 
     #[test]
@@ -393,7 +402,7 @@ mod tests {
         assert_eq!(agent.subagent_max_depth(), 5);
     }
 
-    // ── Subagent tool removal tests ──
+    // ── Spawn tool gating tests ──
 
     struct FakeSpawnTool;
     #[async_trait]
@@ -426,52 +435,257 @@ mod tests {
         }
     }
 
-    #[test]
-    fn factory_removes_subagent_tools_when_max_depth_zero() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-        registry.register(Arc::new(FakeSpawnTool));
-        assert!(registry.contains("SpawnSubagent"));
+    struct FakeWaitTool;
+    #[async_trait]
+    impl TronTool for FakeWaitTool {
+        fn name(&self) -> &'static str {
+            "WaitForAgents"
+        }
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "WaitForAgents".into(),
+                description: "Wait".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _p: serde_json::Value,
+            _c: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+            Ok(text_result("ok", false))
+        }
+    }
 
-        let mut opts = default_opts(Arc::new(MockProvider), registry);
-        opts.is_subagent = true;
-        opts.subagent_max_depth = 0;
+    /// Second interactive tool for multi-interactive tests.
+    struct InteractiveTool2;
+    #[async_trait]
+    impl TronTool for InteractiveTool2 {
+        fn name(&self) -> &'static str {
+            "open_url"
+        }
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn is_interactive(&self) -> bool {
+            true
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "open_url".into(),
+                description: "Open".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _p: serde_json::Value,
+            _c: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+            Ok(text_result("ok", false))
+        }
+    }
 
-        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
-        // SpawnSubagent should be removed (max_depth == 0 for subagent)
-        let _ = agent; // agent created successfully
+    /// Helper: build a registry with all fake tools registered.
+    fn full_registry() -> ToolRegistry {
+        let mut r = ToolRegistry::new();
+        r.register(Arc::new(NormalTool));
+        r.register(Arc::new(InteractiveTool));
+        r.register(Arc::new(InteractiveTool2));
+        r.register(Arc::new(FakeSpawnTool));
+        r.register(Arc::new(FakeWaitTool));
+        r
     }
 
     #[test]
-    fn factory_keeps_subagent_tools_when_max_depth_positive() {
+    fn factory_removes_spawn_tools_when_unattended_max_depth_zero() {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(NormalTool));
         registry.register(Arc::new(FakeSpawnTool));
+        registry.register(Arc::new(FakeWaitTool));
 
         let mut opts = default_opts(Arc::new(MockProvider), registry);
-        opts.is_subagent = true;
+        opts.is_unattended = true;
+        opts.subagent_max_depth = 0;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"SpawnSubagent".into()));
+        assert!(!names.contains(&"WaitForAgents".into()));
+        assert!(names.contains(&"bash".into()));
+    }
+
+    #[test]
+    fn factory_keeps_spawn_tools_when_unattended_max_depth_positive() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(NormalTool));
+        registry.register(Arc::new(FakeSpawnTool));
+        registry.register(Arc::new(FakeWaitTool));
+
+        let mut opts = default_opts(Arc::new(MockProvider), registry);
+        opts.is_unattended = true;
         opts.subagent_max_depth = 3;
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
-        // SpawnSubagent should be kept (max_depth > 0) — tool contributes tokens
-        let tools_tokens = agent.context_manager().estimate_tools_tokens();
-        assert!(
-            tools_tokens > 0,
-            "SpawnSubagent + bash should contribute tool tokens"
-        );
+        let names = agent.context_manager().tool_names();
+        assert!(names.contains(&"SpawnSubagent".into()));
+        assert!(names.contains(&"WaitForAgents".into()));
+    }
 
-        // Verify by comparing against subagent_max_depth=0 (tools removed)
-        let mut registry2 = ToolRegistry::new();
-        registry2.register(Arc::new(NormalTool));
-        registry2.register(Arc::new(FakeSpawnTool));
-        let mut opts2 = default_opts(Arc::new(MockProvider), registry2);
-        opts2.is_subagent = true;
-        opts2.subagent_max_depth = 0;
-        let agent2 = AgentFactory::create_agent(AgentConfig::default(), "s2".into(), opts2);
-        let tools_tokens2 = agent2.context_manager().estimate_tools_tokens();
-        assert!(
-            tools_tokens > tools_tokens2,
-            "max_depth>0 should have more tools than max_depth=0"
-        );
+    // ── Attended (user) agent tests ──
+
+    #[test]
+    fn factory_attended_agent_keeps_interactive_tools() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = false;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(names.contains(&"ask_user".into()));
+        assert!(names.contains(&"open_url".into()));
+    }
+
+    #[test]
+    fn factory_attended_agent_keeps_spawn_tools_at_max_depth_zero() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = false;
+        opts.subagent_max_depth = 0;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(names.contains(&"SpawnSubagent".into()));
+        assert!(names.contains(&"WaitForAgents".into()));
+    }
+
+    #[test]
+    fn factory_attended_agent_applies_denied_tools() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = false;
+        opts.denied_tools = vec!["bash".into()];
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"bash".into()));
+        // Other tools still present
+        assert!(names.contains(&"ask_user".into()));
+        assert!(names.contains(&"SpawnSubagent".into()));
+    }
+
+    // ── Comprehensive unattended agent tests ──
+
+    #[test]
+    fn factory_unattended_removes_all_interactive_tools() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.subagent_max_depth = 3; // keep spawn tools to isolate interactive removal
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"ask_user".into()));
+        assert!(!names.contains(&"open_url".into()));
+        assert!(names.contains(&"bash".into()));
+        assert!(names.contains(&"SpawnSubagent".into()));
+    }
+
+    #[test]
+    fn factory_unattended_with_denied_and_interactive_overlap() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.denied_tools = vec!["ask_user".into()]; // also interactive
+        opts.subagent_max_depth = 3;
+
+        // Should not panic from double-remove
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"ask_user".into()));
+        assert!(!names.contains(&"open_url".into())); // still removed as interactive
+    }
+
+    #[test]
+    fn factory_unattended_with_empty_denied_tools() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.denied_tools = vec![];
+        opts.subagent_max_depth = 0;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        // Interactive tools removed
+        assert!(!names.contains(&"ask_user".into()));
+        assert!(!names.contains(&"open_url".into()));
+        // Spawn tools removed at depth 0
+        assert!(!names.contains(&"SpawnSubagent".into()));
+        assert!(!names.contains(&"WaitForAgents".into()));
+        // Core tools preserved
+        assert!(names.contains(&"bash".into()));
+    }
+
+    #[test]
+    fn factory_unattended_preserves_non_interactive_tools() {
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.subagent_max_depth = 3;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(names.contains(&"bash".into()));
+        assert!(names.contains(&"SpawnSubagent".into()));
+        assert!(names.contains(&"WaitForAgents".into()));
+    }
+
+    #[test]
+    fn factory_denied_tools_applied_before_interactive_removal() {
+        // Verify ordering independence: denied removal + interactive removal are separate passes
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.denied_tools = vec!["bash".into(), "open_url".into()];
+        opts.subagent_max_depth = 3;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+        assert!(!names.contains(&"bash".into())); // denied
+        assert!(!names.contains(&"open_url".into())); // denied + interactive
+        assert!(!names.contains(&"ask_user".into())); // interactive
+        assert!(names.contains(&"SpawnSubagent".into())); // kept (depth > 0)
+    }
+
+    // ── Cron scenario test ──
+
+    #[test]
+    fn factory_cron_agent_scenario() {
+        // Simulate cron: is_unattended=true, denied_tools from user restrictions, max_depth=0
+        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
+        opts.is_unattended = true;
+        opts.denied_tools = vec!["WaitForAgents".into()]; // simulate user restriction
+        opts.subagent_max_depth = 0;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        let names = agent.context_manager().tool_names();
+
+        // All interactive tools removed (the key fix — cron was missing these)
+        assert!(!names.contains(&"ask_user".into()));
+        assert!(!names.contains(&"open_url".into()));
+
+        // Spawn tools removed at depth 0
+        assert!(!names.contains(&"SpawnSubagent".into()));
+        assert!(!names.contains(&"WaitForAgents".into()));
+
+        // Core tools preserved
+        assert!(names.contains(&"bash".into()));
     }
 }

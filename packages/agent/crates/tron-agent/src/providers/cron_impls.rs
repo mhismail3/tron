@@ -163,16 +163,13 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // 4. Create tools
         let tools = (self.tool_factory)();
 
-        // 5. Build denied tools list: user restrictions + always-denied interactive tools
+        // 5. Build denied tools list from user restrictions
         let tool_names: Vec<String> = tools.names();
-        let mut denied_tools = tool_restrictions
+        let denied_tools = tool_restrictions
             .map(|r| r.resolve_denied_tools(&tool_names))
             .unwrap_or_default();
-        for always_denied in ["AskUserQuestion", "RenderAppUI"] {
-            if !denied_tools.iter().any(|t| t == always_denied) {
-                denied_tools.push(always_denied.into());
-            }
-        }
+        // Interactive tools (AskUserQuestion, RenderAppUI, OpenURL, etc.)
+        // are removed automatically by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory
         let mut agent = tron_runtime::AgentFactory::create_agent(
@@ -183,7 +180,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
                 tools,
                 guardrails: None,
                 hooks: None,
-                is_subagent: false,
+                is_unattended: true,
                 denied_tools,
                 subagent_depth: 0,
                 subagent_max_depth: 0,

@@ -336,6 +336,12 @@ impl ContextManager {
     }
 
     #[must_use]
+    /// Return the names of all registered tools.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.config.tools.iter().map(|t| t.name.clone()).collect()
+    }
+
+    #[must_use]
     /// Estimate combined static + dynamic rules token count.
     pub fn estimate_rules_tokens(&self) -> u64 {
         let static_rules = u64::from(token_estimator::estimate_rules_tokens(
