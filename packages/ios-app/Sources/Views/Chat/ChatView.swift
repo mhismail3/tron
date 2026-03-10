@@ -248,6 +248,10 @@ struct ChatView: View {
             // Add in-chat notification for reasoning level change
             if previousLevel != level {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
+                // Persist to server (event-sourced, survives reinstall/migration)
+                Task {
+                    try? await rpcClient.model.setReasoningLevel(sessionId, level: level)
+                }
             }
         }
         // Handle "Draft a Plan" request: Add plan skill to selection

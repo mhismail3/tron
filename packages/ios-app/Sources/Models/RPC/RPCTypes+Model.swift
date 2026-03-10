@@ -215,3 +215,16 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 struct ModelListResult: Decodable {
     let models: [ModelInfo]
 }
+
+// MARK: - Reasoning Level
+
+struct ReasoningLevelParams: Encodable {
+    let sessionId: String
+    let level: String
+}
+
+struct ReasoningLevelResult: Decodable {
+    let previousLevel: String?
+    let newLevel: String
+    let changed: Bool
+}

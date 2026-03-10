@@ -141,6 +141,11 @@ extension ChatViewModel {
             // Update turn counter from unified state
             currentTurn = state.currentTurn
 
+            // Apply event-sourced reasoning level (authoritative over UserDefaults)
+            if let eventSourcedLevel = state.reasoningLevel {
+                inputBarState.reasoningLevel = eventSourcedLevel
+            }
+
             // Populate SubagentState from reconstructed subagent results
             // This enables tap handlers on reconstructed subagent result chips to work
             for result in state.subagentResults {

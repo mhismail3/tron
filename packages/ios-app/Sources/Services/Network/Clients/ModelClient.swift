@@ -68,6 +68,18 @@ final class ModelClient: ModelClientProtocol {
         return result.models
     }
 
+    // MARK: - Reasoning Level
+
+    func setReasoningLevel(_ sessionId: String, level: String) async throws -> ReasoningLevelResult {
+        let ws = try transport.requireConnection()
+
+        let params = ReasoningLevelParams(sessionId: sessionId, level: level)
+        return try await ws.send(
+            method: "config.setReasoningLevel",
+            params: params
+        )
+    }
+
     /// Invalidate the model cache (e.g., after API key changes)
     func invalidateCache() {
         modelCache = nil

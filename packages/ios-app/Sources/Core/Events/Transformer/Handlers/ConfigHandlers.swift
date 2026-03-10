@@ -34,9 +34,9 @@ enum ConfigHandlers {
     ) -> ChatMessage? {
         let parsed = ReasoningLevelPayload(from: payload)
 
-        // Need both previous and new levels to show a meaningful notification
         guard let previousLevel = parsed.previousLevel,
-              let newLevel = parsed.newLevel else { return nil }
+              let newLevel = parsed.newLevel,
+              previousLevel.lowercased() != newLevel.lowercased() else { return nil }
 
         return ChatMessage(
             role: .system,

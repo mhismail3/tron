@@ -89,6 +89,10 @@ fn register_core(registry: &mut MethodRegistry) {
     // Model
     registry.register("model.list", model::ListModelsHandler);
     registry.register("model.switch", model::SwitchModelHandler);
+    registry.register(
+        "config.setReasoningLevel",
+        model::SetReasoningLevelHandler,
+    );
 
     // Context
     registry.register("context.getSnapshot", context::GetSnapshotHandler);
@@ -534,8 +538,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            123,
-            "expected 123 methods, got {}",
+            124,
+            "expected 124 methods, got {}",
             reg.methods().len()
         );
     }

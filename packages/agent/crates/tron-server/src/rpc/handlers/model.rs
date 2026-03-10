@@ -49,7 +49,7 @@ fn known_models() -> Vec<Value> {
             "description": "Best combination of speed and intelligence — adaptive thinking, effort control.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high", "max"],
-            "defaultReasoningLevel": "high",
+            "defaultReasoningLevel": "medium",
             "recommended": true,
             "isLegacy": false,
             "releaseDate": "2026-02-17",
@@ -704,6 +704,89 @@ impl MethodHandler for SwitchModelHandler {
     }
 }
 
+/// Look up the default reasoning level for a model ID from the known models list.
+fn default_reasoning_level(model_id: &str) -> Option<String> {
+    known_models()
+        .iter()
+        .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id))
+        .and_then(|m| m.get("defaultReasoningLevel"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Set the reasoning level for a session.
+///
+/// Persists a `config.reasoning_level` event and invalidates the session cache.
+/// The server is the source of truth: it resolves `previousLevel` from event
+/// history, falling back to the model's `defaultReasoningLevel` for the first
+/// change in a session. The client only sends `sessionId` and `level`.
+pub struct SetReasoningLevelHandler;
+
+#[async_trait]
+impl MethodHandler for SetReasoningLevelHandler {
+    #[instrument(skip(self, ctx), fields(method = "config.setReasoningLevel"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let new_level = require_string_param(params.as_ref(), "level")?;
+
+        // Verify session exists
+        let _ = ctx
+            .event_store
+            .get_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| RpcError::NotFound {
+                code: errors::SESSION_NOT_FOUND.into(),
+                message: format!("Session '{session_id}' not found"),
+            })?;
+
+        // Resolve previous level: event history first, then model default.
+        let state = ctx.event_store.get_state_at_head(&session_id).ok();
+        let previous_level = state
+            .as_ref()
+            .and_then(|s| s.reasoning_level.clone())
+            .or_else(|| {
+                state
+                    .as_ref()
+                    .and_then(|s| default_reasoning_level(&s.model))
+            });
+
+        // Skip if level hasn't actually changed (case-insensitive)
+        if previous_level
+            .as_deref()
+            .map(|p| p.to_lowercase())
+            == Some(new_level.to_lowercase())
+        {
+            return Ok(serde_json::json!({
+                "previousLevel": previous_level,
+                "newLevel": new_level,
+                "changed": false,
+            }));
+        }
+
+        // Persist config.reasoning_level event
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &session_id,
+            event_type: tron_events::EventType::ConfigReasoningLevel,
+            payload: serde_json::json!({
+                "previousLevel": previous_level,
+                "newLevel": new_level,
+            }),
+            parent_id: None,
+        });
+
+        // Invalidate cached session so next resume reconstructs with new level
+        ctx.session_manager.invalidate_session(&session_id);
+
+        Ok(serde_json::json!({
+            "previousLevel": previous_level,
+            "newLevel": new_level,
+            "changed": true,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1238,5 +1321,149 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["newModel"], "gemini-3.1-pro-preview");
+    }
+
+    // ── SetReasoningLevelHandler ──
+
+    #[tokio::test]
+    async fn set_reasoning_level_emits_event() {
+        // Sonnet 4.6 default is "medium" — changing to "max" should emit event
+        // with previousLevel resolved from model default
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .unwrap();
+
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["previousLevel"], "medium");
+        assert_eq!(result["newLevel"], "max");
+        assert_eq!(result["changed"], true);
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["config.reasoning_level"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["previousLevel"], "medium");
+        assert_eq!(payload["newLevel"], "max");
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_default_is_noop() {
+        // Setting to the model's own default should be a no-op
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .unwrap();
+
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["changed"], false);
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["config.reasoning_level"], None)
+            .unwrap();
+        assert_eq!(events.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_no_duplicate() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .unwrap();
+
+        let _ = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+            .await
+            .unwrap();
+
+        // Same level again — server resolves previous from event history
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["changed"], false);
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["config.reasoning_level"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_case_insensitive() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .unwrap();
+
+        let _ = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "Max"})), &ctx)
+            .await
+            .unwrap();
+
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["changed"], false);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_change_emits_both() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .unwrap();
+
+        // First change: medium (default) → high
+        let r1 = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "high"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r1["previousLevel"], "medium");
+
+        // Second change: high (from event) → max
+        let r2 = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r2["previousLevel"], "high");
+        assert_eq!(r2["newLevel"], "max");
+        assert_eq!(r2["changed"], true);
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["config.reasoning_level"], None)
+            .unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_session_not_found() {
+        let ctx = make_test_context();
+        let err = SetReasoningLevelHandler
+            .handle(
+                Some(json!({"sessionId": "nonexistent", "level": "high"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RpcError::NotFound { .. }));
     }
 }

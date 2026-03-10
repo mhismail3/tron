@@ -24,6 +24,8 @@ pub struct ReconstructedState {
     pub is_ended: bool,
     /// Active worktree path (from `worktree.acquired` event, if not released).
     pub worktree_path: Option<String>,
+    /// Last-seen reasoning level from `config.reasoning_level` events.
+    pub reasoning_level: Option<String>,
 }
 
 /// Reconstruct session state from the event store.
@@ -94,6 +96,7 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
         system_prompt: state.system_prompt.clone(),
         is_ended: state.is_ended.unwrap_or(false),
         worktree_path: None,
+        reasoning_level: state.reasoning_level.clone(),
     }
 }
 
@@ -255,6 +258,69 @@ mod tests {
         } else {
             panic!("Expected assistant message at index 1");
         }
+    }
+
+    #[test]
+    fn reconstruct_reasoning_level_none_by_default() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let state = reconstruct(&store, &session.session.id).unwrap();
+        assert!(state.reasoning_level.is_none());
+    }
+
+    #[test]
+    fn reconstruct_reasoning_level_from_event() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::ConfigReasoningLevel,
+                payload: serde_json::json!({
+                    "previousLevel": null,
+                    "newLevel": "high"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, sid).unwrap();
+        assert_eq!(state.reasoning_level.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn reconstruct_reasoning_level_latest_wins() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::ConfigReasoningLevel,
+                payload: serde_json::json!({"previousLevel": null, "newLevel": "medium"}),
+                parent_id: None,
+            })
+            .unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::ConfigReasoningLevel,
+                payload: serde_json::json!({"previousLevel": "medium", "newLevel": "high"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, sid).unwrap();
+        assert_eq!(state.reasoning_level.as_deref(), Some("high"));
     }
 
     #[test]
