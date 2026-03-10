@@ -36,7 +36,7 @@ struct CompactionSection: View {
             }
         } header: {
             Text("Compaction")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         } footer: {
             Text("Context usage % that triggers compaction. Lower values compact sooner, preserving more headroom.")
                 .font(TronTypography.caption2)

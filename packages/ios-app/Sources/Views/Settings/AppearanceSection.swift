@@ -28,9 +28,6 @@ struct AppearanceSection: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
             }
-        } header: {
-            Text("Appearance")
-                .font(TronTypography.bodySM)
         } footer: {
             Text("Auto follows your system appearance setting.")
                 .font(TronTypography.caption2)

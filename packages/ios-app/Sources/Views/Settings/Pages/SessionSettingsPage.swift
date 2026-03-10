@@ -47,7 +47,7 @@ struct SessionSettingsPage: View {
                     }
                 } header: {
                     Text("Session Management")
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 }
                 .listSectionSpacing(16)
             }

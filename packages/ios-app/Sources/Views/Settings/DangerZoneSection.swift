@@ -44,7 +44,7 @@ struct DangerZoneSection: View {
             }
         } header: {
             Text("Danger Zone")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.red)
         }
     }

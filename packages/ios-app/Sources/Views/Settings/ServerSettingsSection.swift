@@ -38,7 +38,7 @@ struct ServerSettingsSection: View {
             }
         } header: {
             Text("Server")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         }
         .listSectionSpacing(16)
     }

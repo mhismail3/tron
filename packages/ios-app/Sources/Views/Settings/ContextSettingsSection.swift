@@ -24,8 +24,8 @@ struct ContextSettingsSection: View {
                 }
             }
         } header: {
-            Text("Context")
-                .font(TronTypography.bodySM)
+            Text("Memory")
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         } footer: {
             Text("Automatically update the session memory ledger after each response.")
                 .font(TronTypography.caption2)

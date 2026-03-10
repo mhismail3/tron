@@ -33,7 +33,7 @@ struct QuickSessionSection: View {
             .onTapGesture { onModelTap() }
         } header: {
             Text("Quick Session")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         } footer: {
             Text("Long-press the + button to instantly start a session with these defaults.")
                 .font(TronTypography.caption2)

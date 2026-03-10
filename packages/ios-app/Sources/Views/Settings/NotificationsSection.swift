@@ -17,7 +17,7 @@ struct NotificationsSection: View {
             .tint(.tronEmerald)
         } header: {
             Text("Notifications")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         } footer: {
             Text("Automatically mark notifications as read when opened.")
                 .font(TronTypography.caption2)

@@ -45,7 +45,7 @@ struct AccountSection: View {
             }
         } header: {
             Text("Accounts")
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
         }
         .listSectionSpacing(16)
     }
