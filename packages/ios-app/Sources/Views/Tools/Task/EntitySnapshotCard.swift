@@ -144,7 +144,7 @@ struct EntitySnapshotCard: View {
 
     @ViewBuilder
     private func metadataRow(icon: String, label: String, value: String, valueColor: Color?) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 11))
                 .foregroundStyle(.tronTextMuted)
