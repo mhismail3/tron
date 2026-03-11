@@ -70,6 +70,7 @@ enum WebSocketError: Error, LocalizedError, Sendable {
 @MainActor
 final class WebSocketService {
 
+    private var urlSession: URLSession?
     private var webSocketTask: URLSessionWebSocketTask?
     private var pingTask: Task<Void, Never>?
     private var receiveTask: Task<Void, Never>?
@@ -142,13 +143,13 @@ final class WebSocketService {
         configuration.timeoutIntervalForResource = 300
         logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
 
-        let session = URLSession(configuration: configuration)
+        urlSession = URLSession(configuration: configuration)
 
         var request = URLRequest(url: serverURL)
         request.timeoutInterval = 30
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
-        webSocketTask = session.webSocketTask(with: request)
+        webSocketTask = urlSession!.webSocketTask(with: request)
         webSocketTask?.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)
 
@@ -188,6 +189,8 @@ final class WebSocketService {
 
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
 
         let pendingCount = pendingRequests.count
         for (id, continuation) in pendingRequests {

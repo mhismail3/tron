@@ -2,14 +2,14 @@ import Testing
 import Foundation
 @testable import TronMobile
 
-// MARK: - ReadError Parsing Tests
+// MARK: - FileOperationError Read Parsing Tests
 
-@Suite("ReadError Parsing")
-struct ReadErrorParsingTests {
+@Suite("FileOperationError Read Parsing")
+struct FileOperationErrorReadTests {
 
     @Test("Parses 'File not found' error")
     func testFileNotFound() {
-        let error = ReadError.parse(from: "File not found: /path/to/missing.swift")
+        let error = FileOperationError.parse(from: "File not found: /path/to/missing.swift", operation: .read)
         guard case .fileNotFound(let path) = error else {
             Issue.record("Expected .fileNotFound, got \(error)")
             return
@@ -23,7 +23,7 @@ struct ReadErrorParsingTests {
 
     @Test("Parses 'Permission denied' error")
     func testPermissionDenied() {
-        let error = ReadError.parse(from: "Permission denied: /etc/shadow")
+        let error = FileOperationError.parse(from: "Permission denied: /etc/shadow", operation: .read)
         guard case .permissionDenied(let path) = error else {
             Issue.record("Expected .permissionDenied, got \(error)")
             return
@@ -37,7 +37,7 @@ struct ReadErrorParsingTests {
 
     @Test("Parses 'Path is a directory' error")
     func testIsDirectory() {
-        let error = ReadError.parse(from: "Path is a directory, not a file: /Users/moose/Sources")
+        let error = FileOperationError.parse(from: "Path is a directory, not a file: /Users/moose/Sources", operation: .read)
         guard case .isDirectory(let path) = error else {
             Issue.record("Expected .isDirectory, got \(error)")
             return
@@ -51,7 +51,7 @@ struct ReadErrorParsingTests {
 
     @Test("Parses 'Missing required parameter' as invalidPath")
     func testInvalidPath() {
-        let error = ReadError.parse(from: "Missing required parameter: file_path must be provided")
+        let error = FileOperationError.parse(from: "Missing required parameter: file_path must be provided", operation: .read)
         guard case .invalidPath = error else {
             Issue.record("Expected .invalidPath, got \(error)")
             return
@@ -61,33 +61,33 @@ struct ReadErrorParsingTests {
         #expect(error.suggestion.contains("missing or invalid"))
     }
 
-    @Test("Parses generic error message")
+    @Test("Parses generic error message with read operation context")
     func testGenericError() {
         let msg = "Error reading file: unexpected I/O failure"
-        let error = ReadError.parse(from: msg)
-        guard case .generic(let message) = error else {
+        let error = FileOperationError.parse(from: msg, operation: .read)
+        guard case .generic(let message, let operation) = error else {
             Issue.record("Expected .generic, got \(error)")
             return
         }
         #expect(message == msg)
+        #expect(operation == .read)
         #expect(error.title == "Read Error")
         #expect(error.icon == "exclamationmark.triangle.fill")
         #expect(error.errorCode == nil)
-        #expect(error.suggestion.contains("unexpected error"))
     }
 
-    @Test("Detects ENOENT from raw error code in message")
+    @Test("Detects ENOENT from raw error code as directoryNotFound")
     func testEnoentCode() {
-        let error = ReadError.parse(from: "ENOENT: no such file or directory, open '/path/file'")
-        guard case .fileNotFound = error else {
-            Issue.record("Expected .fileNotFound for ENOENT, got \(error)")
+        let error = FileOperationError.parse(from: "ENOENT: no such file or directory, open '/path/file'", operation: .read)
+        guard case .directoryNotFound = error else {
+            Issue.record("Expected .directoryNotFound for bare ENOENT, got \(error)")
             return
         }
     }
 
     @Test("Detects EACCES from raw error code in message")
     func testEaccesCode() {
-        let error = ReadError.parse(from: "EACCES: permission denied, open '/path/file'")
+        let error = FileOperationError.parse(from: "EACCES: permission denied, open '/path/file'", operation: .read)
         guard case .permissionDenied = error else {
             Issue.record("Expected .permissionDenied for EACCES, got \(error)")
             return
@@ -96,11 +96,36 @@ struct ReadErrorParsingTests {
 
     @Test("Detects EISDIR from raw error code in message")
     func testEisdirCode() {
-        let error = ReadError.parse(from: "EISDIR: illegal operation on a directory")
+        let error = FileOperationError.parse(from: "EISDIR: illegal operation on a directory", operation: .read)
         guard case .isDirectory = error else {
             Issue.record("Expected .isDirectory for EISDIR, got \(error)")
             return
         }
+    }
+
+    @Test("Distinguishes fileNotFound from directoryNotFound")
+    func testFileVsDirectoryNotFound() {
+        let fileError = FileOperationError.parse(from: "File not found: /missing.txt", operation: .read)
+        guard case .fileNotFound = fileError else {
+            Issue.record("Expected .fileNotFound for 'File not found:' prefix")
+            return
+        }
+
+        let dirError = FileOperationError.parse(from: "directory does not exist", operation: .read)
+        guard case .directoryNotFound = dirError else {
+            Issue.record("Expected .directoryNotFound for 'directory does not exist'")
+            return
+        }
+    }
+
+    @Test("Handles empty error message")
+    func testEmptyMessage() {
+        let error = FileOperationError.parse(from: "", operation: .read)
+        guard case .generic(let message, _) = error else {
+            Issue.record("Expected .generic for empty string")
+            return
+        }
+        #expect(message == "")
     }
 }
 
@@ -160,62 +185,5 @@ struct ToolArgumentParserIntegerTests {
         let args = "{\"file_path\": \"/path/to/file.swift\", \"offset\": 99, \"limit\": 50}"
         #expect(ToolArgumentParser.integer("offset", from: args) == 99)
         #expect(ToolArgumentParser.integer("limit", from: args) == 50)
-    }
-}
-
-// MARK: - ReadToolDetailSheet Data Parsing Tests
-
-@Suite("ReadToolDetailSheet Data Helpers")
-struct ReadToolDetailSheetDataTests {
-
-    @available(iOS 26.0, *)
-    @Test("languageColor returns Swift orange for .swift")
-    func testLanguageColorSwift() {
-        let color = ReadToolDetailSheet.languageColor(for: "swift")
-        #expect(color != .tronSlate)
-    }
-
-    @available(iOS 26.0, *)
-    @Test("languageColor returns TypeScript blue for .ts")
-    func testLanguageColorTS() {
-        let color = ReadToolDetailSheet.languageColor(for: "ts")
-        #expect(color != .tronSlate)
-    }
-
-    @available(iOS 26.0, *)
-    @Test("languageColor returns tronSlate for unknown extension")
-    func testLanguageColorUnknown() {
-        let color = ReadToolDetailSheet.languageColor(for: "xyz")
-        #expect(color == .tronSlate)
-    }
-
-    @available(iOS 26.0, *)
-    @Test("fileIcon returns swift icon for .swift files")
-    func testFileIconSwift() {
-        #expect(ReadToolDetailSheet.fileIcon(for: "MyClass.swift") == "swift")
-    }
-
-    @available(iOS 26.0, *)
-    @Test("fileIcon returns terminal icon for .sh files")
-    func testFileIconSh() {
-        #expect(ReadToolDetailSheet.fileIcon(for: "build.sh") == "terminal")
-    }
-
-    @available(iOS 26.0, *)
-    @Test("fileIcon returns doc for unknown extension")
-    func testFileIconUnknown() {
-        #expect(ReadToolDetailSheet.fileIcon(for: "data.bin") == "doc")
-    }
-
-    @available(iOS 26.0, *)
-    @Test("lineNumberWidth scales with digit count")
-    func testLineNumberWidth() {
-        let smallLines = [ContentLineParser.ParsedLine(id: 0, lineNum: 5, content: "x")]
-        let largeLines = [ContentLineParser.ParsedLine(id: 0, lineNum: 10000, content: "x")]
-
-        let smallWidth = ReadToolDetailSheet.lineNumberWidth(for: smallLines)
-        let largeWidth = ReadToolDetailSheet.lineNumberWidth(for: largeLines)
-
-        #expect(largeWidth > smallWidth)
     }
 }

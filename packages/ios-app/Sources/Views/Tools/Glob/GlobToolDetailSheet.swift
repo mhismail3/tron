@@ -243,26 +243,13 @@ struct GlobToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-
-        return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.tronError)
-
-                    Text("Search Failed")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                Text(result)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(errorTint.body)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        let classification = GlobErrorClassifier.classify(result)
+        return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
+            Text(result)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(TintedColors(accent: .tronError, colorScheme: colorScheme).body)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -310,6 +297,20 @@ struct GlobToolDetailSheet: View {
             .padding(14)
             .sectionFill(.cyan)
         }
+    }
+}
+
+// MARK: - Glob Error Classifier
+
+enum GlobErrorClassifier: ErrorClassifying {
+    static func classify(_ message: String) -> ErrorClassification {
+        if message.contains("Permission denied") || message.contains("EACCES") {
+            return ErrorClassification(icon: "lock.fill", title: "Permission Denied", code: "EACCES", suggestion: "The process does not have permission to search this location.")
+        }
+        if message.contains("No such file") || message.contains("ENOENT") || message.contains("not found") {
+            return ErrorClassification(icon: "questionmark.folder", title: "Path Not Found", code: "ENOENT", suggestion: "Check that the search path exists.")
+        }
+        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil, suggestion: "An unexpected error occurred during file search.")
     }
 }
 

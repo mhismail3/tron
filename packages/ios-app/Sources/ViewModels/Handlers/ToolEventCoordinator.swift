@@ -122,34 +122,41 @@ final class ToolEventCoordinator {
         // The server then continues streaming those same tools, which would cause duplicates.
         if let existingIndex = context.messageIndex.index(forToolCallId: pluginResult.toolCallId)
             ?? MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            context.logInfo("Updating existing tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) with arguments")
-            // Still make the tool visible (in case it wasn't)
-            context.makeToolVisible(pluginResult.toolCallId)
 
-            // Update the existing chip with full arguments from tool_start
-            if case .toolUse(var tool) = context.messages[existingIndex].content {
-                tool.arguments = pluginResult.formattedArguments
-                context.messages[existingIndex].content = .toolUse(tool)
-                context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
-                context.updateInMessageWindow(context.messages[existingIndex])
-            }
+            // AskUserQuestion messages need special update logic (status transition, params).
+            // Let them fall through to handleAskUserQuestionToolStart below.
+            if case .askUserQuestion = context.messages[existingIndex].content {
+                // Fall through — handled below at line "if result.isAskUserQuestion"
+            } else {
+                context.logInfo("Updating existing tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) with arguments")
+                // Still make the tool visible (in case it wasn't)
+                context.makeToolVisible(pluginResult.toolCallId)
 
-            // Update tracked tool call arguments
-            if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
-                context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
-            }
-
-            // Still handle browser tool detection for pre-existing chips
-            if result.isBrowserTool {
-                let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
-                if shouldStartStreaming {
-                    context.startBrowserStreamIfNeeded()
+                // Update the existing chip with full arguments from tool_start
+                if case .toolUse(var tool) = context.messages[existingIndex].content {
+                    tool.arguments = pluginResult.formattedArguments
+                    context.messages[existingIndex].content = .toolUse(tool)
+                    context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                    context.updateInMessageWindow(context.messages[existingIndex])
                 }
-            }
 
-            // Handle side-effects even when updating existing chip
-            handleToolStartSideEffects(pluginResult, result: result, context: context)
-            return
+                // Update tracked tool call arguments
+                if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
+                    context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
+                }
+
+                // Still handle browser tool detection for pre-existing chips
+                if result.isBrowserTool {
+                    let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
+                    if shouldStartStreaming {
+                        context.startBrowserStreamIfNeeded()
+                    }
+                }
+
+                // Handle side-effects even when updating existing chip
+                handleToolStartSideEffects(pluginResult, result: result, context: context)
+                return
+            }
         }
 
         // Finalize any current streaming text before tool starts

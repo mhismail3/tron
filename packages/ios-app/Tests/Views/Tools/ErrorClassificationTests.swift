@@ -104,4 +104,84 @@ struct ErrorClassificationTests {
         let invalidScheme = OpenURLDetailParser.classifyError("Invalid URL scheme: ftp")
         #expect(invalidScheme.title == "Invalid Scheme")
     }
+
+    // MARK: - Search Classifier
+
+    @Test("Search classifies invalid regex")
+    func testSearchInvalidRegex() {
+        let c = SearchErrorClassifier.classify("Invalid regex pattern: [invalid - unterminated character class")
+        #expect(c.title == "Invalid Pattern")
+        #expect(c.code == nil)
+    }
+
+    @Test("Search classifies permission denied")
+    func testSearchPermissionDenied() {
+        let c = SearchErrorClassifier.classify("Permission denied: /root/secret")
+        #expect(c.title == "Permission Denied")
+        #expect(c.code == "EACCES")
+    }
+
+    @Test("Search classifies path not found")
+    func testSearchPathNotFound() {
+        let c = SearchErrorClassifier.classify("No such file or directory: /missing/path")
+        #expect(c.title == "Path Not Found")
+        #expect(c.code == "ENOENT")
+    }
+
+    @Test("Search returns fallback for unknown")
+    func testSearchFallback() {
+        let c = SearchErrorClassifier.classify("something weird happened")
+        #expect(c.title == "Search Failed")
+    }
+
+    // MARK: - Glob Classifier
+
+    @Test("Glob classifies permission denied")
+    func testGlobPermissionDenied() {
+        let c = GlobErrorClassifier.classify("EACCES: Permission denied")
+        #expect(c.title == "Permission Denied")
+        #expect(c.code == "EACCES")
+    }
+
+    @Test("Glob classifies path not found")
+    func testGlobPathNotFound() {
+        let c = GlobErrorClassifier.classify("ENOENT: No such file or directory")
+        #expect(c.title == "Path Not Found")
+        #expect(c.code == "ENOENT")
+    }
+
+    @Test("Glob returns fallback for unknown")
+    func testGlobFallback() {
+        let c = GlobErrorClassifier.classify("unexpected glob error")
+        #expect(c.title == "Search Failed")
+    }
+
+    // MARK: - Bash Classifier
+
+    @Test("Bash classifies exit code error")
+    func testBashExitCode() {
+        let c = BashErrorClassifier.classify("Command failed with exit code 1")
+        #expect(c.title == "Command Failed")
+        #expect(c.code == "EXIT 1")
+    }
+
+    @Test("Bash classifies timeout")
+    func testBashTimeout() {
+        let c = BashErrorClassifier.classify("Command timed out after 120s")
+        #expect(c.title == "Command Timed Out")
+        #expect(c.code == nil)
+    }
+
+    @Test("Bash classifies permission denied")
+    func testBashPermissionDenied() {
+        let c = BashErrorClassifier.classify("Permission denied: /usr/sbin/something")
+        #expect(c.title == "Permission Denied")
+        #expect(c.code == "EACCES")
+    }
+
+    @Test("Bash returns fallback for unknown")
+    func testBashFallback() {
+        let c = BashErrorClassifier.classify("something went wrong")
+        #expect(c.title == "Command Failed")
+    }
 }

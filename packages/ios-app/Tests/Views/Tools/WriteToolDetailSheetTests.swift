@@ -2,14 +2,14 @@ import Testing
 import Foundation
 @testable import TronMobile
 
-// MARK: - FileWriteError Parsing Tests
+// MARK: - FileOperationError Write Parsing Tests
 
-@Suite("FileWriteError Parsing")
-struct FileWriteErrorParsingTests {
+@Suite("FileOperationError Write Parsing")
+struct FileOperationErrorWriteTests {
 
     @Test("Parses 'Permission denied' error")
     func testPermissionDenied() {
-        let error = FileWriteError.parse(from: "Permission denied: /etc/hosts")
+        let error = FileOperationError.parse(from: "Permission denied: /etc/hosts", operation: .write)
         guard case .permissionDenied = error else {
             Issue.record("Expected .permissionDenied, got \(error)")
             return
@@ -21,7 +21,7 @@ struct FileWriteErrorParsingTests {
 
     @Test("Parses ENOENT directory-not-found error")
     func testDirectoryNotFound() {
-        let error = FileWriteError.parse(from: "ENOENT: no such file or directory, open '/missing/dir/file.txt'")
+        let error = FileOperationError.parse(from: "ENOENT: no such file or directory, open '/missing/dir/file.txt'", operation: .write)
         guard case .directoryNotFound = error else {
             Issue.record("Expected .directoryNotFound, got \(error)")
             return
@@ -33,7 +33,7 @@ struct FileWriteErrorParsingTests {
 
     @Test("Parses EISDIR error")
     func testIsDirectory() {
-        let error = FileWriteError.parse(from: "EISDIR: illegal operation on a directory")
+        let error = FileOperationError.parse(from: "EISDIR: illegal operation on a directory", operation: .write)
         guard case .isDirectory = error else {
             Issue.record("Expected .isDirectory, got \(error)")
             return
@@ -44,7 +44,7 @@ struct FileWriteErrorParsingTests {
 
     @Test("Parses disk full error")
     func testDiskFull() {
-        let error = FileWriteError.parse(from: "ENOSPC: No space left on device")
+        let error = FileOperationError.parse(from: "ENOSPC: No space left on device", operation: .write)
         guard case .diskFull = error else {
             Issue.record("Expected .diskFull, got \(error)")
             return
@@ -55,7 +55,7 @@ struct FileWriteErrorParsingTests {
 
     @Test("Parses invalid path error")
     func testInvalidPath() {
-        let error = FileWriteError.parse(from: "Missing required parameter: file_path")
+        let error = FileOperationError.parse(from: "Missing required parameter: file_path", operation: .write)
         guard case .invalidPath = error else {
             Issue.record("Expected .invalidPath, got \(error)")
             return
@@ -63,11 +63,11 @@ struct FileWriteErrorParsingTests {
         #expect(error.errorCode == nil)
     }
 
-    @Test("Parses generic error")
+    @Test("Parses generic error with write operation context")
     func testGenericError() {
         let msg = "Something unexpected happened"
-        let error = FileWriteError.parse(from: msg)
-        guard case .generic(let message) = error else {
+        let error = FileOperationError.parse(from: msg, operation: .write)
+        guard case .generic(let message, _) = error else {
             Issue.record("Expected .generic, got \(error)")
             return
         }

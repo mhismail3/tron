@@ -95,10 +95,10 @@ struct InputBar: View {
                     query: skillMentionQuery,
                     style: .skill,
                     onSelect: { skill in
-                        selectSkillFromMention(skill)
+                        selectFromMention(skill, style: .skill)
                     },
                     onDismiss: {
-                        dismissSkillMentionPopup()
+                        dismissMentionPopup(.skill)
                     }
                 )
                 .padding(.horizontal, 16)
@@ -112,10 +112,10 @@ struct InputBar: View {
                     query: spellMentionQuery,
                     style: .spell,
                     onSelect: { skill in
-                        selectSpellFromMention(skill)
+                        selectFromMention(skill, style: .spell)
                     },
                     onDismiss: {
-                        dismissSpellMentionPopup()
+                        dismissMentionPopup(.spell)
                     }
                 )
                 .padding(.horizontal, 16)
@@ -254,8 +254,8 @@ struct InputBar: View {
         // External dismiss (tap outside)
         .onChange(of: state.isMentionPopupVisible) { _, visible in
             if !visible {
-                if showSkillMentionPopup { dismissSkillMentionPopup() }
-                if showSpellMentionPopup { dismissSpellMentionPopup() }
+                if showSkillMentionPopup { dismissMentionPopup(.skill) }
+                if showSpellMentionPopup { dismissMentionPopup(.spell) }
             }
         }
         // Sheets
@@ -342,11 +342,11 @@ struct InputBar: View {
                     selectedSpells: state.selectedSpells,
                     attachments: state.attachments,
                     onSkillRemove: { skill in
-                        removeSelectedSkill(skill)
+                        removeSelectedMention(skill, style: .skill)
                     },
                     onSkillDetailTap: actions.onSkillDetailTap,
                     onSpellRemove: { skill in
-                        removeSelectedSpell(skill)
+                        removeSelectedMention(skill, style: .spell)
                     },
                     onSpellDetailTap: actions.onSpellDetailTap,
                     onRemoveAttachment: actions.onRemoveAttachment
@@ -417,7 +417,7 @@ struct InputBar: View {
             selected: state.selectedSkills,
             showPopup: $showSkillMentionPopup,
             query: $skillMentionQuery,
-            dismissOther: { dismissSpellMentionPopup() },
+            dismissOther: { dismissMentionPopup(.spell) },
             onCompleted: { skill in
                 if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
                     state.selectedSkills.append(skill)
@@ -434,7 +434,7 @@ struct InputBar: View {
             selected: state.selectedSpells,
             showPopup: $showSpellMentionPopup,
             query: $spellMentionQuery,
-            dismissOther: { dismissSkillMentionPopup() },
+            dismissOther: { dismissMentionPopup(.skill) },
             onCompleted: { skill in
                 if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
                     state.selectedSpells.append(skill)
@@ -479,55 +479,44 @@ struct InputBar: View {
         }
     }
 
-    private func selectSkillFromMention(_ skill: Skill) {
-        if let triggerIndex = state.text.lastIndex(of: "@") {
-            state.text = String(state.text[..<triggerIndex]) + "@" + skill.name + " "
+    private func selectFromMention(_ skill: Skill, style: MentionDetector) {
+        let trigger = style.trigger
+        if let triggerIndex = state.text.lastIndex(of: trigger) {
+            state.text = String(state.text[..<triggerIndex]) + String(trigger) + skill.name + " "
         }
-        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
-            state.selectedSkills.append(skill)
+        if style.trigger == MentionDetector.skill.trigger {
+            if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
+                state.selectedSkills.append(skill)
+            }
+            actions.onSkillSelect?(skill)
+        } else {
+            if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
+                state.selectedSpells.append(skill)
+            }
         }
+        dismissMentionPopup(style)
+    }
+
+    private func dismissMentionPopup(_ style: MentionDetector) {
         withAnimation(.tronStandard) {
-            showSkillMentionPopup = false
-            skillMentionQuery = ""
-        }
-        actions.onSkillSelect?(skill)
-    }
-
-    private func selectSpellFromMention(_ skill: Skill) {
-        if let triggerIndex = state.text.lastIndex(of: "%") {
-            state.text = String(state.text[..<triggerIndex]) + "%" + skill.name + " "
-        }
-        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
-            state.selectedSpells.append(skill)
-        }
-        withAnimation(.tronStandard) {
-            showSpellMentionPopup = false
-            spellMentionQuery = ""
+            if style.trigger == MentionDetector.skill.trigger {
+                showSkillMentionPopup = false
+                skillMentionQuery = ""
+            } else {
+                showSpellMentionPopup = false
+                spellMentionQuery = ""
+            }
         }
     }
 
-    private func dismissSkillMentionPopup() {
-        withAnimation(.tronStandard) {
-            showSkillMentionPopup = false
-            skillMentionQuery = ""
+    private func removeSelectedMention(_ skill: Skill, style: MentionDetector) {
+        if style.trigger == MentionDetector.skill.trigger {
+            state.selectedSkills.removeAll { $0.name == skill.name }
+            actions.onSkillRemove?(skill)
+        } else {
+            state.selectedSpells.removeAll { $0.name == skill.name }
+            actions.onSpellRemove?(skill)
         }
-    }
-
-    private func dismissSpellMentionPopup() {
-        withAnimation(.tronStandard) {
-            showSpellMentionPopup = false
-            spellMentionQuery = ""
-        }
-    }
-
-    private func removeSelectedSkill(_ skill: Skill) {
-        state.selectedSkills.removeAll { $0.name == skill.name }
-        actions.onSkillRemove?(skill)
-    }
-
-    private func removeSelectedSpell(_ skill: Skill) {
-        state.selectedSpells.removeAll { $0.name == skill.name }
-        actions.onSpellRemove?(skill)
     }
 
     /// Trigger reasoning pill animation

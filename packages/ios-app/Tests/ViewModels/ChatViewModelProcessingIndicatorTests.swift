@@ -89,6 +89,8 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         let thinking = ChatMessage.thinking("pondering...", isStreaming: true)
         viewModel.messages = [thinking]
         viewModel.thinkingMessageId = thinking.id
+        // Sync messageIndex so isThinkingActivelyStreaming can find the message
+        viewModel.messageIndex.rebuild(from: viewModel.messages)
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 
@@ -97,6 +99,8 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         let tool = makeToolMessage(status: .running)
         viewModel.messages = [tool]
         viewModel.currentToolMessages = [tool.id: tool]
+        // shouldShowBreathingLine checks runningToolCount (O(1) counter), not currentToolMessages
+        viewModel.runningToolCount = 1
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 
@@ -117,6 +121,8 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         let running = makeToolMessage(status: .running)
         viewModel.messages = [done, running]
         viewModel.currentToolMessages = [done.id: done, running.id: running]
+        // shouldShowBreathingLine checks runningToolCount, not currentToolMessages
+        viewModel.runningToolCount = 1
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 

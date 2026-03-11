@@ -222,7 +222,7 @@ struct ReadToolDetailSheet: View {
     // MARK: - E. Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let error = ReadError.parse(from: result)
+        let error = FileOperationError.parse(from: result, operation: .read)
         let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
 
         return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
@@ -267,93 +267,6 @@ struct ReadToolDetailSheet: View {
         return "From line \(start)"
     }
 
-    // MARK: - Static Helpers (delegate to shared FileDisplayHelpers)
-
-    static func languageColor(for ext: String) -> Color { FileDisplayHelpers.languageColor(for: ext) }
-    static func fileIcon(for filename: String) -> String { FileDisplayHelpers.fileIcon(for: filename) }
-    static func lineNumberWidth(for lines: [ContentLineParser.ParsedLine]) -> CGFloat { FileDisplayHelpers.lineNumberWidth(for: lines) }
-}
-
-// MARK: - ReadError
-
-/// Classifies Read tool error messages into structured error types
-enum ReadError {
-    case fileNotFound(path: String)
-    case permissionDenied(path: String)
-    case isDirectory(path: String)
-    case invalidPath
-    case generic(message: String)
-
-    static func parse(from result: String) -> ReadError {
-        if result.contains("File not found:") || result.contains("file not found") || result.contains("ENOENT") {
-            let path = extractPath(from: result, prefix: "File not found:")
-            return .fileNotFound(path: path)
-        }
-        if result.contains("Permission denied:") || result.contains("permission denied") || result.contains("EACCES") {
-            let path = extractPath(from: result, prefix: "Permission denied:")
-            return .permissionDenied(path: path)
-        }
-        if result.contains("Path is a directory") || result.contains("is a directory") || result.contains("EISDIR") {
-            let path = extractPath(from: result, prefix: "Path is a directory, not a file:")
-            return .isDirectory(path: path)
-        }
-        if result.contains("Missing required parameter") || result.contains("Invalid") && result.contains("path") {
-            return .invalidPath
-        }
-        return .generic(message: result)
-    }
-
-    var title: String {
-        switch self {
-        case .fileNotFound: return "File Not Found"
-        case .permissionDenied: return "Permission Denied"
-        case .isDirectory: return "Path Is a Directory"
-        case .invalidPath: return "Invalid Path"
-        case .generic: return "Read Error"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .fileNotFound: return "questionmark.folder"
-        case .permissionDenied: return "lock.fill"
-        case .isDirectory: return "folder.fill"
-        case .invalidPath: return "exclamationmark.triangle.fill"
-        case .generic: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    var errorCode: String? {
-        switch self {
-        case .fileNotFound: return "ENOENT"
-        case .permissionDenied: return "EACCES"
-        case .isDirectory: return "EISDIR"
-        case .invalidPath: return nil
-        case .generic: return nil
-        }
-    }
-
-    var suggestion: String {
-        switch self {
-        case .fileNotFound:
-            return "Check that the file path is correct and the file exists."
-        case .permissionDenied:
-            return "The process does not have permission to read this file."
-        case .isDirectory:
-            return "This path points to a directory, not a file."
-        case .invalidPath:
-            return "The file path parameter is missing or invalid."
-        case .generic:
-            return "An unexpected error occurred while reading the file."
-        }
-    }
-
-    private static func extractPath(from result: String, prefix: String) -> String {
-        if let range = result.range(of: prefix) {
-            return result[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return ""
-    }
 }
 
 // MARK: - Previews

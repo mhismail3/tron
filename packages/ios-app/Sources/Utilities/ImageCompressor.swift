@@ -41,10 +41,37 @@ struct ImageCompressor {
         var quality: CGFloat = 0.8
         var data = workingImage.jpegData(compressionQuality: quality)
 
-        // Reduce quality until under target or minimum quality reached
+        // Coarse pass: reduce quality in 0.1 steps
         while let d = data, d.count > targetSizeBytes, quality > 0.1 {
             quality -= 0.1
             data = workingImage.jpegData(compressionQuality: quality)
+        }
+
+        // Fine pass: if still over target at low quality, try smaller steps down to 0.01
+        if let d = data, d.count > targetSizeBytes, quality <= 0.1 {
+            quality = 0.08
+            while quality >= 0.01 {
+                data = workingImage.jpegData(compressionQuality: quality)
+                if let d = data, d.count <= targetSizeBytes { break }
+                quality -= 0.02
+            }
+        }
+
+        // Resize fallback: if still over target, progressively shrink dimensions
+        if let d = data, d.count > targetSizeBytes {
+            var scale: CGFloat = 0.9
+            while scale >= 0.3 {
+                let reduced = resize(workingImage, to: CGSize(
+                    width: workingImage.size.width * scale,
+                    height: workingImage.size.height * scale
+                ))
+                data = reduced.jpegData(compressionQuality: max(quality, 0.05))
+                if let d = data, d.count <= targetSizeBytes {
+                    info += "downscaled to \(Int(workingImage.size.width * scale))x\(Int(workingImage.size.height * scale)), "
+                    break
+                }
+                scale -= 0.1
+            }
         }
 
         guard let finalData = data else { return nil }
