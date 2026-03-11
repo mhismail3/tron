@@ -5,6 +5,7 @@
 //! - **Antigravity**: Free tier/sandbox with default project fallback.
 
 use super::errors::AuthError;
+#[allow(unused_imports)] // now_ms used in tests
 use super::types::{
     GoogleAuth, GoogleOAuthEndpoint, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at,
     now_ms,
@@ -82,10 +83,10 @@ pub fn get_authorization_url(config: &GoogleOAuthConfig, challenge: &str) -> Str
     format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent",
         config.oauth.auth_url,
-        urlencoded(&config.oauth.client_id),
-        urlencoded(&config.oauth.redirect_uri),
-        urlencoded(&config.oauth.scopes.join(" ")),
-        urlencoded(challenge),
+        super::urlencoded(&config.oauth.client_id),
+        super::urlencoded(&config.oauth.redirect_uri),
+        super::urlencoded(&config.oauth.scopes.join(" ")),
+        super::urlencoded(challenge),
     )
 }
 
@@ -96,7 +97,7 @@ pub async fn exchange_code_for_tokens(
     code: &str,
     verifier: &str,
 ) -> Result<OAuthTokens, AuthError> {
-    exchange_code_for_tokens_with_client(config, code, verifier, &reqwest::Client::new()).await
+    exchange_code_for_tokens_with_client(config, code, verifier, super::shared_auth_client()).await
 }
 
 /// Exchange authorization code for tokens using a shared HTTP client.
@@ -153,7 +154,7 @@ pub async fn refresh_token(
     config: &GoogleOAuthConfig,
     refresh_token: &str,
 ) -> Result<OAuthTokens, AuthError> {
-    refresh_token_with_client(config, refresh_token, &reqwest::Client::new()).await
+    refresh_token_with_client(config, refresh_token, super::shared_auth_client()).await
 }
 
 /// Refresh an expired OAuth token using a shared HTTP client.
@@ -261,7 +262,7 @@ pub async fn load_server_auth(
     env_token: Option<&str>,
     env_api_key: Option<&str>,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, env_token, env_api_key, &reqwest::Client::new()).await
+    load_server_auth_with_client(auth_path, env_token, env_api_key, super::shared_auth_client()).await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -360,24 +361,20 @@ async fn maybe_refresh_tokens(
     config: &GoogleOAuthConfig,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
-    let buffer_ms = config.oauth.token_expiry_buffer_seconds * 1000;
-    if now_ms() + buffer_ms < tokens.expires_at {
-        return Ok((tokens.clone(), false));
-    }
-
-    tracing::info!("Google OAuth token expired, refreshing...");
-    match refresh_token_with_client(config, &tokens.refresh_token, client).await {
-        Ok(new_tokens) => {
-            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "success")
-                .increment(1);
-            Ok((new_tokens, true))
-        }
-        Err(e) => {
-            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "failure")
-                .increment(1);
-            Err(e)
-        }
-    }
+    let client = client.clone();
+    let config = config.clone();
+    super::refresh::maybe_refresh(
+        tokens,
+        config.oauth.token_expiry_buffer_seconds,
+        "google",
+        |refresh_tok| {
+            let client = client.clone();
+            let config = config.clone();
+            let refresh_tok = refresh_tok.to_owned();
+            async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
+        },
+    )
+    .await
 }
 
 /// Google token endpoint response.
@@ -408,17 +405,6 @@ pub fn get_oauth_credentials(auth_path: &std::path::Path) -> Option<(String, Str
     let id = gpa.client_id?;
     let secret = gpa.client_secret?;
     Some((id, secret))
-}
-
-/// Simple URL encoding.
-fn urlencoded(s: &str) -> String {
-    s.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace('&', "%26")
-        .replace('=', "%3D")
-        .replace('+', "%2B")
-        .replace('/', "%2F")
-        .replace(':', "%3A")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

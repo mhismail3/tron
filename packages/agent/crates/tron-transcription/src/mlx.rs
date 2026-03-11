@@ -194,7 +194,7 @@ impl MlxEngine {
                 {
                     if attempt == 0 {
                         warn!("worker appears dead, restarting...");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         if let Err(e) = self.spawn_worker().await {
                             return Err(TranscriptionError::Sidecar(format!(
                                 "worker restart failed: {e}"

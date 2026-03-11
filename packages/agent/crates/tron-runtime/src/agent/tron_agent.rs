@@ -950,7 +950,6 @@ mod tests {
 
         let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
             store.clone(),
-            sid.clone(),
         ));
         agent.set_persister(Some(persister.clone()));
 
@@ -1052,7 +1051,6 @@ mod tests {
 
         let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
             store.clone(),
-            sid.clone(),
         ));
         agent.set_persister(Some(persister.clone()));
 
@@ -1112,7 +1110,6 @@ mod tests {
 
         let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
             store.clone(),
-            sid.clone(),
         ));
         agent.set_persister(Some(persister.clone()));
 
@@ -1445,7 +1442,6 @@ mod tests {
 
         let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
             store.clone(),
-            sid.clone(),
         ));
         agent.set_persister(Some(persister.clone()));
 

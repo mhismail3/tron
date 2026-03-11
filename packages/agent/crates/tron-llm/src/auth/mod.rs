@@ -19,8 +19,21 @@ pub mod errors;
 pub mod google;
 pub mod openai;
 pub mod pkce;
+pub(crate) mod refresh;
 pub mod storage;
 pub mod types;
+
+/// URL-encode a string for use in query parameters.
+pub(crate) fn urlencoded(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+}
+
+/// Shared HTTP client for auth operations (avoids creating one per call).
+pub(crate) fn shared_auth_client() -> &'static reqwest::Client {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 pub use errors::AuthError;
 pub use pkce::{PkcePair, generate_pkce};
@@ -44,5 +57,31 @@ mod tests {
         let _pair = generate_pkce();
         let _storage = AuthStorage::new();
         let _pa = ProviderAuth::default();
+    }
+
+    #[test]
+    fn urlencoded_basic_chars() {
+        assert_eq!(urlencoded("hello world"), "hello%20world");
+        assert_eq!(urlencoded("a&b=c"), "a%26b%3Dc");
+    }
+
+    #[test]
+    fn urlencoded_special_chars() {
+        let encoded = urlencoded("#?@!$");
+        assert!(encoded.contains("%23")); // #
+        assert!(encoded.contains("%3F")); // ?
+        assert!(encoded.contains("%40")); // @
+        assert!(encoded.contains("%21")); // !
+        assert!(encoded.contains("%24")); // $
+    }
+
+    #[test]
+    fn urlencoded_empty() {
+        assert_eq!(urlencoded(""), "");
+    }
+
+    #[test]
+    fn urlencoded_alphanumeric_passthrough() {
+        assert_eq!(urlencoded("abc123"), "abc123");
     }
 }

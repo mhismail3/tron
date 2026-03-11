@@ -130,7 +130,8 @@ fn run_inference_inner(
         return Ok(Vec::new());
     }
 
-    let encodings = tokenizer.encode_batch(texts.to_vec(), true)?;
+    let inputs: Vec<tokenizers::EncodeInput> = texts.iter().map(|s| s.as_str().into()).collect();
+    let encodings = tokenizer.encode_batch(inputs, true)?;
 
     let max_len = encodings
         .iter()
@@ -173,8 +174,9 @@ fn run_inference_inner(
         ort::value::Tensor::from_array((shape.clone(), attention_mask.clone()))?;
 
     // Some ONNX models accept only input_ids + attention_mask (2 inputs),
-    // others also need position_ids (3 inputs). Check the model's actual inputs.
-    let outputs = if session.inputs().len() >= 3 {
+    // others also need position_ids (3 inputs). Check by name, not count.
+    let has_position_ids = session.inputs().iter().any(|i| i.name() == "position_ids");
+    let outputs = if has_position_ids {
         let position_ids_tensor = ort::value::Tensor::from_array((shape, position_ids))?;
         session.run(ort::inputs![
             input_ids_tensor,

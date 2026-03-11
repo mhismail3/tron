@@ -597,7 +597,6 @@ impl MethodHandler for PromptHandler {
                         let fresh_persister = std::sync::Arc::new(
                             tron_runtime::orchestrator::event_persister::EventPersister::new(
                                 event_store.clone(),
-                                session_id_clone.clone(),
                             ),
                         );
                         (fresh_state, fresh_persister)

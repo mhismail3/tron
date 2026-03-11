@@ -68,7 +68,8 @@ where
 
                     // Convert to &str only for the final line
                     let Ok(line) = std::str::from_utf8(&line_bytes) else {
-                        continue; // skip invalid UTF-8 lines
+                        warn!(byte_count = line_bytes.len(), "skipping non-UTF-8 SSE line");
+                        continue;
                     };
 
                     if let Some(data) = extract_sse_data(line) {
@@ -338,6 +339,24 @@ mod tests {
         let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"cr\":true}");
+    }
+
+    #[tokio::test]
+    async fn parse_lines_skips_invalid_utf8_continues() {
+        // Invalid UTF-8 line followed by a valid line
+        let mut data = Vec::new();
+        data.extend_from_slice(b"data: ");
+        data.extend_from_slice(&[0xFF, 0xFE]); // invalid UTF-8
+        data.push(b'\n');
+        data.extend_from_slice(b"data: {\"valid\":true}\n\n");
+
+        let chunks = vec![Ok(Bytes::from(data))];
+        let stream = futures::stream::iter(chunks);
+        let options = SseParserOptions::default();
+
+        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "{\"valid\":true}");
     }
 
     // ── SseParserOptions ─────────────────────────────────────────────────

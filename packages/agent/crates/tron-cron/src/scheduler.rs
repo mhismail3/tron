@@ -134,6 +134,16 @@ impl CronScheduler {
         self.jobs.read().clone()
     }
 
+    /// Read-only access to jobs without cloning the entire map.
+    pub fn with_jobs<T>(&self, f: impl FnOnce(&HashMap<String, CronJob>) -> T) -> T {
+        f(&self.jobs.read())
+    }
+
+    /// Get a single job by ID (avoids cloning the entire map).
+    pub fn get_job(&self, job_id: &str) -> Option<CronJob> {
+        self.jobs.read().get(job_id).cloned()
+    }
+
     /// Get runtime state for a job.
     pub fn get_runtime_state(&self, job_id: &str) -> Option<JobRuntimeState> {
         self.runtime.read().get(job_id).cloned()
@@ -1195,6 +1205,92 @@ mod tests {
 
         // After stuck detection, overlap check should pass
         assert_eq!(store::count_running_runs(&pool, "cron_overlap").unwrap(), 0);
+    }
+
+    #[test]
+    fn with_jobs_provides_read_access() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+
+        let job = CronJob {
+            id: "cron_wj".into(),
+            name: "WithJobs".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            tool_restrictions: None,
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        scheduler.reload_job(job);
+
+        let count = scheduler.with_jobs(|jobs| jobs.len());
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn get_job_returns_none_for_missing() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+
+        assert!(scheduler.get_job("nonexistent").is_none());
+    }
+
+    #[test]
+    fn get_job_returns_existing() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+
+        let job = CronJob {
+            id: "cron_gj".into(),
+            name: "GetJob".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            tool_restrictions: None,
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        scheduler.reload_job(job);
+
+        let result = scheduler.get_job("cron_gj");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "GetJob");
     }
 
 }

@@ -17,7 +17,7 @@ pub struct SessionContext {
 impl SessionContext {
     /// Create a new session context.
     pub fn new(session_id: String, event_store: Arc<EventStore>) -> Self {
-        let persister = Arc::new(EventPersister::new(event_store, session_id.clone()));
+        let persister = Arc::new(EventPersister::new(event_store));
         Self {
             session_id,
             persister,

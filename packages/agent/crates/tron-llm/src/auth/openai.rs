@@ -3,6 +3,7 @@
 //! Handles token refresh and server auth loading for `OpenAI` (Codex) API.
 
 use super::errors::AuthError;
+#[allow(unused_imports)] // now_ms used in tests
 use super::types::{OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
 /// `OpenAI` token endpoint URL.
@@ -22,7 +23,7 @@ const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 300;
 /// Refresh an `OpenAI` OAuth token.
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn refresh_token(refresh_token: &str) -> Result<OAuthTokens, AuthError> {
-    refresh_token_with_client(refresh_token, &reqwest::Client::new()).await
+    refresh_token_with_client(refresh_token, super::shared_auth_client()).await
 }
 
 /// Refresh an `OpenAI` OAuth token using a shared HTTP client.
@@ -71,7 +72,7 @@ pub async fn load_server_auth(
     env_token: Option<&str>,
     env_api_key: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, env_token, env_api_key, &reqwest::Client::new()).await
+    load_server_auth_with_client(auth_path, env_token, env_api_key, super::shared_auth_client()).await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -134,24 +135,18 @@ async fn maybe_refresh_tokens(
     tokens: &OAuthTokens,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
-    let buffer_ms = TOKEN_EXPIRY_BUFFER_SECONDS * 1000;
-    if now_ms() + buffer_ms < tokens.expires_at {
-        return Ok((tokens.clone(), false));
-    }
-
-    tracing::info!("`OpenAI` OAuth token expired, refreshing...");
-    match refresh_token_with_client(&tokens.refresh_token, client).await {
-        Ok(new_tokens) => {
-            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "success")
-                .increment(1);
-            Ok((new_tokens, true))
-        }
-        Err(e) => {
-            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "failure")
-                .increment(1);
-            Err(e)
-        }
-    }
+    let client = client.clone();
+    super::refresh::maybe_refresh(
+        tokens,
+        TOKEN_EXPIRY_BUFFER_SECONDS,
+        "openai",
+        |refresh_tok| {
+            let client = client.clone();
+            let refresh_tok = refresh_tok.to_owned();
+            async move { refresh_token_with_client(&refresh_tok, &client).await }
+        },
+    )
+    .await
 }
 
 /// `OpenAI` token endpoint response.

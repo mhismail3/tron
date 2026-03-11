@@ -30,10 +30,10 @@ impl EventPersister {
     /// Create a new persister backed by the given event store.
     ///
     /// Spawns a background task that processes events sequentially.
-    pub fn new(event_store: Arc<EventStore>, session_id: String) -> Self {
+    pub fn new(event_store: Arc<EventStore>) -> Self {
         let (tx, rx) = mpsc::channel(256);
 
-        let worker_handle = tokio::spawn(persist_worker(rx, event_store, session_id));
+        let worker_handle = tokio::spawn(persist_worker(rx, event_store));
 
         Self { tx, worker_handle }
     }
@@ -80,6 +80,16 @@ impl EventPersister {
         }
     }
 
+    /// Gracefully shut down: signal worker to exit and await drain.
+    pub async fn shutdown(self) {
+        drop(self.tx);
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.worker_handle,
+        )
+        .await;
+    }
+
     /// Flush all pending events (waits for the queue to drain).
     pub async fn flush(&self) -> Result<(), RuntimeError> {
         // Send a sentinel with reply to know when all prior messages are processed
@@ -110,7 +120,6 @@ impl EventPersister {
 async fn persist_worker(
     mut rx: mpsc::Receiver<PersistRequest>,
     event_store: Arc<EventStore>,
-    _default_session_id: String,
 ) {
     while let Some(req) = rx.recv().await {
         // Skip flush sentinels (null payload)
@@ -155,7 +164,7 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
 
         let result = persister
             .append(
@@ -177,7 +186,7 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
         let sid = &session.session.id;
 
         let e1 = persister
@@ -212,7 +221,7 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
 
         // Should not block or panic
         persister.append_fire_and_forget(
@@ -232,7 +241,7 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
 
         // flush() should return Ok even with no pending events
         let result = persister.flush().await;
@@ -246,7 +255,7 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
 
         // Fire and forget several events
         for i in 0..5 {
@@ -263,13 +272,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_drains_pending_events() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone());
+
+        // Fire and forget 5 events
+        for i in 0..5 {
+            persister.append_fire_and_forget(
+                &session.session.id,
+                EventType::MessageUser,
+                serde_json::json!({"content": format!("msg-{i}")}),
+            );
+        }
+
+        // Shutdown should drain all pending events
+        persister.shutdown().await;
+
+        // Verify all 5 events were persisted
+        let events = store.get_events_since(&session.session.id, 0).unwrap();
+        assert!(events.len() >= 5, "expected at least 5 events, got {}", events.len());
+    }
+
+    #[tokio::test]
+    async fn shutdown_completes_within_timeout() {
+        let store = make_event_store();
+        let persister = EventPersister::new(store.clone());
+
+        let start = std::time::Instant::now();
+        persister.shutdown().await;
+        assert!(start.elapsed().as_secs() < 5, "shutdown should complete quickly with no pending work");
+    }
+
+    #[tokio::test]
+    async fn shutdown_after_worker_abort() {
+        let store = make_event_store();
+        let persister = EventPersister::new(store.clone());
+
+        // Abort the worker to simulate crash
+        persister.worker_handle.abort();
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        // shutdown() should not hang (timeout fires)
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(6),
+            persister.shutdown(),
+        ).await;
+        assert!(result.is_ok(), "shutdown must not hang when worker is already dead");
+    }
+
+    #[tokio::test]
     async fn worker_exit_gives_descriptive_error() {
         let store = make_event_store();
         let session = store
             .create_session("test-model", "/tmp", Some("test"), None, None)
             .expect("Failed to create session");
 
-        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+        let persister = EventPersister::new(store.clone());
 
         // Abort the worker to simulate it exiting
         persister.worker_handle.abort();

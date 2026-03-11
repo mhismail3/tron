@@ -35,7 +35,7 @@ pub struct WorktreeCoordinator {
     /// Active worktrees by session ID.
     active: DashMap<String, WorktreeInfo>,
     /// Sessions grouped by repo root.
-    repo_sessions: DashMap<PathBuf, Vec<String>>,
+    repo_sessions: DashMap<PathBuf, HashSet<String>>,
 }
 
 impl WorktreeCoordinator {
@@ -131,7 +131,7 @@ impl WorktreeCoordinator {
         self.repo_sessions
             .entry(info.repo_root.clone())
             .or_default()
-            .push(session_id.to_string());
+            .insert(session_id.to_string());
 
         // Broadcast to WebSocket clients
         self.broadcast(TronEvent::WorktreeAcquired {
@@ -179,9 +179,13 @@ impl WorktreeCoordinator {
             deleted: release_info.deleted,
         });
 
-        // Untrack from repo_sessions
+        // Untrack from repo_sessions — remove entry entirely if empty
         if let Some(mut sessions) = self.repo_sessions.get_mut(&info.repo_root) {
-            sessions.retain(|s| s != session_id);
+            sessions.remove(session_id);
+            if sessions.is_empty() {
+                drop(sessions);
+                self.repo_sessions.remove(&info.repo_root);
+            }
         }
 
         Ok(())
@@ -1307,6 +1311,104 @@ mod tests {
 
         let result = coord.get_committed_diff("nonexistent").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn release_cleans_empty_repo_sessions() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        // Acquire and release a single session
+        let result = coord.maybe_acquire("sess-clean", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Acquired(_)));
+
+        coord.release("sess-clean").await.unwrap();
+
+        // The repo_sessions DashMap entry should be fully removed, not just empty
+        assert!(
+            coord.repo_sessions.is_empty(),
+            "repo_sessions should be empty after last session released"
+        );
+    }
+
+    #[tokio::test]
+    async fn acquire_idempotent_no_duplicate_tracking() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        // Acquire same session twice (idempotent)
+        coord.maybe_acquire("sess-dup", dir.path()).await.unwrap();
+        coord.maybe_acquire("sess-dup", dir.path()).await.unwrap();
+
+        // repo_sessions should have exactly 1 entry for this session
+        let repo_root = coord.active.get("sess-dup").unwrap().repo_root.clone();
+        let sessions = coord.repo_sessions.get(&repo_root).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "duplicate acquire should not create duplicate tracking entries"
+        );
+    }
+
+    #[tokio::test]
+    async fn release_partial_leaves_other_sessions() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        // Use distinct session IDs (different prefixes → different branch names)
+        let sid1 = "aaaa-partial-s1";
+        let sid2 = "bbbb-partial-s2";
+
+        // Acquire 2 sessions in the same repo
+        let r1 = coord.maybe_acquire(sid1, dir.path()).await.unwrap();
+        let r2 = coord.maybe_acquire(sid2, dir.path()).await.unwrap();
+        assert!(matches!(r1, AcquireResult::Acquired(_)));
+        assert!(matches!(r2, AcquireResult::Acquired(_)));
+
+        // Get repo root from first session
+        let repo_root = coord.active.get(sid1).unwrap().repo_root.clone();
+
+        assert_eq!(coord.repo_sessions.get(&repo_root).unwrap().len(), 2);
+
+        // Release one session
+        coord.release(sid1).await.unwrap();
+
+        // Entry should still exist with 1 session
+        let sessions = coord.repo_sessions.get(&repo_root).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains(sid2));
+        drop(sessions); // must drop before next release to avoid DashMap deadlock
+
+        // Release second session — entry should be fully removed
+        coord.release(sid2).await.unwrap();
+        assert!(coord.repo_sessions.is_empty());
     }
 
     #[tokio::test]

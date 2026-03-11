@@ -36,7 +36,6 @@ impl MethodHandler for ListHandler {
     #[instrument(skip(self, ctx), fields(method = "cron.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let sched = scheduler(ctx)?;
-        let jobs = sched.jobs();
 
         let enabled_filter = opt_bool(params.as_ref(), "enabled");
 
@@ -49,29 +48,32 @@ impl MethodHandler for ListHandler {
         let workspace_filter = params
             .as_ref()
             .and_then(|p| p.get("workspaceId"))
-            .and_then(|v| v.as_str());
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
-        let filtered: Vec<_> = jobs
-            .values()
-            .filter(|j| {
-                if let Some(enabled) = enabled_filter
-                    && j.enabled != enabled
-                {
-                    return false;
-                }
-                if let Some(ref tags) = tag_filter
-                    && !tags.iter().any(|t| j.tags.contains(t))
-                {
-                    return false;
-                }
-                if let Some(ws) = workspace_filter
-                    && j.workspace_id.as_deref() != Some(ws)
-                {
-                    return false;
-                }
-                true
-            })
-            .collect();
+        let filtered: Vec<_> = sched.with_jobs(|jobs| {
+            jobs.values()
+                .filter(|j| {
+                    if let Some(enabled) = enabled_filter
+                        && j.enabled != enabled
+                    {
+                        return false;
+                    }
+                    if let Some(ref tags) = tag_filter
+                        && !tags.iter().any(|t| j.tags.contains(t))
+                    {
+                        return false;
+                    }
+                    if let Some(ref ws) = workspace_filter
+                        && j.workspace_id.as_deref() != Some(ws)
+                    {
+                        return false;
+                    }
+                    true
+                })
+                .cloned()
+                .collect()
+        });
 
         let runtime_states: Vec<_> = filtered
             .iter()
@@ -106,8 +108,7 @@ impl MethodHandler for GetHandler {
         let sched = scheduler(ctx)?;
         let job_id = require_string_param(params.as_ref(), "jobId")?;
 
-        let jobs = sched.jobs();
-        let job = jobs.get(&job_id).ok_or_else(|| RpcError::NotFound {
+        let job = sched.get_job(&job_id).ok_or_else(|| RpcError::NotFound {
             code: "NOT_FOUND".into(),
             message: format!("Job not found: {job_id}"),
         })?;
@@ -121,7 +122,7 @@ impl MethodHandler for GetHandler {
             })?;
 
         Ok(serde_json::json!({
-            "job": to_json_value(job)?,
+            "job": to_json_value(&job)?,
             "runtimeState": runtime_state.map(|rs| serde_json::json!({
                 "jobId": rs.job_id,
                 "nextRunAt": rs.next_run_at,
@@ -543,8 +544,7 @@ impl MethodHandler for RunHandler {
         let sched = scheduler(ctx)?;
         let job_id = require_string_param(params.as_ref(), "jobId")?;
 
-        let jobs = sched.jobs();
-        let _job = jobs.get(&job_id).ok_or_else(|| RpcError::NotFound {
+        let _job = sched.get_job(&job_id).ok_or_else(|| RpcError::NotFound {
             code: "NOT_FOUND".into(),
             message: format!("Job not found: {job_id}"),
         })?;

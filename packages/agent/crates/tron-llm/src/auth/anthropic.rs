@@ -28,10 +28,10 @@ pub fn get_authorization_url(config: &OAuthConfig, challenge: &str) -> String {
     format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256",
         config.auth_url,
-        urlencoded(&config.client_id),
-        urlencoded(&config.redirect_uri),
-        urlencoded(&config.scopes.join(" ")),
-        urlencoded(challenge),
+        super::urlencoded(&config.client_id),
+        super::urlencoded(&config.redirect_uri),
+        super::urlencoded(&config.scopes.join(" ")),
+        super::urlencoded(challenge),
     )
 }
 
@@ -43,7 +43,7 @@ pub async fn exchange_code_for_tokens(
     verifier: &str,
     state: Option<&str>,
 ) -> Result<OAuthTokens, AuthError> {
-    exchange_code_for_tokens_with_client(config, code, verifier, state, &reqwest::Client::new())
+    exchange_code_for_tokens_with_client(config, code, verifier, state, super::shared_auth_client())
         .await
 }
 
@@ -92,7 +92,7 @@ pub async fn refresh_token(
     config: &OAuthConfig,
     refresh_token: &str,
 ) -> Result<OAuthTokens, AuthError> {
-    refresh_token_with_client(config, refresh_token, &reqwest::Client::new()).await
+    refresh_token_with_client(config, refresh_token, super::shared_auth_client()).await
 }
 
 /// Refresh an expired OAuth token using a shared HTTP client.
@@ -155,7 +155,7 @@ pub async fn load_server_auth(
         config,
         env_token,
         preferred_account,
-        &reqwest::Client::new(),
+        super::shared_auth_client(),
     )
     .await
 }
@@ -265,28 +265,21 @@ async fn maybe_refresh_tokens(
         return Ok((tokens.clone(), false));
     }
 
-    tracing::info!("Anthropic OAuth token expired, refreshing...");
-    match refresh_token_with_client(config, &tokens.refresh_token, client).await {
-        Ok(new_tokens) => {
-            metrics::counter!("auth_refresh_total", "provider" => "anthropic", "status" => "success").increment(1);
-            Ok((new_tokens, true))
-        }
-        Err(e) => {
-            metrics::counter!("auth_refresh_total", "provider" => "anthropic", "status" => "failure").increment(1);
-            Err(e)
-        }
-    }
+    let client = client.clone();
+    let config = config.clone();
+    super::refresh::maybe_refresh(tokens, config.token_expiry_buffer_seconds, "anthropic", |refresh_tok| {
+        let client = client.clone();
+        let config = config.clone();
+        let refresh_tok = refresh_tok.to_owned();
+        async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
+    })
+    .await
 }
 
 /// Token endpoint response.
 ///
 /// Uses the shared [`super::types::OAuthTokenRefreshResponse`] type.
 type TokenResponse = super::types::OAuthTokenRefreshResponse;
-
-/// URL-encode a string for use in query parameters.
-fn urlencoded(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -323,30 +316,7 @@ mod tests {
         assert!(url.contains("redirect_uri="));
     }
 
-    #[test]
-    fn urlencoded_basic() {
-        assert_eq!(urlencoded("hello world"), "hello%20world");
-        assert_eq!(urlencoded("a&b=c"), "a%26b%3Dc");
-    }
-
-    #[test]
-    fn urlencoded_special_chars() {
-        assert!(urlencoded("#?@!").contains("%23"));
-        assert!(urlencoded("#?@!").contains("%3F"));
-        assert!(urlencoded("#?@!").contains("%40"));
-        assert!(urlencoded("#?@!").contains("%21"));
-    }
-
-    #[test]
-    fn urlencoded_empty_string() {
-        assert_eq!(urlencoded(""), "");
-    }
-
-    #[test]
-    fn urlencoded_no_encoding_needed() {
-        // Pure alphanumeric should pass through unchanged
-        assert_eq!(urlencoded("abc123"), "abc123");
-    }
+    // urlencoded tests moved to auth/mod.rs (single source of truth)
 
     #[tokio::test]
     async fn load_server_auth_env_token_priority() {
