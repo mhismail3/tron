@@ -102,14 +102,14 @@ pub async fn execute_payload(
 ) -> Result<ExecutionOutput, CronError> {
     // Check capability restrictions for non-AgentTurn payloads.
     // AgentTurn restrictions are applied inside the agent (tool-level filtering).
-    if !matches!(&job.payload, Payload::AgentTurn { .. }) {
-        if let Some(ref tr) = job.tool_restrictions {
-            let cap = payload_capability_name(&job.payload);
-            if !tr.is_capability_allowed(cap) {
-                return Err(CronError::Execution(format!(
-                    "{cap} blocked by job tool restrictions"
-                )));
-            }
+    if !matches!(&job.payload, Payload::AgentTurn { .. })
+        && let Some(ref tr) = job.tool_restrictions
+    {
+        let cap = payload_capability_name(&job.payload);
+        if !tr.is_capability_allowed(cap) {
+            return Err(CronError::Execution(format!(
+                "{cap} blocked by job tool restrictions"
+            )));
         }
     }
 

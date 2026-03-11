@@ -76,12 +76,16 @@ pub async fn run_agent(
 
     // Signal the forward task to drain remaining buffered events and exit
     forward_cancel.cancel();
-    // Wait for it to finish draining (bounded timeout as safety net)
+    // Wait for it to finish draining (bounded timeout as safety net).
+    // Obtain AbortHandle BEFORE passing the JoinHandle to timeout(),
+    // since timeout() consumes the handle on expiry.
+    let abort_handle = forward_handle.abort_handle();
     if tokio::time::timeout(std::time::Duration::from_millis(100), forward_handle)
         .await
         .is_err()
     {
-        warn!(session_id, "forward task did not drain within 100ms");
+        warn!(session_id, "forward task did not drain within 100ms, aborting");
+        abort_handle.abort();
     }
 
     // 5. Drain background hooks
@@ -414,5 +418,61 @@ mod tests {
             .filter(|t| *t == "message_update")
             .count();
         assert_eq!(update_count, 5, "all 5 text deltas must be forwarded");
+    }
+
+    #[tokio::test]
+    async fn forward_task_aborted_on_timeout() {
+        // Verify run_agent completes promptly even if the forward task
+        // would otherwise hang (the abort path prevents leaking tasks).
+        let mut agent = make_agent();
+        let broadcast = Arc::new(EventEmitter::new());
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_agent(
+                &mut agent,
+                "Hello",
+                RunContext::default(),
+                &None,
+                &broadcast,
+            ),
+        )
+        .await;
+
+        // run_agent must complete (not hang due to leaked forward task)
+        assert!(result.is_ok(), "run_agent should complete within 5s");
+        let result = result.unwrap();
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn forward_task_completes_within_timeout_no_abort() {
+        let mut agent = make_agent();
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "Hello",
+            RunContext::default(),
+            &None,
+            &broadcast,
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+
+        // All events should be forwarded (forward task completed normally)
+        let mut saw_ready = false;
+        let mut saw_end = false;
+        while let Ok(event) = rx.try_recv() {
+            match event.event_type() {
+                "agent_end" => saw_end = true,
+                "agent_ready" => saw_ready = true,
+                _ => {}
+            }
+        }
+        assert!(saw_end, "agent_end must be forwarded");
+        assert!(saw_ready, "agent_ready must be emitted");
     }
 }

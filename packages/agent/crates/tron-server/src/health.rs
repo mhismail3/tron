@@ -69,28 +69,22 @@ pub fn deep_health_check(
     tron_home: &Path,
     deploy_dir: &Path,
 ) -> DeepHealthResponse {
-    let mut checks = Vec::new();
-
-    // 1. Database
-    checks.push(check_database(pool));
-
-    // 2. Settings
-    checks.push(check_settings(&tron_home.join("settings.json")));
-
-    // 3. Auth
-    checks.push(check_auth(&tron_home.join("auth.json")));
-
-    // 4. Skills
-    checks.push(check_skills(&tron_home.join("skills")));
-
-    // 5. Binary
-    checks.push(check_binary(&tron_home.join("tron")));
-
-    // 6. Deploy
-    checks.push(check_deploy(deploy_dir));
-
-    // 7. Disk
-    checks.push(check_disk(tron_home));
+    let checks = vec![
+        // 1. Database
+        check_database(pool),
+        // 2. Settings
+        check_settings(&tron_home.join("settings.json")),
+        // 3. Auth
+        check_auth(&tron_home.join("auth.json")),
+        // 4. Skills
+        check_skills(&tron_home.join("skills")),
+        // 5. Binary
+        check_binary(&tron_home.join("tron")),
+        // 6. Deploy
+        check_deploy(deploy_dir),
+        // 7. Disk
+        check_disk(tron_home),
+    ];
 
     let has_fail = checks.iter().any(|c| c.status == "fail");
     let has_warn = checks.iter().any(|c| c.status == "warn");
@@ -164,7 +158,7 @@ fn check_auth(path: &Path) -> DeepHealthCheck {
     match std::fs::read_to_string(path) {
         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(v) => {
-                let count = v.as_object().map_or(0, |o| o.len());
+                let count = v.as_object().map_or(0, serde_json::Map::len);
                 if count == 0 {
                     DeepHealthCheck {
                         name: "auth".into(),
@@ -204,7 +198,7 @@ fn check_skills(path: &Path) -> DeepHealthCheck {
     let count = std::fs::read_dir(path)
         .map(|entries| {
             entries
-                .filter_map(|e| e.ok())
+                .filter_map(Result::ok)
                 .filter(|e| e.path().is_dir())
                 .count()
         })
@@ -251,8 +245,7 @@ fn check_deploy(deploy_dir: &Path) -> DeepHealthCheck {
 
     let status = sentinel
         .as_ref()
-        .map(|s| s.status.as_str())
-        .unwrap_or("none");
+        .map_or("none", |s| s.status.as_str());
 
     let check_status = if status == "restarting" { "warn" } else { "ok" };
 

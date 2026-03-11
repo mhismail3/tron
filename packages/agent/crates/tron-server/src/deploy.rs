@@ -30,7 +30,7 @@ pub struct RestartSentinel {
     pub commit: String,
     /// Git commit hash of the previous deployment.
     pub previous_commit: String,
-    /// Current status ("restarting", "completed", "rolled_back", "failed").
+    /// Current status ("restarting", "completed", "`rolled_back`", "failed").
     pub status: String,
     /// ISO-8601 timestamp of when the restart completed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -169,7 +169,7 @@ pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::R
 /// Mark a "restarting" sentinel as completed. Returns the updated sentinel
 /// only when a transition actually occurs (restarting → completed).
 /// Returns `None` if no sentinel exists or if it's already in a terminal state
-/// (completed, rolled_back, failed).
+/// (completed, `rolled_back`, failed).
 pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSentinel>> {
     let path = artifacts_dir.join("restart-sentinel.json");
     let data = match std::fs::read_to_string(&path) {
@@ -238,22 +238,18 @@ pub fn run_self_test(
     auth_path: &Path,
     binary_path: &Path,
 ) -> SelfTestResult {
-    let mut checks = Vec::new();
-
-    // 1. Database: open + SELECT 1 + verify events table exists
-    checks.push(check_database(db_path));
-
-    // 2. Settings: read + parse
-    checks.push(check_settings(settings_path));
-
-    // 3. Auth: file exists with content
-    checks.push(check_auth(auth_path));
-
-    // 4. Binary: exists + executable
-    checks.push(check_binary(binary_path));
-
-    // 5. Disk space
-    checks.push(check_disk_space(binary_path));
+    let checks = vec![
+        // 1. Database: open + SELECT 1 + verify events table exists
+        check_database(db_path),
+        // 2. Settings: read + parse
+        check_settings(settings_path),
+        // 3. Auth: file exists with content
+        check_auth(auth_path),
+        // 4. Binary: exists + executable
+        check_binary(binary_path),
+        // 5. Disk space
+        check_disk_space(binary_path),
+    ];
 
     let passed = checks.iter().all(|c| c.passed);
     SelfTestResult {
@@ -341,7 +337,7 @@ fn check_auth(auth_path: &Path) -> SelfTestCheck {
     match std::fs::read_to_string(auth_path) {
         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(v) => {
-                let key_count = v.as_object().map_or(0, |o| o.len());
+                let key_count = v.as_object().map_or(0, serde_json::Map::len);
                 if key_count == 0 {
                     SelfTestCheck {
                         name: "auth".into(),

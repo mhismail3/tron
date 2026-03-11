@@ -1,10 +1,11 @@
 //! LRU + TTL cache for web fetch results.
 //!
-//! Stores fetch results keyed by URL + prompt hash. Entries expire after a
+//! Stores fetch results keyed by URL + prompt. Entries expire after a
 //! configurable TTL (default 15 minutes). LRU eviction when capacity is reached.
 
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use indexmap::IndexMap;
 
 const DEFAULT_TTL_SECS: u64 = 15 * 60;
 const DEFAULT_MAX_ENTRIES: usize = 100;
@@ -46,8 +47,7 @@ struct CacheEntry {
 
 /// LRU + TTL cache for web fetch results.
 pub struct WebCache {
-    entries: HashMap<String, CacheEntry>,
-    access_order: Vec<String>,
+    entries: IndexMap<String, CacheEntry>,
     config: WebCacheConfig,
     hits: u64,
     misses: u64,
@@ -57,8 +57,7 @@ impl WebCache {
     /// Create a new cache with the given configuration.
     pub fn new(config: WebCacheConfig) -> Self {
         Self {
-            entries: HashMap::new(),
-            access_order: Vec::new(),
+            entries: IndexMap::new(),
             config,
             hits: 0,
             misses: 0,
@@ -69,33 +68,34 @@ impl WebCache {
     pub fn get(&mut self, url: &str, prompt: &str) -> Option<&CachedResult> {
         let key = cache_key(url, prompt);
 
-        // Check expiry first
-        if let Some(entry) = self.entries.get(&key) {
-            if Instant::now() >= entry.expires_at {
-                drop(self.entries.remove(&key));
-                self.access_order.retain(|k| k != &key);
-                self.misses += 1;
-                return None;
-            }
-        } else {
+        let Some(idx) = self.entries.get_index_of(&key) else {
+            self.misses += 1;
+            return None;
+        };
+
+        // Check expiry
+        if Instant::now() >= self.entries.get_index(idx).unwrap().1.expires_at {
+            drop(self.entries.swap_remove_index(idx));
             self.misses += 1;
             return None;
         }
 
-        // Update LRU order
-        self.access_order.retain(|k| k != &key);
-        self.access_order.push(key.clone());
+        // Move to back (most recently used)
+        let last = self.entries.len() - 1;
+        if idx != last {
+            self.entries.move_index(idx, last);
+        }
         self.hits += 1;
 
-        self.entries.get(&key).map(|e| &e.result)
+        self.entries.get_index(last).map(|(_, e)| &e.result)
     }
 
     /// Store a result in the cache. Evicts if at capacity.
     pub fn set(&mut self, url: &str, prompt: &str, result: CachedResult) {
         let key = cache_key(url, prompt);
 
-        // If already exists, remove from access order
-        self.access_order.retain(|k| k != &key);
+        // Remove existing entry if present
+        drop(self.entries.swap_remove(&key));
 
         // Evict if at capacity
         while self.entries.len() >= self.config.max_entries {
@@ -106,8 +106,7 @@ impl WebCache {
             result,
             expires_at: Instant::now() + self.config.ttl,
         };
-        drop(self.entries.insert(key.clone(), entry));
-        self.access_order.push(key);
+        drop(self.entries.insert(key, entry));
     }
 
     /// Check if a result exists (non-destructive, checks TTL).
@@ -121,7 +120,6 @@ impl WebCache {
     /// Remove all entries and reset stats.
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.access_order.clear();
         self.hits = 0;
         self.misses = 0;
     }
@@ -129,16 +127,7 @@ impl WebCache {
     /// Remove expired entries.
     pub fn cleanup(&mut self) {
         let now = Instant::now();
-        let expired_keys: Vec<String> = self
-            .entries
-            .iter()
-            .filter(|(_, e)| now >= e.expires_at)
-            .map(|(k, _)| k.clone())
-            .collect();
-        for key in &expired_keys {
-            drop(self.entries.remove(key));
-            self.access_order.retain(|k| k != key);
-        }
+        self.entries.retain(|_, e| now < e.expires_at);
     }
 
     /// Get cache statistics.
@@ -160,22 +149,19 @@ impl WebCache {
     fn evict_oldest(&mut self) {
         // Prefer expired entries over LRU
         let now = Instant::now();
-        let expired_key = self
+        let expired_idx = self
             .entries
             .iter()
-            .find(|(_, e)| now >= e.expires_at)
-            .map(|(k, _)| k.clone());
+            .position(|(_, e)| now >= e.expires_at);
 
-        if let Some(key) = expired_key {
-            drop(self.entries.remove(&key));
-            self.access_order.retain(|k| k != &key);
+        if let Some(idx) = expired_idx {
+            drop(self.entries.swap_remove_index(idx));
             return;
         }
 
-        // Otherwise evict LRU
-        if let Some(oldest) = self.access_order.first().cloned() {
-            drop(self.entries.remove(&oldest));
-            drop(self.access_order.remove(0));
+        // Otherwise evict LRU (front = least recently used)
+        if !self.entries.is_empty() {
+            drop(self.entries.shift_remove_index(0));
         }
     }
 }
@@ -192,19 +178,10 @@ pub struct CacheStats {
     pub hit_rate: f64,
 }
 
-/// Generate a cache key from URL + prompt using djb2 hash.
+/// Generate a cache key from URL + prompt.
+/// NUL byte separator prevents ambiguity (neither URL nor prompt contains NUL).
 fn cache_key(url: &str, prompt: &str) -> String {
-    let combined = format!("{url}::{prompt}");
-    let hash = djb2_hash(&combined);
-    format!("{url}::{hash}")
-}
-
-fn djb2_hash(s: &str) -> u32 {
-    let mut hash: u32 = 5381;
-    for byte in s.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(u32::from(byte));
-    }
-    hash
+    format!("{url}\0{prompt}")
 }
 
 #[cfg(test)]
@@ -341,5 +318,71 @@ mod tests {
     fn default_max_entries_100() {
         let config = WebCacheConfig::default();
         assert_eq!(config.max_entries, 100);
+    }
+
+    #[test]
+    fn lru_order_updated_on_access() {
+        let config = WebCacheConfig {
+            ttl: Duration::from_secs(60),
+            max_entries: 3,
+        };
+        let mut cache = WebCache::new(config);
+        cache.set("a", "q", make_result("a"));
+        cache.set("b", "q", make_result("b"));
+        cache.set("c", "q", make_result("c"));
+
+        // Access "a" to move it to MRU position
+        let _ = cache.get("a", "q");
+
+        // Insert "d" — should evict "b" (LRU), not "a" (recently accessed)
+        cache.set("d", "q", make_result("d"));
+
+        assert!(cache.get("a", "q").is_some(), "a should be retained (recently accessed)");
+        assert!(cache.get("b", "q").is_none(), "b should be evicted (LRU)");
+        assert!(cache.get("c", "q").is_some(), "c should be retained");
+        assert!(cache.get("d", "q").is_some(), "d should be present");
+    }
+
+    #[test]
+    fn expired_preferred_over_lru_during_eviction() {
+        let config = WebCacheConfig {
+            ttl: Duration::from_millis(0),
+            max_entries: 2,
+        };
+        let mut cache = WebCache::new(config);
+        cache.set("a", "q", make_result("a"));
+        std::thread::sleep(Duration::from_millis(10));
+
+        // "a" is now expired. Insert with longer TTL.
+        let long_config_entry = CacheEntry {
+            result: make_result("b"),
+            expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        cache.entries.insert(cache_key("b", "q"), long_config_entry);
+
+        // Insert "c" — should evict expired "a", not LRU "b"
+        let long_entry = CacheEntry {
+            result: make_result("c"),
+            expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        cache.entries.insert(cache_key("c", "q"), long_entry);
+
+        // Trigger eviction since we're at capacity
+        while cache.entries.len() >= cache.config.max_entries {
+            cache.evict_oldest();
+        }
+
+        assert!(cache.entries.get(&cache_key("a", "q")).is_none(), "expired 'a' should be evicted");
+        assert!(cache.entries.get(&cache_key("b", "q")).is_some() || cache.entries.get(&cache_key("c", "q")).is_some(),
+            "non-expired entries should be retained");
+    }
+
+    #[test]
+    fn set_same_key_updates_entry() {
+        let mut cache = WebCache::new(WebCacheConfig::default());
+        cache.set("url", "q", make_result("answer1"));
+        cache.set("url", "q", make_result("answer2"));
+        assert_eq!(cache.get("url", "q").unwrap().answer, "answer2");
+        assert_eq!(cache.stats().size, 1);
     }
 }

@@ -1104,11 +1104,11 @@ impl MethodHandler for PromptHandler {
                 // 8b. Close browser session so Chrome is cleaned up and iOS
                 //     hides the globe icon. Emits BrowserEvent::Closed over
                 //     WebSocket if a session existed.
-                if let Some(ref svc) = browser_service {
-                    if let Err(e) = svc.close_session(&session_id_clone).await {
-                        tracing::debug!(session_id = %session_id_clone, error = %e,
-                            "failed to close browser session after run");
-                    }
+                if let Some(ref svc) = browser_service
+                    && let Err(e) = svc.close_session(&session_id_clone).await
+                {
+                    tracing::debug!(session_id = %session_id_clone, error = %e,
+                        "failed to close browser session after run");
                 }
 
                 // 8c. Emit agent.error if the run failed
@@ -1260,10 +1260,10 @@ impl MethodHandler for AbortHandler {
             })?;
 
         // Clean up pending device requests to unblock any waiting tools immediately
-        if aborted {
-            if let Some(ref broker) = ctx.device_request_broker {
-                broker.cancel_all_pending();
-            }
+        if aborted
+            && let Some(ref broker) = ctx.device_request_broker
+        {
+            broker.cancel_all_pending();
         }
 
         Ok(serde_json::json!({ "aborted": aborted }))

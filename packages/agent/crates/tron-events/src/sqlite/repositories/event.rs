@@ -66,8 +66,8 @@ impl EventRepo {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
                      ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"
         );
-        let _ = conn.execute(
-            &sql,
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let _ = stmt.execute(
             params![
                 event.id,
                 event.session_id,
@@ -102,9 +102,9 @@ impl EventRepo {
     /// Get a single event by ID.
     pub fn get_by_id(conn: &Connection, event_id: &str) -> Result<Option<EventRow>> {
         let sql = format!("SELECT {EVENT_COLUMNS} FROM events WHERE id = ?1");
-        let row = conn
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let row = stmt
             .query_row(
-                &sql,
                 params![event_id],
                 Self::map_row,
             )
@@ -372,16 +372,12 @@ impl EventRepo {
         }
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        params.push(Box::new(session_id.to_string()));
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let mut param_values = Vec::with_capacity(1 + types.len());
+        param_values.push(session_id.to_string());
+        param_values.extend(types.iter().map(std::string::ToString::to_string));
 
         let rows = stmt
-            .query_map(params_refs.as_slice(), Self::map_row)?
+            .query_map(rusqlite::params_from_iter(param_values.iter()), Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -413,16 +409,12 @@ impl EventRepo {
         }
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        params.push(Box::new(workspace_id.to_string()));
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let mut param_values = Vec::with_capacity(1 + types.len());
+        param_values.push(workspace_id.to_string());
+        param_values.extend(types.iter().map(std::string::ToString::to_string));
 
         let rows = stmt
-            .query_map(params_refs.as_slice(), Self::map_row)?
+            .query_map(rusqlite::params_from_iter(param_values.iter()), Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -444,15 +436,11 @@ impl EventRepo {
         );
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        params.push(Box::new(workspace_id.to_string()));
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let mut param_values = Vec::with_capacity(1 + types.len());
+        param_values.push(workspace_id.to_string());
+        param_values.extend(types.iter().map(std::string::ToString::to_string));
 
-        let count: i64 = stmt.query_row(params_refs.as_slice(), |row| row.get(0))?;
+        let count: i64 = stmt.query_row(rusqlite::params_from_iter(param_values.iter()), |row| row.get(0))?;
         Ok(count)
     }
 
@@ -489,18 +477,12 @@ impl EventRepo {
         }
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        for ws in workspace_ids {
-            params.push(Box::new(ws.to_string()));
-        }
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let mut param_values = Vec::with_capacity(workspace_ids.len() + types.len());
+        param_values.extend(workspace_ids.iter().map(std::string::ToString::to_string));
+        param_values.extend(types.iter().map(std::string::ToString::to_string));
 
         let rows = stmt
-            .query_map(params_refs.as_slice(), Self::map_row)?
+            .query_map(rusqlite::params_from_iter(param_values.iter()), Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -531,15 +513,10 @@ impl EventRepo {
         }
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let param_values: Vec<String> = types.iter().map(std::string::ToString::to_string).collect();
 
         let rows = stmt
-            .query_map(params_refs.as_slice(), Self::map_row)?
+            .query_map(rusqlite::params_from_iter(param_values.iter()), Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -560,14 +537,9 @@ impl EventRepo {
         );
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let param_values: Vec<String> = types.iter().map(std::string::ToString::to_string).collect();
 
-        let count: i64 = stmt.query_row(params_refs.as_slice(), |row| row.get(0))?;
+        let count: i64 = stmt.query_row(rusqlite::params_from_iter(param_values.iter()), |row| row.get(0))?;
         Ok(count)
     }
 
@@ -594,17 +566,11 @@ impl EventRepo {
         );
 
         let mut stmt = conn.prepare_cached(&sql)?;
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        for ws in workspace_ids {
-            params.push(Box::new(ws.to_string()));
-        }
-        for t in types {
-            params.push(Box::new(t.to_string()));
-        }
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(Box::as_ref).collect();
+        let mut param_values = Vec::with_capacity(workspace_ids.len() + types.len());
+        param_values.extend(workspace_ids.iter().map(std::string::ToString::to_string));
+        param_values.extend(types.iter().map(std::string::ToString::to_string));
 
-        let count: i64 = stmt.query_row(params_refs.as_slice(), |row| row.get(0))?;
+        let count: i64 = stmt.query_row(rusqlite::params_from_iter(param_values.iter()), |row| row.get(0))?;
         Ok(count)
     }
 

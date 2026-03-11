@@ -9,6 +9,10 @@ use tracing::debug;
 use crate::errors::ToolError;
 use crate::traits::{ProcessOptions, ProcessOutput, ProcessRunner};
 
+/// Safety cap for stdout/stderr reads. Prevents OOM if a process writes
+/// gigabytes of output. The Bash tool truncates at 400KB chars on top of this.
+const MAX_OUTPUT_BYTES: u64 = 10 * 1024 * 1024; // 10MB
+
 /// Real subprocess execution backed by `tokio::process::Command`.
 pub struct TokioProcessRunner;
 
@@ -50,15 +54,15 @@ impl ProcessRunner for TokioProcessRunner {
 
         let stdout_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
-            if let Some(mut pipe) = stdout_pipe {
-                let _ = pipe.read_to_end(&mut buf).await;
+            if let Some(pipe) = stdout_pipe {
+                let _ = pipe.take(MAX_OUTPUT_BYTES).read_to_end(&mut buf).await;
             }
             buf
         });
         let stderr_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
-            if let Some(mut pipe) = stderr_pipe {
-                let _ = pipe.read_to_end(&mut buf).await;
+            if let Some(pipe) = stderr_pipe {
+                let _ = pipe.take(MAX_OUTPUT_BYTES).read_to_end(&mut buf).await;
             }
             buf
         });
@@ -74,8 +78,14 @@ impl ProcessRunner for TokioProcessRunner {
 
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let exit_code = status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
-                let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+                let mut stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+                let mut stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+                if stdout_bytes.len() as u64 >= MAX_OUTPUT_BYTES {
+                    stdout.push_str("\n[output capped at 10MB]");
+                }
+                if stderr_bytes.len() as u64 >= MAX_OUTPUT_BYTES {
+                    stderr.push_str("\n[output capped at 10MB]");
+                }
 
                 debug!(command, exit_code, duration_ms, "process completed");
 
@@ -252,5 +262,80 @@ mod tests {
         assert_eq!(result.stderr.trim(), "stderr_val");
         assert!(!result.timed_out);
         assert!(!result.interrupted);
+    }
+
+    #[tokio::test]
+    async fn run_large_stdout_capped() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.timeout_ms = 30_000;
+        // Generate 20MB of output (exceeds 10MB cap)
+        let result = runner
+            .run_command("head -c 20000000 /dev/zero | tr '\\0' 'A'", &opts)
+            .await
+            .unwrap();
+        assert!(
+            result.stdout.len() <= MAX_OUTPUT_BYTES as usize + 50,
+            "stdout should be capped near 10MB, got {}",
+            result.stdout.len()
+        );
+        assert!(
+            result.stdout.contains("[output capped at 10MB]"),
+            "should contain truncation marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_large_stderr_capped() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.timeout_ms = 30_000;
+        let result = runner
+            .run_command("head -c 20000000 /dev/zero | tr '\\0' 'A' >&2", &opts)
+            .await
+            .unwrap();
+        assert!(
+            result.stderr.len() <= MAX_OUTPUT_BYTES as usize + 50,
+            "stderr should be capped near 10MB, got {}",
+            result.stderr.len()
+        );
+        assert!(
+            result.stderr.contains("[output capped at 10MB]"),
+            "should contain truncation marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_normal_output_not_capped() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("echo hello", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.stdout.trim(), "hello");
+        assert!(
+            !result.stdout.contains("[output capped"),
+            "normal output should not have truncation marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_output_at_exact_limit() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.timeout_ms = 30_000;
+        // Generate exactly MAX_OUTPUT_BYTES
+        let result = runner
+            .run_command(
+                &format!("head -c {} /dev/zero | tr '\\0' 'B'", MAX_OUTPUT_BYTES),
+                &opts,
+            )
+            .await
+            .unwrap();
+        // At exactly the limit, the truncation marker IS shown (>= check)
+        assert!(
+            result.stdout.contains("[output capped at 10MB]"),
+            "at-limit output should have truncation marker"
+        );
     }
 }

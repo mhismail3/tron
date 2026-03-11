@@ -26,7 +26,7 @@ pub struct CreateAgentOpts {
     pub hooks: Option<Arc<HookEngine>>,
     /// Whether this agent runs without direct user oversight.
     /// When true, interactive tools are removed, spawn tools are gated
-    /// by max_depth, and all denied_tools are enforced.
+    /// by `max_depth`, and all `denied_tools` are enforced.
     /// Set to true for: subagents, cron agents, system subsessions.
     pub is_unattended: bool,
     /// Tools to remove from the registry before agent creation.

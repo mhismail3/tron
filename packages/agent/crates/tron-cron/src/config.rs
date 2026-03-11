@@ -180,12 +180,13 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
 
 /// Validate tool restrictions: `allowed_tools` and `denied_tools` are mutually exclusive.
 fn validate_tool_restrictions(tr: &ToolRestrictions) -> Result<(), CronError> {
-    if let (Some(allowed), Some(denied)) = (&tr.allowed_tools, &tr.denied_tools) {
-        if !allowed.is_empty() && !denied.is_empty() {
-            return Err(CronError::Validation(
-                "cannot set both allowedTools and deniedTools".into(),
-            ));
-        }
+    if let (Some(allowed), Some(denied)) = (&tr.allowed_tools, &tr.denied_tools)
+        && !allowed.is_empty()
+        && !denied.is_empty()
+    {
+        return Err(CronError::Validation(
+            "cannot set both allowedTools and deniedTools".into(),
+        ));
     }
     Ok(())
 }

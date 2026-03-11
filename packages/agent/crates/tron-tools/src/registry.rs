@@ -4,7 +4,7 @@
 //! The runtime registers tools at startup and queries the registry to dispatch
 //! tool calls and to generate the LLM tool schema.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
 use tracing::debug;
@@ -18,6 +18,7 @@ use crate::traits::TronTool;
 /// LLM API (tools are sent in registration order) and must match the TS server.
 pub struct ToolRegistry {
     tools: IndexMap<String, Arc<dyn TronTool>>,
+    cached_definitions: OnceLock<Vec<Tool>>,
 }
 
 impl ToolRegistry {
@@ -25,6 +26,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: IndexMap::new(),
+            cached_definitions: OnceLock::new(),
         }
     }
 
@@ -32,6 +34,7 @@ impl ToolRegistry {
     pub fn register(&mut self, tool: Arc<dyn TronTool>) {
         debug!(tool_name = tool.name(), "tool registered");
         let _ = self.tools.insert(tool.name().to_owned(), tool);
+        self.cached_definitions = OnceLock::new();
     }
 
     /// Look up a tool by name.
@@ -46,7 +49,9 @@ impl ToolRegistry {
 
     /// Return all tool schemas for the LLM in registration order.
     pub fn definitions(&self) -> Vec<Tool> {
-        self.tools.values().map(|t| t.definition()).collect()
+        self.cached_definitions
+            .get_or_init(|| self.tools.values().map(|t| t.definition()).collect())
+            .clone()
     }
 
     /// Return all tool names in registration order.
@@ -66,7 +71,11 @@ impl ToolRegistry {
 
     /// Remove a tool by name, returning it if it existed.
     pub fn remove(&mut self, name: &str) -> Option<Arc<dyn TronTool>> {
-        self.tools.swap_remove(name)
+        let removed = self.tools.swap_remove(name);
+        if removed.is_some() {
+            self.cached_definitions = OnceLock::new();
+        }
+        removed
     }
 
     /// Whether a tool with the given name is registered.
@@ -229,5 +238,46 @@ mod tests {
         reg.register(Arc::new(StubTool::new("Read")));
         assert!(reg.contains("Read"));
         assert!(!reg.contains("Write"));
+    }
+
+    #[test]
+    fn definitions_cached_across_calls() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        reg.register(Arc::new(StubTool::new("Write")));
+        let defs1 = reg.definitions();
+        let defs2 = reg.definitions();
+        assert_eq!(defs1.len(), defs2.len());
+        assert_eq!(defs1[0].name, defs2[0].name);
+        assert_eq!(defs1[1].name, defs2[1].name);
+    }
+
+    #[test]
+    fn register_invalidates_definition_cache() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        let defs1 = reg.definitions();
+        assert_eq!(defs1.len(), 1);
+
+        reg.register(Arc::new(StubTool::new("Write")));
+        let defs2 = reg.definitions();
+        assert_eq!(defs2.len(), 2);
+        let names: Vec<&str> = defs2.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"Read"));
+        assert!(names.contains(&"Write"));
+    }
+
+    #[test]
+    fn remove_invalidates_definition_cache() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        reg.register(Arc::new(StubTool::new("Write")));
+        let defs1 = reg.definitions();
+        assert_eq!(defs1.len(), 2);
+
+        reg.remove("Write");
+        let defs2 = reg.definitions();
+        assert_eq!(defs2.len(), 1);
+        assert_eq!(defs2[0].name, "Read");
     }
 }

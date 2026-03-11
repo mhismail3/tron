@@ -21,7 +21,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let tool_restrictions_json = job
         .tool_restrictions
         .as_ref()
-        .map(|tr| serde_json::to_string(tr))
+        .map(serde_json::to_string)
         .transpose()?;
     let overlap = job.overlap_policy.as_sql();
     let misfire = job.misfire_policy.as_sql();

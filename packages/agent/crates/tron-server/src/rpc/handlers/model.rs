@@ -755,7 +755,7 @@ impl MethodHandler for SetReasoningLevelHandler {
         // Skip if level hasn't actually changed (case-insensitive)
         if previous_level
             .as_deref()
-            .map(|p| p.to_lowercase())
+            .map(str::to_lowercase)
             == Some(new_level.to_lowercase())
         {
             return Ok(serde_json::json!({
