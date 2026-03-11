@@ -14,6 +14,7 @@ struct SandboxesDashboardView: View {
 
     @State private var containerAction: ContainerAction?
     @State private var showKillConfirmation = false
+    @State private var showRemoveConfirmation = false
     @State private var actionInProgress: String?
     @State private var actionError: String?
 
@@ -21,10 +22,11 @@ struct SandboxesDashboardView: View {
         case kill(ContainerDTO)
         case stop(ContainerDTO)
         case start(ContainerDTO)
+        case remove(ContainerDTO)
 
         var container: ContainerDTO {
             switch self {
-            case .kill(let c), .stop(let c), .start(let c): return c
+            case .kill(let c), .stop(let c), .start(let c), .remove(let c): return c
             }
         }
     }
@@ -85,6 +87,20 @@ struct SandboxesDashboardView: View {
         } message: {
             if let action = containerAction {
                 Text("This will immediately terminate all processes in \"\(action.container.name)\".")
+            }
+        }
+        .alert("Remove Container?", isPresented: $showRemoveConfirmation) {
+            Button("Cancel", role: .cancel) {
+                containerAction = nil
+            }
+            Button("Remove", role: .destructive) {
+                if let action = containerAction {
+                    performAction(action)
+                }
+            }
+        } message: {
+            if let action = containerAction {
+                Text("This will permanently delete \"\(action.container.name)\" and all its data. This cannot be undone.")
             }
         }
         .alert("Action Failed", isPresented: Binding(
@@ -155,12 +171,22 @@ struct SandboxesDashboardView: View {
     @ViewBuilder
     private func swipeButtons(for container: ContainerDTO) -> some View {
         Button(role: .destructive) {
-            containerAction = .kill(container)
-            showKillConfirmation = true
+            containerAction = .remove(container)
+            showRemoveConfirmation = true
         } label: {
-            Image(systemName: "xmark.circle.fill")
+            Image(systemName: "trash.fill")
         }
         .tint(.red)
+
+        if container.status == "running" || container.status == "stopped" {
+            Button(role: .destructive) {
+                containerAction = .kill(container)
+                showKillConfirmation = true
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .tint(.red)
+        }
 
         if container.status == "running" {
             Button {
@@ -204,6 +230,8 @@ struct SandboxesDashboardView: View {
                     _ = try await rpcClient.misc.startContainer(name: c.name)
                 case .kill(let c):
                     _ = try await rpcClient.misc.killContainer(name: c.name)
+                case .remove(let c):
+                    _ = try await rpcClient.misc.removeContainer(name: c.name)
                 }
                 await loadContainers()
             } catch {

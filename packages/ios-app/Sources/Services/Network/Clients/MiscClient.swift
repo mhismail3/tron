@@ -349,6 +349,16 @@ final class MiscClient {
         )
     }
 
+    /// Remove a container and delete its metadata
+    func removeContainer(name: String) async throws -> ContainerActionResult {
+        let ws = try transport.requireConnection()
+
+        return try await ws.send(
+            method: "sandbox.removeContainer",
+            params: ContainerActionParams(name: name)
+        )
+    }
+
     // MARK: - Device Request Methods
 
     /// Respond to a device request from the server.

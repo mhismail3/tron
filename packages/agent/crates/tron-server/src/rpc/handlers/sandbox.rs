@@ -1,4 +1,4 @@
-//! Sandbox handlers: listContainers, startContainer, stopContainer, killContainer.
+//! Sandbox handlers: listContainers, startContainer, stopContainer, killContainer, removeContainer.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -191,6 +191,86 @@ impl MethodHandler for KillContainerHandler {
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let name = require_string_param(params.as_ref(), "name")?;
         run_container_command("kill", &name).await
+    }
+}
+
+/// Remove a container entry from `containers.json`.
+///
+/// Reads the file, filters out entries matching `name`, and writes back
+/// in the same format (object-wrapped or bare array). Silently succeeds
+/// if the file doesn't exist, is empty, or contains invalid JSON.
+fn remove_container_metadata(name: &str) -> Result<(), RpcError> {
+    remove_container_metadata_at(&containers_json_path(), name)
+}
+
+/// Remove a container entry from a specific containers JSON file path.
+fn remove_container_metadata_at(path: &std::path::Path, name: &str) -> Result<(), RpcError> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(RpcError::Internal {
+                message: format!("Failed to read containers.json: {e}"),
+            })
+        }
+    };
+
+    let Ok(parsed) = serde_json::from_str::<Value>(&content) else {
+        return Ok(());
+    };
+
+    let is_object_format = parsed.is_object();
+    let entries = match &parsed {
+        Value::Array(arr) => arr.clone(),
+        Value::Object(map) => map
+            .get("containers")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default(),
+        _ => return Ok(()),
+    };
+
+    let filtered: Vec<Value> = entries
+        .into_iter()
+        .filter(|e| e.get("name").and_then(|n| n.as_str()) != Some(name))
+        .collect();
+
+    let output = if is_object_format {
+        serde_json::json!({ "containers": filtered })
+    } else {
+        Value::Array(filtered)
+    };
+
+    let serialized = serde_json::to_string_pretty(&output).map_err(|e| RpcError::Internal {
+        message: format!("Failed to serialize containers.json: {e}"),
+    })?;
+
+    std::fs::write(path, serialized).map_err(|e| RpcError::Internal {
+        message: format!("Failed to write containers.json: {e}"),
+    })
+}
+
+/// Remove a sandbox container from the runtime and metadata.
+///
+/// Step 1: Attempt `container rm <name>` — errors are ignored (container may be gone).
+/// Step 2: Remove the entry from `containers.json` — errors here propagate.
+pub struct RemoveContainerHandler;
+
+#[async_trait]
+impl MethodHandler for RemoveContainerHandler {
+    #[instrument(skip(self, _ctx), fields(method = "sandbox.removeContainer"))]
+    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        let name = require_string_param(params.as_ref(), "name")?;
+
+        // Best-effort runtime removal — ignore all errors
+        let _ = tokio::process::Command::new("container")
+            .args(["rm", &name])
+            .output()
+            .await;
+
+        remove_container_metadata(&name)?;
+
+        Ok(serde_json::json!({ "success": true }))
     }
 }
 
@@ -403,5 +483,132 @@ mod tests {
             "unexpected error code: {}",
             err.code()
         );
+    }
+
+    // ── remove_container_metadata ────────────────────────────────
+
+    fn write_containers_file(dir: &std::path::Path, content: &str) -> PathBuf {
+        let artifacts = dir.join(".tron").join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let path = artifacts.join("containers.json");
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn read_file(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    fn remove_from_bare_array() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), r#"[{"name":"a"},{"name":"b"}]"#);
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "b");
+    }
+
+    #[test]
+    fn remove_from_object_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(
+            tmp.path(),
+            r#"{"containers":[{"name":"a"},{"name":"b"}]}"#,
+        );
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        let arr = result["containers"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "b");
+    }
+
+    #[test]
+    fn remove_nonexistent_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), r#"[{"name":"a"}]"#);
+        remove_container_metadata_at(&path, "zzz").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remove_last_entry_bare_array() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), r#"[{"name":"a"}]"#);
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        assert!(result.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_last_entry_object_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), r#"{"containers":[{"name":"a"}]}"#);
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        assert!(result["containers"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_multiple_with_same_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path =
+            write_containers_file(tmp.path(), r#"[{"name":"a"},{"name":"a"},{"name":"b"}]"#);
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "b");
+    }
+
+    #[test]
+    fn remove_file_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nonexistent.json");
+        remove_container_metadata_at(&path, "a").unwrap();
+    }
+
+    #[test]
+    fn remove_empty_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), "");
+        remove_container_metadata_at(&path, "a").unwrap();
+    }
+
+    #[test]
+    fn remove_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(tmp.path(), "{broken");
+        remove_container_metadata_at(&path, "a").unwrap();
+    }
+
+    #[test]
+    fn remove_preserves_other_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_containers_file(
+            tmp.path(),
+            r#"[{"name":"a","image":"img-a","port":8080},{"name":"b","image":"img-b","port":9090}]"#,
+        );
+        remove_container_metadata_at(&path, "a").unwrap();
+        let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "b");
+        assert_eq!(arr[0]["image"], "img-b");
+        assert_eq!(arr[0]["port"], 9090);
+    }
+
+    // ── RemoveContainerHandler tests ─────────────────────────────
+
+    #[tokio::test]
+    async fn remove_container_requires_name() {
+        let ctx = make_test_context();
+        let err = RemoveContainerHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 }

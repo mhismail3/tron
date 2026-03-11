@@ -258,6 +258,7 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
     registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
     registry.register("sandbox.killContainer", sandbox::KillContainerHandler);
+    registry.register("sandbox.removeContainer", sandbox::RemoveContainerHandler);
 
     // Notifications
     registry.register("notifications.list", notifications::ListHandler);
@@ -538,7 +539,7 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            124,
+            125,
             "expected 124 methods, got {}",
             reg.methods().len()
         );
