@@ -1,20 +1,78 @@
 //! Graceful shutdown coordination via `CancellationToken`.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use tokio::task::JoinHandle;
+use tokio::sync::Notify;
+use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 /// Default timeout for graceful shutdown before force-exiting.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
+struct TaskRegistry {
+    closed: AtomicBool,
+    next_task_id: AtomicU64,
+    task_count: AtomicUsize,
+    abort_handles: Mutex<HashMap<u64, AbortHandle>>,
+    drained: Notify,
+}
+
+impl TaskRegistry {
+    fn new() -> Self {
+        Self {
+            closed: AtomicBool::new(false),
+            next_task_id: AtomicU64::new(1),
+            task_count: AtomicUsize::new(0),
+            abort_handles: Mutex::new(HashMap::new()),
+            drained: Notify::new(),
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    fn tracked_count(&self) -> usize {
+        self.task_count.load(Ordering::SeqCst)
+    }
+
+    fn finish(&self, task_id: u64) {
+        let removed = self.abort_handles.lock().remove(&task_id).is_some();
+        if removed {
+            let remaining = self.task_count.fetch_sub(1, Ordering::SeqCst) - 1;
+            if remaining == 0 {
+                self.drained.notify_waiters();
+            }
+        }
+    }
+
+    fn abort_all(&self) {
+        let handles: Vec<_> = self.abort_handles.lock().values().cloned().collect();
+        for handle in handles {
+            handle.abort();
+        }
+    }
+
+    async fn wait_for_empty(&self) {
+        while self.tracked_count() > 0 {
+            self.drained.notified().await;
+        }
+    }
+}
+
 /// Coordinates graceful shutdown across all server tasks.
 pub struct ShutdownCoordinator {
     token: CancellationToken,
-    /// Dynamically registered background task handles (e.g. agent runs).
-    task_handles: Mutex<Vec<JoinHandle<()>>>,
+    registry: Arc<TaskRegistry>,
 }
 
 impl ShutdownCoordinator {
@@ -22,18 +80,33 @@ impl ShutdownCoordinator {
     pub fn new() -> Self {
         Self {
             token: CancellationToken::new(),
-            task_handles: Mutex::new(Vec::new()),
+            registry: Arc::new(TaskRegistry::new()),
         }
     }
 
     /// Register a background task handle for graceful shutdown.
+    ///
+    /// Completed tasks self-prune automatically. If shutdown has already begun,
+    /// the task is aborted immediately instead of being retained.
     pub fn register_task(&self, handle: JoinHandle<()>) {
-        self.task_handles.lock().push(handle);
-    }
+        if self.registry.is_closed() {
+            handle.abort();
+            return;
+        }
 
-    /// Take all registered task handles (drains the list).
-    pub fn take_tasks(&self) -> Vec<JoinHandle<()>> {
-        std::mem::take(&mut *self.task_handles.lock())
+        let task_id = self.registry.next_task_id.fetch_add(1, Ordering::Relaxed);
+        let abort_handle = handle.abort_handle();
+        let _ = self.registry.task_count.fetch_add(1, Ordering::SeqCst);
+        let _ = self.registry
+            .abort_handles
+            .lock()
+            .insert(task_id, abort_handle);
+
+        let registry = Arc::clone(&self.registry);
+        drop(tokio::spawn(async move {
+            let _ = handle.await;
+            registry.finish(task_id);
+        }));
     }
 
     /// Get a clone of the cancellation token.
@@ -41,9 +114,15 @@ impl ShutdownCoordinator {
         self.token.clone()
     }
 
+    /// Stop accepting new tasks and signal shutdown to listeners.
+    pub fn close(&self) {
+        self.registry.close();
+        self.token.cancel();
+    }
+
     /// Initiate shutdown.
     pub fn shutdown(&self) {
-        self.token.cancel();
+        self.close();
     }
 
     /// Whether a shutdown has been initiated.
@@ -51,33 +130,33 @@ impl ShutdownCoordinator {
         self.token.is_cancelled()
     }
 
+    /// Number of still-running tracked background tasks.
+    pub fn tracked_task_count(&self) -> usize {
+        self.registry.tracked_count()
+    }
+
     /// Perform a graceful shutdown of all tracked tasks.
     ///
     /// 1. Cancel the shutdown token (signals all tasks)
-    /// 2. Wait up to `timeout` for all handles to complete
+    /// 2. Register any explicit handles with the tracker
+    /// 3. Wait up to `timeout` for all handles to complete
     /// 3. Abort any remaining tasks after timeout
     pub async fn graceful_shutdown(&self, handles: Vec<JoinHandle<()>>, timeout: Option<Duration>) {
         let timeout = timeout.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
 
-        self.shutdown();
+        for handle in handles {
+            self.register_task(handle);
+        }
 
-        // Merge explicitly passed handles with dynamically registered ones
-        let mut all_handles = handles;
-        all_handles.extend(self.take_tasks());
+        self.close();
 
         info!(
-            task_count = all_handles.len(),
+            task_count = self.tracked_task_count(),
             timeout_secs = timeout.as_secs(),
             "waiting for tasks to complete"
         );
 
-        // Collect abort handles before consuming into join_all
-        let abort_handles: Vec<_> = all_handles
-            .iter()
-            .map(tokio::task::JoinHandle::abort_handle)
-            .collect();
-
-        if tokio::time::timeout(timeout, futures::future::join_all(all_handles))
+        if tokio::time::timeout(timeout, self.registry.wait_for_empty())
             .await
             .is_ok()
         {
@@ -87,9 +166,7 @@ impl ShutdownCoordinator {
                 timeout_secs = timeout.as_secs(),
                 "shutdown timed out, aborting remaining tasks"
             );
-            for handle in &abort_handles {
-                handle.abort();
-            }
+            self.registry.abort_all();
         }
     }
 }
@@ -279,15 +356,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_tasks_drains_registry() {
+    async fn completed_tasks_self_prune() {
         let coord = ShutdownCoordinator::new();
-        let h1 = tokio::spawn(async {});
-        let h2 = tokio::spawn(async {});
-        coord.register_task(h1);
-        coord.register_task(h2);
+        coord.register_task(tokio::spawn(async {}));
+        coord.register_task(tokio::spawn(async {}));
 
-        let taken = coord.take_tasks();
-        assert_eq!(taken.len(), 2);
-        assert!(coord.take_tasks().is_empty(), "second take should be empty");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(coord.tracked_task_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn register_after_close_aborts_task() {
+        let coord = ShutdownCoordinator::new();
+        coord.close();
+
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let abort = handle.abort_handle();
+        coord.register_task(handle);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(abort.is_finished());
     }
 }

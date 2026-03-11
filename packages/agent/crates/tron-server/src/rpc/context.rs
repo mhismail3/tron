@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
+use metrics::{counter, histogram};
 use parking_lot::RwLock;
 use tron_embeddings::EmbeddingController;
 use tron_events::{ConnectionPool, EventStore};
@@ -19,6 +20,7 @@ use tron_tools::registry::ToolRegistry;
 use tron_transcription::MlxEngine;
 
 use crate::device::DeviceRequestBroker;
+use crate::rpc::errors::RpcError;
 use crate::shutdown::ShutdownCoordinator;
 
 /// Dependencies needed to create and run agents.
@@ -71,6 +73,27 @@ pub struct RpcContext {
     pub worktree_coordinator: Option<std::sync::Arc<tron_worktree::WorktreeCoordinator>>,
     /// Device request broker for iOS request/response round-trips.
     pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
+}
+
+impl RpcContext {
+    /// Run blocking work on the dedicated blocking pool used by async RPC handlers.
+    pub async fn run_blocking<T, F>(&self, task_name: &'static str, f: F) -> Result<T, RpcError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+    {
+        let start = Instant::now();
+        let result = tokio::task::spawn_blocking(f).await.map_err(|error| {
+            counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
+            RpcError::Internal {
+                message: format!("Blocking task '{task_name}' failed: {error}"),
+            }
+        })?;
+
+        histogram!("rpc_blocking_task_duration_seconds", "task" => task_name.to_owned())
+            .record(start.elapsed().as_secs_f64());
+        result
+    }
 }
 
 #[cfg(test)]
@@ -172,6 +195,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(event.session_id, sid);
+    }
+
+    #[tokio::test]
+    async fn run_blocking_executes_closure() {
+        let ctx = make_test_context();
+        let value = ctx.run_blocking("test.run_blocking", || Ok::<_, RpcError>(41)).await;
+        assert_eq!(value.unwrap(), 41);
     }
 
     #[test]

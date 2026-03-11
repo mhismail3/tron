@@ -528,21 +528,28 @@ impl MethodHandler for PromptHandler {
                 message: format!("Session '{session_id}' not found"),
             })?;
 
+        let deps = ctx
+            .agent_deps
+            .as_ref()
+            .ok_or_else(|| RpcError::NotAvailable {
+                message: "Agent execution dependencies are not configured".into(),
+            })?;
+
         let run_id = uuid::Uuid::now_v7().to_string();
 
         // Register the run with the orchestrator (tracks CancellationToken).
         // If the session already has an active run, this returns an error.
-        let cancel_token = ctx
+        let started_run = ctx
             .orchestrator
-            .start_run(&session_id, &run_id)
+            .begin_run(&session_id, &run_id)
             .map_err(|e| RpcError::Custom {
                 code: e.category().to_uppercase(),
                 message: e.to_string(),
                 details: None,
             })?;
+        let cancel_token = started_run.cancel_token();
 
-        // If agent deps are configured, spawn background execution
-        if let Some(deps) = &ctx.agent_deps {
+        // Spawn background execution
             let orchestrator = ctx.orchestrator.clone();
             let session_manager = ctx.session_manager.clone();
             let broadcast = orchestrator.broadcast().clone();
@@ -576,6 +583,7 @@ impl MethodHandler for PromptHandler {
             let browser_service = ctx.browser_service.clone();
 
             let handle = tokio::spawn(async move {
+                let _started_run = started_run;
                 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
                 use tron_runtime::orchestrator::agent_runner::run_agent;
                 use tron_runtime::types::{AgentConfig, RunContext};
@@ -850,7 +858,6 @@ impl MethodHandler for PromptHandler {
                             error_type: Some(e.category().to_owned()),
                             model: Some(model_for_error),
                         });
-                        orchestrator.complete_run(&session_id_clone);
                         return;
                     }
                 };
@@ -1237,12 +1244,10 @@ impl MethodHandler for PromptHandler {
                     turns = result.turns_executed,
                     "prompt run completed"
                 );
-                orchestrator.complete_run(&session_id_clone);
             });
             if let Some(ref coord) = shutdown_coordinator_for_register {
                 coord.register_task(handle);
             }
-        }
 
         Ok(serde_json::json!({
             "acknowledged": true,
@@ -1527,10 +1532,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_returns_acknowledged() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("mock", "/tmp", Some("t"))
             .unwrap();
 
         let result = PromptHandler
@@ -1543,14 +1548,14 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_generates_unique_run_ids() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid1 = ctx
             .session_manager
-            .create_session("m", "/tmp/1", Some("t1"))
+            .create_session("mock", "/tmp/1", Some("t1"))
             .unwrap();
         let sid2 = ctx
             .session_manager
-            .create_session("m", "/tmp/2", Some("t2"))
+            .create_session("mock", "/tmp/2", Some("t2"))
             .unwrap();
 
         let r1 = PromptHandler
@@ -1603,10 +1608,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_rejects_busy_session() {
-        let ctx = make_test_context();
+        let ctx = make_slow_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("mock", "/tmp", Some("t"))
             .unwrap();
 
         // First prompt succeeds
@@ -1628,10 +1633,10 @@ mod tests {
 
     #[tokio::test]
     async fn abort_active_returns_true() {
-        let ctx = make_test_context();
+        let ctx = make_slow_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
 
         // Start a run so there's something to abort
@@ -1729,10 +1734,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_state_busy_session_is_running() {
-        let ctx = make_test_context();
+        let ctx = make_slow_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
 
         // Start a run
@@ -1928,10 +1933,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_reasoning_level() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -1945,10 +1950,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_images() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -1962,10 +1967,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_attachments() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -1979,10 +1984,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_skills_and_spells() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -2048,10 +2053,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_xhigh_reasoning_level() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -2065,10 +2070,10 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_accepts_max_reasoning_level() {
-        let ctx = make_test_context();
+        let ctx = make_text_context("Done.");
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("mock", "/tmp", None)
             .unwrap();
         let result = PromptHandler
             .handle(
@@ -2179,21 +2184,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_without_agent_deps_stays_busy() {
-        // No agent_deps → run is registered but never completed
+    async fn prompt_without_agent_deps_returns_not_available() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
             .create_session("m", "/tmp", None)
             .unwrap();
 
-        let _ = PromptHandler
+        let err = PromptHandler
             .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
             .await
-            .unwrap();
+            .unwrap_err();
 
-        // Still busy (no background task to complete it)
-        assert!(ctx.orchestrator.has_active_run(&sid));
+        assert_eq!(err.code(), "NOT_AVAILABLE");
+        assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
     #[tokio::test]
@@ -2256,6 +2260,48 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         // Even on error, orchestrator should be freed
+        assert!(!ctx.orchestrator.has_active_run(&sid));
+    }
+
+    #[tokio::test]
+    async fn prompt_cleans_run_on_panic() {
+        struct PanicProvider;
+        #[async_trait]
+        impl Provider for PanicProvider {
+            fn provider_type(&self) -> ProviderKind {
+                ProviderKind::Anthropic
+            }
+            fn model(&self) -> &'static str {
+                "mock"
+            }
+            async fn stream(
+                &self,
+                _c: &tron_core::messages::Context,
+                _o: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
+                panic!("provider panicked");
+            }
+        }
+
+        let mut ctx = make_test_context();
+        ctx.agent_deps = Some(AgentDeps {
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(PanicProvider))),
+            tool_factory: Arc::new(ToolRegistry::new),
+            guardrails: None,
+            hooks: None,
+        });
+
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 

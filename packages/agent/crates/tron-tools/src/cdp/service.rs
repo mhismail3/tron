@@ -186,7 +186,8 @@ mod integration_tests {
     use std::time::Duration;
 
     fn make_real_service() -> BrowserService {
-        let chrome = super::chrome::find_chrome().expect("Chrome required for integration tests");
+        let chrome =
+            crate::cdp::chrome::find_chrome().expect("Chrome required for integration tests");
         BrowserService::new(chrome)
     }
 

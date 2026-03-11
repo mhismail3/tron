@@ -19,16 +19,29 @@ fn get_u32_param(params: Option<&Value>, key: &str, default: u32) -> u32 {
         .unwrap_or(default)
 }
 
-fn get_task_conn(ctx: &RpcContext) -> Result<tron_events::PooledConnection, RpcError> {
-    ctx.task_pool
-        .as_ref()
+async fn with_task_conn<T, F>(
+    ctx: &RpcContext,
+    task_name: &'static str,
+    f: F,
+) -> Result<T, RpcError>
+where
+    T: Send + 'static,
+    F: FnOnce(&tron_events::PooledConnection) -> Result<T, RpcError> + Send + 'static,
+{
+    let pool = ctx
+        .task_pool
+        .clone()
         .ok_or_else(|| RpcError::NotAvailable {
             message: "Task database not configured".into(),
-        })?
-        .get()
-        .map_err(|e| RpcError::Internal {
+        })?;
+
+    ctx.run_blocking(task_name, move || {
+        let conn = pool.get().map_err(|e| RpcError::Internal {
             message: e.to_string(),
-        })
+        })?;
+        f(&conn)
+    })
+    .await
 }
 
 fn task_error_to_rpc(e: &tron_runtime::tasks::TaskError, entity: &str, id: &str) -> RpcError {
@@ -51,23 +64,24 @@ impl MethodHandler for CreateTaskHandler {
     #[instrument(skip(self, ctx), fields(method = "task.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
-        let conn = get_task_conn(ctx)?;
-
         let project_id = opt_string(params.as_ref(), "projectId");
         let description = opt_string(params.as_ref(), "description");
 
-        let task = tron_runtime::tasks::TaskService::create_task(
-            &conn,
-            &tron_runtime::tasks::TaskCreateParams {
-                title,
-                description,
-                project_id,
-                ..Default::default()
-            },
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let task = with_task_conn(ctx, "task.create", move |conn| {
+            tron_runtime::tasks::TaskService::create_task(
+                conn,
+                &tron_runtime::tasks::TaskCreateParams {
+                    title,
+                    description,
+                    project_id,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&task).unwrap_or_default())
     }
@@ -81,10 +95,11 @@ impl MethodHandler for GetTaskHandler {
     #[instrument(skip(self, ctx), fields(method = "task.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let details = tron_runtime::tasks::TaskService::get_task(&conn, &task_id)
-            .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))?;
+        let details = with_task_conn(ctx, "task.get", move |conn| {
+            tron_runtime::tasks::TaskService::get_task(conn, &task_id)
+                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+        })
+        .await?;
 
         Ok(serde_json::to_value(&details).unwrap_or_default())
     }
@@ -98,8 +113,6 @@ impl MethodHandler for UpdateTaskHandler {
     #[instrument(skip(self, ctx), fields(method = "task.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
-        let conn = get_task_conn(ctx)?;
-
         let mut updates = tron_runtime::tasks::TaskUpdateParams::default();
 
         if let Some(title) = opt_string(params.as_ref(), "title") {
@@ -112,8 +125,11 @@ impl MethodHandler for UpdateTaskHandler {
             updates.description = Some(desc);
         }
 
-        let task = tron_runtime::tasks::TaskService::update_task(&conn, &task_id, &updates, None)
-            .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))?;
+        let task = with_task_conn(ctx, "task.update", move |conn| {
+            tron_runtime::tasks::TaskService::update_task(conn, &task_id, &updates, None)
+                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+        })
+        .await?;
 
         Ok(serde_json::to_value(&task).unwrap_or_default())
     }
@@ -126,8 +142,6 @@ pub struct ListTasksHandler;
 impl MethodHandler for ListTasksHandler {
     #[instrument(skip(self, ctx), fields(method = "task.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
-
         let status_filter = opt_string(params.as_ref(), "status").and_then(|s| {
             serde_json::from_value::<tron_runtime::tasks::TaskStatus>(Value::String(s)).ok()
         });
@@ -143,10 +157,14 @@ impl MethodHandler for ListTasksHandler {
         let limit = get_u32_param(params.as_ref(), "limit", 100);
         let offset = get_u32_param(params.as_ref(), "offset", 0);
 
-        let result = tron_runtime::tasks::TaskRepository::list_tasks(&conn, &filter, limit, offset)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let result = with_task_conn(ctx, "task.list", move |conn| {
+            tron_runtime::tasks::TaskRepository::list_tasks(conn, &filter, limit, offset).map_err(
+                |e| RpcError::Internal {
+                    message: e.to_string(),
+                },
+            )
+        })
+        .await?;
 
         Ok(serde_json::json!({ "tasks": result.tasks, "total": result.total }))
     }
@@ -160,10 +178,11 @@ impl MethodHandler for DeleteTaskHandler {
     #[instrument(skip(self, ctx), fields(method = "task.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let deleted = tron_runtime::tasks::TaskService::delete_task(&conn, &task_id, None)
-            .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))?;
+        let deleted = with_task_conn(ctx, "task.delete", move |conn| {
+            tron_runtime::tasks::TaskService::delete_task(conn, &task_id, None)
+                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+        })
+        .await?;
 
         Ok(serde_json::json!({ "deleted": deleted }))
     }
@@ -177,14 +196,16 @@ impl MethodHandler for SearchTasksHandler {
     #[instrument(skip(self, ctx), fields(method = "task.search"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
-        let conn = get_task_conn(ctx)?;
-
         let limit = get_u32_param(params.as_ref(), "limit", 50);
 
-        let results = tron_runtime::tasks::TaskRepository::search_tasks(&conn, &query, limit)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let results = with_task_conn(ctx, "task.search", move |conn| {
+            tron_runtime::tasks::TaskRepository::search_tasks(conn, &query, limit).map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
+            })
+        })
+        .await?;
 
         Ok(serde_json::json!({ "tasks": results }))
     }
@@ -198,14 +219,16 @@ impl MethodHandler for GetTaskActivityHandler {
     #[instrument(skip(self, ctx), fields(method = "task.getActivity"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
-        let conn = get_task_conn(ctx)?;
-
         let limit = get_u32_param(params.as_ref(), "limit", 20);
 
-        let activity = tron_runtime::tasks::TaskRepository::get_activity(&conn, &task_id, limit)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let activity = with_task_conn(ctx, "task.get_activity", move |conn| {
+            tron_runtime::tasks::TaskRepository::get_activity(conn, &task_id, limit).map_err(
+                |e| RpcError::Internal {
+                    message: e.to_string(),
+                },
+            )
+        })
+        .await?;
 
         Ok(serde_json::json!({ "activity": activity }))
     }
@@ -219,23 +242,24 @@ impl MethodHandler for CreateProjectHandler {
     #[instrument(skip(self, ctx), fields(method = "project.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
-        let conn = get_task_conn(ctx)?;
-
         let description = opt_string(params.as_ref(), "description");
         let area_id = opt_string(params.as_ref(), "areaId");
 
-        let project = tron_runtime::tasks::TaskService::create_project(
-            &conn,
-            &tron_runtime::tasks::ProjectCreateParams {
-                title,
-                description,
-                area_id,
-                ..Default::default()
-            },
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let project = with_task_conn(ctx, "project.create", move |conn| {
+            tron_runtime::tasks::TaskService::create_project(
+                conn,
+                &tron_runtime::tasks::ProjectCreateParams {
+                    title,
+                    description,
+                    area_id,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&project).unwrap_or_default())
     }
@@ -248,17 +272,18 @@ pub struct ListProjectsHandler;
 impl MethodHandler for ListProjectsHandler {
     #[instrument(skip(self, ctx), fields(method = "project.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
-
-        let result = tron_runtime::tasks::TaskRepository::list_projects(
-            &conn,
-            &tron_runtime::tasks::ProjectFilter::default(),
-            100,
-            0,
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let result = with_task_conn(ctx, "project.list", move |conn| {
+            tron_runtime::tasks::TaskRepository::list_projects(
+                conn,
+                &tron_runtime::tasks::ProjectFilter::default(),
+                100,
+                0,
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::json!({ "projects": result.projects }))
     }
@@ -272,12 +297,15 @@ impl MethodHandler for GetProjectHandler {
     #[instrument(skip(self, ctx), fields(method = "project.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let project = tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let project_id_for_lookup = project_id.clone();
+        let project = with_task_conn(ctx, "project.get", move |conn| {
+            tron_runtime::tasks::TaskRepository::get_project(conn, &project_id_for_lookup).map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
+            })
+        })
+        .await?;
 
         match project {
             Some(p) => Ok(serde_json::to_value(&p).unwrap_or_default()),
@@ -297,8 +325,6 @@ impl MethodHandler for UpdateProjectHandler {
     #[instrument(skip(self, ctx), fields(method = "project.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
-        let conn = get_task_conn(ctx)?;
-
         let mut updates = tron_runtime::tasks::ProjectUpdateParams::default();
         if let Some(title) = opt_string(params.as_ref(), "title") {
             updates.title = Some(title);
@@ -307,9 +333,11 @@ impl MethodHandler for UpdateProjectHandler {
             updates.description = Some(desc);
         }
 
-        let project =
-            tron_runtime::tasks::TaskService::update_project(&conn, &project_id, &updates)
-                .map_err(|e| task_error_to_rpc(&e, "Project", &project_id))?;
+        let project = with_task_conn(ctx, "project.update", move |conn| {
+            tron_runtime::tasks::TaskService::update_project(conn, &project_id, &updates)
+                .map_err(|e| task_error_to_rpc(&e, "Project", &project_id))
+        })
+        .await?;
 
         Ok(serde_json::to_value(&project).unwrap_or_default())
     }
@@ -323,12 +351,14 @@ impl MethodHandler for DeleteProjectHandler {
     #[instrument(skip(self, ctx), fields(method = "project.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let deleted = tron_runtime::tasks::TaskRepository::delete_project(&conn, &project_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let deleted = with_task_conn(ctx, "project.delete", move |conn| {
+            tron_runtime::tasks::TaskRepository::delete_project(conn, &project_id).map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
+            })
+        })
+        .await?;
 
         Ok(serde_json::json!({ "deleted": deleted }))
     }
@@ -342,34 +372,34 @@ impl MethodHandler for GetProjectDetailsHandler {
     #[instrument(skip(self, ctx), fields(method = "project.getDetails"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
-        let conn = get_task_conn(ctx)?;
+        with_task_conn(ctx, "project.get_details", move |conn| {
+            let project = tron_runtime::tasks::TaskRepository::get_project(conn, &project_id)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?;
 
-        let project = tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
+            let project = project.ok_or_else(|| RpcError::NotFound {
+                code: errors::NOT_FOUND.into(),
+                message: format!("Project '{project_id}' not found"),
             })?;
 
-        let project = project.ok_or_else(|| RpcError::NotFound {
-            code: errors::NOT_FOUND.into(),
-            message: format!("Project '{project_id}' not found"),
-        })?;
+            let filter = tron_runtime::tasks::TaskFilter {
+                project_id: Some(project_id),
+                ..Default::default()
+            };
+            let task_result = tron_runtime::tasks::TaskRepository::list_tasks(conn, &filter, 1000, 0)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?;
 
-        // Get tasks for this project
-        let filter = tron_runtime::tasks::TaskFilter {
-            project_id: Some(project_id),
-            ..Default::default()
-        };
-        let task_result = tron_runtime::tasks::TaskRepository::list_tasks(&conn, &filter, 1000, 0)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+            let mut project_json = serde_json::to_value(&project).unwrap_or_default();
+            if let Some(obj) = project_json.as_object_mut() {
+                let _ = obj.insert("tasks".into(), serde_json::json!(task_result.tasks));
+            }
 
-        let mut project_json = serde_json::to_value(&project).unwrap_or_default();
-        if let Some(obj) = project_json.as_object_mut() {
-            let _ = obj.insert("tasks".into(), serde_json::json!(task_result.tasks));
-        }
-
-        Ok(project_json)
+            Ok(project_json)
+        })
+        .await
     }
 }
 
@@ -381,21 +411,22 @@ impl MethodHandler for CreateAreaHandler {
     #[instrument(skip(self, ctx), fields(method = "area.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
-        let conn = get_task_conn(ctx)?;
-
         let description = opt_string(params.as_ref(), "description");
 
-        let area = tron_runtime::tasks::TaskService::create_area(
-            &conn,
-            &tron_runtime::tasks::AreaCreateParams {
-                title,
-                description,
-                ..Default::default()
-            },
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let area = with_task_conn(ctx, "area.create", move |conn| {
+            tron_runtime::tasks::TaskService::create_area(
+                conn,
+                &tron_runtime::tasks::AreaCreateParams {
+                    title,
+                    description,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&area).unwrap_or_default())
     }
@@ -408,17 +439,18 @@ pub struct ListAreasHandler;
 impl MethodHandler for ListAreasHandler {
     #[instrument(skip(self, ctx), fields(method = "area.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
-
-        let result = tron_runtime::tasks::TaskRepository::list_areas(
-            &conn,
-            &tron_runtime::tasks::AreaFilter::default(),
-            100,
-            0,
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let result = with_task_conn(ctx, "area.list", move |conn| {
+            tron_runtime::tasks::TaskRepository::list_areas(
+                conn,
+                &tron_runtime::tasks::AreaFilter::default(),
+                100,
+                0,
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::json!({ "areas": result.areas }))
     }
@@ -432,13 +464,15 @@ impl MethodHandler for GetAreaHandler {
     #[instrument(skip(self, ctx), fields(method = "area.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let area = tron_runtime::tasks::TaskRepository::get_area(&conn, &area_id).map_err(|e| {
-            RpcError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        let area_id_for_lookup = area_id.clone();
+        let area = with_task_conn(ctx, "area.get", move |conn| {
+            tron_runtime::tasks::TaskRepository::get_area(conn, &area_id_for_lookup).map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
+            })
+        })
+        .await?;
 
         match area {
             Some(a) => Ok(serde_json::to_value(&a).unwrap_or_default()),
@@ -458,8 +492,6 @@ impl MethodHandler for UpdateAreaHandler {
     #[instrument(skip(self, ctx), fields(method = "area.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
-        let conn = get_task_conn(ctx)?;
-
         let mut updates = tron_runtime::tasks::AreaUpdateParams::default();
         if let Some(title) = opt_string(params.as_ref(), "title") {
             updates.title = Some(title);
@@ -468,12 +500,15 @@ impl MethodHandler for UpdateAreaHandler {
             updates.description = Some(desc);
         }
 
-        let area = tron_runtime::tasks::TaskRepository::update_area(&conn, &area_id, &updates)
-            .map_err(|e| task_error_to_rpc(&e, "Area", &area_id))?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Area '{area_id}' not found"),
-            })?;
+        let area = with_task_conn(ctx, "area.update", move |conn| {
+            tron_runtime::tasks::TaskRepository::update_area(conn, &area_id, &updates)
+                .map_err(|e| task_error_to_rpc(&e, "Area", &area_id))?
+                .ok_or_else(|| RpcError::NotFound {
+                    code: errors::NOT_FOUND.into(),
+                    message: format!("Area '{area_id}' not found"),
+                })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&area).unwrap_or_default())
     }
@@ -487,14 +522,14 @@ impl MethodHandler for DeleteAreaHandler {
     #[instrument(skip(self, ctx), fields(method = "area.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
-        let conn = get_task_conn(ctx)?;
-
-        let deleted =
-            tron_runtime::tasks::TaskRepository::delete_area(&conn, &area_id).map_err(|e| {
+        let deleted = with_task_conn(ctx, "area.delete", move |conn| {
+            tron_runtime::tasks::TaskRepository::delete_area(conn, &area_id).map_err(|e| {
                 RpcError::Internal {
                     message: e.to_string(),
                 }
-            })?;
+            })
+        })
+        .await?;
 
         Ok(serde_json::json!({ "deleted": deleted }))
     }
@@ -507,7 +542,6 @@ pub struct BatchDeleteTasksHandler;
 impl MethodHandler for BatchDeleteTasksHandler {
     #[instrument(skip(self, ctx), fields(method = "tasks.batchDelete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
         let dry_run = params
             .as_ref()
             .and_then(|p| p.get("dryRun"))
@@ -524,11 +558,13 @@ impl MethodHandler for BatchDeleteTasksHandler {
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
         let target = tron_runtime::tasks::BatchTarget { ids, filter };
-        let result =
-            tron_runtime::tasks::TaskService::batch_delete_tasks(&conn, &target, dry_run, None)
+        let result = with_task_conn(ctx, "tasks.batch_delete", move |conn| {
+            tron_runtime::tasks::TaskService::batch_delete_tasks(conn, &target, dry_run, None)
                 .map_err(|e| RpcError::Internal {
                     message: e.to_string(),
-                })?;
+                })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&result).unwrap_or_default())
     }
@@ -541,7 +577,6 @@ pub struct BatchUpdateTasksHandler;
 impl MethodHandler for BatchUpdateTasksHandler {
     #[instrument(skip(self, ctx), fields(method = "tasks.batchUpdate"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
         let dry_run = params
             .as_ref()
             .and_then(|p| p.get("dryRun"))
@@ -579,12 +614,15 @@ impl MethodHandler for BatchUpdateTasksHandler {
             updates.area_id = Some(aid);
         }
 
-        let result = tron_runtime::tasks::TaskService::batch_update_tasks(
-            &conn, &target, &updates, dry_run, None,
-        )
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let result = with_task_conn(ctx, "tasks.batch_update", move |conn| {
+            tron_runtime::tasks::TaskService::batch_update_tasks(
+                conn, &target, &updates, dry_run, None,
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })
+        })
+        .await?;
 
         Ok(serde_json::to_value(&result).unwrap_or_default())
     }
@@ -597,18 +635,20 @@ pub struct BatchCreateTasksHandler;
 impl MethodHandler for BatchCreateTasksHandler {
     #[instrument(skip(self, ctx), fields(method = "tasks.batchCreate"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let conn = get_task_conn(ctx)?;
-
         let items: Vec<tron_runtime::tasks::TaskCreateParams> = params
             .as_ref()
             .and_then(|p| p.get("items"))
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        let result = tron_runtime::tasks::TaskService::batch_create_tasks(&conn, &items, None)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let result = with_task_conn(ctx, "tasks.batch_create", move |conn| {
+            tron_runtime::tasks::TaskService::batch_create_tasks(conn, &items, None).map_err(
+                |e| RpcError::Internal {
+                    message: e.to_string(),
+                },
+            )
+        })
+        .await?;
 
         Ok(result)
     }

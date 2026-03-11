@@ -1137,7 +1137,7 @@ mod tests {
             .unwrap();
 
         // Simulate a running session by starting a run via orchestrator
-        let _ = ctx.orchestrator.start_run(&sid, "run-1").unwrap();
+        let _run = ctx.orchestrator.begin_run(&sid, "run-1").unwrap();
 
         let err = SwitchModelHandler
             .handle(

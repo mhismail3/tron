@@ -32,34 +32,16 @@ fn map_ios_level(s: &str) -> LogLevel {
 
 /// Insert client log entries into the `logs` table with deduplication.
 ///
-/// Reads the high-water mark (`MAX(timestamp)`) for `origin = 'ios-client'`,
-/// filters out entries at or before the watermark, then batch-inserts the rest
-/// in a single transaction.
+/// Uses the partial unique index on `(timestamp, component, message)` for
+/// `origin = 'ios-client'`, so out-of-order delivery remains correct and
+/// duplicate replays are ignored at insert time.
 ///
 /// Returns the number of rows actually inserted.
 fn insert_client_logs(
     conn: &PooledConnection,
     entries: &[ClientLogEntry],
 ) -> Result<usize, RpcError> {
-    let watermark: Option<String> = conn
-        .query_row(
-            "SELECT MAX(timestamp) FROM logs WHERE origin = 'ios-client'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| RpcError::Internal {
-            message: format!("Failed to query watermark: {e}"),
-        })?;
-
-    let new_entries: Vec<&ClientLogEntry> = match watermark.as_deref() {
-        Some(wm) => entries
-            .iter()
-            .filter(|e| e.timestamp.as_str() > wm)
-            .collect(),
-        None => entries.iter().collect(),
-    };
-
-    if new_entries.is_empty() {
+    if entries.is_empty() {
         return Ok(0);
     }
 
@@ -80,7 +62,7 @@ fn insert_client_logs(
             })?;
 
         let mut count = 0usize;
-        for entry in &new_entries {
+        for entry in entries {
             let level = map_ios_level(&entry.level);
             let component = format!("ios.{}", entry.category);
             let level_str = level.to_string();
@@ -133,15 +115,15 @@ impl MethodHandler for IngestLogsHandler {
             });
         }
 
-        let conn = ctx
-            .event_store
-            .pool()
-            .get()
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to get DB connection: {e}"),
-            })?;
-
-        let inserted = insert_client_logs(&conn, &entries)?;
+        let pool = ctx.event_store.pool().clone();
+        let inserted = ctx
+            .run_blocking("logs.ingest", move || {
+                let conn = pool.get().map_err(|e| RpcError::Internal {
+                    message: format!("Failed to get DB connection: {e}"),
+                })?;
+                insert_client_logs(&conn, &entries)
+            })
+            .await?;
 
         Ok(serde_json::json!({
             "success": true,
@@ -200,6 +182,38 @@ mod tests {
             .unwrap();
         assert_eq!(result["success"], true);
         assert_eq!(result["inserted"], 0);
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_accepts_out_of_order_entries() {
+        let ctx = make_test_context();
+
+        let first = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "RPC", "message": "newer"}
+            ]
+        });
+        let second = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "RPC", "message": "older"}
+            ]
+        });
+
+        let first_result = IngestLogsHandler.handle(Some(first), &ctx).await.unwrap();
+        let second_result = IngestLogsHandler.handle(Some(second), &ctx).await.unwrap();
+
+        assert_eq!(first_result["inserted"], 1);
+        assert_eq!(second_result["inserted"], 1);
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[tokio::test]

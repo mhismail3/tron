@@ -21,8 +21,62 @@ use crate::orchestrator::turn_accumulator::TurnAccumulatorMap;
 struct ActiveRun {
     run_id: String,
     cancel: CancellationToken,
-    /// RAII guard — released when the run is removed from `active_runs`.
-    _permit: OwnedSemaphorePermit,
+}
+
+struct RunRegistry {
+    max_concurrent_sessions: usize,
+    run_semaphore: Arc<Semaphore>,
+    active_runs: Mutex<HashMap<String, ActiveRun>>,
+}
+
+impl RunRegistry {
+    fn new(max_concurrent_sessions: usize) -> Self {
+        Self {
+            max_concurrent_sessions,
+            run_semaphore: Arc::new(Semaphore::new(max_concurrent_sessions)),
+            active_runs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn remove(&self, session_id: &str) {
+        let mut runs = self.active_runs.lock();
+        let _ = runs.remove(session_id);
+        #[allow(clippy::cast_precision_loss)]
+        gauge!("agent_runs_active").set(runs.len() as f64);
+    }
+}
+
+/// Active run registration guard.
+///
+/// Dropping this guard always clears the session's active-run entry and
+/// releases its concurrency permit, even if the owning task exits early.
+pub struct StartedRun {
+    session_id: String,
+    cancel: CancellationToken,
+    registry: Arc<RunRegistry>,
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl StartedRun {
+    /// Get the cancellation token for this run.
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel.clone()
+    }
+}
+
+impl Drop for StartedRun {
+    fn drop(&mut self) {
+        self.registry.remove(&self.session_id);
+        let _ = self.permit.take();
+    }
+}
+
+impl std::fmt::Debug for StartedRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartedRun")
+            .field("session_id", &self.session_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Multi-session orchestrator.
@@ -30,10 +84,7 @@ pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
     max_concurrent_sessions: usize,
-    /// Semaphore limiting total concurrent agent runs.
-    run_semaphore: Arc<Semaphore>,
-    /// Active runs keyed by `session_id`.
-    active_runs: Mutex<HashMap<String, ActiveRun>>,
+    run_registry: Arc<RunRegistry>,
     /// Tool call tracker shared with RPC handlers.
     tool_tracker: Mutex<ToolCallTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
@@ -47,8 +98,7 @@ impl Orchestrator {
             session_manager,
             broadcast: Arc::new(EventEmitter::new()),
             max_concurrent_sessions: max_concurrent,
-            run_semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            active_runs: Mutex::new(HashMap::new()),
+            run_registry: Arc::new(RunRegistry::new(max_concurrent)),
             tool_tracker: Mutex::new(ToolCallTracker::new()),
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
         }
@@ -74,27 +124,23 @@ impl Orchestrator {
         &self.turn_accumulators
     }
 
-    /// Start tracking a run for a session. Returns the `CancellationToken`.
+    /// Start tracking a run for a session.
     ///
     /// Errors if:
     /// - The session already has an active run (`SessionBusy`)
     /// - The server is at max concurrent runs (`ServerBusy`)
     #[instrument(skip(self), fields(session_id, run_id))]
-    pub fn start_run(
-        &self,
-        session_id: &str,
-        run_id: &str,
-    ) -> Result<CancellationToken, RuntimeError> {
-        let mut runs = self.active_runs.lock();
+    pub fn begin_run(&self, session_id: &str, run_id: &str) -> Result<StartedRun, RuntimeError> {
+        let mut runs = self.run_registry.active_runs.lock();
         if runs.contains_key(session_id) {
             return Err(RuntimeError::SessionBusy(session_id.to_string()));
         }
         // Acquire a concurrency permit (non-blocking).
-        let permit = Arc::clone(&self.run_semaphore)
+        let permit = Arc::clone(&self.run_registry.run_semaphore)
             .try_acquire_owned()
             .map_err(|_| RuntimeError::ServerBusy {
                 current: runs.len(),
-                max: self.max_concurrent_sessions,
+                max: self.run_registry.max_concurrent_sessions,
             })?;
         let cancel = CancellationToken::new();
         let _ = runs.insert(
@@ -102,28 +148,23 @@ impl Orchestrator {
             ActiveRun {
                 run_id: run_id.to_string(),
                 cancel: cancel.clone(),
-                _permit: permit,
             },
         );
         #[allow(clippy::cast_precision_loss)]
         gauge!("agent_runs_active").set(runs.len() as f64);
         debug!(session_id, run_id, "run started");
-        Ok(cancel)
-    }
-
-    /// Complete a run for a session (removes from active tracking).
-    #[instrument(skip(self), fields(session_id))]
-    pub fn complete_run(&self, session_id: &str) {
-        debug!(session_id, "run completed");
-        let mut runs = self.active_runs.lock();
-        let _ = runs.remove(session_id);
-        #[allow(clippy::cast_precision_loss)]
-        gauge!("agent_runs_active").set(runs.len() as f64);
+        Ok(StartedRun {
+            session_id: session_id.to_string(),
+            cancel,
+            registry: Arc::clone(&self.run_registry),
+            permit: Some(permit),
+        })
     }
 
     /// Get the run ID for an active session (if any).
     pub fn get_run_id(&self, session_id: &str) -> Option<String> {
-        self.active_runs
+        self.run_registry
+            .active_runs
             .lock()
             .get(session_id)
             .map(|r| r.run_id.clone())
@@ -131,19 +172,19 @@ impl Orchestrator {
 
     /// Check if a session has an active run.
     pub fn has_active_run(&self, session_id: &str) -> bool {
-        self.active_runs.lock().contains_key(session_id)
+        self.run_registry.active_runs.lock().contains_key(session_id)
     }
 
     /// Number of active runs.
     pub fn active_run_count(&self) -> usize {
-        self.active_runs.lock().len()
+        self.run_registry.active_runs.lock().len()
     }
 
     /// Abort a running session by cancelling its `CancellationToken`.
     /// Returns true if the session had an active run that was cancelled.
     #[instrument(skip(self), fields(session_id))]
     pub fn abort(&self, session_id: &str) -> Result<bool, RuntimeError> {
-        let runs = self.active_runs.lock();
+        let runs = self.run_registry.active_runs.lock();
         if let Some(run) = runs.get(session_id) {
             warn!(session_id, "abort requested");
             run.cancel.cancel();
@@ -158,7 +199,7 @@ impl Orchestrator {
     /// This is an **advisory** check — it reads from two independent data stores
     /// (`active_runs` and `session_manager`) without a single atomic transaction.
     /// Callers should tolerate stale results. The authoritative guard is
-    /// `start_run()`, which rejects duplicate runs under its own lock.
+    /// `begin_run()`, which rejects duplicate runs under its own lock.
     pub fn is_session_busy(&self, session_id: &str) -> bool {
         self.has_active_run(session_id) || self.session_manager.is_active(session_id)
     }
@@ -202,13 +243,15 @@ impl Orchestrator {
         info!("orchestrator shutdown initiated");
         // Cancel and clear all active runs
         {
-            let mut runs = self.active_runs.lock();
+            let mut runs = self.run_registry.active_runs.lock();
             if !runs.is_empty() {
                 warn!(count = runs.len(), "clearing orphaned active runs during shutdown");
                 for run in runs.values() {
                     run.cancel.cancel();
                 }
                 runs.clear();
+                #[allow(clippy::cast_precision_loss)]
+                gauge!("agent_runs_active").set(0.0);
             }
         }
 
@@ -299,30 +342,31 @@ mod tests {
     // --- Run tracking tests ---
 
     #[test]
-    fn start_run_creates_token() {
+    fn begin_run_creates_token() {
         let orch = make_orchestrator();
-        let token = orch.start_run("s1", "run_1").unwrap();
+        let run = orch.begin_run("s1", "run_1").unwrap();
+        let token = run.cancel_token();
         assert!(!token.is_cancelled());
         assert!(orch.has_active_run("s1"));
         assert_eq!(orch.active_run_count(), 1);
     }
 
     #[test]
-    fn start_run_rejects_busy_session() {
+    fn begin_run_rejects_busy_session() {
         let orch = make_orchestrator();
-        let _token = orch.start_run("s1", "run_1").unwrap();
+        let _run = orch.begin_run("s1", "run_1").unwrap();
 
-        let err = orch.start_run("s1", "run_2").unwrap_err();
+        let err = orch.begin_run("s1", "run_2").unwrap_err();
         assert!(err.to_string().contains("busy"));
     }
 
     #[test]
-    fn complete_run_clears_active() {
+    fn dropping_run_clears_active() {
         let orch = make_orchestrator();
-        let _token = orch.start_run("s1", "run_1").unwrap();
+        let run = orch.begin_run("s1", "run_1").unwrap();
         assert!(orch.has_active_run("s1"));
 
-        orch.complete_run("s1");
+        drop(run);
         assert!(!orch.has_active_run("s1"));
         assert_eq!(orch.active_run_count(), 0);
     }
@@ -330,7 +374,7 @@ mod tests {
     #[test]
     fn get_run_id_returns_correct_id() {
         let orch = make_orchestrator();
-        let _token = orch.start_run("s1", "run_abc").unwrap();
+        let _run = orch.begin_run("s1", "run_abc").unwrap();
         assert_eq!(orch.get_run_id("s1").unwrap(), "run_abc");
     }
 
@@ -345,7 +389,8 @@ mod tests {
     #[test]
     fn abort_active_session_returns_true() {
         let orch = make_orchestrator();
-        let token = orch.start_run("s1", "run_1").unwrap();
+        let run = orch.begin_run("s1", "run_1").unwrap();
+        let token = run.cancel_token();
 
         let result = orch.abort("s1").unwrap();
         assert!(result);
@@ -362,7 +407,8 @@ mod tests {
     #[test]
     fn abort_cancels_token() {
         let orch = make_orchestrator();
-        let token = orch.start_run("s1", "run_1").unwrap();
+        let run = orch.begin_run("s1", "run_1").unwrap();
+        let token = run.cancel_token();
         assert!(!token.is_cancelled());
 
         let _ = orch.abort("s1").unwrap();
@@ -374,8 +420,8 @@ mod tests {
     #[test]
     fn concurrent_runs_different_sessions() {
         let orch = make_orchestrator();
-        let _t1 = orch.start_run("s1", "run_1").unwrap();
-        let _t2 = orch.start_run("s2", "run_2").unwrap();
+        let _t1 = orch.begin_run("s1", "run_1").unwrap();
+        let _t2 = orch.begin_run("s2", "run_2").unwrap();
 
         assert_eq!(orch.active_run_count(), 2);
         assert!(orch.has_active_run("s1"));
@@ -385,12 +431,15 @@ mod tests {
     #[test]
     fn abort_one_doesnt_affect_other() {
         let orch = make_orchestrator();
-        let t1 = orch.start_run("s1", "run_1").unwrap();
-        let t2 = orch.start_run("s2", "run_2").unwrap();
+        let t1 = orch.begin_run("s1", "run_1").unwrap();
+        let t2 = orch.begin_run("s2", "run_2").unwrap();
+
+        let t1_token = t1.cancel_token();
+        let t2_token = t2.cancel_token();
 
         let _ = orch.abort("s1").unwrap();
-        assert!(t1.is_cancelled());
-        assert!(!t2.is_cancelled());
+        assert!(t1_token.is_cancelled());
+        assert!(!t2_token.is_cancelled());
     }
 
     // --- Tool call tracker tests ---
@@ -417,42 +466,40 @@ mod tests {
     // --- Concurrency limit tests ---
 
     #[test]
-    fn start_run_rejects_at_capacity() {
+    fn begin_run_rejects_at_capacity() {
         let orch = make_orchestrator(); // max_concurrent = 10
 
         // Fill to capacity
+        let mut runs = Vec::new();
         for i in 0..10 {
-            let _t = orch
-                .start_run(&format!("s{i}"), &format!("run_{i}"))
-                .unwrap();
+            runs.push(orch.begin_run(&format!("s{i}"), &format!("run_{i}")).unwrap());
         }
         assert_eq!(orch.active_run_count(), 10);
 
         // 11th run should fail with ServerBusy
-        let err = orch.start_run("s10", "run_10").unwrap_err();
+        let err = orch.begin_run("s10", "run_10").unwrap_err();
         assert!(err.to_string().contains("Server busy"));
     }
 
     #[test]
-    fn permit_released_on_complete() {
+    fn permit_released_on_drop() {
         let orch = make_orchestrator(); // max_concurrent = 10
 
         // Fill to capacity
+        let mut runs = Vec::new();
         for i in 0..10 {
-            let _t = orch
-                .start_run(&format!("s{i}"), &format!("run_{i}"))
-                .unwrap();
+            runs.push(orch.begin_run(&format!("s{i}"), &format!("run_{i}")).unwrap());
         }
 
         // At capacity — can't start another
-        assert!(orch.start_run("s10", "run_10").is_err());
+        assert!(orch.begin_run("s10", "run_10").is_err());
 
-        // Complete one run — frees a permit
-        orch.complete_run("s0");
+        // Drop one run — frees a permit
+        drop(runs.remove(0));
         assert_eq!(orch.active_run_count(), 9);
 
         // Now we can start a new run
-        let _t = orch.start_run("s10", "run_10").unwrap();
+        let _t = orch.begin_run("s10", "run_10").unwrap();
         assert_eq!(orch.active_run_count(), 10);
     }
 
@@ -461,12 +508,14 @@ mod tests {
     #[tokio::test]
     async fn shutdown_cancels_all_runs() {
         let orch = make_orchestrator();
-        let t1 = orch.start_run("s1", "run_1").unwrap();
-        let t2 = orch.start_run("s2", "run_2").unwrap();
+        let t1 = orch.begin_run("s1", "run_1").unwrap();
+        let t2 = orch.begin_run("s2", "run_2").unwrap();
+        let t1_token = t1.cancel_token();
+        let t2_token = t2.cancel_token();
 
         orch.shutdown().await.unwrap();
-        assert!(t1.is_cancelled());
-        assert!(t2.is_cancelled());
+        assert!(t1_token.is_cancelled());
+        assert!(t2_token.is_cancelled());
     }
 
     #[tokio::test]
@@ -484,9 +533,9 @@ mod tests {
     fn is_session_busy_reflects_active_run() {
         let orch = make_orchestrator();
         assert!(!orch.is_session_busy("s1"));
-        let _token = orch.start_run("s1", "run_1").unwrap();
+        let run = orch.begin_run("s1", "run_1").unwrap();
         assert!(orch.is_session_busy("s1"));
-        orch.complete_run("s1");
+        drop(run);
         assert!(!orch.is_session_busy("s1"));
     }
 
@@ -505,13 +554,15 @@ mod tests {
     #[tokio::test]
     async fn shutdown_clears_orphaned_runs() {
         let orch = make_orchestrator();
-        let t1 = orch.start_run("s1", "run_1").unwrap();
-        let t2 = orch.start_run("s2", "run_2").unwrap();
+        let t1 = orch.begin_run("s1", "run_1").unwrap();
+        let t2 = orch.begin_run("s2", "run_2").unwrap();
+        let t1_token = t1.cancel_token();
+        let t2_token = t2.cancel_token();
         assert_eq!(orch.active_run_count(), 2);
 
         orch.shutdown().await.unwrap();
-        assert!(t1.is_cancelled());
-        assert!(t2.is_cancelled());
+        assert!(t1_token.is_cancelled());
+        assert!(t2_token.is_cancelled());
         assert_eq!(orch.active_run_count(), 0, "active_runs must be cleared after shutdown");
     }
 }

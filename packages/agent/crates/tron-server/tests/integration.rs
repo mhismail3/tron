@@ -36,7 +36,7 @@ type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Boot a test server and return the WS URL + shutdown handle.
-async fn boot_server() -> (String, Arc<TronServer>) {
+async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let pool = tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
@@ -100,6 +100,12 @@ async fn boot_server() -> (String, Arc<TronServer>) {
     (ws_url, server)
 }
 
+/// Boot the default test server with a provider that stays active briefly so
+/// busy-session behavior is observable in integration tests.
+async fn boot_server() -> (String, Arc<TronServer>) {
+    boot_server_with_provider(Arc::new(LaggyTextProvider::new("ok"))).await
+}
+
 // ── Mock Providers ──
 
 struct TextOnlyProvider {
@@ -144,6 +150,46 @@ impl Provider for TextOnlyProvider {
             }),
         ];
         Ok(Box::pin(stream::iter(events)))
+    }
+}
+
+struct LaggyTextProvider {
+    text: String,
+}
+impl LaggyTextProvider {
+    fn new(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+        }
+    }
+}
+#[async_trait]
+impl Provider for LaggyTextProvider {
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
+    }
+    fn model(&self) -> &'static str {
+        "mock"
+    }
+    async fn stream(
+        &self,
+        _c: &tron_core::messages::Context,
+        _o: &ProviderStreamOptions,
+    ) -> Result<StreamEventStream, ProviderError> {
+        let text = self.text.clone();
+        let s = async_stream::stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::TextDelta { delta: text.clone() });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            yield Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text(&text)],
+                    token_usage: Some(TokenUsage::default()),
+                },
+                stop_reason: "end_turn".into(),
+            });
+        };
+        Ok(Box::pin(s))
     }
 }
 
@@ -1255,9 +1301,24 @@ async fn e2e_bridge_session_isolation() {
             base: BaseEvent::now(&sid2),
         });
 
-    // ws1 (bound to sid1) should NOT receive sid2's event
-    let evt1 = try_read_json(&mut ws1, Duration::from_millis(200)).await;
-    assert!(evt1.is_none(), "ws1 should not receive sid2 events");
+    // ws1 (bound to sid1) should NOT receive sid2's agent.start event.
+    let evt1 = tokio::time::timeout(Duration::from_millis(200), async {
+        loop {
+            match try_read_json(&mut ws1, Duration::from_millis(25)).await {
+                Some(msg) if msg.get("type").and_then(|v| v.as_str()) == Some("agent.start") => {
+                    break Some(msg);
+                }
+                Some(_) => continue,
+                None => break None,
+            }
+        }
+    })
+    .await
+    .unwrap_or(None);
+    assert!(
+        evt1.is_none(),
+        "ws1 should not receive sid2 agent.start events"
+    );
 
     // ws2 (bound to sid2) SHOULD receive it
     let evt2 = read_until_event_type(&mut ws2, "agent.start").await;
@@ -1984,11 +2045,16 @@ async fn e2e_sequential_prompts_after_abort() {
     // Abort
     let _ = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
 
-    // Wait a bit for the abort to process
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Complete the run so the session is no longer busy
-    server.rpc_context().orchestrator.complete_run(&sid);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !server.rpc_context().orchestrator.has_active_run(&sid) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("aborted run should self-clean");
 
     // Second prompt should work now
     let resp2 = rpc_call(
@@ -2409,9 +2475,8 @@ async fn e2e_prompt_abort_mid_stream() {
 }
 
 #[tokio::test]
-async fn e2e_prompt_without_deps_stays_busy() {
-    // boot_server() has agent_deps: None
-    let (url, server) = boot_server().await;
+async fn e2e_prompt_without_deps_returns_not_available() {
+    let (url, server) = boot_server_without_deps().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
@@ -2424,18 +2489,8 @@ async fn e2e_prompt_without_deps_stays_busy() {
         Some(json!({"sessionId": sid, "prompt": "no deps"})),
     )
     .await;
-    assert_eq!(resp["success"], true);
-
-    // Without agent_deps, no background task is spawned, so session stays busy
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "agent.getState",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
-    assert_eq!(resp["result"]["isRunning"], true);
+    assert_eq!(resp["success"], false);
+    assert_eq!(resp["error"]["code"], "NOT_AVAILABLE");
 
     server.shutdown().shutdown();
 }

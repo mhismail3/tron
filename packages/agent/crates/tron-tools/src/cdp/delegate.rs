@@ -273,8 +273,8 @@ mod integration_tests {
     use super::*;
 
     fn make_delegate() -> CdpBrowserDelegate {
-        let chrome = super::chrome::find_chrome().expect("Chrome required");
-        let svc = Arc::new(super::service::BrowserService::new(chrome));
+        let chrome = crate::cdp::chrome::find_chrome().expect("Chrome required");
+        let svc = Arc::new(crate::cdp::service::BrowserService::new(chrome));
         CdpBrowserDelegate::new(svc)
     }
 
@@ -467,8 +467,8 @@ mod integration_tests {
 
     #[tokio::test]
     async fn delegate_auto_starts_screencast() {
-        let chrome = super::chrome::find_chrome().expect("Chrome required");
-        let svc = Arc::new(super::service::BrowserService::new(chrome));
+        let chrome = crate::cdp::chrome::find_chrome().expect("Chrome required");
+        let svc = Arc::new(crate::cdp::service::BrowserService::new(chrome));
         let d = CdpBrowserDelegate::new(Arc::clone(&svc));
 
         let action = BrowserAction {
@@ -487,8 +487,8 @@ mod integration_tests {
 
     #[tokio::test]
     async fn delegate_does_not_restart_screencast() {
-        let chrome = super::chrome::find_chrome().expect("Chrome required");
-        let svc = Arc::new(super::service::BrowserService::new(chrome));
+        let chrome = crate::cdp::chrome::find_chrome().expect("Chrome required");
+        let svc = Arc::new(crate::cdp::service::BrowserService::new(chrome));
         let d = CdpBrowserDelegate::new(Arc::clone(&svc));
 
         // First action: triggers auto-start

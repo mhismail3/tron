@@ -989,7 +989,8 @@ mod integration_tests {
     use super::*;
 
     async fn launch_test_session() -> Arc<BrowserSession> {
-        let chrome = super::chrome::find_chrome().expect("Chrome required for integration tests");
+        let chrome =
+            crate::cdp::chrome::find_chrome().expect("Chrome required for integration tests");
         let (tx, _) = broadcast::channel(64);
         Arc::new(BrowserSession::launch(&chrome, tx).await.unwrap())
     }

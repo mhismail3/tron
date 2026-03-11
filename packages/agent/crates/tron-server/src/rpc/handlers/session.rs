@@ -45,19 +45,25 @@ impl MethodHandler for CreateSessionHandler {
         // indicators immediately (content is loaded later at prompt time).
         let event_store = ctx.event_store.clone();
         let broadcast = ctx.orchestrator.broadcast().clone();
+        let shutdown_coordinator = ctx.shutdown_coordinator.clone();
         let session_id_for_task = session_id.clone();
         let working_dir_for_task = working_dir.clone();
-        let join = tokio::task::spawn_blocking(move || {
-            emit_optimistic_context_events(
-                &event_store,
-                &broadcast,
-                &session_id_for_task,
-                &working_dir_for_task,
-            );
-        })
-        .await;
-        if let Err(e) = join {
-            tracing::warn!(error = %e, "optimistic context preload task panicked");
+        let handle = tokio::spawn(async move {
+            let join = tokio::task::spawn_blocking(move || {
+                emit_optimistic_context_events(
+                    &event_store,
+                    &broadcast,
+                    &session_id_for_task,
+                    &working_dir_for_task,
+                );
+            })
+            .await;
+            if let Err(e) = join {
+                tracing::warn!(error = %e, "optimistic context preload task panicked");
+            }
+        });
+        if let Some(ref coord) = shutdown_coordinator {
+            coord.register_task(handle);
         }
 
         Ok(serde_json::json!({
@@ -1517,6 +1523,28 @@ mod tests {
 
     // ── Optimistic context event tests ──
 
+    async fn wait_for_event_count(
+        ctx: &RpcContext,
+        session_id: &str,
+        event_types: &[&str],
+        expected: usize,
+    ) -> Vec<tron_events::sqlite::row_types::EventRow> {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let events = ctx
+                    .event_store
+                    .get_events_by_type(session_id, event_types, Some(10))
+                    .unwrap();
+                if events.len() >= expected {
+                    break events;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for optimistic context events")
+    }
+
     #[tokio::test]
     async fn create_session_emits_rules_loaded_when_rules_exist() {
         // Set up a temp dir with a CLAUDE.md file
@@ -1539,10 +1567,7 @@ mod tests {
         let sid = result["sessionId"].as_str().unwrap();
 
         // Check persisted rules.loaded event
-        let rules_events = ctx
-            .event_store
-            .get_events_by_type(sid, &["rules.loaded"], Some(10))
-            .unwrap();
+        let rules_events = wait_for_event_count(&ctx, sid, &["rules.loaded"], 1).await;
         assert_eq!(
             rules_events.len(),
             1,
@@ -1552,7 +1577,19 @@ mod tests {
         // Check broadcast events: session_created then rules_loaded
         let e1 = rx.try_recv().unwrap();
         assert_eq!(e1.event_type(), "session_created");
-        let e2 = rx.try_recv().unwrap();
+        let e2 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => break event,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                    Err(err) => panic!("unexpected broadcast error: {err}"),
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for rules_loaded broadcast");
         assert_eq!(e2.event_type(), "rules_loaded");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1608,10 +1645,7 @@ mod tests {
             .unwrap();
 
         let sid = result["sessionId"].as_str().unwrap();
-        let rules_events = ctx
-            .event_store
-            .get_events_by_type(sid, &["rules.loaded"], Some(1))
-            .unwrap();
+        let rules_events = wait_for_event_count(&ctx, sid, &["rules.loaded"], 1).await;
         let payload: serde_json::Value = serde_json::from_str(&rules_events[0].payload).unwrap();
         // At least 1 file (the project rules); may also have global rules
         assert!(
