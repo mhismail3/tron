@@ -38,6 +38,7 @@ impl MethodHandler for CreateSessionHandler {
                 base: BaseEvent::now(&session_id),
                 model: model.to_string(),
                 working_directory: working_dir.clone(),
+                source: None,
             });
 
         // Optimistically discover rules and memory so clients can display loading
@@ -573,6 +574,7 @@ impl MethodHandler for GetChatSessionHandler {
                     base: BaseEvent::now(&session_id),
                     model: model.clone(),
                     working_directory: working_dir.clone(),
+                    source: Some("chat".into()),
                 });
 
             // Chat sessions are clean slates — no auto-injected rules or memory
@@ -647,6 +649,7 @@ impl MethodHandler for ResetChatSessionHandler {
                 base: BaseEvent::now(&new_id),
                 model: model.clone(),
                 working_directory: working_dir.clone(),
+                source: Some("chat".into()),
             });
 
         // Chat sessions are clean slates — no optimistic context events

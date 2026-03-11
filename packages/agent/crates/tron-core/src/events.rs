@@ -620,6 +620,9 @@ tron_events! {
         model: String,
         #[serde(rename = "workingDirectory")]
         working_directory: String,
+        /// Session source (e.g. "chat" for persistent chat sessions).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     } => "session_created",
 
     /// Session archived.
@@ -1493,6 +1496,7 @@ mod tests {
                 base: base.clone(),
                 model: "m".into(),
                 working_directory: "/tmp".into(),
+                source: None,
             },
             TronEvent::SessionArchived { base: base.clone() },
             TronEvent::SessionUnarchived { base: base.clone() },

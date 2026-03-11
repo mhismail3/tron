@@ -626,6 +626,7 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             base,
             model,
             working_directory,
+            source,
             ..
         } => Some(make_rpc(event, "session.created", Some(serde_json::json!({
             "model": model,
@@ -636,6 +637,7 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             "cost": 0.0,
             "lastActivity": base.timestamp,
             "isActive": true,
+            "isChat": source.as_deref() == Some("chat"),
         })))),
         TronEvent::SessionForked { new_session_id, .. } => {
             Some(make_rpc(event, "session.forked", Some(serde_json::json!({
@@ -1053,6 +1055,7 @@ mod tests {
                 base: BaseEvent::now("s2"),
                 model: "claude-opus-4-6".into(),
                 working_directory: "/tmp".into(),
+                source: None,
             })
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1538,6 +1541,7 @@ mod tests {
             base: BaseEvent::now("s1"),
             model: "claude-opus-4-6".into(),
             working_directory: "/tmp/project".into(),
+            source: None,
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "session.created");
@@ -1546,6 +1550,7 @@ mod tests {
         assert_eq!(data["workingDirectory"], "/tmp/project");
         assert_eq!(data["messageCount"], 0);
         assert_eq!(data["inputTokens"], 0);
+        assert_eq!(data["isChat"], false);
         assert_eq!(data["outputTokens"], 0);
         assert_eq!(data["cost"], 0.0);
         assert_eq!(data["isActive"], true);
@@ -1622,6 +1627,7 @@ mod tests {
             base: BaseEvent::now("s1"),
             model: "claude-opus-4-6".into(),
             working_directory: "/tmp".into(),
+            source: None,
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "session.created");
@@ -1760,6 +1766,7 @@ mod tests {
                 base: base.clone(),
                 model: "m".into(),
                 working_directory: "/".into(),
+                source: None,
             },
             TronEvent::SessionArchived { base: base.clone() },
             TronEvent::SessionUnarchived { base: base.clone() },
