@@ -86,7 +86,7 @@ fn emit_optimistic_context_events(
     working_dir: &str,
 ) {
     let settings = tron_settings::get_settings();
-    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, &settings);
+    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, &settings, false);
 
     let files_json: Vec<serde_json::Value> = artifacts
         .rules
@@ -575,18 +575,7 @@ impl MethodHandler for GetChatSessionHandler {
                     working_directory: working_dir.clone(),
                 });
 
-            // Optimistic context preload
-            let event_store = ctx.event_store.clone();
-            let broadcast = ctx.orchestrator.broadcast().clone();
-            let sid = session_id.clone();
-            let wd = working_dir.clone();
-            let join = tokio::task::spawn_blocking(move || {
-                emit_optimistic_context_events(&event_store, &broadcast, &sid, &wd);
-            })
-            .await;
-            if let Err(e) = join {
-                tracing::warn!(error = %e, "chat session context preload panicked");
-            }
+            // Chat sessions are clean slates — no auto-injected rules or memory
         }
 
         let session = ctx
@@ -660,18 +649,7 @@ impl MethodHandler for ResetChatSessionHandler {
                 working_directory: working_dir.clone(),
             });
 
-        // Optimistic context preload for the new session
-        let event_store = ctx.event_store.clone();
-        let broadcast = ctx.orchestrator.broadcast().clone();
-        let sid = new_id.clone();
-        let wd = working_dir.clone();
-        let join = tokio::task::spawn_blocking(move || {
-            emit_optimistic_context_events(&event_store, &broadcast, &sid, &wd);
-        })
-        .await;
-        if let Err(e) = join {
-            tracing::warn!(error = %e, "reset chat context preload panicked");
-        }
+        // Chat sessions are clean slates — no optimistic context events
 
         let session = ctx
             .session_manager

@@ -62,10 +62,12 @@ fn build_context_manager_for_session(
     };
 
     let settings = tron_settings::get_settings();
+    let is_chat = session.source.as_deref() == Some("chat");
     let artifacts = load_session_context_artifacts(
         ctx.event_store.as_ref(),
         &session.working_directory,
         &settings,
+        is_chat,
     );
 
     // 6. Get tool definitions

@@ -90,6 +90,7 @@ pub(crate) fn load_session_context_artifacts(
     event_store: &EventStore,
     working_dir: &str,
     settings: &tron_settings::TronSettings,
+    is_chat: bool,
 ) -> SessionContextArtifacts {
     let home_dir = std::env::var("HOME").ok().map(PathBuf::from);
     load_session_context_artifacts_with_home(
@@ -97,6 +98,7 @@ pub(crate) fn load_session_context_artifacts(
         working_dir,
         settings,
         home_dir.as_deref(),
+        is_chat,
     )
 }
 
@@ -105,7 +107,12 @@ pub(crate) fn load_session_context_artifacts_with_home(
     working_dir: &str,
     settings: &tron_settings::TronSettings,
     home_dir: Option<&Path>,
+    is_chat: bool,
 ) -> SessionContextArtifacts {
+    // Chat sessions are clean slates — no auto-injected rules or memory
+    if is_chat {
+        return SessionContextArtifacts::default();
+    }
     let wd_path = Path::new(working_dir);
     let rules = load_rules(wd_path, settings, home_dir);
     let memory = load_memory(event_store, working_dir, settings);
@@ -346,6 +353,7 @@ mod tests {
             working_dir.path().to_str().unwrap(),
             &settings,
             Some(home_dir.path()),
+            false,
         );
 
         assert_eq!(artifacts.rules.files.len(), 2);
@@ -404,7 +412,7 @@ mod tests {
         });
 
         let artifacts =
-            load_session_context_artifacts(ctx.event_store.as_ref(), working_dir_str, &settings);
+            load_session_context_artifacts(ctx.event_store.as_ref(), working_dir_str, &settings, false);
         let memory = artifacts.memory.expect("memory should be loaded");
 
         assert_eq!(memory.raw_event_count, 1);

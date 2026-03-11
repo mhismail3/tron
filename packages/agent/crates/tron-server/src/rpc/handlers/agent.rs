@@ -656,7 +656,8 @@ impl MethodHandler for PromptHandler {
                     .unwrap_or(working_dir);
 
                 // 2. Load project rules via ContextLoader
-                let project_rules = {
+                // Chat sessions are clean slates — no auto-injected rules
+                let project_rules = if !is_chat {
                     let wd = std::path::Path::new(&working_dir);
                     let mut loader = tron_runtime::context::loader::ContextLoader::new(
                         tron_runtime::context::loader::ContextLoaderConfig {
@@ -675,20 +676,26 @@ impl MethodHandler for PromptHandler {
                             Some(ctx.merged)
                         }
                     })
+                } else {
+                    None
                 };
 
                 // 3. Load global rules (~/.tron/CLAUDE.md)
                 let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-                let global_rules = home_dir
-                    .as_deref()
-                    .and_then(tron_runtime::context::loader::load_global_rules);
+                let global_rules = if !is_chat {
+                    home_dir
+                        .as_deref()
+                        .and_then(tron_runtime::context::loader::load_global_rules)
+                } else {
+                    None
+                };
 
                 // 4. Merge rules (global first, then project)
                 let combined_rules =
                     tron_runtime::context::loader::merge_rules(global_rules, project_rules);
 
                 // 4b. Discover scoped rules for dynamic path-based activation
-                let rules_index = {
+                let rules_index = if !is_chat {
                     let wd_path = std::path::Path::new(&working_dir);
                     let config = tron_runtime::context::rules_discovery::RulesDiscoveryConfig {
                         project_root: wd_path.to_path_buf(),
@@ -705,11 +712,13 @@ impl MethodHandler for PromptHandler {
                             discovered,
                         ))
                     }
+                } else {
+                    None
                 };
 
                 // 4c. Reconstruct prior rule activations on session resume
                 let is_resumed = !state.messages.is_empty();
-                let pre_activated_rules = if is_resumed {
+                let pre_activated_rules = if !is_chat && is_resumed {
                     let events = event_store
                         .get_events_by_type(
                             &session_id_clone,
@@ -759,7 +768,7 @@ impl MethodHandler for PromptHandler {
                 let memory = {
                     let auto_inject = &settings.context.memory.auto_inject;
 
-                    if auto_inject.enabled {
+                    if auto_inject.enabled && !is_chat {
                         if let Some(ref ec) = embedding_controller {
                             let ctrl = ec.lock().await;
                             match resolved_ws_id.as_deref() {
