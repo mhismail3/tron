@@ -119,6 +119,7 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(crate::rpc::session_context::ContextArtifactsService::new()),
         }
     }
 

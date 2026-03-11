@@ -69,6 +69,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         cron_scheduler: None,
         worktree_coordinator: None,
         device_request_broker: None,
+        context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
     };
 
     let mut registry = MethodRegistry::new();
@@ -291,6 +292,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         cron_scheduler: None,
         worktree_coordinator: None,
         device_request_broker: None,
+        context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
     };
 
     let mut registry = MethodRegistry::new();

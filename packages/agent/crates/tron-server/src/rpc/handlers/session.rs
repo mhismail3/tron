@@ -9,7 +9,7 @@ use tron_runtime::agent::event_emitter::EventEmitter;
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::{opt_bool, opt_string, require_string_param};
-use crate::rpc::handlers::session_context::{RuleFileLevel, load_session_context_artifacts};
+use crate::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 use crate::rpc::registry::MethodHandler;
 
 /// Create a new session.
@@ -44,6 +44,7 @@ impl MethodHandler for CreateSessionHandler {
         // Optimistically discover rules and memory so clients can display loading
         // indicators immediately (content is loaded later at prompt time).
         let event_store = ctx.event_store.clone();
+        let context_artifacts = ctx.context_artifacts.clone();
         let broadcast = ctx.orchestrator.broadcast().clone();
         let shutdown_coordinator = ctx.shutdown_coordinator.clone();
         let session_id_for_task = session_id.clone();
@@ -52,6 +53,7 @@ impl MethodHandler for CreateSessionHandler {
             let join = tokio::task::spawn_blocking(move || {
                 emit_optimistic_context_events(
                     &event_store,
+                    context_artifacts.as_ref(),
                     &broadcast,
                     &session_id_for_task,
                     &working_dir_for_task,
@@ -88,14 +90,16 @@ impl MethodHandler for CreateSessionHandler {
 /// indicators immediately. The actual content is loaded later when the first prompt is sent.
 fn emit_optimistic_context_events(
     event_store: &std::sync::Arc<tron_events::EventStore>,
+    context_artifacts: &ContextArtifactsService,
     broadcast: &std::sync::Arc<EventEmitter>,
     session_id: &str,
     working_dir: &str,
 ) {
     let settings = tron_settings::get_settings();
-    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, &settings, false);
+    let artifacts = context_artifacts.load(event_store.as_ref(), working_dir, &settings, false);
 
     let files_json: Vec<serde_json::Value> = artifacts
+        .session
         .rules
         .files
         .iter()
@@ -118,7 +122,7 @@ fn emit_optimistic_context_events(
     if !files_json.is_empty() {
         #[allow(clippy::cast_possible_truncation)]
         let total = files_json.len() as u32;
-        let merged_tokens = artifacts.rules.merged_tokens_estimate();
+        let merged_tokens = artifacts.session.rules.merged_tokens_estimate();
         let _ = event_store.append(&tron_events::AppendOptions {
             session_id,
             event_type: tron_events::EventType::RulesLoaded,
@@ -137,7 +141,7 @@ fn emit_optimistic_context_events(
         });
     }
 
-    if let Some(memory) = artifacts.memory {
+    if let Some(memory) = artifacts.session.memory {
         #[allow(clippy::cast_possible_truncation)]
         let count = memory.raw_event_count as u32;
 

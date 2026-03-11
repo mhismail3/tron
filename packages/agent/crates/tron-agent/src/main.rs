@@ -796,6 +796,7 @@ async fn main() -> Result<()> {
         cron_scheduler: Some(cron_scheduler.clone()),
         worktree_coordinator,
         device_request_broker: None, // set after TronServer creation (needs broadcast)
+        context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
     };
 
     // Method registry
@@ -1434,6 +1435,7 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1623,6 +1625,7 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
         };
 
         let mut registry = MethodRegistry::new();

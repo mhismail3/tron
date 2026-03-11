@@ -8,11 +8,15 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{debug, instrument, warn};
 use tron_events::EventType;
+use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
+use tron_runtime::orchestrator::agent_runner::run_agent;
+use tron_runtime::types::{AgentConfig, RunContext};
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
+use crate::rpc::session_context::{ContextArtifactsService, collect_dynamic_rule_paths};
 
 /// Extract skill/spell names from a JSON array.
 ///
@@ -130,6 +134,42 @@ fn build_user_event_payload(
         payload["spells"] = Value::Array(spells.to_vec());
     }
     payload
+}
+
+#[derive(Default)]
+struct PromptContextArtifacts {
+    rules_content: Option<String>,
+    rules_index: Option<tron_runtime::context::rules_index::RulesIndex>,
+    pre_activated_rules: Vec<String>,
+    workspace_id: Option<String>,
+}
+
+fn load_prompt_context_artifacts(
+    context_artifacts: &ContextArtifactsService,
+    event_store: &tron_events::EventStore,
+    session_id: &str,
+    working_dir: &str,
+    settings: &tron_settings::TronSettings,
+    is_chat: bool,
+    is_resumed: bool,
+) -> PromptContextArtifacts {
+    if is_chat {
+        return PromptContextArtifacts::default();
+    }
+
+    let artifacts = context_artifacts.load(event_store, working_dir, settings, is_chat);
+    let pre_activated_rules = if is_resumed {
+        collect_dynamic_rule_paths(event_store, session_id)
+    } else {
+        Vec::new()
+    };
+
+    PromptContextArtifacts {
+        rules_content: artifacts.session.rules.merged_content,
+        rules_index: artifacts.rules_index,
+        pre_activated_rules,
+        workspace_id: artifacts.workspace_id,
+    }
 }
 
 // =============================================================================
@@ -565,6 +605,7 @@ impl MethodHandler for PromptHandler {
             let is_chat = session.source.as_deref() == Some("chat");
 
             let event_store = ctx.event_store.clone();
+            let context_artifacts = ctx.context_artifacts.clone();
             let embedding_controller = ctx.embedding_controller.clone();
             let skill_registry = ctx.skill_registry.clone();
             let subagent_manager = ctx.subagent_manager.clone();
@@ -584,9 +625,6 @@ impl MethodHandler for PromptHandler {
 
             let handle = tokio::spawn(async move {
                 let _started_run = started_run;
-                use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-                use tron_runtime::orchestrator::agent_runner::run_agent;
-                use tron_runtime::types::{AgentConfig, RunContext};
 
                 // Grab settings once — consistent snapshot for the entire run
                 let settings = tron_settings::get_settings();
@@ -663,112 +701,40 @@ impl MethodHandler for PromptHandler {
                     .map(|i| i.worktree_path.to_string_lossy().to_string())
                     .unwrap_or(working_dir);
 
-                // 2. Load project rules via ContextLoader
-                // Chat sessions are clean slates — no auto-injected rules
-                let project_rules = if !is_chat {
-                    let wd = std::path::Path::new(&working_dir);
-                    let mut loader = tron_runtime::context::loader::ContextLoader::new(
-                        tron_runtime::context::loader::ContextLoaderConfig {
-                            project_root: wd.to_path_buf(),
-                            discover_standalone_files: settings
-                                .context
-                                .rules
-                                .discover_standalone_files,
-                            ..Default::default()
-                        },
-                    );
-                    loader.load(wd).ok().and_then(|ctx| {
-                        if ctx.merged.is_empty() {
-                            None
-                        } else {
-                            Some(ctx.merged)
-                        }
-                    })
-                } else {
-                    None
-                };
-
-                // 3. Load global rules (~/.tron/CLAUDE.md)
-                let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-                let global_rules = if !is_chat {
-                    home_dir
-                        .as_deref()
-                        .and_then(tron_runtime::context::loader::load_global_rules)
-                } else {
-                    None
-                };
-
-                // 4. Merge rules (global first, then project)
-                let combined_rules =
-                    tron_runtime::context::loader::merge_rules(global_rules, project_rules);
-
-                // 4b. Discover scoped rules for dynamic path-based activation
-                let rules_index = if !is_chat {
-                    let wd_path = std::path::Path::new(&working_dir);
-                    let config = tron_runtime::context::rules_discovery::RulesDiscoveryConfig {
-                        project_root: wd_path.to_path_buf(),
-                        discover_standalone_files: settings.context.rules.discover_standalone_files,
-                        exclude_root_level: true,
-                        ..Default::default()
-                    };
-                    let discovered =
-                        tron_runtime::context::rules_discovery::discover_rules_files(&config);
-                    if discovered.is_empty() {
-                        None
-                    } else {
-                        Some(tron_runtime::context::rules_index::RulesIndex::new(
-                            discovered,
-                        ))
-                    }
-                } else {
-                    None
-                };
-
-                // 4c. Reconstruct prior rule activations on session resume
                 let is_resumed = !state.messages.is_empty();
-                let pre_activated_rules = if !is_chat && is_resumed {
-                    let events = event_store
-                        .get_events_by_type(
-                            &session_id_clone,
-                            &[
-                                "rules.activated",
-                                "compact.boundary",
-                                "compact.summary",
-                                "context.cleared",
-                            ],
-                            None,
-                        )
-                        .unwrap_or_default();
-                    let boundary_types = ["compact.boundary", "compact.summary", "context.cleared"];
-                    let mut activated: Vec<String> = Vec::new();
-                    for event in &events {
-                        if boundary_types.contains(&event.event_type.as_str()) {
-                            activated.clear();
-                        } else if event.event_type == "rules.activated"
-                            && let Ok(payload) =
-                                serde_json::from_str::<serde_json::Value>(&event.payload)
-                            && let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
-                        {
-                            for rule in rules {
-                                if let Some(p) = rule.get("relativePath").and_then(|v| v.as_str())
-                                    && !activated.contains(&p.to_owned())
-                                {
-                                    activated.push(p.to_owned());
-                                }
-                            }
-                        }
+                let working_dir_for_artifacts = working_dir.clone();
+                let session_id_for_artifacts = session_id_clone.clone();
+                let event_store_for_artifacts = event_store.clone();
+                let context_artifacts_for_load = context_artifacts.clone();
+                let settings_for_artifacts = settings.clone();
+                let prompt_artifacts = match tokio::task::spawn_blocking(move || {
+                    load_prompt_context_artifacts(
+                        context_artifacts_for_load.as_ref(),
+                        event_store_for_artifacts.as_ref(),
+                        &session_id_for_artifacts,
+                        &working_dir_for_artifacts,
+                        &settings_for_artifacts,
+                        is_chat,
+                        is_resumed,
+                    )
+                })
+                .await
+                {
+                    Ok(artifacts) => artifacts,
+                    Err(error) => {
+                        warn!(
+                            session_id = %session_id_clone,
+                            working_dir = %working_dir,
+                            error = %error,
+                            "failed to load prompt context artifacts"
+                        );
+                        PromptContextArtifacts::default()
                     }
-                    activated
-                } else {
-                    vec![]
                 };
-
-                // Resolve workspace ID once for memory injection and tool context
-                let resolved_ws_id = event_store
-                    .get_workspace_by_path(&working_dir)
-                    .ok()
-                    .flatten()
-                    .map(|ws| ws.id);
+                let combined_rules = prompt_artifacts.rules_content;
+                let rules_index = prompt_artifacts.rules_index;
+                let pre_activated_rules = prompt_artifacts.pre_activated_rules;
+                let resolved_ws_id = prompt_artifacts.workspace_id;
 
                 // 5. Load workspace memory from ledger entries
                 // (rules.loaded / memory.loaded events are emitted optimistically
@@ -1380,6 +1346,7 @@ impl MethodHandler for GetAgentStateHandler {
 mod tests {
     use super::*;
     use crate::rpc::context::AgentDeps;
+    use crate::rpc::handlers::session::CreateSessionHandler;
     use crate::rpc::handlers::test_helpers::{FixedProviderFactory, make_test_context};
     use futures::stream;
     use serde_json::json;
@@ -1523,6 +1490,58 @@ mod tests {
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(Arc::new(SlowProvider))),
+            tool_factory: Arc::new(ToolRegistry::new),
+            guardrails: None,
+            hooks: None,
+        });
+        ctx
+    }
+
+    struct SignalledSlowProvider {
+        ready: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl Provider for SignalledSlowProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+        fn model(&self) -> &'static str {
+            "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let ready = self.ready.clone();
+            let s = async_stream::stream! {
+                yield Ok(StreamEvent::Start);
+                yield Ok(StreamEvent::TextDelta { delta: "partial text".into() });
+                ready.notify_waiters();
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                yield Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text("partial text")],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 3,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                });
+            };
+            Ok(Box::pin(s))
+        }
+    }
+
+    fn make_signalled_slow_context(ready: Arc<tokio::sync::Notify>) -> RpcContext {
+        let mut ctx = make_test_context();
+        ctx.agent_deps = Some(AgentDeps {
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(SignalledSlowProvider {
+                ready,
+            }))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,
@@ -2700,6 +2719,50 @@ mod tests {
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
+    #[tokio::test]
+    async fn prompt_reuses_warmed_context_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scoped_rules_dir = tmp.path().join("src").join(".claude");
+        std::fs::create_dir_all(&scoped_rules_dir).unwrap();
+        std::fs::write(scoped_rules_dir.join("AGENTS.md"), "# Scoped Rules").unwrap();
+
+        let ctx = make_text_context("Done.");
+        let result = CreateSessionHandler
+            .handle(
+                Some(json!({"workingDirectory": tmp.path().to_string_lossy()})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let sid = result["sessionId"].as_str().unwrap().to_string();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if ctx.context_artifacts.rules_index_builds() == 1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for warmup to populate rules cache");
+
+        let builds_before_prompt = ctx.context_artifacts.rules_index_builds();
+
+        let prompt = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(prompt["acknowledged"], true);
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            ctx.context_artifacts.rules_index_builds(),
+            builds_before_prompt,
+            "prompt should reuse the session.create warmup rules-index build"
+        );
+    }
+
     // ── Fix 4+6: skill/spell loading tests ──
 
     fn register_test_skill(ctx: &RpcContext, name: &str, content: &str) {
@@ -3187,10 +3250,12 @@ mod tests {
 
     #[tokio::test]
     async fn interrupted_run_persists_partial_assistant_message() {
-        let ctx = make_slow_context();
+        let ready = Arc::new(tokio::sync::Notify::new());
+        let ctx = make_signalled_slow_context(ready.clone());
+        let tempdir = tempfile::tempdir().unwrap();
         let sid = ctx
             .session_manager
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", tempdir.path().to_str().unwrap(), None)
             .unwrap();
 
         let _ = PromptHandler
@@ -3198,7 +3263,11 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            ready.notified().await;
+        })
+        .await
+        .expect("timed out waiting for first text delta");
 
         let _ = AbortHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)

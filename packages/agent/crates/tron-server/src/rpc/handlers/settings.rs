@@ -102,6 +102,12 @@ mod tests {
     use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
     use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    fn settings_reload_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
 
     fn make_ctx_with_temp_settings() -> (crate::rpc::context::RpcContext, tempfile::TempDir) {
         let mut ctx = make_test_context();
@@ -276,6 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_reloads_cached_singleton() {
+        let _guard = settings_reload_lock().lock().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         // Prime the cache with defaults pointing at temp path
@@ -316,6 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_reloads_ledger_toggle() {
+        let _guard = settings_reload_lock().lock().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         // Prime the cache

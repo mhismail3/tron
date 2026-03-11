@@ -40,7 +40,6 @@ pub mod plan;
 pub mod sandbox;
 pub mod search;
 pub mod session;
-pub(crate) mod session_context;
 pub mod settings;
 pub mod skills;
 pub mod system;
@@ -354,6 +353,7 @@ pub(crate) mod test_helpers {
     use tron_tools::registry::ToolRegistry;
 
     use crate::rpc::context::{AgentDeps, RpcContext};
+    use crate::rpc::session_context::ContextArtifactsService;
 
     /// A no-op mock provider for tests.
     pub struct MockProvider;
@@ -479,6 +479,7 @@ pub(crate) mod test_helpers {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(ContextArtifactsService::new()),
         }
     }
 
@@ -514,6 +515,7 @@ pub(crate) mod test_helpers {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(ContextArtifactsService::new()),
         }
     }
 }

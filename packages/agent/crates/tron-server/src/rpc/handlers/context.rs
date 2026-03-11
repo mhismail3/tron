@@ -16,12 +16,11 @@ use tron_skills::registry::SkillRegistry;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::session_context::{
-    RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
-    load_session_context_artifacts,
-};
 use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
+use crate::rpc::session_context::{
+    RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
+};
 
 // =============================================================================
 // Shared helper
@@ -63,12 +62,15 @@ fn build_context_manager_for_session(
 
     let settings = tron_settings::get_settings();
     let is_chat = session.source.as_deref() == Some("chat");
-    let artifacts = load_session_context_artifacts(
-        ctx.event_store.as_ref(),
-        &session.working_directory,
-        &settings,
-        is_chat,
-    );
+    let artifacts = ctx
+        .context_artifacts
+        .load(
+            ctx.event_store.as_ref(),
+            &session.working_directory,
+            &settings,
+            is_chat,
+        )
+        .session;
 
     // 6. Get tool definitions
     let tools = ctx
@@ -1520,6 +1522,7 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
+            context_artifacts: Arc::new(crate::rpc::session_context::ContextArtifactsService::new()),
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))

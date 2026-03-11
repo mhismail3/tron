@@ -68,6 +68,24 @@ pub struct DiscoveredRulesFile {
     pub modified_at: SystemTime,
 }
 
+/// Metadata for a scanned directory during rules discovery.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScannedRulesDirectory {
+    /// Absolute path to the directory.
+    pub path: PathBuf,
+    /// Last modification time at scan time.
+    pub modified_at: Option<SystemTime>,
+}
+
+/// Full rules discovery output: discovered files plus the directories visited.
+#[derive(Clone, Debug, Default)]
+pub struct RulesDiscoveryResult {
+    /// Discovered rules files.
+    pub files: Vec<DiscoveredRulesFile>,
+    /// Directories whose contents were examined during the scan.
+    pub scanned_dirs: Vec<ScannedRulesDirectory>,
+}
+
 /// Configuration for rules discovery.
 #[derive(Clone, Debug)]
 pub struct RulesDiscoveryConfig {
@@ -110,8 +128,14 @@ impl Default for RulesDiscoveryConfig {
 /// (`.claude/`, `.tron/`, `.agent/`) and optionally as standalone files.
 /// Returns files classified as global or scoped based on their location.
 pub fn discover_rules_files(config: &RulesDiscoveryConfig) -> Vec<DiscoveredRulesFile> {
+    discover_rules_files_with_state(config).files
+}
+
+/// Discover rules files and return the directory scan state used to find them.
+pub fn discover_rules_files_with_state(config: &RulesDiscoveryConfig) -> RulesDiscoveryResult {
     let mut results = Vec::new();
     let mut seen_real_paths = HashSet::new();
+    let mut scanned_dirs = Vec::new();
 
     let mut ctx = ScanContext {
         project_root: &config.project_root,
@@ -121,11 +145,15 @@ pub fn discover_rules_files(config: &RulesDiscoveryConfig) -> Vec<DiscoveredRule
         exclude_root_level: config.exclude_root_level,
         results: &mut results,
         seen_real_paths: &mut seen_real_paths,
+        scanned_dirs: &mut scanned_dirs,
     };
 
     scan_directory(&config.project_root, 0, &mut ctx);
 
-    results
+    RulesDiscoveryResult {
+        files: results,
+        scanned_dirs,
+    }
 }
 
 struct ScanContext<'a> {
@@ -136,6 +164,7 @@ struct ScanContext<'a> {
     exclude_root_level: bool,
     results: &'a mut Vec<DiscoveredRulesFile>,
     seen_real_paths: &'a mut HashSet<PathBuf>,
+    scanned_dirs: &'a mut Vec<ScannedRulesDirectory>,
 }
 
 fn scan_directory(dir: &Path, current_depth: u32, ctx: &mut ScanContext<'_>) {
@@ -143,11 +172,24 @@ fn scan_directory(dir: &Path, current_depth: u32, ctx: &mut ScanContext<'_>) {
         return;
     }
 
+    ctx.scanned_dirs.push(ScannedRulesDirectory {
+        path: dir.to_path_buf(),
+        modified_at: fs::metadata(dir).ok().and_then(|meta| meta.modified().ok()),
+    });
+
     let is_root = dir == ctx.project_root;
 
     // Check agent dirs for context files at this level
     for agent_dir in AGENT_DIRS {
         let agent_dir_path = dir.join(agent_dir);
+        if agent_dir_path.is_dir() {
+            ctx.scanned_dirs.push(ScannedRulesDirectory {
+                path: agent_dir_path.clone(),
+                modified_at: fs::metadata(&agent_dir_path)
+                    .ok()
+                    .and_then(|meta| meta.modified().ok()),
+            });
+        }
         if let Ok(entries) = fs::read_dir(&agent_dir_path) {
             for entry in entries.flatten() {
                 let Ok(ft) = entry.file_type() else {
