@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 
+use crate::rpc::canvas_service;
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::require_string_param;
@@ -17,24 +18,8 @@ impl MethodHandler for GetCanvasHandler {
     #[instrument(skip(self, ctx), fields(method = "canvas.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let canvas_id = require_string_param(params.as_ref(), "canvasId")?;
-
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let canvas_path = format!("{home}/.tron/artifacts/canvases/{canvas_id}.json");
-
         ctx.run_blocking("canvas.get", move || {
-            if let Ok(content) = std::fs::read_to_string(&canvas_path)
-                && let Ok(canvas) = serde_json::from_str::<Value>(&content)
-            {
-                return Ok(serde_json::json!({
-                    "found": true,
-                    "canvas": canvas,
-                }));
-            }
-
-            Ok(serde_json::json!({
-                "found": false,
-                "canvas": null,
-            }))
+            Ok(canvas_service::get_canvas(&canvas_id))
         })
         .await
     }

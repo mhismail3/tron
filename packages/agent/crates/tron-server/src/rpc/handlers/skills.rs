@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tokio::task;
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
@@ -81,15 +80,13 @@ impl MethodHandler for RefreshSkillsHandler {
 
         let skill_registry = ctx.skill_registry.clone();
         let working_dir = working_dir.to_string();
-        let count = task::spawn_blocking(move || {
-            let mut registry = skill_registry.write();
-            registry.refresh(&working_dir);
-            registry.list(None).len()
-        })
-        .await
-        .map_err(|e| RpcError::Internal {
-            message: format!("Failed to refresh skills in blocking task: {e}"),
-        })?;
+        let count = ctx
+            .run_blocking("skill.refresh", move || {
+                let mut registry = skill_registry.write();
+                registry.refresh(&working_dir);
+                Ok(registry.list(None).len())
+            })
+            .await?;
 
         Ok(serde_json::json!({ "success": true, "skillCount": count }))
     }

@@ -10,11 +10,7 @@ use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::transcription::{normalize_base64, transcribe_audio};
 use crate::rpc::handlers::{opt_string, opt_u64, require_string_param};
 use crate::rpc::registry::MethodHandler;
-
-fn notes_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    format!("{home}/.tron/notes/Voice Notes")
-}
+use crate::rpc::voice_notes_service;
 
 /// Save a voice note (accepts base64 audio, writes markdown with frontmatter).
 ///
@@ -30,13 +26,10 @@ impl MethodHandler for SaveHandler {
 
         let mime_type_owned = opt_string(params.as_ref(), "mimeType");
         let mime_type = mime_type_owned.as_deref().unwrap_or("audio/wav");
-        let dir = notes_dir();
+        let dir = voice_notes_service::notes_dir();
         let create_dir = dir.clone();
         ctx.run_blocking("voiceNotes.mkdir", move || {
-            std::fs::create_dir_all(&create_dir).map_err(|e| RpcError::Internal {
-                message: format!("Failed to create voice notes directory: {e}"),
-            })?;
-            Ok(())
+            voice_notes_service::ensure_notes_dir(&create_dir)
         })
         .await?;
 
@@ -67,10 +60,7 @@ impl MethodHandler for SaveHandler {
         );
         let write_path = filepath.clone();
         ctx.run_blocking("voiceNotes.write", move || {
-            std::fs::write(&write_path, &content).map_err(|e| RpcError::Internal {
-                message: format!("Failed to write voice note: {e}"),
-            })?;
-            Ok(())
+            voice_notes_service::write_note(&write_path, &content)
         })
         .await?;
 
@@ -97,73 +87,9 @@ impl MethodHandler for ListHandler {
         let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 50)).unwrap_or(usize::MAX);
         let offset = usize::try_from(opt_u64(params.as_ref(), "offset", 0)).unwrap_or(0);
 
-        let dir = notes_dir();
+        let dir = voice_notes_service::notes_dir();
         ctx.run_blocking("voiceNotes.list", move || {
-            let mut notes = Vec::new();
-
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if !name.ends_with("-voice-note.md") {
-                        continue;
-                    }
-                    let path = entry.path();
-                    let content = std::fs::read_to_string(&path).unwrap_or_default();
-
-                    let mut created_at = String::new();
-                    let mut duration_seconds: Option<f64> = None;
-                    let mut language: Option<String> = None;
-                    let mut transcript = String::new();
-
-                    if let Some(stripped) = content.strip_prefix("---\n")
-                        && let Some(end) = stripped.find("---\n")
-                    {
-                        let fm = &stripped[..end];
-                        for line in fm.lines() {
-                            if let Some(val) = line.strip_prefix("created: ") {
-                                created_at = val.trim().to_string();
-                            } else if let Some(val) = line.strip_prefix("duration: ") {
-                                duration_seconds = val.trim().parse().ok();
-                            } else if let Some(val) = line.strip_prefix("language: ") {
-                                language = Some(val.trim().to_string());
-                            }
-                        }
-                        transcript = content[4 + end + 4..].trim().to_string();
-                    }
-
-                    let preview = if transcript.len() > 100 {
-                        transcript[..100].to_string()
-                    } else {
-                        transcript.clone()
-                    };
-
-                    notes.push(serde_json::json!({
-                        "filename": name,
-                        "filepath": path.to_string_lossy(),
-                        "createdAt": created_at,
-                        "durationSeconds": duration_seconds,
-                        "language": language,
-                        "preview": preview,
-                        "transcript": transcript,
-                    }));
-                }
-            }
-
-            notes.sort_by(|a, b| {
-                let a_ts = a["createdAt"].as_str().unwrap_or("");
-                let b_ts = b["createdAt"].as_str().unwrap_or("");
-                b_ts.cmp(a_ts)
-            });
-
-            let total_count = notes.len();
-            let has_more = offset + limit < total_count;
-            let notes: Vec<Value> = notes.into_iter().skip(offset).take(limit).collect();
-
-            Ok(serde_json::json!({
-                "notes": notes,
-                "totalCount": total_count,
-                "hasMore": has_more,
-            }))
+            Ok(voice_notes_service::list_notes(&dir, limit, offset))
         })
         .await
     }
@@ -177,15 +103,14 @@ impl MethodHandler for DeleteHandler {
     #[instrument(skip(self, ctx), fields(method = "voiceNotes.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let filename = require_string_param(params.as_ref(), "filename")?;
-        let filepath = format!("{}/{filename}", notes_dir());
+        let filepath = format!("{}/{filename}", voice_notes_service::notes_dir());
+        let filename_for_response = filename.clone();
 
         ctx.run_blocking("voiceNotes.delete", move || {
-            let _ = std::fs::remove_file(&filepath);
-
-            Ok(serde_json::json!({
-                "success": true,
-                "filename": filename,
-            }))
+            Ok(voice_notes_service::delete_note(
+                &filepath,
+                &filename_for_response,
+            ))
         })
         .await
     }
@@ -200,7 +125,7 @@ mod tests {
 
     #[test]
     fn notes_dir_returns_voice_notes_subdirectory() {
-        let dir = notes_dir();
+        let dir = voice_notes_service::notes_dir();
         assert!(
             dir.ends_with("Voice Notes"),
             "Expected 'Voice Notes' subdir, got: {dir}"
@@ -302,7 +227,7 @@ mod tests {
     async fn delete_voice_note_by_filename() {
         let ctx = make_test_context();
         // Create a temp note
-        let dir = notes_dir();
+        let dir = voice_notes_service::notes_dir();
         let _ = std::fs::create_dir_all(&dir);
         let filename = "test-delete-voice-note.md";
         let path = format!("{dir}/{filename}");

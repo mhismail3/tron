@@ -1,88 +1,45 @@
 //! Git handler: clone.
 
-use std::sync::LazyLock;
-
 use async_trait::async_trait;
-use regex::Regex;
 use serde_json::Value;
 use tokio::time::{Duration, timeout};
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
+use crate::rpc::git_service;
 use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
-
-static GIT_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^https://(github\.com|gitlab\.com|bitbucket\.org)/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$",
-    )
-    .unwrap()
-});
-
-/// Validate a GitHub/GitLab URL.
-fn is_valid_git_url(url: &str) -> bool {
-    GIT_URL_RE.is_match(url)
-}
-
-/// Check for path traversal in a target directory.
-fn has_path_traversal(path: &str) -> bool {
-    path.contains("..") || path.contains('\0')
-}
 
 /// Clone a git repository.
 pub struct CloneHandler;
 
 #[async_trait]
 impl MethodHandler for CloneHandler {
-    #[instrument(skip(self, _ctx), fields(method = "git.clone"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "git.clone"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let url = require_string_param(params.as_ref(), "url")?;
         let target_path = require_string_param(params.as_ref(), "targetPath")?;
-
-        if !is_valid_git_url(&url) {
-            return Err(RpcError::InvalidParams {
-                message: format!("Invalid git URL: {url}"),
-            });
-        }
-
-        if has_path_traversal(&target_path) {
-            return Err(RpcError::InvalidParams {
-                message: "Target directory contains path traversal".into(),
-            });
-        }
-
-        let repo_name = url
-            .rsplit('/')
-            .next()
-            .unwrap_or("repo")
-            .trim_end_matches(".git");
-
-        let target_dir = std::path::PathBuf::from(&target_path);
-
-        // Check if target already exists
-        if target_dir.exists() {
-            return Err(RpcError::Custom {
-                code: errors::ALREADY_EXISTS.into(),
-                message: format!("Target directory already exists: {}", target_dir.display()),
-                details: None,
-            });
-        }
-
-        // Ensure parent dir exists
-        if let Some(parent) = target_dir.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| RpcError::Internal {
-                message: format!("Failed to create parent directory: {e}"),
-            })?;
-        }
+        let url_for_clone = url.clone();
+        let clone_request = ctx
+            .run_blocking("git.clone.prepare", move || {
+                git_service::prepare_clone(&url, &target_path)
+            })
+            .await?;
 
         // Execute git clone with timeout
         let output = timeout(
             CLONE_TIMEOUT,
             tokio::process::Command::new("git")
-                .args(["clone", "--depth", "1", &url, &target_dir.to_string_lossy()])
+                .args([
+                    "clone",
+                    "--depth",
+                    "1",
+                    &url_for_clone,
+                    &clone_request.target_dir.to_string_lossy(),
+                ])
                 .output(),
         )
         .await
@@ -115,8 +72,8 @@ impl MethodHandler for CloneHandler {
 
         Ok(serde_json::json!({
             "success": true,
-            "path": target_dir.to_string_lossy(),
-            "repoName": repo_name,
+            "path": clone_request.target_dir.to_string_lossy(),
+            "repoName": clone_request.repo_name,
         }))
     }
 }
@@ -129,26 +86,40 @@ mod tests {
 
     #[test]
     fn valid_github_url() {
-        assert!(is_valid_git_url("https://github.com/user/repo"));
-        assert!(is_valid_git_url("https://github.com/user/repo.git"));
-        assert!(is_valid_git_url("https://gitlab.com/org/project"));
-        assert!(is_valid_git_url("https://bitbucket.org/team/repo"));
+        assert!(git_service::is_valid_git_url(
+            "https://github.com/user/repo"
+        ));
+        assert!(git_service::is_valid_git_url(
+            "https://github.com/user/repo.git"
+        ));
+        assert!(git_service::is_valid_git_url(
+            "https://gitlab.com/org/project"
+        ));
+        assert!(git_service::is_valid_git_url(
+            "https://bitbucket.org/team/repo"
+        ));
     }
 
     #[test]
     fn invalid_git_url() {
-        assert!(!is_valid_git_url("http://github.com/user/repo"));
-        assert!(!is_valid_git_url("https://evil.com/user/repo"));
-        assert!(!is_valid_git_url("not a url"));
-        assert!(!is_valid_git_url("https://github.com/../../../etc/passwd"));
+        assert!(!git_service::is_valid_git_url(
+            "http://github.com/user/repo"
+        ));
+        assert!(!git_service::is_valid_git_url("https://evil.com/user/repo"));
+        assert!(!git_service::is_valid_git_url("not a url"));
+        assert!(!git_service::is_valid_git_url(
+            "https://github.com/../../../etc/passwd"
+        ));
     }
 
     #[test]
     fn path_traversal_detected() {
-        assert!(has_path_traversal("../../../etc"));
-        assert!(has_path_traversal("/tmp/test/../../../etc"));
-        assert!(!has_path_traversal("/tmp/my-repo"));
-        assert!(!has_path_traversal("/home/user/Workspace/repo"));
+        assert!(git_service::has_path_traversal("../../../etc"));
+        assert!(git_service::has_path_traversal("/tmp/test/../../../etc"));
+        assert!(!git_service::has_path_traversal("/tmp/my-repo"));
+        assert!(!git_service::has_path_traversal(
+            "/home/user/Workspace/repo"
+        ));
     }
 
     #[tokio::test]

@@ -2,43 +2,13 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::path::Path;
-use tokio::task;
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::require_param;
 use crate::rpc::registry::MethodHandler;
-
-fn read_settings_json(path: &Path) -> Result<Value, RpcError> {
-    if !path.exists() {
-        return Ok(Value::Object(serde_json::Map::default()));
-    }
-
-    let content = std::fs::read_to_string(path).map_err(|e| RpcError::Internal {
-        message: format!("Failed to read settings: {e}"),
-    })?;
-
-    Ok(serde_json::from_str::<Value>(&content)
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::default())))
-}
-
-fn write_settings_json(path: &Path, value: &Value) -> Result<(), RpcError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| RpcError::Internal {
-            message: format!("Failed to create settings directory: {e}"),
-        })?;
-    }
-
-    let content = serde_json::to_string_pretty(value).map_err(|e| RpcError::Internal {
-        message: e.to_string(),
-    })?;
-    std::fs::write(path, content).map_err(|e| RpcError::Internal {
-        message: format!("Failed to write settings: {e}"),
-    })?;
-    Ok(())
-}
+use crate::rpc::settings_service;
 
 /// Get current settings.
 pub struct GetSettingsHandler;
@@ -48,19 +18,10 @@ impl MethodHandler for GetSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.get"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let settings_path = ctx.settings_path.clone();
-        let settings = task::spawn_blocking(move || {
-            tron_settings::load_settings_from_path(&settings_path).unwrap_or_default()
+        ctx.run_blocking("settings.get", move || {
+            settings_service::load_settings_value(&settings_path)
         })
         .await
-        .map_err(|e| RpcError::Internal {
-            message: format!("Failed to load settings in blocking task: {e}"),
-        })?;
-
-        let value = serde_json::to_value(settings).map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
-
-        Ok(value)
     }
 }
 
@@ -73,24 +34,10 @@ impl MethodHandler for UpdateSettingsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let updates = require_param(params.as_ref(), "settings")?.clone();
         let settings_path = ctx.settings_path.clone();
-        task::spawn_blocking(move || -> Result<(), RpcError> {
-            let current = read_settings_json(&settings_path)?;
-
-            // Deep merge updates over current
-            let merged = tron_settings::deep_merge(current, updates);
-
-            write_settings_json(&settings_path, &merged)?;
-
-            // Reload the global settings cache so all subsequent
-            // get_settings() calls return the updated values.
-            tron_settings::reload_settings_from_path(&settings_path);
-
-            Ok(())
+        ctx.run_blocking("settings.update", move || {
+            settings_service::update_settings(&settings_path, updates)
         })
-        .await
-        .map_err(|e| RpcError::Internal {
-            message: format!("Settings update task failed: {e}"),
-        })??;
+        .await?;
 
         Ok(serde_json::json!({ "success": true }))
     }
@@ -100,14 +47,9 @@ impl MethodHandler for UpdateSettingsHandler {
 mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::make_test_context;
+    use crate::rpc::settings_service::settings_reload_lock;
     use serde_json::json;
     use std::path::PathBuf;
-    use std::sync::OnceLock;
-
-    fn settings_reload_lock() -> &'static tokio::sync::Mutex<()> {
-        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-    }
 
     fn make_ctx_with_temp_settings() -> (crate::rpc::context::RpcContext, tempfile::TempDir) {
         let mut ctx = make_test_context();

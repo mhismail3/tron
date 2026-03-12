@@ -14,17 +14,23 @@
 
 pub(crate) mod agent_commands;
 pub(crate) mod agent_queries;
+pub(crate) mod canvas_service;
 pub(crate) mod client_logs;
 pub mod context;
 pub mod errors;
+pub(crate) mod filesystem_service;
+pub(crate) mod git_service;
 pub mod handlers;
 pub(crate) mod memory_commands;
 pub mod memory_ledger;
 pub(crate) mod memory_queries;
 pub(crate) mod notification_inbox;
 pub mod registry;
+pub(crate) mod sandbox_service;
 pub(crate) mod session_commands;
 pub mod session_context;
 pub(crate) mod session_queries;
+pub(crate) mod settings_service;
 pub mod types;
 pub mod validation;
+pub(crate) mod voice_notes_service;
