@@ -1,10 +1,10 @@
 //! Server-side deploy: types, sentinel I/O, atomic binary install, Axum handlers.
 
+mod service;
+
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 
-use crate::rpc::types::RpcEvent;
+use self::service::DeployService;
 use crate::server::AppState;
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -640,35 +640,7 @@ pub fn codesign_binary(path: &Path) {
 
 /// GET /deploy/status
 pub async fn status_handler(State(state): State<AppState>) -> Json<DeployStatusResponse> {
-    let binary_path = &state.deploy_binary_path;
-    let deploy_dir = &state.deploy_dir;
-
-    let (deployed_commit, sentinel, binary_metadata) = tokio::join!(
-        read_deployed_commit_async(deploy_dir),
-        read_sentinel_async(deploy_dir),
-        tokio::fs::metadata(binary_path),
-    );
-
-    let binary_exists = binary_metadata.is_ok();
-    let binary_modified = binary_metadata
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .map(|t| {
-            let dt: chrono::DateTime<chrono::Utc> = t.into();
-            dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        });
-
-    let restart_initiated = state.deploy_restart_initiated.load(Ordering::Relaxed);
-
-    Json(DeployStatusResponse {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        deployed_commit,
-        binary_path: binary_path.to_string_lossy().to_string(),
-        binary_exists,
-        binary_modified,
-        restart_initiated,
-        sentinel,
-    })
+    Json(DeployService::new(&state).status().await)
 }
 
 /// POST /deploy/restart
@@ -676,175 +648,17 @@ pub async fn restart_handler(
     State(state): State<AppState>,
     axum::Json(req): axum::Json<DeployRestartRequest>,
 ) -> Result<Json<DeployRestartResponse>, (StatusCode, Json<Value>)> {
-    // Guard: prevent double-restart
-    if state
-        .deploy_restart_initiated
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "restart already initiated" })),
-        ));
-    }
-
-    let installed_binary = &state.deploy_binary_path;
-    let deploy_dir = &state.deploy_dir;
-
-    // Resolve source binary
-    let workspace_root = resolve_workspace_root();
-    let source = resolve_source_binary(req.source_binary.as_deref(), workspace_root.as_deref())
-        .ok_or_else(|| {
-            state
-                .deploy_restart_initiated
-                .store(false, Ordering::SeqCst);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "cannot resolve source binary: set TRON_REPO_ROOT env or pass sourceBinary"
-                })),
-            )
-        })?;
-
-    // Validate source exists
-    if tokio::fs::metadata(&source).await.is_err() {
-        state
-            .deploy_restart_initiated
-            .store(false, Ordering::SeqCst);
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": format!("source binary not found: {}", source.display())
-            })),
-        ));
-    }
-
-    // Read commits
-    let previous_commit = read_deployed_commit_async(deploy_dir).await;
-    let workspace_root_for_git = workspace_root.clone();
-    let new_commit = tokio::task::spawn_blocking(move || {
-        workspace_root_for_git
-            .as_deref()
-            .and_then(git_head_commit)
-            .unwrap_or_else(|| "unknown".to_string())
-    })
-    .await
-    .map_err(|error| {
-        state
-            .deploy_restart_initiated
-            .store(false, Ordering::SeqCst);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("failed to resolve git commit: {error}") })),
-        )
-    })?;
-
-    // Ensure deployment dir exists
-    let _ = tokio::fs::create_dir_all(&deploy_dir).await;
-
-    // Atomic binary install (backup + copy)
-    let _ = atomic_binary_install(&source, installed_binary, deploy_dir)
+    DeployService::new(&state)
+        .restart(req)
         .await
-        .map_err(|e| {
-            state
-                .deploy_restart_initiated
-                .store(false, Ordering::SeqCst);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("binary install failed: {e}") })),
-            )
-        })?;
-
-    // Write deployed commit
-    let commit_path = deploy_dir.join("deployed-commit");
-    let _ = tokio::fs::write(&commit_path, &new_commit).await;
-
-    // Write sentinel
-    let sentinel = RestartSentinel {
-        action: "deploy".to_string(),
-        timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        commit: new_commit.clone(),
-        previous_commit: previous_commit.clone(),
-        status: "restarting".to_string(),
-        completed_at: None,
-        initiated_by: req.session_id.or_else(|| Some("api".to_string())),
-        self_test: None,
-    };
-    let deploy_dir_for_sentinel = deploy_dir.clone();
-    let sentinel_for_write = sentinel.clone();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        write_sentinel(&deploy_dir_for_sentinel, &sentinel_for_write)
-    })
-    .await
-    .unwrap_or_else(|error| Err(io::Error::other(error.to_string())))
-    {
-        warn!(error = %e, "failed to write restart sentinel (non-fatal)");
-    }
-
-    let delay_ms = req.delay_ms;
-
-    // Spawn background shutdown task (runs AFTER this response reaches the client)
-    let broadcast = state.broadcast.clone();
-    let shutdown = state.shutdown.clone();
-    let orchestrator = state.rpc_context.orchestrator.clone();
-
-    #[allow(clippy::let_underscore_future)]
-    let _ = tokio::spawn(async move {
-        // 1. Wait for response to reach client + agent to finish turn
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-
-        // 2. Broadcast server.restarting to all WebSocket clients
-        let event = RpcEvent::new(
-            "server.restarting",
-            None,
-            Some(json!({
-                "reason": "deploy",
-                "commit": sentinel.commit,
-                "restartExpectedMs": 5000,
-            })),
-        );
-        broadcast.broadcast_all(&event).await;
-
-        // 3. Drain active agent runs (poll 500ms, max 30s)
-        let drain_start = Instant::now();
-        let drain_timeout = Duration::from_secs(30);
-        loop {
-            let active = orchestrator.active_run_count();
-            if active == 0 {
-                info!("deploy: all agent runs drained");
-                break;
-            }
-            if drain_start.elapsed() >= drain_timeout {
-                warn!(active, "deploy: drain timeout, proceeding with active runs");
-                break;
-            }
-            debug!(active, "deploy: waiting for agent runs to drain...");
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        // 4. Graceful shutdown
-        info!("deploy: initiating graceful shutdown");
-        shutdown
-            .graceful_shutdown(vec![], Some(Duration::from_secs(5)))
-            .await;
-
-        // 5. Exit with non-zero code so launchd's SuccessfulExit:false restarts us.
-        // Code 42 = intentional deploy restart (not a crash or error).
-        info!("deploy: exiting process for restart (code 42)");
-        std::process::exit(42);
-    });
-
-    Ok(Json(DeployRestartResponse {
-        ok: true,
-        restarting_in_ms: delay_ms,
-        commit: new_commit,
-        previous_commit,
-    }))
+        .map(Json)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     // ── Sentinel serialization ─────────────────────────────────────────
 
@@ -1516,6 +1330,73 @@ mod tests {
         assert_eq!(after.modified().unwrap(), before_modified);
 
         server.shutdown().shutdown();
+    }
+
+    #[tokio::test]
+    async fn deploy_restart_writes_commit_and_sentinel_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("fake-binary");
+        std::fs::write(&src, b"fake tron binary").unwrap();
+
+        let server = make_isolated_test_server(dir.path());
+        let app = server.router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/deploy/restart")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"sourceBinary": "{}", "delayMs": 60000, "sessionId": "sess-123"}}"#,
+                src.display()
+            )))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 10_000)
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_slice(&body).unwrap();
+
+        let deployed_commit =
+            std::fs::read_to_string(dir.path().join("deploy").join("deployed-commit")).unwrap();
+        assert_eq!(deployed_commit.trim(), response["commit"].as_str().unwrap());
+
+        let sentinel = read_sentinel(&dir.path().join("deploy")).unwrap();
+        assert_eq!(sentinel.status, "restarting");
+        assert_eq!(sentinel.commit, response["commit"].as_str().unwrap());
+        assert_eq!(
+            sentinel.previous_commit,
+            response["previousCommit"].as_str().unwrap()
+        );
+        assert_eq!(sentinel.initiated_by.as_deref(), Some("sess-123"));
+
+        server.shutdown().shutdown();
+    }
+
+    #[tokio::test]
+    async fn deploy_restart_fails_when_deploy_dir_is_not_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("fake-binary");
+        std::fs::write(&src, b"fake tron binary").unwrap();
+        std::fs::write(dir.path().join("deploy"), b"not a directory").unwrap();
+
+        let server = make_isolated_test_server(dir.path());
+        let app = server.router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/deploy/restart")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"sourceBinary": "{}", "delayMs": 60000}}"#,
+                src.display()
+            )))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!server.deploy_restart_initiated().load(Ordering::SeqCst));
+        assert!(read_sentinel(&dir.path().join("deploy")).is_none());
     }
 
     // ── Self-test tests ───────────────────────────────────────────────

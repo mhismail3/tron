@@ -946,6 +946,16 @@ cmd_deploy() {
     cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
     cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
 
+    # Install runtime CLI (only if changed)
+    local cli_source="$SCRIPT_DIR/tron-cli"
+    if [ -f "$cli_source" ]; then
+        if ! cmp -s "$cli_source" "$DEPLOY_DIR/tron-cli"; then
+            cp "$cli_source" "$DEPLOY_DIR/tron-cli"
+            chmod +x "$DEPLOY_DIR/tron-cli"
+            print_success "Updated runtime CLI"
+        fi
+    fi
+
     # Regenerate plist so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
     create_launchd_plist
@@ -1051,10 +1061,18 @@ cmd_install() {
     create_launchd_plist
     print_success "Created: $PLIST_PATH"
 
-    # Install CLI symlink
+    # Install runtime CLI
+    local cli_source="$SCRIPT_DIR/tron-cli"
+    if [ -f "$cli_source" ]; then
+        cp "$cli_source" "$DEPLOY_DIR/tron-cli"
+        chmod +x "$DEPLOY_DIR/tron-cli"
+        print_success "Installed runtime CLI"
+    fi
+
+    # Symlink global tron command to runtime CLI (not workspace)
     print_status "Installing tron CLI..."
-    ln -sf "$SCRIPT_DIR/tron" "$BIN_DIR/tron"
-    print_success "Installed: $BIN_DIR/tron -> $SCRIPT_DIR/tron"
+    ln -sf "$DEPLOY_DIR/tron-cli" "$BIN_DIR/tron"
+    print_success "Installed: $BIN_DIR/tron -> $DEPLOY_DIR/tron-cli"
 
     # Check PATH
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -1235,11 +1253,19 @@ EOF
         run_tests || print_warning "Some tests failed (continuing anyway)"
     fi
 
-    # Create symlink for global 'tron' command
+    # Install runtime CLI and create symlink
     print_status "Setting up tron command..."
     mkdir -p "$HOME/.local/bin"
-    ln -sf "$PROJECT_DIR/scripts/tron" "$HOME/.local/bin/tron"
-    print_success "Created symlink: ~/.local/bin/tron"
+    local cli_source="$SCRIPT_DIR/tron-cli"
+    if [ -f "$cli_source" ]; then
+        cp "$cli_source" "$DEPLOY_DIR/tron-cli"
+        chmod +x "$DEPLOY_DIR/tron-cli"
+        ln -sf "$DEPLOY_DIR/tron-cli" "$HOME/.local/bin/tron"
+        print_success "Created symlink: ~/.local/bin/tron -> $DEPLOY_DIR/tron-cli"
+    else
+        ln -sf "$PROJECT_DIR/scripts/tron" "$HOME/.local/bin/tron"
+        print_warning "tron-cli not found, falling back to workspace symlink"
+    fi
 
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         print_warning "~/.local/bin is not in your PATH"
@@ -1763,32 +1789,26 @@ cmd_help() {
     echo ""
     echo "Usage: tron <command> [options]"
     echo ""
-    echo "Development:"
+    echo -e "${BOLD}Development (workspace only):${NC}"
     echo "  dev             Start server (-b build, -t test, -d background)"
     echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
     echo "  bench           Performance benchmarks (run, compare)"
     echo "  setup           First-time project setup"
     echo ""
-    echo "Service:"
+    echo -e "${BOLD}Deployment (workspace only):${NC}"
+    echo "  preflight       Pre-deploy infrastructure check"
+    echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
+    echo "  install         Initial setup (launchd + CLI)"
+    echo "  uninstall       Remove service (preserves data)"
+    echo ""
+    echo -e "${BOLD}Runtime (available globally via tron-cli):${NC}"
     echo "  start           Start launchd service"
     echo "  stop            Stop service"
     echo "  restart         Restart service"
     echo "  status          Show service status"
-    echo ""
-    echo "Deployment:"
-    echo "  preflight       Pre-deploy infrastructure check"
-    echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
-    echo "  install         Initial setup (launchd + CLI)"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
-    echo "  uninstall       Remove service (preserves data)"
-    echo ""
-    echo "Auth:"
     echo "  login           Authenticate with Claude (--label <name> for multi-account)"
-    echo ""
-    echo "Data:"
     echo "  backfill-ledger Import LEDGER.jsonl entries as memory events"
-    echo ""
-    echo "Logs:"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""
@@ -1808,6 +1828,17 @@ case "${1:-help}" in
 esac
 
 ensure_tron_home
+
+# Delegate runtime commands to installed tron-cli if available.
+# This allows `tron status`, `tron start`, etc. to work without the workspace.
+RUNTIME_CLI="$DEPLOY_DIR/tron-cli"
+case "$1" in
+    status|start|stop|restart|logs|errors|rollback|login|backfill-ledger)
+        if [ -f "$RUNTIME_CLI" ] && [ -x "$RUNTIME_CLI" ]; then
+            exec "$RUNTIME_CLI" "$@"
+        fi
+        ;;
+esac
 
 case "$1" in
     dev)       shift; cmd_dev "$@" ;;
