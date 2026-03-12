@@ -169,7 +169,7 @@ pub struct AgentConfig {
 }
 
 const fn default_max_turns() -> u32 {
-    25
+    250
 }
 
 impl Default for AgentConfig {
@@ -368,7 +368,7 @@ mod tests {
     fn agent_config_default() {
         let cfg = AgentConfig::default();
         assert_eq!(cfg.model, "claude-opus-4-6");
-        assert_eq!(cfg.max_turns, 25);
+        assert_eq!(cfg.max_turns, 250);
         assert!(!cfg.enable_thinking);
         assert!(cfg.stop_sequences.is_empty());
         assert!(cfg.provider_type.is_none());

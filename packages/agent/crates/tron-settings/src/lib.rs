@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(settings.server.default_provider, "anthropic");
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 1);
-        assert_eq!(settings.agent.max_turns, 100);
+        assert_eq!(settings.agent.max_turns, 250);
         assert_eq!(settings.tools.bash.default_timeout_ms, 120_000);
         assert_eq!(settings.context.compactor.max_tokens, 25_000);
         assert!(settings.context.memory.embedding.enabled);

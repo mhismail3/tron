@@ -152,7 +152,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         let agent_config = tron_runtime::AgentConfig {
             model: model.to_owned(),
             system_prompt: system_prompt.map(String::from),
-            max_turns: 25,
+            max_turns: 100,
             enable_thinking: true,
             working_directory: Some(workspace_path.clone()),
             server_origin: Some(self.origin.clone()),

@@ -94,7 +94,7 @@ pub struct AgentRuntimeSettings {
 impl Default for AgentRuntimeSettings {
     fn default() -> Self {
         Self {
-            max_turns: 100,
+            max_turns: 250,
             subagent_max_depth: 3,
             subagent_model: "claude-haiku-4-5-20251001".to_string(),
         }
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn agent_defaults() {
         let a = AgentRuntimeSettings::default();
-        assert_eq!(a.max_turns, 100);
+        assert_eq!(a.max_turns, 250);
         assert_eq!(a.subagent_max_depth, 3);
         assert_eq!(a.subagent_model, "claude-haiku-4-5-20251001");
 
@@ -379,7 +379,7 @@ mod tests {
         let json = serde_json::json!({ "subagentMaxDepth": 5 });
         let a: AgentRuntimeSettings = serde_json::from_value(json).unwrap();
         assert_eq!(a.subagent_max_depth, 5);
-        assert_eq!(a.max_turns, 100); // other fields default
+        assert_eq!(a.max_turns, 250); // other fields default
 
         let roundtrip = serde_json::to_value(&a).unwrap();
         assert_eq!(roundtrip.get("subagentMaxDepth").unwrap(), 5);
