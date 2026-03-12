@@ -256,16 +256,17 @@ extension ChatViewModel {
         contextState.lastTurnInputTokens = postCompactionTokens
         logger.debug("Updated lastTurnInputTokens to \(postCompactionTokens) after compaction", category: .events)
 
-        // Replace the in-progress pill with the final compaction pill
+        // Mutate content in-place to keep the same message identity → smooth animation
         if let inProgressId = compactionInProgressMessageId,
            let index = messageIndex.index(for: inProgressId) {
-            let compactionMessage = ChatMessage.compaction(
-                tokensBefore: result.tokensBefore,
-                tokensAfter: result.tokensAfter,
-                reason: result.reason,
-                summary: result.summary
-            )
-            messages[index] = compactionMessage
+            withAnimation(.smooth(duration: 0.35)) {
+                messages[index].content = .compaction(
+                    tokensBefore: result.tokensBefore,
+                    tokensAfter: result.tokensAfter,
+                    reason: result.reason,
+                    summary: result.summary
+                )
+            }
             compactionInProgressMessageId = nil
         } else {
             // No in-progress pill found (e.g. reconstruction) — just append

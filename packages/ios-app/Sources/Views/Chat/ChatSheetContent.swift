@@ -43,7 +43,8 @@ struct ChatSheetContent: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
-                readOnly: sheetReadOnly
+                readOnly: sheetReadOnly,
+                contextState: viewModel.contextState
             )
 
         case .sessionHistory:

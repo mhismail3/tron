@@ -199,31 +199,16 @@ struct TranscriptionNoSpeechNotificationView: View {
     }
 }
 
-// MARK: - Compaction In Progress Notification View
-
-struct CompactionInProgressNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .cyan, interactive: true) {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(.cyan)
-
-                Text("Compacting context...")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.cyan.opacity(0.9))
-            }
-        }
-    }
-}
-
-// MARK: - Compaction Notification View
+// MARK: - Compaction Notification View (unified in-progress + completed)
 
 struct CompactionNotificationView: View {
-    let tokensBefore: Int
-    let tokensAfter: Int
-    let reason: String
+    let isInProgress: Bool
+    var tokensBefore: Int = 0
+    var tokensAfter: Int = 0
+    var reason: String = ""
     var onTap: (() -> Void)? = nil
+
+    private let iconSize: CGFloat = TronTypography.sizeBody2
 
     private var tokensSaved: Int {
         tokensBefore - tokensAfter
@@ -241,33 +226,47 @@ struct CompactionNotificationView: View {
         return Int(Double(tokensSaved) / Double(tokensBefore) * 100)
     }
 
-    private var reasonDisplay: String {
-        CompactionReason(rawValue: reason)?.displayText ?? reason
-    }
-
     var body: some View {
-        NotificationPill(tint: .cyan, interactive: true, onTap: onTap) {
+        NotificationPill(tint: .cyan, interactive: !isInProgress, onTap: isInProgress ? nil : onTap) {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.cyan)
+                ZStack {
+                    if isInProgress {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.cyan)
+                            .transition(.blurReplace)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.cyan)
+                            .transition(.blurReplace)
+                    }
+                }
+                .frame(width: iconSize, height: iconSize)
 
-                Text("Context compacted")
+                Text(isInProgress ? "Compacting context..." : "Context compacted")
                     .font(TronTypography.filePath)
                     .foregroundStyle(.cyan.opacity(0.9))
+                    .contentTransition(.interpolate)
 
-                Text("\u{2022}")
-                    .font(TronTypography.badge)
-                    .foregroundStyle(.cyan.opacity(0.5))
+                if !isInProgress && tokensSaved > 0 {
+                    Text("\u{2022}")
+                        .font(TronTypography.badge)
+                        .foregroundStyle(.cyan.opacity(0.5))
+                        .transition(.blurReplace)
 
-                Text("\(formattedSaved) tokens saved")
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.cyan.opacity(0.7))
+                    Text("\(formattedSaved) tokens saved")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.cyan.opacity(0.7))
+                        .transition(.blurReplace)
 
-                Text("(\(compressionPercent)%)")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.cyan.opacity(0.5))
+                    Text("(\(compressionPercent)%)")
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.cyan.opacity(0.5))
+                        .transition(.blurReplace)
+                }
             }
+            .animation(.smooth(duration: 0.35), value: isInProgress)
         }
     }
 }

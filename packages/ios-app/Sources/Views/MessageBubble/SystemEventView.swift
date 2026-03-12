@@ -8,12 +8,32 @@ struct SystemEventView: View {
     var onTap: ((MessageBubbleTapAction) -> Void)?
 
     var body: some View {
-        // Memory updating/updated share a single view for smooth in-place animation
+        // Memory and compaction events share unified views for smooth in-place animation
         if event.isMemoryNotification {
             memoryNotificationView
+        } else if event.isCompactionNotification {
+            compactionNotificationView
         } else {
             nonMemoryEventView
         }
+    }
+
+    @ViewBuilder
+    private var compactionNotificationView: some View {
+        let isInProgress = event.compactionIsInProgress
+        let tokensBefore = event.compactionTokensBefore
+        let tokensAfter = event.compactionTokensAfter
+        let reason = event.compactionReason
+        let summary = event.compactionSummary
+        CompactionNotificationView(
+            isInProgress: isInProgress,
+            tokensBefore: tokensBefore,
+            tokensAfter: tokensAfter,
+            reason: reason,
+            onTap: isInProgress ? nil : {
+                onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
+            }
+        )
     }
 
     @ViewBuilder
@@ -49,19 +69,6 @@ struct SystemEventView: View {
 
         case .transcriptionNoSpeech:
             TranscriptionNoSpeechNotificationView()
-
-        case .compactionInProgress:
-            CompactionInProgressNotificationView()
-
-        case .compaction(let tokensBefore, let tokensAfter, let reason, let summary):
-            CompactionNotificationView(
-                tokensBefore: tokensBefore,
-                tokensAfter: tokensAfter,
-                reason: reason,
-                onTap: {
-                    onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
-                }
-            )
 
         case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)

@@ -6,28 +6,28 @@ final class NotificationPillTests: XCTestCase {
     // MARK: - CompactionNotificationView Tests
 
     func testCompactionReasonDisplayPreTurnGuardrail() {
-        let view = CompactionNotificationView(tokensBefore: 100000, tokensAfter: 50000, reason: "pre_turn_guardrail")
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "pre_turn_guardrail")
         XCTAssertNotNil(view)
     }
 
     func testCompactionReasonDisplayThresholdExceeded() {
-        let view = CompactionNotificationView(tokensBefore: 100000, tokensAfter: 50000, reason: "threshold_exceeded")
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "threshold_exceeded")
         XCTAssertNotNil(view)
     }
 
     func testCompactionReasonDisplayManual() {
-        let view = CompactionNotificationView(tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
         XCTAssertNotNil(view)
     }
 
     func testCompactionTokensSaved() {
-        let view = CompactionNotificationView(tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
         // 50000 tokens saved = 50.0k
         XCTAssertNotNil(view)
     }
 
     func testCompactionCompressionPercent() {
-        let view = CompactionNotificationView(tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
         // 50% compression
         XCTAssertNotNil(view)
     }

@@ -94,6 +94,47 @@ enum SystemEvent: Equatable, Hashable {
         }
     }
 
+    /// Whether this is a compaction in-progress or completed event (for unified animation)
+    var isCompactionNotification: Bool {
+        switch self {
+        case .compactionInProgress, .compaction: return true
+        default: return false
+        }
+    }
+
+    /// Whether the compaction notification is still in progress
+    var compactionIsInProgress: Bool {
+        if case .compactionInProgress = self { return true }
+        return false
+    }
+
+    /// Tokens before compaction (0 for in-progress)
+    var compactionTokensBefore: Int {
+        if case .compaction(let before, _, _, _) = self { return before }
+        return 0
+    }
+
+    /// Tokens after compaction (0 for in-progress)
+    var compactionTokensAfter: Int {
+        if case .compaction(_, let after, _, _) = self { return after }
+        return 0
+    }
+
+    /// Compaction reason
+    var compactionReason: String {
+        switch self {
+        case .compactionInProgress(let reason): return reason
+        case .compaction(_, _, let reason, _): return reason
+        default: return ""
+        }
+    }
+
+    /// Compaction summary (nil for in-progress)
+    var compactionSummary: String? {
+        if case .compaction(_, _, _, let summary) = self { return summary }
+        return nil
+    }
+
     /// Whether this is a memory updating or memory updated event (for unified animation)
     var isMemoryNotification: Bool {
         switch self {

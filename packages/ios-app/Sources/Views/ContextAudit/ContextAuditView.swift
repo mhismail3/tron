@@ -8,6 +8,8 @@ struct ContextAuditView: View {
     let sessionId: String
     var skillStore: SkillStore?
     var readOnly: Bool = false
+    /// Observable context state — drives background refresh when tokens change (e.g. after compaction)
+    var contextState: ContextTrackingState?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
@@ -107,6 +109,9 @@ struct ContextAuditView: View {
             }
             .task {
                 await loadContext()
+            }
+            .onChange(of: contextState?.contextWindowTokens) {
+                Task { await reloadContextInBackground() }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
