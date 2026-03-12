@@ -87,15 +87,18 @@ impl TronTool for ReadHealthTool {
         };
 
         let method = format!("health.{action}");
-        let result = self.delegate.device_request(&method, params.clone()).await?;
+        let result = self
+            .delegate
+            .device_request(&method, params.clone())
+            .await?;
 
         // Include data in content so the LLM can see it (details is metadata-only)
         let content = serde_json::to_string_pretty(&result).unwrap_or_default();
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(&content),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                &content,
+            )]),
             details: Some(json!({
                 "action": action,
             })),
@@ -163,7 +166,10 @@ mod tests {
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("running"), "should contain workout data: {text}");
+        assert!(
+            text.contains("running"),
+            "should contain workout data: {text}"
+        );
     }
 
     #[tokio::test]

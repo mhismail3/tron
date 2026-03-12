@@ -97,7 +97,8 @@ impl ShutdownCoordinator {
         let task_id = self.registry.next_task_id.fetch_add(1, Ordering::Relaxed);
         let abort_handle = handle.abort_handle();
         let _ = self.registry.task_count.fetch_add(1, Ordering::SeqCst);
-        let _ = self.registry
+        let _ = self
+            .registry
             .abort_handles
             .lock()
             .insert(task_id, abort_handle);

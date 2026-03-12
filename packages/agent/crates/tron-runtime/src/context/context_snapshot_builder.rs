@@ -286,8 +286,14 @@ mod tests {
         }
         fn get_tool_summaries(&self) -> Vec<ToolSummary> {
             vec![
-                ToolSummary { name: "bash".into(), description: "Execute a shell command.".into() },
-                ToolSummary { name: "read".into(), description: "Read file contents.".into() },
+                ToolSummary {
+                    name: "bash".into(),
+                    description: "Execute a shell command.".into(),
+                },
+                ToolSummary {
+                    name: "read".into(),
+                    description: "Read file contents.".into(),
+                },
             ]
         }
     }

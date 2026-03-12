@@ -158,6 +158,7 @@ mod tests {
             },
             model: "claude".into(),
             working_directory: "/Users/moose/Workspace/tron".into(),
+            source: "manual".into(),
         }
     }
 
@@ -313,7 +314,10 @@ mod tests {
         let payload = make_payload();
         let texts = build_lesson_texts(&payload);
         assert_eq!(texts.len(), 1);
-        assert_eq!(texts[0], "Lesson from Implement auth: Always validate tokens");
+        assert_eq!(
+            texts[0],
+            "Lesson from Implement auth: Always validate tokens"
+        );
     }
 
     #[test]

@@ -203,7 +203,9 @@ mod tests {
     #[tokio::test]
     async fn run_blocking_executes_closure() {
         let ctx = make_test_context();
-        let value = ctx.run_blocking("test.run_blocking", || Ok::<_, RpcError>(41)).await;
+        let value = ctx
+            .run_blocking("test.run_blocking", || Ok::<_, RpcError>(41))
+            .await;
         assert_eq!(value.unwrap(), 41);
     }
 

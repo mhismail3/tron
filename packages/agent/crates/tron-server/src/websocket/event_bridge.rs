@@ -106,7 +106,8 @@ impl EventBridge {
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::debug!(lagged = n, "event bridge lagged");
-                metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge").increment(n);
+                metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge")
+                    .increment(n);
                 true
             }
             Err(broadcast::error::RecvError::Closed) => {
@@ -223,11 +224,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         .unwrap_or_else(|| make_rpc(event, event.event_type(), Some(serde_json::json!({}))))
 }
 
-fn make_rpc(
-    event: &TronEvent,
-    wire_type: &str,
-    data: Option<serde_json::Value>,
-) -> RpcEvent {
+fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<serde_json::Value>) -> RpcEvent {
     let session_id = event.session_id();
     RpcEvent {
         event_type: wire_type.to_string(),
@@ -244,30 +241,38 @@ fn make_rpc(
 
 fn convert_message_event(event: &TronEvent) -> Option<RpcEvent> {
     match event {
-        TronEvent::MessageUpdate { content, .. } => {
-            Some(make_rpc(event, "agent.text_delta", Some(serde_json::json!({ "delta": content }))))
-        }
+        TronEvent::MessageUpdate { content, .. } => Some(make_rpc(
+            event,
+            "agent.text_delta",
+            Some(serde_json::json!({ "delta": content })),
+        )),
         TronEvent::MessageDeleted {
             target_event_id,
             target_type,
             target_turn,
             reason,
             ..
-        } => Some(make_rpc(event, "agent.message_deleted", Some(serde_json::json!({
-            "targetEventId": target_event_id,
-            "targetType": target_type,
-            "targetTurn": target_turn,
-            "reason": reason,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.message_deleted",
+            Some(serde_json::json!({
+                "targetEventId": target_event_id,
+                "targetType": target_type,
+                "targetTurn": target_turn,
+                "reason": reason,
+            })),
+        )),
         _ => None,
     }
 }
 
 fn convert_turn_event(event: &TronEvent) -> Option<RpcEvent> {
     match event {
-        TronEvent::TurnStart { turn, .. } => {
-            Some(make_rpc(event, "agent.turn_start", Some(serde_json::json!({ "turn": turn }))))
-        }
+        TronEvent::TurnStart { turn, .. } => Some(make_rpc(
+            event,
+            "agent.turn_start",
+            Some(serde_json::json!({ "turn": turn })),
+        )),
         TronEvent::TurnEnd {
             turn,
             duration,
@@ -357,13 +362,17 @@ fn convert_turn_event(event: &TronEvent) -> Option<RpcEvent> {
             error_category,
             error_message,
             ..
-        } => Some(make_rpc(event, "agent.retry", Some(serde_json::json!({
-            "attempt": attempt,
-            "maxRetries": max_retries,
-            "delayMs": delay_ms,
-            "errorCategory": error_category,
-            "errorMessage": error_message,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.retry",
+            Some(serde_json::json!({
+                "attempt": attempt,
+                "maxRetries": max_retries,
+                "delayMs": delay_ms,
+                "errorCategory": error_category,
+                "errorMessage": error_message,
+            })),
+        )),
         _ => None,
     }
 }
@@ -428,13 +437,19 @@ fn convert_tool_event(event: &TronEvent) -> Option<RpcEvent> {
             tool_call_id,
             update,
             ..
-        } => Some(make_rpc(event, "agent.tool_output", Some(serde_json::json!({
-            "toolCallId": tool_call_id,
-            "output": update,
-        })))),
-        TronEvent::ToolUseBatch { tool_calls, .. } => {
-            Some(make_rpc(event, "agent.tool_use_batch", Some(serde_json::json!({ "toolCalls": tool_calls }))))
-        }
+        } => Some(make_rpc(
+            event,
+            "agent.tool_output",
+            Some(serde_json::json!({
+                "toolCallId": tool_call_id,
+                "output": update,
+            })),
+        )),
+        TronEvent::ToolUseBatch { tool_calls, .. } => Some(make_rpc(
+            event,
+            "agent.tool_use_batch",
+            Some(serde_json::json!({ "toolCalls": tool_calls })),
+        )),
         TronEvent::ToolCallArgumentDelta {
             tool_call_id,
             tool_name,
@@ -452,10 +467,14 @@ fn convert_tool_event(event: &TronEvent) -> Option<RpcEvent> {
             tool_call_id,
             tool_name,
             ..
-        } => Some(make_rpc(event, "agent.tool_generating", Some(serde_json::json!({
-            "toolCallId": tool_call_id,
-            "toolName": tool_name,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.tool_generating",
+            Some(serde_json::json!({
+                "toolCallId": tool_call_id,
+                "toolName": tool_name,
+            })),
+        )),
         _ => None,
     }
 }
@@ -503,11 +522,15 @@ fn convert_hook_event(event: &TronEvent) -> Option<RpcEvent> {
             hook_event,
             execution_id,
             ..
-        } => Some(make_rpc(event, "hook.background_started", Some(serde_json::json!({
-            "hookNames": hook_names,
-            "hookEvent": hook_event,
-            "executionId": execution_id,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "hook.background_started",
+            Some(serde_json::json!({
+                "hookNames": hook_names,
+                "hookEvent": hook_event,
+                "executionId": execution_id,
+            })),
+        )),
         TronEvent::HookBackgroundCompleted {
             hook_names,
             hook_event,
@@ -533,15 +556,21 @@ fn convert_hook_event(event: &TronEvent) -> Option<RpcEvent> {
 
 fn convert_streaming_event(event: &TronEvent) -> Option<RpcEvent> {
     match event {
-        TronEvent::ThinkingStart { .. } => {
-            Some(make_rpc(event, "agent.thinking_start", Some(serde_json::json!({}))))
-        }
-        TronEvent::ThinkingDelta { delta, .. } => {
-            Some(make_rpc(event, "agent.thinking_delta", Some(serde_json::json!({ "delta": delta }))))
-        }
-        TronEvent::ThinkingEnd { thinking, .. } => {
-            Some(make_rpc(event, "agent.thinking_end", Some(serde_json::json!({ "thinking": thinking }))))
-        }
+        TronEvent::ThinkingStart { .. } => Some(make_rpc(
+            event,
+            "agent.thinking_start",
+            Some(serde_json::json!({})),
+        )),
+        TronEvent::ThinkingDelta { delta, .. } => Some(make_rpc(
+            event,
+            "agent.thinking_delta",
+            Some(serde_json::json!({ "delta": delta })),
+        )),
+        TronEvent::ThinkingEnd { thinking, .. } => Some(make_rpc(
+            event,
+            "agent.thinking_end",
+            Some(serde_json::json!({ "thinking": thinking })),
+        )),
         _ => None,
     }
 }
@@ -587,10 +616,14 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             reason,
             tokens_before,
             ..
-        } => Some(make_rpc(event, "agent.compaction_started", Some(serde_json::json!({
-            "reason": reason,
-            "tokensBefore": tokens_before,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.compaction_started",
+            Some(serde_json::json!({
+                "reason": reason,
+                "tokensBefore": tokens_before,
+            })),
+        )),
         TronEvent::CompactionComplete {
             success,
             tokens_before,
@@ -611,39 +644,53 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
                 data["reason"] = serde_json::to_value(r).unwrap_or_default();
             }
             set_opt(&mut data, "summary", summary);
-            set_opt(&mut data, "estimatedContextTokens", estimated_context_tokens);
+            set_opt(
+                &mut data,
+                "estimatedContextTokens",
+                estimated_context_tokens,
+            );
             Some(make_rpc(event, "agent.compaction", Some(data)))
         }
         TronEvent::ContextWarning {
             usage_percent,
             message,
             ..
-        } => Some(make_rpc(event, "context.warning", Some(serde_json::json!({
-            "usagePercent": usage_percent,
-            "message": message,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "context.warning",
+            Some(serde_json::json!({
+                "usagePercent": usage_percent,
+                "message": message,
+            })),
+        )),
         TronEvent::SessionCreated {
             base,
             model,
             working_directory,
             source,
             ..
-        } => Some(make_rpc(event, "session.created", Some(serde_json::json!({
-            "model": model,
-            "workingDirectory": working_directory,
-            "messageCount": 0,
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cost": 0.0,
-            "lastActivity": base.timestamp,
-            "isActive": true,
-            "isChat": source.as_deref() == Some("chat"),
-        })))),
-        TronEvent::SessionForked { new_session_id, .. } => {
-            Some(make_rpc(event, "session.forked", Some(serde_json::json!({
+        } => Some(make_rpc(
+            event,
+            "session.created",
+            Some(serde_json::json!({
+                "model": model,
+                "workingDirectory": working_directory,
+                "messageCount": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cost": 0.0,
+                "lastActivity": base.timestamp,
+                "isActive": true,
+                "isChat": source.as_deref() == Some("chat"),
+            })),
+        )),
+        TronEvent::SessionForked { new_session_id, .. } => Some(make_rpc(
+            event,
+            "session.forked",
+            Some(serde_json::json!({
                 "newSessionId": new_session_id,
-            }))))
-        }
+            })),
+        )),
         TronEvent::SessionUpdated {
             title,
             model,
@@ -660,68 +707,94 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             last_assistant_response,
             parent_session_id,
             ..
-        } => Some(make_rpc(event, "session.updated", Some(serde_json::json!({
-            "title": title,
-            "model": model,
-            "messageCount": message_count,
-            "inputTokens": input_tokens,
-            "outputTokens": output_tokens,
-            "lastTurnInputTokens": last_turn_input_tokens,
-            "cacheReadTokens": cache_read_tokens,
-            "cacheCreationTokens": cache_creation_tokens,
-            "cost": cost,
-            "lastActivity": last_activity,
-            "isActive": is_active,
-            "lastUserPrompt": last_user_prompt,
-            "lastAssistantResponse": last_assistant_response,
-            "parentSessionId": parent_session_id,
-        })))),
-        TronEvent::MemoryUpdating { .. } => {
-            Some(make_rpc(event, "agent.memory_updating", Some(serde_json::json!({}))))
-        }
+        } => Some(make_rpc(
+            event,
+            "session.updated",
+            Some(serde_json::json!({
+                "title": title,
+                "model": model,
+                "messageCount": message_count,
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+                "lastTurnInputTokens": last_turn_input_tokens,
+                "cacheReadTokens": cache_read_tokens,
+                "cacheCreationTokens": cache_creation_tokens,
+                "cost": cost,
+                "lastActivity": last_activity,
+                "isActive": is_active,
+                "lastUserPrompt": last_user_prompt,
+                "lastAssistantResponse": last_assistant_response,
+                "parentSessionId": parent_session_id,
+            })),
+        )),
+        TronEvent::MemoryUpdating { .. } => Some(make_rpc(
+            event,
+            "agent.memory_updating",
+            Some(serde_json::json!({})),
+        )),
         TronEvent::MemoryUpdated {
             title,
             entry_type,
             event_id,
             ..
-        } => Some(make_rpc(event, "agent.memory_updated", Some(serde_json::json!({
-            "title": title,
-            "entryType": entry_type,
-            "eventId": event_id,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.memory_updated",
+            Some(serde_json::json!({
+                "title": title,
+                "entryType": entry_type,
+                "eventId": event_id,
+            })),
+        )),
         TronEvent::ContextCleared {
             tokens_before,
             tokens_after,
             ..
-        } => Some(make_rpc(event, "agent.context_cleared", Some(serde_json::json!({
-            "tokensBefore": tokens_before,
-            "tokensAfter": tokens_after,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.context_cleared",
+            Some(serde_json::json!({
+                "tokensBefore": tokens_before,
+                "tokensAfter": tokens_after,
+            })),
+        )),
         TronEvent::RulesLoaded {
             total_files,
             dynamic_rules_count,
             ..
-        } => Some(make_rpc(event, "rules.loaded", Some(serde_json::json!({
-            "totalFiles": total_files,
-            "dynamicRulesCount": dynamic_rules_count,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "rules.loaded",
+            Some(serde_json::json!({
+                "totalFiles": total_files,
+                "dynamicRulesCount": dynamic_rules_count,
+            })),
+        )),
         TronEvent::RulesActivated {
             rules,
             total_activated,
             ..
-        } => Some(make_rpc(event, "rules.activated", Some(serde_json::json!({
-            "rules": rules.iter().map(|r| serde_json::json!({
-                "relativePath": r.relative_path,
-                "scopeDir": r.scope_dir,
-            })).collect::<Vec<_>>(),
-            "totalActivated": total_activated,
-        })))),
-        TronEvent::MemoryLoaded { count, .. } => {
-            Some(make_rpc(event, "memory.loaded", Some(serde_json::json!({ "count": count }))))
-        }
-        TronEvent::SkillRemoved { skill_name, .. } => {
-            Some(make_rpc(event, "agent.skill_removed", Some(serde_json::json!({ "skillName": skill_name }))))
-        }
+        } => Some(make_rpc(
+            event,
+            "rules.activated",
+            Some(serde_json::json!({
+                "rules": rules.iter().map(|r| serde_json::json!({
+                    "relativePath": r.relative_path,
+                    "scopeDir": r.scope_dir,
+                })).collect::<Vec<_>>(),
+                "totalActivated": total_activated,
+            })),
+        )),
+        TronEvent::MemoryLoaded { count, .. } => Some(make_rpc(
+            event,
+            "memory.loaded",
+            Some(serde_json::json!({ "count": count })),
+        )),
+        TronEvent::SkillRemoved { skill_name, .. } => Some(make_rpc(
+            event,
+            "agent.skill_removed",
+            Some(serde_json::json!({ "skillName": skill_name })),
+        )),
         TronEvent::SubagentSpawned {
             subagent_session_id,
             task,
@@ -786,19 +859,27 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             error,
             duration,
             ..
-        } => Some(make_rpc(event, "agent.subagent_failed", Some(serde_json::json!({
-            "subagentSessionId": subagent_session_id,
-            "error": error,
-            "duration": duration,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.subagent_failed",
+            Some(serde_json::json!({
+                "subagentSessionId": subagent_session_id,
+                "error": error,
+                "duration": duration,
+            })),
+        )),
         TronEvent::SubagentEvent {
             subagent_session_id,
             event: inner,
             ..
-        } => Some(make_rpc(event, "agent.subagent_event", Some(serde_json::json!({
-            "subagentSessionId": subagent_session_id,
-            "event": inner,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "agent.subagent_event",
+            Some(serde_json::json!({
+                "subagentSessionId": subagent_session_id,
+                "event": inner,
+            })),
+        )),
         TronEvent::SubagentResultAvailable {
             parent_session_id,
             subagent_session_id,
@@ -824,7 +905,11 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             });
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "error", error);
-            Some(make_rpc(event, "agent.subagent_result_available", Some(data)))
+            Some(make_rpc(
+                event,
+                "agent.subagent_result_available",
+                Some(data),
+            ))
         }
         TronEvent::WorktreeAcquired {
             path,
@@ -848,13 +933,17 @@ fn convert_session_event(event: &TronEvent) -> Option<RpcEvent> {
             insertions,
             deletions,
             ..
-        } => Some(make_rpc(event, "worktree.commit", Some(serde_json::json!({
-            "commitHash": commit_hash,
-            "message": message,
-            "filesChanged": files_changed,
-            "insertions": insertions,
-            "deletions": deletions,
-        })))),
+        } => Some(make_rpc(
+            event,
+            "worktree.commit",
+            Some(serde_json::json!({
+                "commitHash": commit_hash,
+                "message": message,
+                "filesChanged": files_changed,
+                "insertions": insertions,
+                "deletions": deletions,
+            })),
+        )),
         TronEvent::WorktreeMerged {
             source_branch,
             target_branch,
@@ -1011,7 +1100,13 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // AgentStart is NOT in the global list — should only reach C1 (bound to "s1")
@@ -1046,7 +1141,13 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // SessionCreated for "s2" — both clients should receive it
@@ -1089,7 +1190,13 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // TurnStart for "s1" — both clients should receive it (global)
@@ -1101,14 +1208,8 @@ mod tests {
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        assert!(
-            conn1_rx.try_recv().is_ok(),
-            "C1 should receive turn_start"
-        );
-        assert!(
-            conn2_rx.try_recv().is_ok(),
-            "C2 should receive turn_start"
-        );
+        assert!(conn1_rx.try_recv().is_ok(), "C1 should receive turn_start");
+        assert!(conn2_rx.try_recv().is_ok(), "C2 should receive turn_start");
 
         drop(tx);
         let _ = handle.await;
@@ -1129,7 +1230,13 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // MessageUpdate for "s1" — only C1 should receive it
@@ -1141,8 +1248,14 @@ mod tests {
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        assert!(conn1_rx.try_recv().is_ok(), "C1 should receive message_update");
-        assert!(conn2_rx.try_recv().is_err(), "C2 should NOT receive message_update");
+        assert!(
+            conn1_rx.try_recv().is_ok(),
+            "C1 should receive message_update"
+        );
+        assert!(
+            conn2_rx.try_recv().is_err(),
+            "C2 should NOT receive message_update"
+        );
 
         drop(tx);
         let _ = handle.await;
@@ -1158,7 +1271,13 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)
@@ -1189,7 +1308,13 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tron_tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), Some(browser_rx), CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            Some(browser_rx),
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // Close browser channel
@@ -2132,7 +2257,13 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
+        let bridge = EventBridge::new(
+            rx,
+            bm.clone(),
+            None,
+            CancellationToken::new(),
+            Arc::new(TurnAccumulatorMap::new()),
+        );
         let handle = tokio::spawn(bridge.run());
 
         // Send CompactionStart

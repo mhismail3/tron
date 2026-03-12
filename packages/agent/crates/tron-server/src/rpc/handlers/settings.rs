@@ -329,11 +329,7 @@ mod tests {
         // Prime the cache
         tron_settings::reload_settings_from_path(&ctx.settings_path);
         assert!(
-            tron_settings::get_settings()
-                .context
-                .memory
-                .ledger
-                .enabled,
+            tron_settings::get_settings().context.memory.ledger.enabled,
             "ledger should default to true"
         );
 

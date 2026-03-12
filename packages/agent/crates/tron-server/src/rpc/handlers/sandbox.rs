@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::{debug, instrument, warn};
 
 use crate::rpc::context::RpcContext;
@@ -119,10 +119,7 @@ impl MethodHandler for ListContainersHandler {
         let statuses = query_container_statuses().await;
         enrich_with_status(&mut containers, &statuses);
 
-        let tailscale_ip = tron_settings::get_settings()
-            .server
-            .tailscale_ip
-            .clone();
+        let tailscale_ip = tron_settings::get_settings().server.tailscale_ip.clone();
 
         Ok(serde_json::json!({
             "containers": containers,
@@ -211,7 +208,7 @@ fn remove_container_metadata_at(path: &std::path::Path, name: &str) -> Result<()
         Err(e) => {
             return Err(RpcError::Internal {
                 message: format!("Failed to read containers.json: {e}"),
-            })
+            });
         }
     };
 
@@ -424,7 +421,10 @@ mod tests {
         let ctx = make_test_context();
         let result = ListContainersHandler.handle(None, &ctx).await.unwrap();
         let ip = &result["tailscaleIp"];
-        assert!(ip.is_null() || ip.is_string(), "tailscaleIp must be null or string");
+        assert!(
+            ip.is_null() || ip.is_string(),
+            "tailscaleIp must be null or string"
+        );
     }
 
     #[tokio::test]
@@ -513,10 +513,8 @@ mod tests {
     #[test]
     fn remove_from_object_format() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_containers_file(
-            tmp.path(),
-            r#"{"containers":[{"name":"a"},{"name":"b"}]}"#,
-        );
+        let path =
+            write_containers_file(tmp.path(), r#"{"containers":[{"name":"a"},{"name":"b"}]}"#);
         remove_container_metadata_at(&path, "a").unwrap();
         let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
         let arr = result["containers"].as_array().unwrap();
@@ -554,8 +552,7 @@ mod tests {
     #[test]
     fn remove_multiple_with_same_name() {
         let tmp = tempfile::tempdir().unwrap();
-        let path =
-            write_containers_file(tmp.path(), r#"[{"name":"a"},{"name":"a"},{"name":"b"}]"#);
+        let path = write_containers_file(tmp.path(), r#"[{"name":"a"},{"name":"a"},{"name":"b"}]"#);
         remove_container_metadata_at(&path, "a").unwrap();
         let result: Value = serde_json::from_str(&read_file(&path)).unwrap();
         let arr = result.as_array().unwrap();

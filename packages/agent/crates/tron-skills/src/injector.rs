@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::registry::SkillRegistry;
-use crate::types::{SkillInjectionResult, SkillInfo, SkillMetadata, SkillReference};
+use crate::types::{SkillInfo, SkillInjectionResult, SkillMetadata, SkillReference};
 
 // INVARIANT: These regex patterns are compile-time literals, validated by tests.
 static SKILL_REF_PATTERN: LazyLock<Regex> =
@@ -199,20 +199,22 @@ fn build_tool_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
 
     if let Some(allowed) = &fm.allowed_tools
-        && !allowed.is_empty() {
-            let tools = allowed.join(", ");
-            return format!(
-                "<skill-tool-preferences>This skill works best with: {tools}. Prefer these tools.</skill-tool-preferences>"
-            );
-        }
+        && !allowed.is_empty()
+    {
+        let tools = allowed.join(", ");
+        return format!(
+            "<skill-tool-preferences>This skill works best with: {tools}. Prefer these tools.</skill-tool-preferences>"
+        );
+    }
 
     if let Some(denied) = &fm.denied_tools
-        && !denied.is_empty() {
-            let tools = denied.join(", ");
-            return format!(
-                "<skill-tool-restrictions>This skill must NOT use: {tools}. These tools are restricted.</skill-tool-restrictions>"
-            );
-        }
+        && !denied.is_empty()
+    {
+        let tools = denied.join(", ");
+        return format!(
+            "<skill-tool-restrictions>This skill must NOT use: {tools}. These tools are restricted.</skill-tool-restrictions>"
+        );
+    }
 
     String::new()
 }

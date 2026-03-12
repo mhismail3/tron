@@ -34,33 +34,35 @@ impl ResourceRule {
         };
 
         if let Some(max) = self.max_value
-            && value > max {
-                return RuleEvaluationResult::triggered(
-                    &self.base.id,
-                    self.base.severity,
-                    format!(
-                        "{}: Value {} exceeds maximum {}",
-                        self.base.name, value, max
-                    ),
-                )
-                .with_details(serde_json::json!({
-                    "value": value,
-                    "maxValue": max,
-                }));
-            }
+            && value > max
+        {
+            return RuleEvaluationResult::triggered(
+                &self.base.id,
+                self.base.severity,
+                format!(
+                    "{}: Value {} exceeds maximum {}",
+                    self.base.name, value, max
+                ),
+            )
+            .with_details(serde_json::json!({
+                "value": value,
+                "maxValue": max,
+            }));
+        }
 
         if let Some(min) = self.min_value
-            && value < min {
-                return RuleEvaluationResult::triggered(
-                    &self.base.id,
-                    self.base.severity,
-                    format!("{}: Value {} below minimum {}", self.base.name, value, min),
-                )
-                .with_details(serde_json::json!({
-                    "value": value,
-                    "minValue": min,
-                }));
-            }
+            && value < min
+        {
+            return RuleEvaluationResult::triggered(
+                &self.base.id,
+                self.base.severity,
+                format!("{}: Value {} below minimum {}", self.base.name, value, min),
+            )
+            .with_details(serde_json::json!({
+                "value": value,
+                "minValue": min,
+            }));
+        }
 
         RuleEvaluationResult::not_triggered(&self.base.id)
     }

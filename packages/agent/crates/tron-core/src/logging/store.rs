@@ -52,14 +52,14 @@ impl<'a> LogStore<'a> {
             params.push(Box::new(origin.clone()));
         }
         if let Some(ref components) = opts.components
-            && !components.is_empty() {
-                let placeholders: Vec<String> =
-                    components.iter().map(|_| "?".to_string()).collect();
-                let _ = write!(sql, " AND component IN ({})", placeholders.join(", "));
-                for c in components {
-                    params.push(Box::new(c.clone()));
-                }
+            && !components.is_empty()
+        {
+            let placeholders: Vec<String> = components.iter().map(|_| "?".to_string()).collect();
+            let _ = write!(sql, " AND component IN ({})", placeholders.join(", "));
+            for c in components {
+                params.push(Box::new(c.clone()));
             }
+        }
 
         let order = opts.order.unwrap_or_default().as_sql();
         let _ = write!(sql, " ORDER BY timestamp {order}");

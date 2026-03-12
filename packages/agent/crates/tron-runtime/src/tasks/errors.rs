@@ -13,6 +13,15 @@ pub enum TaskError {
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
 
+    /// Write contention exceeded the retry deadline.
+    #[error("Database busy during {operation} after {attempts} attempts")]
+    Busy {
+        /// Logical operation that timed out under contention.
+        operation: &'static str,
+        /// Number of busy/locked failures observed.
+        attempts: u32,
+    },
+
     /// Entity not found.
     #[error("{entity} not found: {id}")]
     NotFound {
@@ -96,6 +105,18 @@ mod tests {
     fn test_validation_display() {
         let err = TaskError::Validation("title is required".to_string());
         assert_eq!(err.to_string(), "Validation error: title is required");
+    }
+
+    #[test]
+    fn test_busy_display() {
+        let err = TaskError::Busy {
+            operation: "batch update",
+            attempts: 4,
+        };
+        assert_eq!(
+            err.to_string(),
+            "Database busy during batch update after 4 attempts"
+        );
     }
 
     #[test]

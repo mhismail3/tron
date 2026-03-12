@@ -83,11 +83,7 @@ impl EventPersister {
     /// Gracefully shut down: signal worker to exit and await drain.
     pub async fn shutdown(self) {
         drop(self.tx);
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.worker_handle,
-        )
-        .await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.worker_handle).await;
     }
 
     /// Flush all pending events (waits for the queue to drain).
@@ -117,10 +113,7 @@ impl EventPersister {
 }
 
 /// Background worker that processes persist requests sequentially.
-async fn persist_worker(
-    mut rx: mpsc::Receiver<PersistRequest>,
-    event_store: Arc<EventStore>,
-) {
+async fn persist_worker(mut rx: mpsc::Receiver<PersistRequest>, event_store: Arc<EventStore>) {
     while let Some(req) = rx.recv().await {
         // Skip flush sentinels (null payload)
         if req.payload.is_null() && req.session_id.is_empty() {
@@ -294,7 +287,11 @@ mod tests {
 
         // Verify all 5 events were persisted
         let events = store.get_events_since(&session.session.id, 0).unwrap();
-        assert!(events.len() >= 5, "expected at least 5 events, got {}", events.len());
+        assert!(
+            events.len() >= 5,
+            "expected at least 5 events, got {}",
+            events.len()
+        );
     }
 
     #[tokio::test]
@@ -304,7 +301,10 @@ mod tests {
 
         let start = std::time::Instant::now();
         persister.shutdown().await;
-        assert!(start.elapsed().as_secs() < 5, "shutdown should complete quickly with no pending work");
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "shutdown should complete quickly with no pending work"
+        );
     }
 
     #[tokio::test]
@@ -317,11 +317,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         // shutdown() should not hang (timeout fires)
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(6),
-            persister.shutdown(),
-        ).await;
-        assert!(result.is_ok(), "shutdown must not hang when worker is already dead");
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(6), persister.shutdown()).await;
+        assert!(
+            result.is_ok(),
+            "shutdown must not hang when worker is already dead"
+        );
     }
 
     #[tokio::test]

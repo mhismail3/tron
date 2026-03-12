@@ -68,6 +68,9 @@ pub struct MemoryLedgerPayload {
     /// Working directory.
     #[serde(deserialize_with = "null_to_default")]
     pub working_directory: String,
+    /// Origin of the ledger write (`auto`, `manual`, `cron`, etc.).
+    #[serde(deserialize_with = "null_to_default")]
+    pub source: String,
 }
 
 /// Event ID range.
@@ -162,6 +165,7 @@ mod tests {
             },
             model: "claude".into(),
             working_directory: "/tmp".into(),
+            source: "manual".into(),
         };
         let json = serde_json::to_value(&payload).unwrap();
         let back: MemoryLedgerPayload = serde_json::from_value(json).unwrap();
@@ -197,6 +201,7 @@ mod tests {
         assert_eq!(payload.token_cost, LedgerTokenCost::default());
         assert!(payload.model.is_empty());
         assert!(payload.working_directory.is_empty());
+        assert!(payload.source.is_empty());
     }
 
     #[test]

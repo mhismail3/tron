@@ -66,7 +66,6 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

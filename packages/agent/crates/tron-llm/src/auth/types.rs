@@ -150,9 +150,10 @@ impl AuthStorage {
             return Vec::new();
         };
         if let Some(keys) = &svc.api_keys
-            && !keys.is_empty() {
-                return keys.clone();
-            }
+            && !keys.is_empty()
+        {
+            return keys.clone();
+        }
         if let Some(key) = &svc.api_key {
             return vec![key.clone()];
         }

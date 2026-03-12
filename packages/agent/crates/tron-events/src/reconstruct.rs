@@ -13,8 +13,8 @@
 
 use serde_json::Value;
 
-use crate::types::base::SessionEvent;
 use crate::types::EventType;
+use crate::types::base::SessionEvent;
 use crate::types::payloads::TokenTotals;
 use crate::types::state::{Message, MessageWithEventId};
 
@@ -105,9 +105,10 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
             }
             EventType::ConfigPromptUpdate => {
                 if event.payload.get("contentBlobId").is_some()
-                    && let Some(hash) = event.payload.get("newHash").and_then(Value::as_str) {
-                        system_prompt = Some(format!("[Updated prompt - hash: {hash}]"));
-                    }
+                    && let Some(hash) = event.payload.get("newHash").and_then(Value::as_str)
+                {
+                    system_prompt = Some(format!("[Updated prompt - hash: {hash}]"));
+                }
             }
             _ => {}
         }
@@ -158,9 +159,11 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
     // End-of-stream flush: if last message is assistant with tool_use
     if !st.pending_tool_results.is_empty()
         && let Some(last) = st.combined.last()
-            && last.message.role == "assistant" && content_has_tool_use(&last.message.content) {
-                flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
-            }
+        && last.message.role == "assistant"
+        && content_has_tool_use(&last.message.content)
+    {
+        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
+    }
 
     // Inject synthetic error results for any unmatched tool calls.
     // This happens when: (a) a user interrupt discards pending tool results,
@@ -247,11 +250,7 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
 
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
 
-    if let Some(last) = st
-        .combined
-        .last_mut()
-        .filter(|e| e.message.role == "user")
-    {
+    if let Some(last) = st.combined.last_mut().filter(|e| e.message.role == "user") {
         last.message.content = merge_message_content(&last.message.content, &content, "user");
         last.event_ids.push(Some(event.id.clone()));
     } else {
@@ -314,10 +313,11 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
     accumulate_tokens(&event.payload, &mut st.tokens);
 
     if let Some(turn) = event.payload.get("turn").and_then(Value::as_i64)
-        && turn > st.current_turn {
-            st.current_turn = turn;
-            st.turn_count = turn;
-        }
+        && turn > st.current_turn
+    {
+        st.current_turn = turn;
+        st.turn_count = turn;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -474,13 +474,15 @@ fn restore_truncated_inputs(
                         .unwrap_or(false);
                     let block_id = block.get("id").and_then(Value::as_str);
 
-                    if is_tool_use && is_truncated
+                    if is_tool_use
+                        && is_truncated
                         && let Some(id) = block_id
-                            && let Some(full_args) = tool_call_args_map.get(id) {
-                                let mut restored_block = block.clone();
-                                restored_block["arguments"] = full_args.clone();
-                                return restored_block;
-                            }
+                        && let Some(full_args) = tool_call_args_map.get(id)
+                    {
+                        let mut restored_block = block.clone();
+                        restored_block["arguments"] = full_args.clone();
+                        return restored_block;
+                    }
                     block.clone()
                 })
                 .collect();
@@ -2112,7 +2114,10 @@ mod tests {
         let msgs = get_messages(&result);
         // Consecutive user messages merge
         assert_eq!(msgs.len(), 1);
-        let arr = msgs[0].content.as_array().expect("merged content should be array");
+        let arr = msgs[0]
+            .content
+            .as_array()
+            .expect("merged content should be array");
         // First array's blocks + second normalized to [{type:text, text:...}]
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["type"], "text");

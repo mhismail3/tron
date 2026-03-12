@@ -364,8 +364,14 @@ mod tests {
         assert!((settings.retry.jitter_factor - defaults.retry.jitter_factor).abs() < f64::EPSILON);
         assert_eq!(settings.agent.max_turns, defaults.agent.max_turns);
         assert_eq!(settings.agent.subagent_model, defaults.agent.subagent_model);
-        assert_eq!(settings.tools.bash.default_timeout_ms, defaults.tools.bash.default_timeout_ms);
-        assert_eq!(settings.context.compactor.max_tokens, defaults.context.compactor.max_tokens);
+        assert_eq!(
+            settings.tools.bash.default_timeout_ms,
+            defaults.tools.bash.default_timeout_ms
+        );
+        assert_eq!(
+            settings.context.compactor.max_tokens,
+            defaults.context.compactor.max_tokens
+        );
         assert!(settings.context.memory.embedding.enabled);
         assert!(settings.guardrails.is_none());
     }

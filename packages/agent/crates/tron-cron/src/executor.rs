@@ -118,15 +118,7 @@ pub async fn execute_payload(
             command,
             working_directory,
             timeout_secs,
-        } => {
-            execute_shell(
-                command,
-                working_directory.as_deref(),
-                *timeout_secs,
-                cancel,
-            )
-            .await
-        }
+        } => execute_shell(command, working_directory.as_deref(), *timeout_secs, cancel).await,
         Payload::Webhook {
             url,
             method,
@@ -178,10 +170,9 @@ pub async fn execute_payload(
             session_id,
             message,
         } => {
-            let injector = deps
-                .event_injector
-                .as_ref()
-                .ok_or_else(|| CronError::Execution("system event injector not available".into()))?;
+            let injector = deps.event_injector.as_ref().ok_or_else(|| {
+                CronError::Execution("system event injector not available".into())
+            })?;
             if !injector.session_exists(session_id).await {
                 return Err(CronError::Execution(format!(
                     "session not found: {session_id}"
@@ -206,19 +197,20 @@ pub async fn execute_with_retries(
     loop {
         // Re-check job is still enabled before retries
         if attempt > 0
-            && let Ok(false) = crate::store::is_job_enabled(&deps.pool, &job.id) {
-                return make_run(
-                    run_id,
-                    &job.id,
-                    &job.name,
-                    started_at,
-                    Some(completed_at_fn()),
-                    RunStatus::Cancelled,
-                    attempt,
-                    None,
-                    Some("job disabled during retry".into()),
-                );
-            }
+            && let Ok(false) = crate::store::is_job_enabled(&deps.pool, &job.id)
+        {
+            return make_run(
+                run_id,
+                &job.id,
+                &job.name,
+                started_at,
+                Some(completed_at_fn()),
+                RunStatus::Cancelled,
+                attempt,
+                None,
+                Some("job disabled during retry".into()),
+            );
+        }
 
         let result = execute_payload(job, deps, cancel.clone()).await;
 
@@ -308,7 +300,10 @@ async fn execute_shell(
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
     const MAX_OUTPUT: usize = 1_048_576; // 1MB
-    let dir = working_dir.map_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()), String::from);
+    let dir = working_dir.map_or_else(
+        || std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        String::from,
+    );
 
     let mut cmd = tokio::process::Command::new("bash");
     cmd.arg("-c")
@@ -560,8 +555,7 @@ mod tests {
     }
 
     fn make_test_deps() -> ExecutorDeps {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
@@ -579,39 +573,22 @@ mod tests {
 
     #[tokio::test]
     async fn shell_command_captures_stdout() {
-        let output = execute_shell(
-            "echo hello",
-            Some("/tmp"),
-            10,
-            CancellationToken::new(),
-        )
-        .await
-        .unwrap();
+        let output = execute_shell("echo hello", Some("/tmp"), 10, CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(output.stdout.trim(), "hello");
     }
 
     #[tokio::test]
     async fn shell_command_exit_code() {
-        let result = execute_shell(
-            "exit 42",
-            Some("/tmp"),
-            10,
-            CancellationToken::new(),
-        )
-        .await;
+        let result = execute_shell("exit 42", Some("/tmp"), 10, CancellationToken::new()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("exit code 42"));
     }
 
     #[tokio::test]
     async fn shell_command_timeout() {
-        let result = execute_shell(
-            "sleep 60",
-            Some("/tmp"),
-            1,
-            CancellationToken::new(),
-        )
-        .await;
+        let result = execute_shell("sleep 60", Some("/tmp"), 1, CancellationToken::new()).await;
         assert!(matches!(result, Err(CronError::TimedOut)));
     }
 
@@ -620,15 +597,10 @@ mod tests {
         let cancel = CancellationToken::new();
         let cancel2 = cancel.clone();
 
-        let handle = tokio::spawn(async move {
-            execute_shell(
-                "sleep 60",
-                Some("/tmp"),
-                300,
-                cancel2,
-            )
-            .await
-        });
+        let handle =
+            tokio::spawn(
+                async move { execute_shell("sleep 60", Some("/tmp"), 300, cancel2).await },
+            );
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         cancel.cancel();
@@ -665,10 +637,7 @@ mod tests {
         };
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not available"));
+        assert!(result.unwrap_err().to_string().contains("not available"));
     }
 
     #[tokio::test]
@@ -687,14 +656,9 @@ mod tests {
 
     #[tokio::test]
     async fn shell_command_captures_stderr() {
-        let output = execute_shell(
-            "echo err >&2",
-            Some("/tmp"),
-            10,
-            CancellationToken::new(),
-        )
-        .await
-        .unwrap();
+        let output = execute_shell("echo err >&2", Some("/tmp"), 10, CancellationToken::new())
+            .await
+            .unwrap();
         assert!(output.stderr.trim().contains("err"));
     }
 
@@ -749,7 +713,10 @@ mod tests {
             _cancel: CancellationToken,
         ) -> Result<AgentTurnResult, CronError> {
             let mut guard = self.response.lock();
-            std::mem::replace(&mut *guard, Err(CronError::Execution("already consumed".into())))
+            std::mem::replace(
+                &mut *guard,
+                Err(CronError::Execution("already consumed".into())),
+            )
         }
     }
 
@@ -844,7 +811,12 @@ mod tests {
         };
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("session not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("session not found")
+        );
     }
 
     // ── Retry logic ─────────────────────────────────────────────────
@@ -954,7 +926,12 @@ mod tests {
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ShellCommand blocked"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ShellCommand blocked")
+        );
     }
 
     #[tokio::test]
@@ -967,7 +944,12 @@ mod tests {
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ShellCommand blocked"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ShellCommand blocked")
+        );
     }
 
     #[tokio::test]
@@ -1040,7 +1022,12 @@ mod tests {
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("SystemEvent blocked"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("SystemEvent blocked")
+        );
     }
 
     #[tokio::test]

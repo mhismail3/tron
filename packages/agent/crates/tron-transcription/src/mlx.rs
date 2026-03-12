@@ -119,9 +119,10 @@ impl MlxEngine {
                 }
                 debug!("worker startup: {}", line.trim());
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim())
-                    && val.get("status").and_then(|s| s.as_str()) == Some("ready") {
-                        return Ok(());
-                    }
+                    && val.get("status").and_then(|s| s.as_str()) == Some("ready")
+                {
+                    return Ok(());
+                }
             }
         })
         .await;
@@ -248,13 +249,12 @@ impl MlxEngine {
                 Err(TranscriptionError::Sidecar("worker closed stdout".into()))
             }
             Ok(Ok(_)) => {
-                let resp: serde_json::Value =
-                    serde_json::from_str(line.trim()).map_err(|e| {
-                        TranscriptionError::Sidecar(format!(
-                            "bad JSON from worker: {e}: {}",
-                            line.trim()
-                        ))
-                    })?;
+                let resp: serde_json::Value = serde_json::from_str(line.trim()).map_err(|e| {
+                    TranscriptionError::Sidecar(format!(
+                        "bad JSON from worker: {e}: {}",
+                        line.trim()
+                    ))
+                })?;
 
                 if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
                     return Err(TranscriptionError::Sidecar(format!("worker error: {err}")));

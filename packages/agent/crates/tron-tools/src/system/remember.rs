@@ -124,9 +124,7 @@ async fn dispatch_action(
                 return Ok(error_result("session action requires session_id parameter"));
             };
             match store.get_session(sid).await? {
-                Some(s) => {
-                    serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}"))
-                }
+                Some(s) => serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}")),
                 None => format!("Session not found: {sid}"),
             }
         }
@@ -159,9 +157,7 @@ async fn dispatch_action(
         "logs" => {
             let sid = session_id.as_deref().unwrap_or("");
             let level = get_optional_string(params, "level");
-            let entries = store
-                .get_logs(sid, level.as_deref(), limit, offset)
-                .await?;
+            let entries = store.get_logs(sid, level.as_deref(), limit, offset).await?;
             format_json_entries(&entries)
         }
         "stats" => {
@@ -179,9 +175,7 @@ async fn dispatch_action(
     };
 
     Ok(TronToolResult {
-        content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
-            content,
-        )]),
+        content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(content)]),
         details: Some(json!({"action": action})),
         is_error: None,
         stop_turn: None,
@@ -236,11 +230,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.",
         .build()
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let action = match validate_required_string(&params, "action", "query action") {
             Ok(a) => a,
             Err(e) => return Ok(e),
@@ -257,7 +247,15 @@ Use read_blob to retrieve full content when tool results reference a blob_id.",
         #[allow(clippy::cast_possible_truncation)]
         let offset = get_optional_u64(&params, "offset").unwrap_or(0) as u32;
 
-        dispatch_action(&*self.store, &action, &params, ctx.workspace_id.as_deref(), limit, offset).await
+        dispatch_action(
+            &*self.store,
+            &action,
+            &params,
+            ctx.workspace_id.as_deref(),
+            limit,
+            offset,
+        )
+        .await
     }
 }
 

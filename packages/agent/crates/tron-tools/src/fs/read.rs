@@ -13,9 +13,9 @@ use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::truncation::{TruncateOptions, estimate_tokens, truncate_output};
 use crate::utils::validation::validate_required_string;
 
@@ -192,7 +192,7 @@ impl TronTool for ReadTool {
 mod tests {
     use super::*;
 
-    use crate::testutil::{extract_text, make_ctx, MockFs};
+    use crate::testutil::{MockFs, extract_text, make_ctx};
 
     #[tokio::test]
     async fn valid_file_with_line_numbers() {

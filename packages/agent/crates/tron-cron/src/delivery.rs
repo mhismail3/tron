@@ -85,15 +85,17 @@ async fn deliver_apns(
 
     let title = title.unwrap_or(&job.name);
     let body = match &run.status {
-        crate::types::RunStatus::Completed => {
-            run.output
-                .as_deref()
-                .unwrap_or("Completed successfully")
-                .chars()
-                .take(200)
-                .collect::<String>()
-        }
-        _ => format!("Failed: {}", run.error.as_deref().unwrap_or("unknown error")),
+        crate::types::RunStatus::Completed => run
+            .output
+            .as_deref()
+            .unwrap_or("Completed successfully")
+            .chars()
+            .take(200)
+            .collect::<String>(),
+        _ => format!(
+            "Failed: {}",
+            run.error.as_deref().unwrap_or("unknown error")
+        ),
     };
 
     notifier.notify(title, &body).await
@@ -141,8 +143,8 @@ mod tests {
     use super::*;
     use crate::types::*;
     use chrono::Utc;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct MockPushNotifier {
         called: AtomicBool,
@@ -161,19 +163,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::executor::PushNotifier for MockPushNotifier {
-        async fn notify(
-            &self,
-            _title: &str,
-            _body: &str,
-        ) -> Result<(), crate::errors::CronError> {
+        async fn notify(&self, _title: &str, _body: &str) -> Result<(), crate::errors::CronError> {
             self.called.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
 
     fn make_deps_with_notifier(notifier: Arc<MockPushNotifier>) -> ExecutorDeps {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             crate::migrations::run_migrations(&conn).unwrap();
@@ -237,8 +234,7 @@ mod tests {
     }
 
     fn make_deps() -> ExecutorDeps {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             crate::migrations::run_migrations(&conn).unwrap();

@@ -846,9 +846,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.tool_calls.len(), 1, "duplicate tool calls should be deduped");
+        assert_eq!(
+            result.tool_calls.len(),
+            1,
+            "duplicate tool calls should be deduped"
+        );
         assert_eq!(result.tool_calls[0].id, "tc-dup");
-        assert_eq!(result.tool_calls[0].arguments["command"], serde_json::json!("ls"));
+        assert_eq!(
+            result.tool_calls[0].arguments["command"],
+            serde_json::json!("ls")
+        );
     }
 
     // -- finalize_tool_call unit tests --

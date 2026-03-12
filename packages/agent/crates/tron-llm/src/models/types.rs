@@ -225,18 +225,12 @@ mod tests {
             "anthropic".parse::<Provider>().unwrap(),
             Provider::Anthropic
         );
-        assert_eq!(
-            "openai".parse::<Provider>().unwrap(),
-            Provider::OpenAi
-        );
+        assert_eq!("openai".parse::<Provider>().unwrap(), Provider::OpenAi);
         assert_eq!(
             "openai-codex".parse::<Provider>().unwrap(),
             Provider::OpenAiCodex
         );
-        assert_eq!(
-            "google".parse::<Provider>().unwrap(),
-            Provider::Google
-        );
+        assert_eq!("google".parse::<Provider>().unwrap(), Provider::Google);
         assert!("nonexistent".parse::<Provider>().is_err());
     }
 
@@ -261,10 +255,7 @@ mod tests {
 
     #[test]
     fn provider_type_minimax_from_str() {
-        assert_eq!(
-            "minimax".parse::<Provider>().unwrap(),
-            Provider::MiniMax
-        );
+        assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::MiniMax);
     }
 
     #[test]

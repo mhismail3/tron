@@ -30,9 +30,10 @@ pub async fn merge_session(
 
     // On failure, try to restore original branch
     if result.as_ref().is_ok_and(|r| !r.success)
-        && let Some(ref branch) = original_branch {
-            let _ = git.checkout(repo_root, branch).await;
-        }
+        && let Some(ref branch) = original_branch
+    {
+        let _ = git.checkout(repo_root, branch).await;
+    }
 
     result
 }
@@ -47,7 +48,12 @@ async fn do_merge(
 
     match git.merge(repo_root, source_branch).await {
         Ok(commit) => {
-            debug!(source = source_branch, target = target_branch, commit, "merge complete");
+            debug!(
+                source = source_branch,
+                target = target_branch,
+                commit,
+                "merge complete"
+            );
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),
@@ -55,9 +61,16 @@ async fn do_merge(
                 strategy: MergeStrategy::Merge,
             })
         }
-        Err(WorktreeError::Git(ref msg)) if msg.contains("CONFLICT") || msg.contains("Merge conflict") => {
+        Err(WorktreeError::Git(ref msg))
+            if msg.contains("CONFLICT") || msg.contains("Merge conflict") =>
+        {
             let conflicts = git.conflict_files(repo_root).await.unwrap_or_default();
-            warn!(source = source_branch, target = target_branch, ?conflicts, "merge conflicts");
+            warn!(
+                source = source_branch,
+                target = target_branch,
+                ?conflicts,
+                "merge conflicts"
+            );
             let _ = git.abort_merge(repo_root).await;
             Ok(MergeResult {
                 success: false,
@@ -83,7 +96,12 @@ async fn do_rebase(
             // Fast-forward target
             git.checkout(repo_root, target_branch).await?;
             let commit = git.merge(repo_root, source_branch).await?;
-            debug!(source = source_branch, target = target_branch, commit, "rebase complete");
+            debug!(
+                source = source_branch,
+                target = target_branch,
+                commit,
+                "rebase complete"
+            );
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),
@@ -91,9 +109,16 @@ async fn do_rebase(
                 strategy: MergeStrategy::Rebase,
             })
         }
-        Err(WorktreeError::Git(ref msg)) if msg.contains("CONFLICT") || msg.contains("could not apply") => {
+        Err(WorktreeError::Git(ref msg))
+            if msg.contains("CONFLICT") || msg.contains("could not apply") =>
+        {
             let conflicts = git.conflict_files(repo_root).await.unwrap_or_default();
-            warn!(source = source_branch, target = target_branch, ?conflicts, "rebase conflicts");
+            warn!(
+                source = source_branch,
+                target = target_branch,
+                ?conflicts,
+                "rebase conflicts"
+            );
             let _ = git.abort_rebase(repo_root).await;
             Ok(MergeResult {
                 success: false,
@@ -122,7 +147,12 @@ async fn do_squash(
                     &format!("squash merge {source_branch} into {target_branch}"),
                 )
                 .await?;
-            debug!(source = source_branch, target = target_branch, commit, "squash merge complete");
+            debug!(
+                source = source_branch,
+                target = target_branch,
+                commit,
+                "squash merge complete"
+            );
             Ok(MergeResult {
                 success: true,
                 merge_commit: Some(commit),
@@ -132,7 +162,12 @@ async fn do_squash(
         }
         Err(WorktreeError::Git(ref msg)) if msg.contains("CONFLICT") => {
             let conflicts = git.conflict_files(repo_root).await.unwrap_or_default();
-            warn!(source = source_branch, target = target_branch, ?conflicts, "squash merge conflicts");
+            warn!(
+                source = source_branch,
+                target = target_branch,
+                ?conflicts,
+                "squash merge conflicts"
+            );
             let _ = git.abort_merge(repo_root).await;
             Ok(MergeResult {
                 success: false,
@@ -180,11 +215,7 @@ mod tests {
         run_cmd(dir, &["git", "checkout", "-b", branch]).await;
         std::fs::write(dir.join(file), format!("content of {file}")).unwrap();
         run_cmd(dir, &["git", "add", "-A"]).await;
-        run_cmd(
-            dir,
-            &["git", "commit", "-m", &format!("add {file}")],
-        )
-        .await;
+        run_cmd(dir, &["git", "commit", "-m", &format!("add {file}")]).await;
     }
 
     #[tokio::test]
@@ -196,15 +227,9 @@ mod tests {
         make_branch_with_commit(dir.path(), "feature", "feature.txt").await;
         run_cmd(dir.path(), &["git", "checkout", &main]).await;
 
-        let result = merge_session(
-            dir.path(),
-            "feature",
-            &main,
-            MergeStrategy::Merge,
-            &git,
-        )
-        .await
-        .unwrap();
+        let result = merge_session(dir.path(), "feature", &main, MergeStrategy::Merge, &git)
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.merge_commit.is_some());

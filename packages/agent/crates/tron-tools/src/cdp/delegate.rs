@@ -188,7 +188,11 @@ impl BrowserDelegate for CdpBrowserDelegate {
         session_id: &str,
         action: &BrowserAction,
     ) -> Result<BrowserResult, ToolError> {
-        let session = self.service.get_or_create(session_id).await.map_err(cdp_err)?;
+        let session = self
+            .service
+            .get_or_create(session_id)
+            .await
+            .map_err(cdp_err)?;
 
         // Auto-start screencast for iOS frame streaming (matches TS server behavior)
         if !session.is_streaming()
@@ -214,7 +218,10 @@ impl BrowserDelegate for CdpBrowserDelegate {
     }
 
     async fn close_session(&self, session_id: &str) -> Result<(), ToolError> {
-        self.service.close_session(session_id).await.map_err(cdp_err)
+        self.service
+            .close_session(session_id)
+            .await
+            .map_err(cdp_err)
     }
 }
 

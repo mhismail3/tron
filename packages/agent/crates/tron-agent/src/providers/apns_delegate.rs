@@ -34,7 +34,10 @@ impl ApnsNotifyDelegate {
 
     /// Query active device tokens from the database.
     fn active_tokens(&self) -> Result<Vec<String>, ToolError> {
-        let conn = self.pool.get().map_err(|e| ToolError::internal(format!("Failed to get DB connection: {e}")))?;
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| ToolError::internal(format!("Failed to get DB connection: {e}")))?;
         let tokens = DeviceTokenRepo::get_all_active(&conn)
             .map_err(|e| ToolError::internal(format!("Failed to query device tokens: {e}")))?;
         Ok(tokens.into_iter().map(|t| t.device_token).collect())
@@ -46,16 +49,17 @@ impl ApnsNotifyDelegate {
 
         // Forward custom data (convert Value map to String map)
         if let Some(ref extra) = notification.data
-            && let Some(obj) = extra.as_object() {
-                for (k, v) in obj {
-                    let s = if let Some(s) = v.as_str() {
-                        s.to_string()
-                    } else {
-                        v.to_string()
-                    };
-                    let _ = data.insert(k.clone(), s);
-                }
+            && let Some(obj) = extra.as_object()
+        {
+            for (k, v) in obj {
+                let s = if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                };
+                let _ = data.insert(k.clone(), s);
             }
+        }
 
         ApnsNotification {
             title: notification.title.clone(),

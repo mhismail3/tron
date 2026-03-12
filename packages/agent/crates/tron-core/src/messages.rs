@@ -437,8 +437,8 @@ pub fn is_api_tool_use_block(block: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use serde_json::json;
+    use std::sync::Arc;
 
     // -- ToolCall --
 
@@ -799,12 +799,30 @@ mod tests {
 
     #[test]
     fn provider_serde_roundtrip() {
-        assert_eq!(serde_json::to_string(&Provider::Anthropic).unwrap(), "\"anthropic\"");
-        assert_eq!(serde_json::to_string(&Provider::OpenAi).unwrap(), "\"openai\"");
-        assert_eq!(serde_json::to_string(&Provider::OpenAiCodex).unwrap(), "\"openai-codex\"");
-        assert_eq!(serde_json::to_string(&Provider::Google).unwrap(), "\"google\"");
-        assert_eq!(serde_json::to_string(&Provider::MiniMax).unwrap(), "\"minimax\"");
-        assert_eq!(serde_json::to_string(&Provider::Unknown).unwrap(), "\"unknown\"");
+        assert_eq!(
+            serde_json::to_string(&Provider::Anthropic).unwrap(),
+            "\"anthropic\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::OpenAi).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::OpenAiCodex).unwrap(),
+            "\"openai-codex\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Google).unwrap(),
+            "\"google\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::MiniMax).unwrap(),
+            "\"minimax\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Unknown).unwrap(),
+            "\"unknown\""
+        );
 
         let back: Provider = serde_json::from_str("\"anthropic\"").unwrap();
         assert_eq!(back, Provider::Anthropic);
@@ -825,9 +843,15 @@ mod tests {
 
     #[test]
     fn provider_from_str() {
-        assert_eq!("anthropic".parse::<Provider>().unwrap(), Provider::Anthropic);
+        assert_eq!(
+            "anthropic".parse::<Provider>().unwrap(),
+            Provider::Anthropic
+        );
         assert_eq!("openai".parse::<Provider>().unwrap(), Provider::OpenAi);
-        assert_eq!("openai-codex".parse::<Provider>().unwrap(), Provider::OpenAiCodex);
+        assert_eq!(
+            "openai-codex".parse::<Provider>().unwrap(),
+            Provider::OpenAiCodex
+        );
         assert_eq!("google".parse::<Provider>().unwrap(), Provider::Google);
         assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::MiniMax);
         assert!("nonexistent".parse::<Provider>().is_err());
@@ -840,5 +864,4 @@ mod tests {
         assert_eq!(Provider::OpenAiCodex.as_str(), "openai-codex");
         assert_eq!(Provider::Google.as_str(), "google");
     }
-
 }

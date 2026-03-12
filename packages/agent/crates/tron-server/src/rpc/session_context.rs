@@ -171,7 +171,9 @@ struct RulesIndexFingerprint {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum MemoryFingerprint {
     Disabled,
-    MissingWorkspace { working_dir: String },
+    MissingWorkspace {
+        working_dir: String,
+    },
     Snapshot {
         workspace_id: String,
         working_dir: String,
@@ -290,7 +292,10 @@ impl ContextArtifactsService {
         home_dir: Option<&Path>,
     ) -> CachedArtifacts {
         let working_dir_path = Path::new(working_dir);
-        let workspace = event_store.get_workspace_by_path(working_dir).ok().flatten();
+        let workspace = event_store
+            .get_workspace_by_path(working_dir)
+            .ok()
+            .flatten();
         let rules = load_rules(working_dir_path, settings, home_dir);
         let rules_discovery = discover_rules_state(working_dir_path, settings);
         let rules_index = rules_index_from_discovery(&rules_discovery);
@@ -359,7 +364,10 @@ pub(crate) fn load_session_context_artifacts_with_home(
         return SessionContextArtifacts::default();
     }
     let wd_path = Path::new(working_dir);
-    let workspace = event_store.get_workspace_by_path(working_dir).ok().flatten();
+    let workspace = event_store
+        .get_workspace_by_path(working_dir)
+        .ok()
+        .flatten();
     let rules = load_rules(wd_path, settings, home_dir);
     let memory = load_memory_from_workspace(event_store, workspace.as_ref(), settings);
     SessionContextArtifacts { rules, memory }
@@ -601,19 +609,25 @@ impl CachedArtifacts {
     ) -> bool {
         self.rules_fingerprint.is_fresh()
             && self.rules_index_fingerprint.is_fresh()
-            && self.memory_fingerprint.is_fresh(event_store, working_dir, settings, home_dir)
+            && self
+                .memory_fingerprint
+                .is_fresh(event_store, working_dir, settings, home_dir)
     }
 }
 
 impl RulesFingerprint {
     fn is_fresh(&self) -> bool {
-        self.watched_paths.iter().all(PathFingerprint::matches_current)
+        self.watched_paths
+            .iter()
+            .all(PathFingerprint::matches_current)
     }
 }
 
 impl RulesIndexFingerprint {
     fn is_fresh(&self) -> bool {
-        self.scanned_dirs.iter().all(PathFingerprint::matches_current)
+        self.scanned_dirs
+            .iter()
+            .all(PathFingerprint::matches_current)
             && self
                 .discovered_files
                 .iter()
@@ -882,8 +896,12 @@ mod tests {
             parent_id: None,
         });
 
-        let artifacts =
-            load_session_context_artifacts(ctx.event_store.as_ref(), working_dir_str, &settings, false);
+        let artifacts = load_session_context_artifacts(
+            ctx.event_store.as_ref(),
+            working_dir_str,
+            &settings,
+            false,
+        );
         let memory = artifacts.memory.expect("memory should be loaded");
 
         assert_eq!(memory.raw_event_count, 1);

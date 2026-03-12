@@ -164,7 +164,10 @@ mod tests {
 
         // Build the same tool with the builder
         let new = ToolSchemaBuilder::new("Read", "Read file")
-            .required_property("file_path", json!({"type": "string", "description": "Path"}))
+            .required_property(
+                "file_path",
+                json!({"type": "string", "description": "Path"}),
+            )
             .property("offset", json!({"type": "number", "description": "Start"}))
             .build();
 

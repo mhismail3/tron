@@ -431,11 +431,12 @@ impl MethodHandler for UpdateHandler {
             if tr_val.is_null() {
                 job.tool_restrictions = None;
             } else {
-                job.tool_restrictions = Some(
-                    serde_json::from_value(tr_val.clone()).map_err(|e| RpcError::InvalidParams {
-                        message: format!("Invalid toolRestrictions: {e}"),
-                    })?,
-                );
+                job.tool_restrictions =
+                    Some(serde_json::from_value(tr_val.clone()).map_err(|e| {
+                        RpcError::InvalidParams {
+                            message: format!("Invalid toolRestrictions: {e}"),
+                        }
+                    })?);
             }
         }
 
@@ -994,7 +995,10 @@ mod tests {
             "jobId": job_id,
             "toolRestrictions": {"deniedTools": ["Bash"]}
         });
-        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        let updated = UpdateHandler
+            .handle(Some(update_params), &ctx)
+            .await
+            .unwrap();
         assert_eq!(updated["job"]["toolRestrictions"]["deniedTools"][0], "Bash");
     }
 
@@ -1017,7 +1021,10 @@ mod tests {
             "jobId": job_id,
             "toolRestrictions": null
         });
-        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        let updated = UpdateHandler
+            .handle(Some(update_params), &ctx)
+            .await
+            .unwrap();
         assert!(updated["job"]["toolRestrictions"].is_null());
     }
 
@@ -1040,7 +1047,10 @@ mod tests {
             "jobId": job_id,
             "toolRestrictions": {"allowedTools": ["Read", "Grep"]}
         });
-        let updated = UpdateHandler.handle(Some(update_params), &ctx).await.unwrap();
+        let updated = UpdateHandler
+            .handle(Some(update_params), &ctx)
+            .await
+            .unwrap();
         let tr = &updated["job"]["toolRestrictions"];
         assert_eq!(tr["allowedTools"][0], "Read");
         assert_eq!(tr["allowedTools"][1], "Grep");

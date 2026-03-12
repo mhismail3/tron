@@ -262,7 +262,13 @@ pub async fn load_server_auth(
     env_token: Option<&str>,
     env_api_key: Option<&str>,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, env_token, env_api_key, super::shared_auth_client()).await
+    load_server_auth_with_client(
+        auth_path,
+        env_token,
+        env_api_key,
+        super::shared_auth_client(),
+    )
+    .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -292,42 +298,43 @@ pub async fn load_server_auth_with_client(
     // 2. OAuth from auth.json
     let gpa = super::storage::get_google_provider_auth(auth_path);
     if let Some(ref gpa) = gpa
-        && let Some(oauth) = &gpa.base.oauth {
-            let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
-            let cfg = get_config(endpoint);
+        && let Some(oauth) = &gpa.base.oauth
+    {
+        let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
+        let cfg = get_config(endpoint);
 
-            // Use stored client credentials for refresh
-            let cfg_with_creds = GoogleOAuthConfig {
-                oauth: OAuthConfig {
-                    client_id: gpa.client_id.clone().unwrap_or(cfg.oauth.client_id),
-                    client_secret: gpa.client_secret.clone().or(cfg.oauth.client_secret),
-                    ..cfg.oauth
-                },
-                ..cfg
-            };
+        // Use stored client credentials for refresh
+        let cfg_with_creds = GoogleOAuthConfig {
+            oauth: OAuthConfig {
+                client_id: gpa.client_id.clone().unwrap_or(cfg.oauth.client_id),
+                client_secret: gpa.client_secret.clone().or(cfg.oauth.client_secret),
+                ..cfg.oauth
+            },
+            ..cfg
+        };
 
-            match maybe_refresh_tokens(oauth, &cfg_with_creds, client).await {
-                Ok((tokens, refreshed)) => {
-                    if refreshed {
-                        tracing::info!("persisting refreshed Google tokens");
-                        // Update the stored OAuth tokens in the google provider auth
-                        let mut updated_gpa = gpa.clone();
-                        updated_gpa.base.oauth = Some(tokens.clone());
-                        let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
-                    }
-                    return Ok(Some(GoogleAuth {
-                        auth: ServerAuth::from_oauth(&tokens, None),
-                        endpoint: Some(endpoint),
-                        api_endpoint: Some(cfg_with_creds.api_endpoint),
-                        api_version: Some(cfg_with_creds.api_version),
-                        project_id: gpa.project_id.clone(),
-                    }));
+        match maybe_refresh_tokens(oauth, &cfg_with_creds, client).await {
+            Ok((tokens, refreshed)) => {
+                if refreshed {
+                    tracing::info!("persisting refreshed Google tokens");
+                    // Update the stored OAuth tokens in the google provider auth
+                    let mut updated_gpa = gpa.clone();
+                    updated_gpa.base.oauth = Some(tokens.clone());
+                    let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
                 }
-                Err(e) => {
-                    tracing::warn!("Google OAuth refresh failed: {e}");
-                }
+                return Ok(Some(GoogleAuth {
+                    auth: ServerAuth::from_oauth(&tokens, None),
+                    endpoint: Some(endpoint),
+                    api_endpoint: Some(cfg_with_creds.api_endpoint),
+                    api_version: Some(cfg_with_creds.api_version),
+                    project_id: gpa.project_id.clone(),
+                }));
+            }
+            Err(e) => {
+                tracing::warn!("Google OAuth refresh failed: {e}");
             }
         }
+    }
 
     // 3. Env var API key
     if let Some(key) = env_api_key {
@@ -342,15 +349,16 @@ pub async fn load_server_auth_with_client(
 
     // 4. API key from auth.json
     if let Some(gpa) = &gpa
-        && let Some(key) = &gpa.base.api_key {
-            return Ok(Some(GoogleAuth {
-                auth: ServerAuth::from_api_key(key),
-                endpoint: None,
-                api_endpoint: None,
-                api_version: None,
-                project_id: None,
-            }));
-        }
+        && let Some(key) = &gpa.base.api_key
+    {
+        return Ok(Some(GoogleAuth {
+            auth: ServerAuth::from_api_key(key),
+            endpoint: None,
+            api_endpoint: None,
+            api_version: None,
+            project_id: None,
+        }));
+    }
 
     Ok(None)
 }

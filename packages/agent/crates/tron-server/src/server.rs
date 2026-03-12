@@ -227,9 +227,7 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 }
 
 /// GET /health/deep — Deep health check with per-subsystem results.
-async fn deep_health_handler(
-    State(state): State<AppState>,
-) -> Json<health::DeepHealthResponse> {
+async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.broadcast.connection_count();
     let sessions = state.rpc_context.orchestrator.active_session_count();
     let pool = state.rpc_context.event_store.pool();
@@ -539,8 +537,7 @@ mod tests {
             .await
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(["healthy", "degraded", "unhealthy"]
-            .contains(&parsed["status"].as_str().unwrap()));
+        assert!(["healthy", "degraded", "unhealthy"].contains(&parsed["status"].as_str().unwrap()));
         assert!(parsed["checks"].is_array());
         assert!(parsed["uptimeSecs"].is_number());
     }

@@ -84,40 +84,56 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                     workspace_id: workspace_id.map(String::from),
                     ..Default::default()
                 };
-                let mut all_results = ctrl.hybrid_search(
-                    query,
-                    &fts_results,
-                    &HybridSearchOptions { limit: limit as usize, ..Default::default() },
-                    &local_opts,
-                ).await.unwrap_or_default();
+                let mut all_results = ctrl
+                    .hybrid_search(
+                        query,
+                        &fts_results,
+                        &HybridSearchOptions {
+                            limit: limit as usize,
+                            ..Default::default()
+                        },
+                        &local_opts,
+                    )
+                    .await
+                    .unwrap_or_default();
 
                 // 2b. Cross-project search (vector-only, excludes current workspace)
                 if let Some(ws) = workspace_id
-                    && cross_project_top_k > 0 {
-                        let cross_opts = tron_embeddings::SearchOptions {
-                            limit: cross_project_top_k * 2,
-                            exclude_workspace_id: Some(ws.to_string()),
-                            ..Default::default()
-                        };
-                        if let Ok(mut cross) = ctrl.hybrid_search(
+                    && cross_project_top_k > 0
+                {
+                    let cross_opts = tron_embeddings::SearchOptions {
+                        limit: cross_project_top_k * 2,
+                        exclude_workspace_id: Some(ws.to_string()),
+                        ..Default::default()
+                    };
+                    if let Ok(mut cross) = ctrl
+                        .hybrid_search(
                             query,
                             &[], // vector-only for cross-project
-                            &HybridSearchOptions { limit: cross_project_top_k, ..Default::default() },
+                            &HybridSearchOptions {
+                                limit: cross_project_top_k,
+                                ..Default::default()
+                            },
                             &cross_opts,
-                        ).await {
-                            all_results.append(&mut cross);
-                        }
+                        )
+                        .await
+                    {
+                        all_results.append(&mut cross);
                     }
+                }
 
                 if !all_results.is_empty() {
                     // 3. Apply temporal decay
                     let now = chrono::Utc::now();
-                    let mut timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> = HashMap::new();
+                    let mut timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> =
+                        HashMap::new();
                     for r in &all_results {
                         if let Ok(Some(event)) = self.store.get_event(&r.event_id)
-                            && let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
-                                let _ = timestamps.insert(r.event_id.clone(), ts.with_timezone(&chrono::Utc));
-                            }
+                            && let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp)
+                        {
+                            let _ = timestamps
+                                .insert(r.event_id.clone(), ts.with_timezone(&chrono::Utc));
+                        }
                     }
                     apply_temporal_decay(&mut all_results, &timestamps, half_life_days, now);
 

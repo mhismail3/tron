@@ -1102,7 +1102,10 @@ mod tests {
 
     #[test]
     fn test_dependency_relationship_sql_roundtrip() {
-        for rel in [DependencyRelationship::Blocks, DependencyRelationship::Related] {
+        for rel in [
+            DependencyRelationship::Blocks,
+            DependencyRelationship::Related,
+        ] {
             assert_eq!(DependencyRelationship::from_sql(rel.as_sql()), rel);
         }
     }

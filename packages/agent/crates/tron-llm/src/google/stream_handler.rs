@@ -260,23 +260,23 @@ fn handle_finish(
 
     // Handle safety block
     if finish_reason == "SAFETY"
-        && let Some(ratings) = safety_ratings {
-            let blocked: Vec<String> = ratings
-                .iter()
-                .filter(|r| {
-                    r.probability == HarmProbability::High
-                        || r.probability == HarmProbability::Medium
-                })
-                .map(|r| format!("{:?}", r.category))
-                .collect();
+        && let Some(ratings) = safety_ratings
+    {
+        let blocked: Vec<String> = ratings
+            .iter()
+            .filter(|r| {
+                r.probability == HarmProbability::High || r.probability == HarmProbability::Medium
+            })
+            .map(|r| format!("{:?}", r.category))
+            .collect();
 
-            if !blocked.is_empty() {
-                events.push(StreamEvent::SafetyBlock {
-                    blocked_categories: blocked.clone(),
-                    error: format!("Response blocked by safety filter: {}", blocked.join(", ")),
-                });
-            }
+        if !blocked.is_empty() {
+            events.push(StreamEvent::SafetyBlock {
+                blocked_categories: blocked.clone(),
+                error: format!("Response blocked by safety filter: {}", blocked.join(", ")),
+            });
         }
+    }
 
     // End text if active
     if state.text_started {

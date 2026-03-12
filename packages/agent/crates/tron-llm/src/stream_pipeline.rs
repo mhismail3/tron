@@ -9,8 +9,8 @@ use futures::stream::{self, StreamExt};
 use tracing::{error, warn};
 
 use crate::provider::{ProviderResult, StreamEventStream};
-use tron_core::events::StreamEvent;
 use crate::sse::{SseParserOptions, parse_sse_lines};
+use tron_core::events::StreamEvent;
 
 /// Convert an HTTP response's SSE byte stream into a typed [`StreamEventStream`].
 ///

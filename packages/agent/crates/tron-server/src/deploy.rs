@@ -408,10 +408,7 @@ fn check_disk_space(reference_path: &Path) -> SelfTestCheck {
         .unwrap_or(Path::new("/"))
         .to_string_lossy();
     // Use `df -m` to get available space in MB
-    match std::process::Command::new("df")
-        .args(["-m", &dir])
-        .output()
-    {
+    match std::process::Command::new("df").args(["-m", &dir]).output() {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout);
             // Second line, fourth column = available MB
@@ -603,15 +600,17 @@ pub fn codesign_binary(path: &Path) {
             }
             String::from_utf8(o.stdout).ok().and_then(|out| {
                 // Parse first identity line: "  1) HEXHASH \"Name (ID)\""
-                out.lines().find(|l| l.contains(')') && l.contains('"')).and_then(|line| {
-                    let start = line.find('"')?;
-                    let end = line.rfind('"')?;
-                    if end > start {
-                        Some(line[start + 1..end].to_string())
-                    } else {
-                        None
-                    }
-                })
+                out.lines()
+                    .find(|l| l.contains(')') && l.contains('"'))
+                    .and_then(|line| {
+                        let start = line.find('"')?;
+                        let end = line.rfind('"')?;
+                        if end > start {
+                            Some(line[start + 1..end].to_string())
+                        } else {
+                            None
+                        }
+                    })
             })
         });
 
@@ -625,7 +624,10 @@ pub fn codesign_binary(path: &Path) {
         .output()
     {
         Ok(o) if o.status.success() => {
-            info!(identity = identity.as_str(), "binary signed for TCC persistence");
+            info!(
+                identity = identity.as_str(),
+                "binary signed for TCC persistence"
+            );
         }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
@@ -1673,8 +1675,7 @@ mod tests {
             self_test: None,
         };
         write_last_deployment_with_error(dir.path(), &s, "self-test failed: database").unwrap();
-        let contents =
-            std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
         let v: Value = serde_json::from_str(&contents).unwrap();
         assert_eq!(v["status"], "rolled_back");
         assert_eq!(v["error"], "self-test failed: database");
@@ -1688,8 +1689,7 @@ mod tests {
         s.status = "completed".into();
         s.completed_at = Some("2026-03-09T10:01:00.000Z".into());
         write_last_deployment(dir.path(), &s).unwrap();
-        let contents =
-            std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
         let v: Value = serde_json::from_str(&contents).unwrap();
         assert!(v["error"].is_null());
     }

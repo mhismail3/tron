@@ -149,10 +149,7 @@ impl WebCache {
     fn evict_oldest(&mut self) {
         // Prefer expired entries over LRU
         let now = Instant::now();
-        let expired_idx = self
-            .entries
-            .iter()
-            .position(|(_, e)| now >= e.expires_at);
+        let expired_idx = self.entries.iter().position(|(_, e)| now >= e.expires_at);
 
         if let Some(idx) = expired_idx {
             drop(self.entries.swap_remove_index(idx));
@@ -337,7 +334,10 @@ mod tests {
         // Insert "d" — should evict "b" (LRU), not "a" (recently accessed)
         cache.set("d", "q", make_result("d"));
 
-        assert!(cache.get("a", "q").is_some(), "a should be retained (recently accessed)");
+        assert!(
+            cache.get("a", "q").is_some(),
+            "a should be retained (recently accessed)"
+        );
         assert!(cache.get("b", "q").is_none(), "b should be evicted (LRU)");
         assert!(cache.get("c", "q").is_some(), "c should be retained");
         assert!(cache.get("d", "q").is_some(), "d should be present");
@@ -372,9 +372,15 @@ mod tests {
             cache.evict_oldest();
         }
 
-        assert!(cache.entries.get(&cache_key("a", "q")).is_none(), "expired 'a' should be evicted");
-        assert!(cache.entries.get(&cache_key("b", "q")).is_some() || cache.entries.get(&cache_key("c", "q")).is_some(),
-            "non-expired entries should be retained");
+        assert!(
+            cache.entries.get(&cache_key("a", "q")).is_none(),
+            "expired 'a' should be evicted"
+        );
+        assert!(
+            cache.entries.get(&cache_key("b", "q")).is_some()
+                || cache.entries.get(&cache_key("c", "q")).is_some(),
+            "non-expired entries should be retained"
+        );
     }
 
     #[test]

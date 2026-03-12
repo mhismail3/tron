@@ -486,8 +486,12 @@ mod tests {
         let conn = setup();
         let ws = WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/tmp/proj",
+                name: None,
+            },
+        )
+        .unwrap();
 
         let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
         assert_eq!(results.len(), 1);
@@ -499,12 +503,20 @@ mod tests {
         let conn = setup();
         let ws1 = WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/tmp/proj",
+                name: None,
+            },
+        )
+        .unwrap();
         let ws2 = WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/tmp/proj/sub", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/tmp/proj/sub",
+                name: None,
+            },
+        )
+        .unwrap();
 
         let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
         assert_eq!(results.len(), 2);
@@ -518,12 +530,20 @@ mod tests {
         let conn = setup();
         let ws1 = WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/tmp/proj",
+                name: None,
+            },
+        )
+        .unwrap();
         WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/tmp/projOther", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/tmp/projOther",
+                name: None,
+            },
+        )
+        .unwrap();
 
         let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
         assert_eq!(results.len(), 1);
@@ -542,20 +562,36 @@ mod tests {
         let conn = setup();
         WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/a", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/a",
+                name: None,
+            },
+        )
+        .unwrap();
         WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/a/b", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/a/b",
+                name: None,
+            },
+        )
+        .unwrap();
         WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/a/b/c", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/a/b/c",
+                name: None,
+            },
+        )
+        .unwrap();
         WorkspaceRepo::create(
             &conn,
-            &CreateWorkspaceOptions { path: "/a/d", name: None },
-        ).unwrap();
+            &CreateWorkspaceOptions {
+                path: "/a/d",
+                name: None,
+            },
+        )
+        .unwrap();
 
         let results = WorkspaceRepo::find_by_path_prefix(&conn, "/a").unwrap();
         assert_eq!(results.len(), 4);

@@ -215,7 +215,10 @@ mod tests {
 
     #[test]
     fn first_sentence_normal() {
-        assert_eq!(first_sentence("Execute a command. More details here."), "Execute a command.");
+        assert_eq!(
+            first_sentence("Execute a command. More details here."),
+            "Execute a command."
+        );
     }
 
     #[test]
@@ -225,7 +228,10 @@ mod tests {
 
     #[test]
     fn first_sentence_newline_after_period() {
-        assert_eq!(first_sentence("Search the web.\n\nMore info."), "Search the web.");
+        assert_eq!(
+            first_sentence("Search the web.\n\nMore info."),
+            "Search the web."
+        );
     }
 
     #[test]
@@ -253,12 +259,18 @@ mod tests {
 
     #[test]
     fn first_sentence_abbreviation_mid_word() {
-        assert_eq!(first_sentence("Uses v2.0 protocol. Details."), "Uses v2.0 protocol.");
+        assert_eq!(
+            first_sentence("Uses v2.0 protocol. Details."),
+            "Uses v2.0 protocol."
+        );
     }
 
     #[test]
     fn first_sentence_ellipsis() {
-        assert_eq!(first_sentence("Wait... then proceed. Done."), "Wait... then proceed.");
+        assert_eq!(
+            first_sentence("Wait... then proceed. Done."),
+            "Wait... then proceed."
+        );
     }
 
     #[test]

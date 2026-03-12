@@ -16,6 +16,7 @@
 //!   `&Connection` and executes SQL. No shared mutable state.
 
 pub mod connection;
+pub mod contention;
 pub mod migrations;
 pub mod repositories;
 pub mod row_types;

@@ -31,10 +31,8 @@ pub mod vector_repo;
 pub use config::EmbeddingConfig;
 pub use controller::{BackfillEntry, BackfillResult, EmbeddingController, WorkspaceMemory};
 pub use errors::{EmbeddingError, Result};
+pub use hybrid::{HybridResult, HybridSearchOptions, apply_temporal_decay, reciprocal_rank_fusion};
 pub use normalize::{cosine_similarity, l2_norm, l2_normalize, matryoshka_truncate};
 pub use service::{EmbeddingService, MockEmbeddingService};
-pub use text::{
-    build_embedding_text, build_lesson_texts, with_document_prefix, with_query_prefix,
-};
-pub use hybrid::{apply_temporal_decay, reciprocal_rank_fusion, HybridResult, HybridSearchOptions};
+pub use text::{build_embedding_text, build_lesson_texts, with_document_prefix, with_query_prefix};
 pub use vector_repo::{SearchOptions, VectorRepository, VectorSearchResult};

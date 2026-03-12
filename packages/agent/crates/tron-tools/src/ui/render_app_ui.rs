@@ -69,10 +69,22 @@ The UI renders as a native SwiftUI sheet on iOS with liquid glass styling.\n\n\
 IMPORTANT: After calling this tool, do NOT output additional text. The UI will be \
 presented to the user, and their response will come back as a new message.",
         )
-        .required_property("ui", json!({"type": "object", "description": "Root UI component tree"}))
-        .property("canvasId", json!({"type": "string", "description": "Canvas ID (auto-generated if omitted)"}))
-        .property("title", json!({"type": "string", "description": "Sheet toolbar title"}))
-        .property("state", json!({"type": "object", "description": "Initial binding values"}))
+        .required_property(
+            "ui",
+            json!({"type": "object", "description": "Root UI component tree"}),
+        )
+        .property(
+            "canvasId",
+            json!({"type": "string", "description": "Canvas ID (auto-generated if omitted)"}),
+        )
+        .property(
+            "title",
+            json!({"type": "string", "description": "Sheet toolbar title"}),
+        )
+        .property(
+            "state",
+            json!({"type": "object", "description": "Initial binding values"}),
+        )
         .build()
     }
 

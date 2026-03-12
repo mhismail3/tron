@@ -185,31 +185,32 @@ pub async fn load_server_auth_with_client(
 
     // 2. Multi-account tokens
     if let Some(accounts) = &pa.accounts
-        && !accounts.is_empty() {
-            let account = if let Some(label) = preferred_account {
-                accounts.iter().find(|a| a.label == label)
-            } else {
-                None
-            }
-            .or_else(|| accounts.first());
-
-            if let Some(acct) = account {
-                let (tokens, refreshed) = maybe_refresh_tokens(&acct.oauth, config, client).await?;
-                if refreshed {
-                    tracing::info!(account = %acct.label, "persisting refreshed account tokens");
-                    let _ = super::storage::save_account_oauth_tokens(
-                        auth_path,
-                        "anthropic",
-                        &acct.label,
-                        &tokens,
-                    );
-                }
-                return Ok(Some(ServerAuth::from_oauth(
-                    &tokens,
-                    Some(acct.label.clone()),
-                )));
-            }
+        && !accounts.is_empty()
+    {
+        let account = if let Some(label) = preferred_account {
+            accounts.iter().find(|a| a.label == label)
+        } else {
+            None
         }
+        .or_else(|| accounts.first());
+
+        if let Some(acct) = account {
+            let (tokens, refreshed) = maybe_refresh_tokens(&acct.oauth, config, client).await?;
+            if refreshed {
+                tracing::info!(account = %acct.label, "persisting refreshed account tokens");
+                let _ = super::storage::save_account_oauth_tokens(
+                    auth_path,
+                    "anthropic",
+                    &acct.label,
+                    &tokens,
+                );
+            }
+            return Ok(Some(ServerAuth::from_oauth(
+                &tokens,
+                Some(acct.label.clone()),
+            )));
+        }
+    }
 
     // 3. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
@@ -267,12 +268,17 @@ async fn maybe_refresh_tokens(
 
     let client = client.clone();
     let config = config.clone();
-    super::refresh::maybe_refresh(tokens, config.token_expiry_buffer_seconds, "anthropic", |refresh_tok| {
-        let client = client.clone();
-        let config = config.clone();
-        let refresh_tok = refresh_tok.to_owned();
-        async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
-    })
+    super::refresh::maybe_refresh(
+        tokens,
+        config.token_expiry_buffer_seconds,
+        "anthropic",
+        |refresh_tok| {
+            let client = client.clone();
+            let config = config.clone();
+            let refresh_tok = refresh_tok.to_owned();
+            async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
+        },
+    )
     .await
 }
 

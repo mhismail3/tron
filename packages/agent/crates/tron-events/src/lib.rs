@@ -43,7 +43,10 @@ pub use sqlite::{
     ConnectionConfig, ConnectionPool, MigrationResult, PooledConnection, new_file, new_in_memory,
     run_migrations,
 };
-pub use store::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
+pub use store::{
+    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult,
+    event_rows_to_session_events,
+};
 pub use types::{
     ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SearchResult, SessionEvent,
     SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,

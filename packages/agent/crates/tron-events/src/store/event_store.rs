@@ -11,11 +11,11 @@ use uuid::Uuid;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::Duration;
 
 use crate::errors::{EventStoreError, Result};
 use crate::reconstruct::{ReconstructionResult, reconstruct_from_events};
 use crate::sqlite::connection::{ConnectionPool, PooledConnection};
+use crate::sqlite::contention::{self, RetryError};
 use crate::sqlite::repositories::blob::BlobRepo;
 use crate::sqlite::repositories::branch::BranchRepo;
 use crate::sqlite::repositories::device_token::{DeviceTokenRepo, RegisterTokenResult};
@@ -84,7 +84,6 @@ pub struct EventStore {
 }
 
 impl EventStore {
-    const SQLITE_BUSY_MAX_RETRIES: u32 = 32;
     /// Create a new `EventStore` with the given connection pool.
     pub fn new(pool: ConnectionPool) -> Self {
         Self {
@@ -137,34 +136,19 @@ impl EventStore {
         self.retry_on_sqlite_busy(f)
     }
 
-    /// Retry an operation on `SQLite` BUSY/LOCKED with linear backoff + jitter.
-    ///
-    /// Backoff: base = min(attempts * 10, 500) ms, jitter ±25% to prevent
-    /// thundering herd when multiple writers contend on the same database.
     #[allow(clippy::unused_self)]
     fn retry_on_sqlite_busy<T>(&self, mut f: impl FnMut() -> Result<T>) -> Result<T> {
-        let mut attempts = 0;
-
-        loop {
-            match f() {
-                Ok(value) => return Ok(value),
-                Err(err)
-                    if Self::is_sqlite_busy_or_locked(&err)
-                        && attempts < Self::SQLITE_BUSY_MAX_RETRIES =>
-                {
-                    attempts += 1;
-                    let base_ms = u64::from(attempts).saturating_mul(10).min(500);
-                    let jitter_range = base_ms / 4;
-                    let jitter = if jitter_range > 0 {
-                        rand::random::<u64>() % (jitter_range * 2 + 1)
-                    } else {
-                        0
-                    };
-                    let backoff_ms = base_ms.saturating_sub(jitter_range) + jitter;
-                    std::thread::sleep(Duration::from_millis(backoff_ms));
-                }
-                Err(err) => return Err(err),
-            }
+        match contention::retry_on_busy(
+            contention::BusyRetryPolicy::sqlite_write(),
+            &mut f,
+            Self::is_sqlite_busy_or_locked,
+        ) {
+            Ok(value) => Ok(value),
+            Err(RetryError::Inner(err)) => Err(err),
+            Err(RetryError::BusyTimeout(timeout)) => Err(EventStoreError::Busy {
+                operation: "event store write",
+                attempts: timeout.attempts,
+            }),
         }
     }
 
@@ -176,6 +160,7 @@ impl EventStore {
                     rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
                 )
             }
+            EventStoreError::Busy { .. } => true,
             _ => false,
         }
     }
@@ -627,6 +612,16 @@ impl EventStore {
         EventRepo::get_by_types(&conn, session_id, types, limit)
     }
 
+    /// Get the latest event of a specific type within a session.
+    pub fn get_latest_event_by_type(
+        &self,
+        session_id: &str,
+        event_type: &str,
+    ) -> Result<Option<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_latest_by_type(&conn, session_id, event_type)
+    }
+
     /// Get events by workspace and types (cross-session query).
     pub fn get_events_by_workspace_and_types(
         &self,
@@ -723,7 +718,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events(&ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -737,7 +732,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events(&ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -753,7 +748,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events(&ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, head_id, reconstruction))
     }
@@ -767,7 +762,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events(&ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, event_id, reconstruction))
     }
@@ -1094,7 +1089,7 @@ impl EventStore {
 ///
 /// Each `EventRow.payload` is a JSON string; this parses it into `serde_json::Value`.
 /// Invalid JSON falls back to `Value::Null`.
-fn rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
+pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
     rows.iter()
         .map(|row| SessionEvent {
             id: row.id.clone(),
@@ -2887,7 +2882,7 @@ mod tests {
     // ── Helpers ───────────────────────────────────────────────────────
 
     #[test]
-    fn rows_to_session_events_converts_correctly() {
+    fn event_rows_to_session_events_converts_correctly() {
         let row = EventRow {
             id: "evt_1".to_string(),
             session_id: "sess_1".to_string(),
@@ -2916,7 +2911,7 @@ mod tests {
             cost: None,
         };
 
-        let events = super::rows_to_session_events(&[row]);
+        let events = super::event_rows_to_session_events(&[row]);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "evt_1");
         assert_eq!(events[0].event_type, EventType::SessionStart);
@@ -2924,7 +2919,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_to_session_events_handles_invalid_json() {
+    fn event_rows_to_session_events_handles_invalid_json() {
         let row = EventRow {
             id: "evt_1".to_string(),
             session_id: "sess_1".to_string(),
@@ -2953,7 +2948,7 @@ mod tests {
             cost: None,
         };
 
-        let events = super::rows_to_session_events(&[row]);
+        let events = super::event_rows_to_session_events(&[row]);
         assert_eq!(events.len(), 1);
         assert!(events[0].payload.is_null());
     }

@@ -50,6 +50,9 @@ fn task_error_to_rpc(e: &tron_runtime::tasks::TaskError, entity: &str, id: &str)
             code: errors::NOT_FOUND.into(),
             message: format!("{entity} '{id}' not found"),
         },
+        tron_runtime::tasks::TaskError::Busy { .. } => RpcError::NotAvailable {
+            message: e.to_string(),
+        },
         _ => RpcError::Internal {
             message: e.to_string(),
         },
@@ -222,11 +225,11 @@ impl MethodHandler for GetTaskActivityHandler {
         let limit = get_u32_param(params.as_ref(), "limit", 20);
 
         let activity = with_task_conn(ctx, "task.get_activity", move |conn| {
-            tron_runtime::tasks::TaskRepository::get_activity(conn, &task_id, limit).map_err(
-                |e| RpcError::Internal {
+            tron_runtime::tasks::TaskRepository::get_activity(conn, &task_id, limit).map_err(|e| {
+                RpcError::Internal {
                     message: e.to_string(),
-                },
-            )
+                }
+            })
         })
         .await?;
 
@@ -299,11 +302,11 @@ impl MethodHandler for GetProjectHandler {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let project_id_for_lookup = project_id.clone();
         let project = with_task_conn(ctx, "project.get", move |conn| {
-            tron_runtime::tasks::TaskRepository::get_project(conn, &project_id_for_lookup).map_err(|e| {
-                RpcError::Internal {
+            tron_runtime::tasks::TaskRepository::get_project(conn, &project_id_for_lookup).map_err(
+                |e| RpcError::Internal {
                     message: e.to_string(),
-                }
-            })
+                },
+            )
         })
         .await?;
 
@@ -387,10 +390,12 @@ impl MethodHandler for GetProjectDetailsHandler {
                 project_id: Some(project_id),
                 ..Default::default()
             };
-            let task_result = tron_runtime::tasks::TaskRepository::list_tasks(conn, &filter, 1000, 0)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
+            let task_result = tron_runtime::tasks::TaskRepository::list_tasks(
+                conn, &filter, 1000, 0,
+            )
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
 
             let mut project_json = serde_json::to_value(&project).unwrap_or_default();
             if let Some(obj) = project_json.as_object_mut() {
@@ -642,11 +647,11 @@ impl MethodHandler for BatchCreateTasksHandler {
             .unwrap_or_default();
 
         let result = with_task_conn(ctx, "tasks.batch_create", move |conn| {
-            tron_runtime::tasks::TaskService::batch_create_tasks(conn, &items, None).map_err(
-                |e| RpcError::Internal {
+            tron_runtime::tasks::TaskService::batch_create_tasks(conn, &items, None).map_err(|e| {
+                RpcError::Internal {
                     message: e.to_string(),
-                },
-            )
+                }
+            })
         })
         .await?;
 
@@ -866,10 +871,7 @@ mod tests {
             .unwrap();
 
         let result = BatchDeleteTasksHandler
-            .handle(
-                Some(json!({"ids": [t1["id"], t2["id"]]})),
-                &ctx,
-            )
+            .handle(Some(json!({"ids": [t1["id"], t2["id"]]})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["affected"], 2);
@@ -941,9 +943,7 @@ mod tests {
     #[tokio::test]
     async fn batch_delete_no_target() {
         let ctx = make_test_context_with_tasks();
-        let result = BatchDeleteTasksHandler
-            .handle(Some(json!({})), &ctx)
-            .await;
+        let result = BatchDeleteTasksHandler.handle(Some(json!({})), &ctx).await;
         assert!(result.is_err());
     }
 

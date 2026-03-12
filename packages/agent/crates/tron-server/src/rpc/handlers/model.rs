@@ -753,11 +753,7 @@ impl MethodHandler for SetReasoningLevelHandler {
             });
 
         // Skip if level hasn't actually changed (case-insensitive)
-        if previous_level
-            .as_deref()
-            .map(str::to_lowercase)
-            == Some(new_level.to_lowercase())
-        {
+        if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
             return Ok(serde_json::json!({
                 "previousLevel": previous_level,
                 "newLevel": new_level,
@@ -859,11 +855,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
-        assert!(
-            models
-                .iter()
-                .any(|m| m["id"] == "gemini-3.1-pro-preview")
-        );
+        assert!(models.iter().any(|m| m["id"] == "gemini-3.1-pro-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-3-pro-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-3-flash-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-pro"));
@@ -888,10 +880,7 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1-highspeed"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2"));
-        let minimax_count = models
-            .iter()
-            .filter(|m| m["provider"] == "minimax")
-            .count();
+        let minimax_count = models.iter().filter(|m| m["provider"] == "minimax").count();
         assert_eq!(minimax_count, 5);
     }
 
@@ -901,7 +890,11 @@ mod tests {
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
         for model in models.iter().filter(|m| m["provider"] == "minimax") {
-            assert_eq!(model["supportsImages"], false, "{} should not support images", model["id"]);
+            assert_eq!(
+                model["supportsImages"], false,
+                "{} should not support images",
+                model["id"]
+            );
         }
     }
 
@@ -1348,8 +1341,7 @@ mod tests {
             .get_events_by_type(&sid, &["config.reasoning_level"], None)
             .unwrap();
         assert_eq!(events.len(), 1);
-        let payload: serde_json::Value =
-            serde_json::from_str(&events[0].payload).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["previousLevel"], "medium");
         assert_eq!(payload["newLevel"], "max");
     }

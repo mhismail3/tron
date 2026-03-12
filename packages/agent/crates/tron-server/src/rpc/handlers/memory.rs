@@ -6,165 +6,24 @@
 //!
 //! Both call [`execute_ledger_write()`] — the ONLY difference is what triggers the call.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::{debug, instrument, warn};
+use tracing::instrument;
 
+#[cfg(test)]
 use tron_core::messages::{Message, UserMessageContent};
-use tron_runtime::context::ledger_writer::LedgerParseResult;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
+use crate::rpc::memory_ledger::{LedgerWriteDeps, execute_ledger_write};
+#[cfg(test)]
+use crate::rpc::memory_ledger::{
+    build_cycle_snapshot as compute_cycle_messages, cron_assistant_text_len,
+    prepare_cron_transcript,
+};
 use crate::rpc::registry::MethodHandler;
 
 use super::{opt_array, opt_string, opt_u64};
-
-// =============================================================================
-// Cycle boundary helpers
-// =============================================================================
-
-/// Information about a "cycle" — the messages between two memory.ledger boundaries.
-pub struct CycleInfo {
-    /// Messages in this cycle (after the last boundary).
-    pub messages: Vec<Message>,
-    /// First event ID in this cycle.
-    pub first_event_id: String,
-    /// Last event ID in this cycle.
-    pub last_event_id: String,
-    /// First user turn number in this cycle.
-    pub first_turn: i64,
-    /// Last user turn number in this cycle.
-    pub last_turn: i64,
-}
-
-/// Compute messages in the current cycle (after the last `memory.ledger` boundary).
-///
-/// Multiple ledger entries per session are expected — each covers a different cycle.
-/// This mirrors the TS server's `computeCycleRange()` pattern.
-pub fn compute_cycle_messages(
-    event_store: &tron_events::EventStore,
-    session_manager: &tron_runtime::orchestrator::session_manager::SessionManager,
-    session_id: &str,
-) -> Option<CycleInfo> {
-    // 1. Find the last memory.ledger event's sequence (the boundary)
-    let ledger_events = event_store
-        .get_events_by_type(session_id, &["memory.ledger"], Some(1000))
-        .unwrap_or_default();
-    let boundary_sequence = ledger_events.last().map(|e| e.sequence);
-
-    // 2. Get events after the boundary (or all events if no boundary)
-    let cycle_events = if let Some(seq) = boundary_sequence {
-        event_store
-            .get_events_since(session_id, seq)
-            .unwrap_or_default()
-    } else {
-        let opts = tron_events::sqlite::repositories::event::ListEventsOptions {
-            limit: None,
-            offset: None,
-        };
-        event_store
-            .get_events_by_session(session_id, &opts)
-            .unwrap_or_default()
-    };
-
-    if cycle_events.is_empty() {
-        return None;
-    }
-
-    let first_event_id = cycle_events
-        .first()
-        .map(|e| e.id.clone())
-        .unwrap_or_default();
-    let last_event_id = cycle_events
-        .last()
-        .map(|e| e.id.clone())
-        .unwrap_or_default();
-
-    // 3. Reconstruct messages from cycle events
-    //    If there's no boundary, use all messages from the session.
-    //    If there IS a boundary, only include messages from cycle events.
-    let messages = if boundary_sequence.is_some() {
-        // Build messages from cycle events by parsing message.user / message.assistant events
-        let mut msgs = Vec::new();
-        for ev in &cycle_events {
-            match ev.event_type.as_str() {
-                "message.user" => {
-                    if let Ok(payload) = serde_json::from_str::<Value>(&ev.payload) {
-                        let content = payload
-                            .get("content")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        msgs.push(Message::User {
-                            content: UserMessageContent::Text(content),
-                            timestamp: None,
-                        });
-                    }
-                }
-                "message.assistant" => {
-                    if let Ok(msg) = serde_json::from_str::<Message>(&format!(
-                        r#"{{"role":"assistant","payload":{}}}"#,
-                        ev.payload
-                    )) {
-                        msgs.push(msg);
-                    } else if let Ok(payload) = serde_json::from_str::<Value>(&ev.payload) {
-                        // Fallback: wrap payload into a Message::Assistant via serde
-                        let wrapper = serde_json::json!({
-                            "role": "assistant",
-                            "content": payload.get("content").cloned().unwrap_or(Value::Array(vec![])),
-                        });
-                        if let Ok(msg) = serde_json::from_value::<Message>(wrapper) {
-                            msgs.push(msg);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        msgs
-    } else {
-        // No boundary — use full session messages
-        let active = session_manager.resume_session(session_id).ok()?;
-        active.state.messages.clone()
-    };
-
-    if messages.is_empty() {
-        return None;
-    }
-
-    // 4. Compute turn range from cycle events
-    //    Count turns that already happened before this cycle (offset) + turns in this cycle
-    let prior_user_turns = if let Some(seq) = boundary_sequence {
-        // Count user message events before the boundary
-        let all_events = event_store
-            .get_events_by_type(session_id, &["message.user"], Some(10000))
-            .unwrap_or_default();
-        #[allow(clippy::cast_possible_wrap)]
-        let count = all_events.iter().filter(|e| e.sequence <= seq).count() as i64;
-        count
-    } else {
-        0
-    };
-
-    let cycle_user_turns = messages
-        .iter()
-        .filter(|m| matches!(m, Message::User { .. }))
-        .count();
-    #[allow(clippy::cast_possible_wrap)]
-    let first_turn = prior_user_turns + 1;
-    #[allow(clippy::cast_possible_wrap)]
-    let last_turn = prior_user_turns + cycle_user_turns as i64;
-
-    Some(CycleInfo {
-        messages,
-        first_event_id,
-        last_event_id,
-        first_turn,
-        last_turn,
-    })
-}
 
 /// Emit `MemoryUpdated` event via the orchestrator broadcast.
 fn emit_memory_updated(
@@ -183,313 +42,6 @@ fn emit_memory_updated(
             entry_type: entry_type.map(String::from),
             event_id: event_id.map(String::from),
         });
-}
-
-// =============================================================================
-// Shared ledger write pipeline
-// =============================================================================
-
-/// Dependencies for the shared ledger write pipeline.
-///
-/// Both the auto path (`RuntimeMemoryDeps`) and manual path (`UpdateLedgerHandler`)
-/// construct this from their respective contexts, then call [`execute_ledger_write()`].
-pub struct LedgerWriteDeps {
-    /// Event store for persisting ledger events.
-    pub event_store: Arc<tron_events::EventStore>,
-    /// Session manager for session context and message history.
-    pub session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
-    /// Subagent manager for spawning LLM subsessions (required for ledger generation).
-    pub subagent_manager:
-        Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
-    /// Embedding controller for fire-and-forget semantic vector indexing.
-    pub embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
-    /// Shutdown coordinator for tracking in-flight embedding tasks.
-    pub shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
-}
-
-/// Execute the full ledger write pipeline.
-///
-/// This is the **single paved codepath** for memory ledger writes. Both the
-/// auto-triggered path (after agent completion) and the manual RPC path call this.
-///
-/// Pipeline:
-/// 1. Compute cycle messages (since last `memory.ledger` boundary)
-/// 2. Spawn LLM subsession to generate structured ledger entry
-/// 3. Parse LLM response into `LedgerEntry`
-/// 4. Build full payload (matching TS server `MemoryLedgerPayload` format)
-/// 5. Persist as `memory.ledger` event
-/// 6. Fire-and-forget embedding for semantic search
-///
-/// Returns a `LedgerWriteResult` suitable for both callers.
-pub async fn execute_ledger_write(
-    session_id: &str,
-    working_directory: &str,
-    deps: &LedgerWriteDeps,
-    source: &str,
-) -> tron_events::memory::types::LedgerWriteResult {
-    // 1. Compute cycle messages
-    let cycle = compute_cycle_messages(&deps.event_store, &deps.session_manager, session_id);
-    let cycle = match cycle {
-        Some(c) if !c.messages.is_empty() => c,
-        _ => {
-            return tron_events::memory::types::LedgerWriteResult::skipped(
-                "no new messages since last boundary",
-            );
-        }
-    };
-
-    // 2. Spawn LLM subsession for structured ledger entry
-    let cycle_message_count = cycle.messages.len();
-    let has_subagent = deps.subagent_manager.is_some();
-    debug!(
-        session_id,
-        has_subagent, cycle_message_count, "executing ledger write"
-    );
-
-    let llm_result = if let Some(ref manager) = deps.subagent_manager {
-        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
-        use tron_runtime::context::llm_summarizer::SubsessionSpawner;
-        use tron_runtime::context::summarizer::serialize_messages;
-
-        let transcript = if source == "cron" {
-            let filtered = prepare_cron_transcript(&cycle.messages);
-            if cron_assistant_text_len(&filtered) < 500 {
-                debug!(
-                    session_id,
-                    "cron session had no meaningful assistant output, skipping ledger"
-                );
-                return tron_events::memory::types::LedgerWriteResult::skipped(
-                    "cron session had no meaningful output",
-                );
-            }
-            serialize_messages(&filtered)
-        } else {
-            serialize_messages(&cycle.messages)
-        };
-        let spawner = SubagentManagerSpawner {
-            manager: manager.clone(),
-            parent_session_id: session_id.to_owned(),
-            working_directory: working_directory.to_owned(),
-            system_prompt: tron_runtime::context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
-            model: Some("claude-haiku-4-5-20251001".to_string()),
-        };
-        let result = spawner.spawn_summarizer(&transcript).await;
-        if result.success {
-            result
-                .output
-                .as_deref()
-                .and_then(|o| tron_runtime::context::ledger_writer::parse_ledger_response(o).ok())
-        } else {
-            debug!(session_id, error = ?result.error, "subsession ledger call failed");
-            None
-        }
-    } else {
-        debug!(session_id, "no subagent manager available for ledger write");
-        None
-    };
-
-    // 3. Process result
-    match llm_result {
-        Some(LedgerParseResult::Skip) => {
-            debug!(
-                session_id,
-                "LLM classified interaction as trivial, skipping"
-            );
-            tron_events::memory::types::LedgerWriteResult::skipped("trivial interaction")
-        }
-        Some(LedgerParseResult::Entry(entry)) => {
-            let payload =
-                build_ledger_payload(&cycle, &entry, deps, session_id, working_directory, source);
-            persist_and_embed(deps, session_id, working_directory, &entry, payload)
-        }
-        None => tron_events::memory::types::LedgerWriteResult::skipped("LLM call failed"),
-    }
-}
-
-/// Build the full `memory.ledger` JSON payload (matches TS server `MemoryLedgerPayload` format).
-fn build_ledger_payload(
-    cycle: &CycleInfo,
-    entry: &tron_runtime::context::ledger_writer::LedgerEntry,
-    deps: &LedgerWriteDeps,
-    session_id: &str,
-    working_directory: &str,
-    source: &str,
-) -> Value {
-    let session_info = deps.session_manager.get_session(session_id).ok().flatten();
-    let (total_input, total_output) = session_info
-        .as_ref()
-        .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
-    let model = session_info
-        .as_ref()
-        .map(|s| s.latest_model.clone())
-        .unwrap_or_default();
-
-    serde_json::json!({
-        "eventRange": {
-            "firstEventId": cycle.first_event_id,
-            "lastEventId": cycle.last_event_id,
-        },
-        "turnRange": {
-            "firstTurn": cycle.first_turn,
-            "lastTurn": cycle.last_turn,
-        },
-        "title": entry.title,
-        "entryType": entry.entry_type,
-        "status": entry.status,
-        "tags": entry.tags,
-        "input": entry.input,
-        "actions": entry.actions,
-        "files": entry.files.iter().map(|f| serde_json::json!({
-            "path": f.path, "op": f.op, "why": f.why,
-        })).collect::<Vec<_>>(),
-        "decisions": entry.decisions.iter().map(|d| serde_json::json!({
-            "choice": d.choice, "reason": d.reason,
-        })).collect::<Vec<_>>(),
-        "lessons": entry.lessons,
-        "thinkingInsights": entry.thinking_insights,
-        "tokenCost": { "input": total_input, "output": total_output },
-        "model": model,
-        "workingDirectory": working_directory,
-        "source": source,
-    })
-}
-
-/// Persist a `memory.ledger` event and spawn fire-and-forget embedding.
-fn persist_and_embed(
-    deps: &LedgerWriteDeps,
-    session_id: &str,
-    working_directory: &str,
-    entry: &tron_runtime::context::ledger_writer::LedgerEntry,
-    payload: Value,
-) -> tron_events::memory::types::LedgerWriteResult {
-    let event_id = match deps.event_store.append(&tron_events::AppendOptions {
-        session_id,
-        event_type: tron_events::EventType::MemoryLedger,
-        payload: payload.clone(),
-        parent_id: None,
-    }) {
-        Ok(row) => row.id,
-        Err(e) => {
-            warn!(
-                session_id,
-                error = %e,
-                title = %entry.title,
-                "failed to persist memory.ledger event"
-            );
-            return tron_events::memory::types::LedgerWriteResult::failed(
-                "database temporarily busy",
-            );
-        }
-    };
-
-    let embed_ws_id = deps
-        .event_store
-        .get_workspace_by_path(working_directory)
-        .ok()
-        .flatten()
-        .map_or_else(|| working_directory.to_owned(), |ws| ws.id);
-    spawn_embed_memory_with_deps(
-        deps.embedding_controller.as_ref(),
-        &event_id,
-        &embed_ws_id,
-        &payload,
-        deps.shutdown_coordinator.as_ref(),
-    );
-
-    debug!(
-        session_id,
-        title = %entry.title,
-        entry_type = %entry.entry_type,
-        event_id = %event_id,
-        "ledger entry written"
-    );
-
-    tron_events::memory::types::LedgerWriteResult::written(
-        entry.title.clone(),
-        entry.entry_type.clone(),
-        event_id,
-        payload,
-    )
-}
-
-/// Spawn a fire-and-forget embedding task (standalone version, not requiring `RpcContext`).
-fn spawn_embed_memory_with_deps(
-    controller: Option<&Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
-    event_id: &str,
-    workspace_id: &str,
-    payload: &Value,
-    shutdown_coordinator: Option<&Arc<crate::shutdown::ShutdownCoordinator>>,
-) {
-    if let Some(ec) = controller {
-        let ec = Arc::clone(ec);
-        let event_id = event_id.to_owned();
-        let workspace_id = workspace_id.to_owned();
-        let payload = payload.clone();
-        let handle = tokio::spawn(async move {
-            let ctrl = ec.lock().await;
-            if let Err(e) = ctrl.embed_memory(&event_id, &workspace_id, &payload).await {
-                warn!(error = %e, event_id, "failed to embed ledger entry");
-            }
-        });
-        if let Some(coord) = shutdown_coordinator {
-            coord.register_task(handle);
-        }
-    }
-}
-
-// =============================================================================
-// Cron transcript preparation
-// =============================================================================
-
-/// Prepare transcript for a cron session by stripping long boilerplate user
-/// messages (reusable task prompts) so the ledger LLM focuses on the
-/// assistant's actual actions rather than static configuration.
-fn prepare_cron_transcript(messages: &[Message]) -> Vec<Message> {
-    messages
-        .iter()
-        .map(|m| {
-            if let Message::User { content, .. } = m
-                && user_message_len(content) > 500 {
-                    return Message::User {
-                        content: UserMessageContent::Text(
-                            "[Recurring cron task prompt omitted — focus on the assistant's actions below]".into(),
-                        ),
-                        timestamp: None,
-                    };
-                }
-            m.clone()
-        })
-        .collect()
-}
-
-/// Total text length across all assistant messages (ignores `tool_use`, thinking, etc.).
-/// Used to detect no-op cron sessions before spending an LLM call on ledger generation.
-fn cron_assistant_text_len(messages: &[Message]) -> usize {
-    messages
-        .iter()
-        .map(|m| {
-            if let Message::Assistant { content, .. } = m {
-                content
-                    .iter()
-                    .filter_map(|c| c.as_text())
-                    .map(str::len)
-                    .sum::<usize>()
-            } else {
-                0
-            }
-        })
-        .sum()
-}
-
-fn user_message_len(content: &UserMessageContent) -> usize {
-    match content {
-        UserMessageContent::Text(t) => t.len(),
-        UserMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|c| c.as_text())
-            .map(str::len)
-            .sum(),
-    }
 }
 
 // =============================================================================
@@ -542,122 +94,115 @@ impl MethodHandler for GetLedgerHandler {
                 .collect()
         });
 
-        // Fetch raw events — either workspace-scoped or global
-        let (all_events_for_tags, count_and_page) = if let Some(ref dir) = working_dir {
-            // Workspace-scoped: prefix match
-            let workspaces = ctx
-                .event_store
-                .find_workspaces_by_path_prefix(dir)
-                .unwrap_or_default();
-
-            if workspaces.is_empty() {
-                return Ok(serde_json::json!({
-                    "entries": [],
-                    "hasMore": false,
-                    "totalCount": 0,
-                }));
-            }
-
-            let workspace_ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
-
-            if tags_filter.is_some() {
-                let events = ctx
-                    .event_store
-                    .get_events_by_workspaces_and_types(
-                        &workspace_ids,
-                        &["memory.ledger"],
-                        None,
-                        None,
-                    )
+        let event_store = ctx.event_store.clone();
+        ctx.run_blocking("memory.get_ledger", move || {
+            // Fetch raw events — either workspace-scoped or global
+            let (all_events_for_tags, count_and_page) = if let Some(ref dir) = working_dir {
+                let workspaces = event_store
+                    .find_workspaces_by_path_prefix(dir)
                     .unwrap_or_default();
-                (Some(events), None)
-            } else {
-                let total_count = ctx
-                    .event_store
-                    .count_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"])
-                    .unwrap_or(0);
-                let events = ctx
-                    .event_store
-                    .get_events_by_workspaces_and_types(
-                        &workspace_ids,
-                        &["memory.ledger"],
-                        Some(limit),
-                        Some(offset),
-                    )
-                    .unwrap_or_default();
-                (None, Some((events, total_count)))
-            }
-        } else {
-            // Global: all workspaces
-            if tags_filter.is_some() {
-                let events = ctx
-                    .event_store
+
+                if workspaces.is_empty() {
+                    return Ok(serde_json::json!({
+                        "entries": [],
+                        "hasMore": false,
+                        "totalCount": 0,
+                    }));
+                }
+
+                let workspace_ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
+
+                if tags_filter.is_some() {
+                    let events = event_store
+                        .get_events_by_workspaces_and_types(
+                            &workspace_ids,
+                            &["memory.ledger"],
+                            None,
+                            None,
+                        )
+                        .unwrap_or_default();
+                    (Some(events), None)
+                } else {
+                    let total_count = event_store
+                        .count_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"])
+                        .unwrap_or(0);
+                    let events = event_store
+                        .get_events_by_workspaces_and_types(
+                            &workspace_ids,
+                            &["memory.ledger"],
+                            Some(limit),
+                            Some(offset),
+                        )
+                        .unwrap_or_default();
+                    (None, Some((events, total_count)))
+                }
+            } else if tags_filter.is_some() {
+                let events = event_store
                     .get_all_events_by_types(&["memory.ledger"], None, None)
                     .unwrap_or_default();
                 (Some(events), None)
             } else {
-                let total_count = ctx
-                    .event_store
+                let total_count = event_store
                     .count_all_events_by_types(&["memory.ledger"])
                     .unwrap_or(0);
-                let events = ctx
-                    .event_store
+                let events = event_store
                     .get_all_events_by_types(&["memory.ledger"], Some(limit), Some(offset))
                     .unwrap_or_default();
                 (None, Some((events, total_count)))
+            };
+
+            if let Some(all_events) = all_events_for_tags {
+                let tags = tags_filter.as_ref().ok_or_else(|| RpcError::Internal {
+                    message: "memory tag filter state was inconsistent".into(),
+                })?;
+                let filtered: Vec<Value> = all_events
+                    .iter()
+                    .map(event_to_ledger_dto)
+                    .filter(|dto| {
+                        let entry_tags = dto["tags"]
+                            .as_array()
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(String::from)
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        tags.iter().any(|tag| entry_tags.contains(tag))
+                    })
+                    .collect();
+
+                let total_count = filtered.len();
+                let offset_usize = usize::try_from(offset).unwrap_or(0);
+                let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
+                let entries: Vec<Value> = filtered
+                    .into_iter()
+                    .skip(offset_usize)
+                    .take(limit_usize)
+                    .collect();
+                let has_more = offset_usize + limit_usize < total_count;
+
+                return Ok(serde_json::json!({
+                    "entries": entries,
+                    "hasMore": has_more,
+                    "totalCount": total_count,
+                }));
             }
-        };
 
-        // Tag-filtered path: filter in memory, then paginate
-        if let Some(all_events) = all_events_for_tags {
-            // INVARIANT: `all_events_for_tags` is Some only when `tags_filter` is Some.
-            let tags = tags_filter.as_ref().unwrap();
-            let filtered: Vec<Value> = all_events
-                .iter()
-                .map(event_to_ledger_dto)
-                .filter(|dto| {
-                    let entry_tags = dto["tags"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(Value::as_str)
-                                .map(String::from)
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    tags.iter().any(|t| entry_tags.contains(t))
-                })
-                .collect();
+            let (events, total_count) = count_and_page.ok_or_else(|| RpcError::Internal {
+                message: "memory ledger pagination state was inconsistent".into(),
+            })?;
+            let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
+            #[allow(clippy::cast_possible_wrap)]
+            let has_more = (offset + limit) < total_count;
 
-            let total_count = filtered.len();
-            let offset_usize = usize::try_from(offset).unwrap_or(0);
-            let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
-            let entries: Vec<Value> = filtered
-                .into_iter()
-                .skip(offset_usize)
-                .take(limit_usize)
-                .collect();
-            let has_more = offset_usize + limit_usize < total_count;
-
-            return Ok(serde_json::json!({
+            Ok(serde_json::json!({
                 "entries": entries,
                 "hasMore": has_more,
                 "totalCount": total_count,
-            }));
-        }
-
-        // Non-tag path: already paginated by SQL
-        // INVARIANT: `count_and_page` is Some when `all_events_for_tags` is None (early return above).
-        let (events, total_count) = count_and_page.unwrap();
-        let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
-        #[allow(clippy::cast_possible_wrap)]
-        let has_more = (offset + limit) < total_count;
-
-        Ok(serde_json::json!({
-            "entries": entries,
-            "hasMore": has_more,
-            "totalCount": total_count,
-        }))
+            }))
+        })
+        .await
     }
 }
 
@@ -708,40 +253,14 @@ impl MethodHandler for UpdateLedgerHandler {
                 base: tron_core::events::BaseEvent::now(session_id),
             });
 
-        // Resume session to verify it exists and get working directory
-        let Ok(active) = ctx.session_manager.resume_session(session_id) else {
-            debug!(session_id, "session not found or empty during resume");
-            emit_memory_updated(ctx, session_id, None, Some("skipped"), None);
-            return Ok(serde_json::json!({
-                "written": false,
-                "title": null,
-                "entryType": null,
-                "reason": "session not found or empty",
-            }));
-        };
-
-        if active.state.messages.is_empty() {
-            debug!(session_id, "no messages in session");
-            emit_memory_updated(ctx, session_id, None, Some("skipped"), None);
-            return Ok(serde_json::json!({
-                "written": false,
-                "title": null,
-                "entryType": null,
-                "reason": "no_messages",
-            }));
-        }
-
-        let working_dir = active.state.working_directory.clone().unwrap_or_default();
-
         // Delegate to the shared pipeline
         let deps = LedgerWriteDeps {
             event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
             subagent_manager: ctx.subagent_manager.clone(),
             embedding_controller: ctx.embedding_controller.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         };
-        let result = execute_ledger_write(session_id, &working_dir, &deps, "manual").await;
+        let result = execute_ledger_write(session_id, &deps, "manual").await;
 
         // Emit memory_updated based on result
         if result.written {
@@ -812,65 +331,65 @@ impl MethodHandler for SearchMemoryHandler {
 
         let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 20)).unwrap_or(usize::MAX);
 
-        let sessions = ctx
-            .session_manager
-            .list_sessions(&tron_runtime::SessionFilter {
-                include_archived: true,
-                ..Default::default()
-            })
-            .unwrap_or_default();
-
-        let mut entries = Vec::new();
-        let search_lower = search_text.to_lowercase();
-
-        for session in sessions {
-            let events = ctx
-                .event_store
-                .get_events_by_type(&session.id, &["memory.ledger"], Some(100))
+        let event_store = ctx.event_store.clone();
+        let session_manager = ctx.session_manager.clone();
+        ctx.run_blocking("memory.search", move || {
+            let sessions = session_manager
+                .list_sessions(&tron_runtime::SessionFilter {
+                    include_archived: true,
+                    ..Default::default()
+                })
                 .unwrap_or_default();
 
-            for event in events {
-                let payload: Value = match serde_json::from_str(&event.payload) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+            let mut entries = Vec::new();
+            let search_lower = search_text.to_lowercase();
 
-                // Text filter (case-insensitive)
-                if !search_lower.is_empty() {
-                    let payload_text = payload.to_string().to_lowercase();
-                    if !payload_text.contains(&search_lower) {
+            for session in sessions {
+                let events = event_store
+                    .get_events_by_type(&session.id, &["memory.ledger"], Some(100))
+                    .unwrap_or_default();
+
+                for event in events {
+                    let payload: Value = match serde_json::from_str(&event.payload) {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    };
+
+                    if !search_lower.is_empty()
+                        && !payload.to_string().to_lowercase().contains(&search_lower)
+                    {
                         continue;
                     }
-                }
 
-                // Type filter
-                if let Some(tf) = type_filter.as_deref() {
-                    let entry_type = payload
-                        .get("entryType")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    if entry_type != tf {
-                        continue;
+                    if let Some(type_filter) = type_filter.as_deref() {
+                        let entry_type = payload
+                            .get("entryType")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        if entry_type != type_filter {
+                            continue;
+                        }
+                    }
+
+                    entries.push(event_to_search_dto(&event));
+
+                    if entries.len() >= limit {
+                        break;
                     }
                 }
-
-                entries.push(event_to_search_dto(&event));
-
                 if entries.len() >= limit {
                     break;
                 }
             }
-            if entries.len() >= limit {
-                break;
-            }
-        }
 
-        let total_count = entries.len();
+            let total_count = entries.len();
 
-        Ok(serde_json::json!({
-            "entries": entries,
-            "totalCount": total_count,
-        }))
+            Ok(serde_json::json!({
+                "entries": entries,
+                "totalCount": total_count,
+            }))
+        })
+        .await
     }
 }
 
@@ -882,50 +401,50 @@ impl MethodHandler for GetHandoffsHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.getHandoffs"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 10)).unwrap_or(usize::MAX);
-
-        let sessions = ctx
-            .session_manager
-            .list_sessions(&tron_runtime::SessionFilter {
-                include_archived: true,
-                limit: Some(limit * 2),
-                ..Default::default()
-            })
-            .unwrap_or_default();
-
-        let mut handoffs = Vec::new();
-
-        for session in sessions {
-            let events = ctx
-                .event_store
-                .get_events_by_type(&session.id, &["memory.ledger"], Some(1))
+        let event_store = ctx.event_store.clone();
+        let session_manager = ctx.session_manager.clone();
+        ctx.run_blocking("memory.get_handoffs", move || {
+            let sessions = session_manager
+                .list_sessions(&tron_runtime::SessionFilter {
+                    include_archived: true,
+                    limit: Some(limit * 2),
+                    ..Default::default()
+                })
                 .unwrap_or_default();
 
-            if let Some(event) = events.first()
-                && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload)
-            {
-                let summary = parsed
-                    .get("input")
-                    .and_then(Value::as_str)
-                    .or_else(|| parsed.get("summary").and_then(Value::as_str))
-                    .unwrap_or("");
-                handoffs.push(serde_json::json!({
-                    "id": event.id,
-                    "sessionId": session.id,
-                    "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
-                    "createdAt": event.timestamp,
-                    "summary": summary,
-                    "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
-                }));
+            let mut handoffs = Vec::new();
+
+            for session in sessions {
+                if let Some(event) = event_store
+                    .get_latest_event_by_type(&session.id, "memory.ledger")
+                    .unwrap_or_default()
+                    && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload)
+                {
+                    let summary = parsed
+                        .get("input")
+                        .and_then(Value::as_str)
+                        .or_else(|| parsed.get("summary").and_then(Value::as_str))
+                        .unwrap_or("");
+                    handoffs.push(serde_json::json!({
+                        "id": event.id,
+                        "sessionId": session.id,
+                        "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
+                        "createdAt": event.timestamp,
+                        "summary": summary,
+                        "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
+                    }));
+                }
+
+                if handoffs.len() >= limit {
+                    break;
+                }
             }
 
-            if handoffs.len() >= limit {
-                break;
-            }
-        }
-
-        Ok(serde_json::json!({
-            "handoffs": handoffs,
-        }))
+            Ok(serde_json::json!({
+                "handoffs": handoffs,
+            }))
+        })
+        .await
     }
 }
 
@@ -933,7 +452,9 @@ impl MethodHandler for GetHandoffsHandler {
 mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::make_test_context;
+    use crate::rpc::memory_ledger::user_message_len;
     use serde_json::json;
+    use std::sync::Arc;
 
     /// Helper: create a session and append a `memory.ledger` event with the given payload.
     /// Returns `(session_id, event_id)`.
@@ -1867,12 +1388,11 @@ mod tests {
         // No subagent_manager → LLM call fails → skipped, but the signature is validated
         let deps = LedgerWriteDeps {
             event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
             subagent_manager: None,
             embedding_controller: None,
             shutdown_coordinator: None,
         };
-        let result = execute_ledger_write(&sid, "/tmp", &deps, "manual").await;
+        let result = execute_ledger_write(&sid, &deps, "manual").await;
         assert!(!result.written); // No LLM available
     }
 
@@ -1918,7 +1438,11 @@ mod tests {
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid,
             event_type: tron_events::EventType::MemoryLedger,
-            payload: json!({"title": "Implement dark mode", "entryType": "feature"}),
+            payload: json!({
+                "title": "Implement dark mode",
+                "entryType": "feature",
+                "turnRange": {"firstTurn": 1, "lastTurn": 1}
+            }),
             parent_id: None,
         });
         ctx.session_manager.invalidate_session(&sid);
@@ -1958,8 +1482,9 @@ mod tests {
         });
         ctx.session_manager.invalidate_session(&sid);
 
-        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
-        let cycle = cycle.expect("should return cycle");
+        let cycle = compute_cycle_messages(&ctx.event_store, &sid)
+            .unwrap()
+            .expect("should return cycle");
         // No boundary → all messages returned
         assert!(!cycle.messages.is_empty());
         assert_eq!(cycle.first_turn, 1);
@@ -1996,7 +1521,11 @@ mod tests {
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid,
             event_type: tron_events::EventType::MemoryLedger,
-            payload: json!({"title": "First cycle", "entryType": "feature"}),
+            payload: json!({
+                "title": "First cycle",
+                "entryType": "feature",
+                "turnRange": {"firstTurn": 1, "lastTurn": 1}
+            }),
             parent_id: None,
         });
 
@@ -2019,8 +1548,9 @@ mod tests {
         });
         ctx.session_manager.invalidate_session(&sid);
 
-        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
-        let cycle = cycle.expect("should return cycle");
+        let cycle = compute_cycle_messages(&ctx.event_store, &sid)
+            .unwrap()
+            .expect("should return cycle");
         // Only second cycle messages (after boundary)
         assert_eq!(cycle.messages.len(), 2); // 1 user + 1 assistant
         assert_eq!(cycle.first_turn, 2); // Prior cycle had 1 user turn
@@ -2045,7 +1575,7 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", Some("test"))
             .unwrap();
 
-        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
+        let cycle = compute_cycle_messages(&ctx.event_store, &sid).unwrap();
         // session.start event exists but no message events → cycle has no messages
         // compute_cycle_messages returns None or Some with empty messages
         assert!(cycle.is_none() || cycle.unwrap().messages.is_empty());
@@ -2152,13 +1682,12 @@ mod tests {
 
         let deps = LedgerWriteDeps {
             event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
             subagent_manager: Some(subagent),
             embedding_controller: None,
             shutdown_coordinator: None,
         };
 
-        let result = execute_ledger_write(&sid, "/tmp/cron-test", &deps, "cron").await;
+        let result = execute_ledger_write(&sid, &deps, "cron").await;
         assert!(result.written, "ledger write should succeed");
 
         // Verify persisted event has source: "cron"

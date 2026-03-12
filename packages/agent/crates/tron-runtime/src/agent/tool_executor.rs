@@ -842,7 +842,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(result.result.is_error.unwrap_or(false));
-        assert!(elapsed < Duration::from_secs(2), "should cancel quickly, took {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "should cancel quickly, took {elapsed:?}"
+        );
     }
 
     #[tokio::test]
@@ -908,7 +911,10 @@ mod tests {
         let ToolResultContent::Text { text } = &blocks[0] else {
             panic!("Expected text block");
         };
-        assert!(text.to_lowercase().contains("cancelled"), "error should mention cancellation, got: {text}");
+        assert!(
+            text.to_lowercase().contains("cancelled"),
+            "error should mention cancellation, got: {text}"
+        );
     }
 
     #[tokio::test]

@@ -196,7 +196,10 @@ mod tests {
         let mmap: i64 = conn
             .query_row("PRAGMA mmap_size", [], |r| r.get(0))
             .unwrap_or(0);
-        assert!(mmap > 0, "mmap_size should be > 0 on file-backed DB, got {mmap}");
+        assert!(
+            mmap > 0,
+            "mmap_size should be > 0 on file-backed DB, got {mmap}"
+        );
     }
 
     #[test]
@@ -204,7 +207,9 @@ mod tests {
         let config = ConnectionConfig::default();
         let pool = new_in_memory(&config).unwrap();
         let conn = pool.get().unwrap();
-        let temp_store: i32 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0)).unwrap();
+        let temp_store: i32 = conn
+            .query_row("PRAGMA temp_store", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(temp_store, 2); // 2 = MEMORY
     }
 }

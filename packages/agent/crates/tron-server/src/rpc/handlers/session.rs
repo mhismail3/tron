@@ -9,8 +9,8 @@ use tron_runtime::agent::event_emitter::EventEmitter;
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::{opt_bool, opt_string, require_string_param};
-use crate::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 use crate::rpc::registry::MethodHandler;
+use crate::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 
 /// Create a new session.
 pub struct CreateSessionHandler;
@@ -1759,8 +1759,15 @@ mod tests {
         let _ = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
 
         // Old session should be archived (ended_at set)
-        let old = ctx.session_manager.get_session(original_id).unwrap().unwrap();
-        assert!(old.ended_at.is_some(), "old chat session should be archived");
+        let old = ctx
+            .session_manager
+            .get_session(original_id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            old.ended_at.is_some(),
+            "old chat session should be archived"
+        );
     }
 
     #[tokio::test]

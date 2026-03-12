@@ -13,6 +13,15 @@ pub enum EventStoreError {
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
+    /// Write contention exceeded the retry deadline.
+    #[error("database busy during {operation} after {attempts} attempts")]
+    Busy {
+        /// Logical operation that timed out under contention.
+        operation: &'static str,
+        /// Number of busy/locked failures observed.
+        attempts: u32,
+    },
+
     /// Connection pool error.
     #[error("connection pool error: {0}")]
     Pool(#[from] r2d2::Error),
@@ -78,6 +87,18 @@ mod tests {
     }
 
     #[test]
+    fn busy_error_display() {
+        let err = EventStoreError::Busy {
+            operation: "append",
+            attempts: 7,
+        };
+        assert_eq!(
+            err.to_string(),
+            "database busy during append after 7 attempts"
+        );
+    }
+
+    #[test]
     fn migration_error_display() {
         let err = EventStoreError::Migration {
             message: "v003 failed: table already exists".into(),
@@ -120,5 +141,4 @@ mod tests {
             "invalid operation: cannot fork ended session"
         );
     }
-
 }

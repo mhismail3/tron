@@ -565,5 +565,4 @@ mod tests {
     fn detect_unknown_defaults_to_anthropic() {
         assert_eq!(detect_provider("some-unknown-model"), Provider::Anthropic);
     }
-
 }

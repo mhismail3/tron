@@ -84,7 +84,10 @@ pub async fn run_agent(
         .await
         .is_err()
     {
-        warn!(session_id, "forward task did not drain within 100ms, aborting");
+        warn!(
+            session_id,
+            "forward task did not drain within 100ms, aborting"
+        );
         abort_handle.abort();
     }
 

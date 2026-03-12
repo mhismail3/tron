@@ -226,14 +226,13 @@ impl CronScheduler {
                     });
                     let broadcaster = broadcaster.clone();
                     tokio::spawn(async move {
-                        broadcaster.broadcast_cron_event("cron.configError", payload).await;
+                        broadcaster
+                            .broadcast_cron_event("cron.configError", payload)
+                            .await;
                     });
                 }
 
-                crate::types::CronConfig {
-                    version: 1,
-                    jobs,
-                }
+                crate::types::CronConfig { version: 1, jobs }
             }
         };
 
@@ -259,9 +258,13 @@ impl CronScheduler {
         // Clean up orphaned run records from previous server instance
         let now = self.clock.now_utc();
         if let Ok(orphaned) = store::complete_orphaned_runs(&self.pool, now, "server restarted")
-            && orphaned > 0 {
-                tracing::info!(count = orphaned, "cleaned up orphaned run records from previous instance");
-            }
+            && orphaned > 0
+        {
+            tracing::info!(
+                count = orphaned,
+                "cleaned up orphaned run records from previous instance"
+            );
+        }
 
         // Detect stuck jobs
         self.detect_stuck_jobs()?;
@@ -318,10 +321,7 @@ impl CronScheduler {
             return;
         }
 
-        tracing::info!(
-            job_count = self.job_count(),
-            "cron scheduler started"
-        );
+        tracing::info!(job_count = self.job_count(), "cron scheduler started");
 
         let mut last_maintenance = self.clock.now_utc();
         let mut active_tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
@@ -330,16 +330,14 @@ impl CronScheduler {
             let now = self.clock.now_utc();
 
             // Compute sleep duration until next job
-            let sleep_duration = self
-                .next_wakeup()
-                .map_or(Duration::from_secs(60), |next| {
-                    let diff = next - now;
-                    if diff.num_milliseconds() <= 0 {
-                        Duration::from_millis(0)
-                    } else {
-                        Duration::from_millis(diff.num_milliseconds().min(60_000) as u64)
-                    }
-                });
+            let sleep_duration = self.next_wakeup().map_or(Duration::from_secs(60), |next| {
+                let diff = next - now;
+                if diff.num_milliseconds() <= 0 {
+                    Duration::from_millis(0)
+                } else {
+                    Duration::from_millis(diff.num_milliseconds().min(60_000) as u64)
+                }
+            });
 
             tokio::select! {
                 () = tokio::time::sleep(sleep_duration) => {
@@ -546,8 +544,8 @@ impl CronScheduler {
 
                 // Update the original running run record(s) to timed_out
                 let error_msg = "stuck job cleared on startup/maintenance";
-                let updated = store::complete_stuck_runs(&self.pool, &job_id, now, error_msg)
-                    .unwrap_or(0);
+                let updated =
+                    store::complete_stuck_runs(&self.pool, &job_id, now, error_msg).unwrap_or(0);
 
                 // If no records found (edge case: record deleted or DB inconsistency),
                 // create a synthetic timed_out record for audit trail
@@ -574,14 +572,16 @@ impl CronScheduler {
                 }
 
                 store::clear_running_since(&self.pool, &job_id)?;
-                self.runtime.write().entry(job_id.clone()).and_modify(|s| s.running_since = None);
+                self.runtime
+                    .write()
+                    .entry(job_id.clone())
+                    .and_modify(|s| s.running_since = None);
                 let _ = store::increment_consecutive_failures(&self.pool, &job_id);
             }
         }
 
         Ok(())
     }
-
 }
 
 /// Execute a single job (runs in a spawned task).
@@ -602,7 +602,10 @@ async fn execute_job(
         return;
     }
     let _ = store::set_running_since(pool, &job.id, started_at);
-    runtime.write().entry(job.id.clone()).and_modify(|s| s.running_since = Some(started_at));
+    runtime
+        .write()
+        .entry(job.id.clone())
+        .and_modify(|s| s.running_since = Some(started_at));
 
     // Execute with retries
     let clock_ref: &dyn Clock = clock;
@@ -629,14 +632,16 @@ async fn execute_job(
     if run.status == RunStatus::Completed {
         let _ = store::reset_consecutive_failures(pool, &job.id);
     } else if let Ok(failures) = store::increment_consecutive_failures(pool, &job.id)
-        && job.auto_disable_after > 0 && failures >= job.auto_disable_after {
-            let _ = store::disable_job(pool, &job.id);
-            tracing::warn!(
-                job_id = %job.id,
-                failures,
-                "auto-disabled after consecutive failures"
-            );
-        }
+        && job.auto_disable_after > 0
+        && failures >= job.auto_disable_after
+    {
+        let _ = store::disable_job(pool, &job.id);
+        tracing::warn!(
+            job_id = %job.id,
+            failures,
+            "auto-disabled after consecutive failures"
+        );
+    }
 
     // Deliver results
     delivery::deliver(job, &run, deps).await;
@@ -648,9 +653,15 @@ mod tests {
     use crate::clock::FakeClock;
     use crate::types::*;
 
-    fn setup() -> (ConnectionPool, Arc<FakeClock>, PathBuf, PathBuf, CancellationToken, tempfile::TempDir) {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+    fn setup() -> (
+        ConnectionPool,
+        Arc<FakeClock>,
+        PathBuf,
+        PathBuf,
+        CancellationToken,
+        tempfile::TempDir,
+    ) {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
@@ -840,7 +851,10 @@ mod tests {
         let tomorrow_1pm = DateTime::parse_from_rfc3339("2026-02-24T13:00:00Z")
             .unwrap()
             .to_utc();
-        assert_eq!(next, tomorrow_1pm, "next_run_at should be tomorrow at 13:00");
+        assert_eq!(
+            next, tomorrow_1pm,
+            "next_run_at should be tomorrow at 13:00"
+        );
 
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
@@ -913,7 +927,10 @@ mod tests {
             .next_run_at
             .expect("should still have next_run_at");
 
-        assert_eq!(before, after, "next_run_at should be preserved on reload with no schedule change");
+        assert_eq!(
+            before, after,
+            "next_run_at should be preserved on reload with no schedule change"
+        );
 
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
@@ -996,7 +1013,10 @@ mod tests {
             .next_run_at
             .expect("should still have next_run_at");
 
-        assert_ne!(before, after, "next_run_at should change when schedule changes");
+        assert_ne!(
+            before, after,
+            "next_run_at should change when schedule changes"
+        );
         // Clock is at 12:00, so next 10 AM should be tomorrow
         let tomorrow_10am = DateTime::parse_from_rfc3339("2026-02-24T10:00:00Z")
             .unwrap()
@@ -1038,7 +1058,14 @@ mod tests {
     fn detect_stuck_updates_original_run() {
         let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path,
+            backup_path,
+            cancel,
+        );
 
         // Insert a job with running_since 3 hours ago (timeout is 7200s = 2h)
         let job = CronJob {
@@ -1046,8 +1073,15 @@ mod tests {
             name: "Stuck".into(),
             description: None,
             enabled: true,
-            schedule: Schedule::Every { interval_secs: 60, anchor: None },
-            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
             delivery: vec![],
             overlap_policy: OverlapPolicy::default(),
             misfire_policy: MisfirePolicy::default(),
@@ -1082,15 +1116,29 @@ mod tests {
     fn detect_stuck_creates_synthetic_when_no_run() {
         let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path,
+            backup_path,
+            cancel,
+        );
 
         let job = CronJob {
             id: "cron_ghost".into(),
             name: "Ghost".into(),
             description: None,
             enabled: true,
-            schedule: Schedule::Every { interval_secs: 60, anchor: None },
-            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
             delivery: vec![],
             overlap_policy: OverlapPolicy::default(),
             misfire_policy: MisfirePolicy::default(),
@@ -1127,8 +1175,15 @@ mod tests {
             name: "Orphan".into(),
             description: None,
             enabled: true,
-            schedule: Schedule::Every { interval_secs: 60, anchor: None },
-            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
             delivery: vec![],
             overlap_policy: OverlapPolicy::default(),
             misfire_policy: MisfirePolicy::default(),
@@ -1143,7 +1198,10 @@ mod tests {
         };
 
         // Config must include the job so sync doesn't delete it (and NULL the run job_ids)
-        let config = CronConfig { version: 1, jobs: vec![job.clone()] };
+        let config = CronConfig {
+            version: 1,
+            jobs: vec![job.clone()],
+        };
         crate::config::save_config(&config_path, &backup_path, &config).unwrap();
 
         store::upsert_job(&pool, &job).unwrap();
@@ -1153,7 +1211,14 @@ mod tests {
         assert_eq!(store::count_running_runs(&pool, "cron_orphan").unwrap(), 2);
 
         let deps = make_deps(&pool);
-        let scheduler = Arc::new(CronScheduler::new(pool.clone(), clock, deps, config_path, backup_path, cancel.clone()));
+        let scheduler = Arc::new(CronScheduler::new(
+            pool.clone(),
+            clock,
+            deps,
+            config_path,
+            backup_path,
+            cancel.clone(),
+        ));
         let (h1, h2) = scheduler.start();
         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -1171,15 +1236,29 @@ mod tests {
     fn overlap_unblocked_after_stuck_detection() {
         let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path,
+            backup_path,
+            cancel,
+        );
 
         let job = CronJob {
             id: "cron_overlap".into(),
             name: "Overlap".into(),
             description: None,
             enabled: true,
-            schedule: Schedule::Every { interval_secs: 60, anchor: None },
-            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
             delivery: vec![],
             overlap_policy: OverlapPolicy::Skip,
             misfire_policy: MisfirePolicy::default(),
@@ -1292,5 +1371,4 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(result.unwrap().name, "GetJob");
     }
-
 }

@@ -121,5 +121,4 @@ mod tests {
         assert_eq!(usage.cache_read_tokens, Some(1000));
         assert_eq!(usage.cache_creation_tokens, None);
     }
-
 }

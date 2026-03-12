@@ -80,11 +80,9 @@ impl TronTool for SetClipboardTool {
         };
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(format!(
-                    "Copied to clipboard: {display_label}"
-                )),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                format!("Copied to clipboard: {display_label}"),
+            )]),
             details: Some(json!({
                 "content": content,
                 "label": label,

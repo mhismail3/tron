@@ -7,8 +7,8 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::{opt_u64, opt_string, require_string_param};
 use crate::rpc::handlers::transcription::{normalize_base64, transcribe_audio};
+use crate::rpc::handlers::{opt_string, opt_u64, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 fn notes_dir() -> String {
@@ -104,19 +104,20 @@ impl MethodHandler for ListHandler {
                 let mut transcript = String::new();
 
                 if let Some(stripped) = content.strip_prefix("---\n")
-                    && let Some(end) = stripped.find("---\n") {
-                        let fm = &stripped[..end];
-                        for line in fm.lines() {
-                            if let Some(val) = line.strip_prefix("created: ") {
-                                created_at = val.trim().to_string();
-                            } else if let Some(val) = line.strip_prefix("duration: ") {
-                                duration_seconds = val.trim().parse().ok();
-                            } else if let Some(val) = line.strip_prefix("language: ") {
-                                language = Some(val.trim().to_string());
-                            }
+                    && let Some(end) = stripped.find("---\n")
+                {
+                    let fm = &stripped[..end];
+                    for line in fm.lines() {
+                        if let Some(val) = line.strip_prefix("created: ") {
+                            created_at = val.trim().to_string();
+                        } else if let Some(val) = line.strip_prefix("duration: ") {
+                            duration_seconds = val.trim().parse().ok();
+                        } else if let Some(val) = line.strip_prefix("language: ") {
+                            language = Some(val.trim().to_string());
                         }
-                        transcript = content[4 + end + 4..].trim().to_string();
                     }
+                    transcript = content[4 + end + 4..].trim().to_string();
+                }
 
                 let preview = if transcript.len() > 100 {
                     transcript[..100].to_string()

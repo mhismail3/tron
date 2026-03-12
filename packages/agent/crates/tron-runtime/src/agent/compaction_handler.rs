@@ -260,12 +260,8 @@ impl CompactionHandler {
 
         let compaction_start = std::time::Instant::now();
 
-        let result = Self::run_summarizer(
-            context_manager,
-            session_id,
-            self.subagent_manager.as_ref(),
-        )
-        .await;
+        let result =
+            Self::run_summarizer(context_manager, session_id, self.subagent_manager.as_ref()).await;
 
         Ok(Self::emit_compaction_events(
             result,
@@ -327,10 +323,8 @@ impl CompactionHandler {
         context_manager: &mut ContextManager,
         session_id: &str,
         subagent_manager: Option<&Arc<SubagentManager>>,
-    ) -> Result<
-        crate::context::types::CompactionResult,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
+    ) -> Result<crate::context::types::CompactionResult, Box<dyn std::error::Error + Send + Sync>>
+    {
         if let Some(manager) = subagent_manager {
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
@@ -387,23 +381,24 @@ impl CompactionHandler {
                 });
 
                 if compaction_result.success
-                    && let Some(persister) = persister {
-                        let reason_str = format!("{reason:?}");
-                        #[allow(clippy::cast_possible_wrap)]
-                        let payload = serde_json::json!({
-                            "originalTokens": tokens_before as i64,
-                            "compactedTokens": tokens_after as i64,
-                            "compressionRatio": compaction_result.compression_ratio,
-                            "reason": reason_str,
-                            "summary": summary_text,
-                            "estimatedContextTokens": tokens_after as i64,
-                        });
-                        persister.append_fire_and_forget(
-                            session_id,
-                            tron_events::EventType::CompactBoundary,
-                            payload,
-                        );
-                    }
+                    && let Some(persister) = persister
+                {
+                    let reason_str = format!("{reason:?}");
+                    #[allow(clippy::cast_possible_wrap)]
+                    let payload = serde_json::json!({
+                        "originalTokens": tokens_before as i64,
+                        "compactedTokens": tokens_after as i64,
+                        "compressionRatio": compaction_result.compression_ratio,
+                        "reason": reason_str,
+                        "summary": summary_text,
+                        "estimatedContextTokens": tokens_after as i64,
+                    });
+                    persister.append_fire_and_forget(
+                        session_id,
+                        tron_events::EventType::CompactBoundary,
+                        payload,
+                    );
+                }
                 true
             }
             Err(e) => {

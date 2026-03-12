@@ -379,12 +379,10 @@ mod tests {
         let mut results = make_hybrid_results(&[("e1", 1.0), ("e2", 0.5)]);
         let now = chrono::Utc::now();
         let same_ts = now - chrono::Duration::days(15);
-        let timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> = [
-            ("e1".to_string(), same_ts),
-            ("e2".to_string(), same_ts),
-        ]
-        .into_iter()
-        .collect();
+        let timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> =
+            [("e1".to_string(), same_ts), ("e2".to_string(), same_ts)]
+                .into_iter()
+                .collect();
 
         apply_temporal_decay(&mut results, &timestamps, 30.0, now);
         assert_eq!(results[0].event_id, "e1");

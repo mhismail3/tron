@@ -298,40 +298,36 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     )));
 
     // 14: SetClipboard (fire-and-forget — iOS handles via tool event)
-    registry.register(Arc::new(
-        tron_tools::ui::clipboard::SetClipboardTool::new(),
-    ));
+    registry.register(Arc::new(tron_tools::ui::clipboard::SetClipboardTool::new()));
 
     // 15–17: Device-querying tools (conditional on device request broker)
     if let Some(broker) = config.device_request_broker.get() {
         let device_delegate: Arc<dyn tron_tools::traits::DeviceDelegate> =
             Arc::new(providers::BrokerDeviceDelegate::new(broker.clone()));
 
-        let settings = tron_settings::loader::load_settings_from_path(
-            &tron_settings::loader::settings_path(),
-        )
-        .unwrap_or_default();
+        let settings =
+            tron_settings::loader::load_settings_from_path(&tron_settings::loader::settings_path())
+                .unwrap_or_default();
 
         if settings.integrations.calendar.enabled {
-            registry.register(Arc::new(
-                tron_tools::ui::calendar::ManageCalendarTool::new(
-                    device_delegate.clone(),
-                    settings.integrations.calendar.allow_write,
-                ),
-            ));
+            registry.register(Arc::new(tron_tools::ui::calendar::ManageCalendarTool::new(
+                device_delegate.clone(),
+                settings.integrations.calendar.allow_write,
+            )));
         }
 
         if settings.integrations.contacts.enabled {
-            registry.register(Arc::new(
-                tron_tools::ui::contacts::SearchContactsTool::new(device_delegate.clone()),
-            ));
+            registry.register(Arc::new(tron_tools::ui::contacts::SearchContactsTool::new(
+                device_delegate.clone(),
+            )));
         }
 
-        if settings.integrations.health.enabled && !settings.integrations.health.data_types.is_empty()
+        if settings.integrations.health.enabled
+            && !settings.integrations.health.data_types.is_empty()
         {
-            registry.register(Arc::new(
-                tron_tools::ui::health::ReadHealthTool::new(device_delegate),
-            ));
+            registry.register(Arc::new(tron_tools::ui::health::ReadHealthTool::new(
+                device_delegate,
+            )));
         }
     }
 
@@ -407,8 +403,7 @@ async fn main() -> Result<()> {
             tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
         tron_runtime::tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
-        tron_cron::migrations::run_migrations(&conn)
-            .context("Failed to run cron migrations")?;
+        tron_cron::migrations::run_migrations(&conn).context("Failed to run cron migrations")?;
 
         // v4 purges ~1.55M ort::logging rows. VACUUM reclaims the freed space.
         // VACUUM cannot run inside a transaction, so it runs here after migrations commit.
@@ -458,9 +453,8 @@ async fn main() -> Result<()> {
     let max_sessions = args
         .max_sessions
         .unwrap_or(settings.server.max_concurrent_sessions);
-    let session_manager = Arc::new(
-        SessionManager::new(event_store.clone()).with_origin(origin.clone()),
-    );
+    let session_manager =
+        Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
@@ -520,7 +514,8 @@ async fn main() -> Result<()> {
 
                 // Create vector repository with a dedicated connection (VectorRepository owns a
                 // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
-                let vec_conn = rusqlite::Connection::open(&db_path).expect("db connection for vectors");
+                let vec_conn =
+                    rusqlite::Connection::open(&db_path).expect("db connection for vectors");
                 vec_conn
                     .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
                     .expect("vector connection pragmas");
@@ -590,8 +585,9 @@ async fn main() -> Result<()> {
     let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
 
     // Deferred device request broker reference (set after TronServer creation when BroadcastManager is available)
-    let device_broker_cell: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>> =
-        Arc::new(std::sync::OnceLock::new());
+    let device_broker_cell: Arc<
+        std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>,
+    > = Arc::new(std::sync::OnceLock::new());
 
     // Clone before move into ToolRegistryConfig
     let apns_for_deploy = apns_service.clone();
@@ -654,8 +650,9 @@ async fn main() -> Result<()> {
                     manager: sm_for_summarizer.clone(),
                 },
             );
-            let http: Arc<dyn tron_tools::traits::HttpClient> =
-                Arc::new(tron_tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()));
+            let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(
+                tron_tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()),
+            );
             registry.register(Arc::new(
                 tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
             ));
@@ -728,9 +725,10 @@ async fn main() -> Result<()> {
                 task_pool.clone(),
             )) as Arc<dyn tron_cron::PushNotifier>
         }),
-        event_injector: Some(Arc::new(providers::CronSystemEventInjector::new(
-            event_store.clone(),
-        )) as Arc<dyn tron_cron::SystemEventInjector>),
+        event_injector: Some(
+            Arc::new(providers::CronSystemEventInjector::new(event_store.clone()))
+                as Arc<dyn tron_cron::SystemEventInjector>,
+        ),
         http_client: tool_config.http_client.clone(),
         pool: task_pool.clone(),
     };
@@ -796,7 +794,9 @@ async fn main() -> Result<()> {
         cron_scheduler: Some(cron_scheduler.clone()),
         worktree_coordinator,
         device_request_broker: None, // set after TronServer creation (needs broadcast)
-        context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
+        context_artifacts: Arc::new(
+            tron_server::rpc::session_context::ContextArtifactsService::new(),
+        ),
     };
 
     // Method registry
@@ -868,7 +868,10 @@ async fn main() -> Result<()> {
             let auth = auth_path();
             let binary_path = tron_settings::tron_home_dir().join("tron");
             let test_result = tron_server::deploy::run_self_test(
-                &db_path, &settings_path_for_selftest, &auth, &binary_path,
+                &db_path,
+                &settings_path_for_selftest,
+                &auth,
+                &binary_path,
             );
 
             if !test_result.passed {
@@ -926,17 +929,15 @@ async fn main() -> Result<()> {
                     previous = sentinel.previous_commit.as_str(),
                     "post-deploy restart completed successfully"
                 );
-                if let Err(e) =
-                    tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel)
-                {
+                if let Err(e) = tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
                     tracing::warn!(error = %e, "failed to write last-deployment.json");
                 }
 
                 // Send APNS push notification for successful deploy
                 if let Some(ref apns) = apns_for_deploy {
                     let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
-                    let commit_subject = tron_server::deploy::resolve_workspace_root()
-                        .and_then(|root| {
+                    let commit_subject =
+                        tron_server::deploy::resolve_workspace_root().and_then(|root| {
                             std::process::Command::new("git")
                                 .args(["log", "-1", "--format=%s", &sentinel.commit])
                                 .current_dir(root)
@@ -973,19 +974,18 @@ async fn main() -> Result<()> {
                         })
                         .unwrap_or_default();
                     if !tokens.is_empty() {
-                        let notification =
-                            tron_server::platform::apns::ApnsNotification {
-                                title: "Deploy Complete".into(),
-                                body,
-                                data: std::collections::HashMap::from([
-                                    ("type".into(), "deploy.completed".into()),
-                                    ("commit".into(), sentinel.commit.clone()),
-                                ]),
-                                priority: "high".into(),
-                                sound: None,
-                                badge: None,
-                                thread_id: None,
-                            };
+                        let notification = tron_server::platform::apns::ApnsNotification {
+                            title: "Deploy Complete".into(),
+                            body,
+                            data: std::collections::HashMap::from([
+                                ("type".into(), "deploy.completed".into()),
+                                ("commit".into(), sentinel.commit.clone()),
+                            ]),
+                            priority: "high".into(),
+                            sound: None,
+                            badge: None,
+                            thread_id: None,
+                        };
                         let apns = apns.clone();
                         drop(tokio::spawn(async move {
                             let _ = apns.send_to_many(&tokens, &notification).await;
@@ -1008,45 +1008,37 @@ async fn main() -> Result<()> {
                     .get()
                     .ok()
                     .and_then(|conn| {
-                        conn.prepare(
-                            "SELECT device_token FROM device_tokens WHERE is_active = 1",
-                        )
-                        .ok()
-                        .and_then(|mut stmt| {
-                            stmt.query_map([], |row| row.get::<_, String>(0))
-                                .ok()
-                                .map(|rows| rows.filter_map(Result::ok).collect())
-                        })
+                        conn.prepare("SELECT device_token FROM device_tokens WHERE is_active = 1")
+                            .ok()
+                            .and_then(|mut stmt| {
+                                stmt.query_map([], |row| row.get::<_, String>(0))
+                                    .ok()
+                                    .map(|rows| rows.filter_map(Result::ok).collect())
+                            })
                     })
                     .unwrap_or_default();
                 if !tokens.is_empty() {
                     let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
-                    let reason =
-                        data["reason"].as_str().unwrap_or("unknown");
-                    let notification =
-                        tron_server::platform::apns::ApnsNotification {
-                            title: "Deploy Rolled Back".into(),
-                            body: format!("Tron restored: {reason}"),
-                            data: std::collections::HashMap::from([
-                                ("type".into(), ntype.into()),
-                                (
-                                    "commit".into(),
-                                    data["commit"]
-                                        .as_str()
-                                        .unwrap_or("unknown")
-                                        .into(),
-                                ),
-                                ("reason".into(), reason.into()),
-                            ]),
-                            priority: "high".into(),
-                            sound: None,
-                            badge: None,
-                            thread_id: None,
-                        };
+                    let reason = data["reason"].as_str().unwrap_or("unknown");
+                    let notification = tron_server::platform::apns::ApnsNotification {
+                        title: "Deploy Rolled Back".into(),
+                        body: format!("Tron restored: {reason}"),
+                        data: std::collections::HashMap::from([
+                            ("type".into(), ntype.into()),
+                            (
+                                "commit".into(),
+                                data["commit"].as_str().unwrap_or("unknown").into(),
+                            ),
+                            ("reason".into(), reason.into()),
+                        ]),
+                        priority: "high".into(),
+                        sound: None,
+                        badge: None,
+                        thread_id: None,
+                    };
                     let apns = apns.clone();
                     drop(tokio::spawn(async move {
-                        let _ =
-                            apns.send_to_many(&tokens, &notification).await;
+                        let _ = apns.send_to_many(&tokens, &notification).await;
                     }));
                 }
             }
@@ -1435,7 +1427,9 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
-            context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
+            context_artifacts: Arc::new(
+                tron_server::rpc::session_context::ContextArtifactsService::new(),
+            ),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1625,7 +1619,9 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
-            context_artifacts: Arc::new(tron_server::rpc::session_context::ContextArtifactsService::new()),
+            context_artifacts: Arc::new(
+                tron_server::rpc::session_context::ContextArtifactsService::new(),
+            ),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1648,5 +1644,4 @@ mod tests {
             .expect("shutdown timed out")
             .expect("join error");
     }
-
 }

@@ -296,7 +296,6 @@ struct RuntimeMemoryDeps {
     session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
     broadcast: Arc<tron_runtime::EventEmitter>,
     session_id: String,
-    workspace_id: String,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
     ledger_enabled: bool,
@@ -409,20 +408,13 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         _opts: &tron_events::memory::types::LedgerWriteOpts,
     ) -> tron_events::memory::types::LedgerWriteResult {
         // Delegate to the shared pipeline (same codepath as manual UpdateLedgerHandler).
-        let deps = crate::rpc::handlers::memory::LedgerWriteDeps {
+        let deps = crate::rpc::memory_ledger::LedgerWriteDeps {
             event_store: self.event_store.clone(),
-            session_manager: self.session_manager.clone(),
             subagent_manager: self.subagent_manager.clone(),
             embedding_controller: self.embedding_controller.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
         };
-        crate::rpc::handlers::memory::execute_ledger_write(
-            &self.session_id,
-            &self.workspace_id,
-            &deps,
-            "auto",
-        )
-        .await
+        crate::rpc::memory_ledger::execute_ledger_write(&self.session_id, &deps, "auto").await
     }
 
     fn is_ledger_enabled(&self) -> bool {
@@ -463,7 +455,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
     }
 
     fn workspace_id(&self) -> Option<&str> {
-        Some(&self.workspace_id)
+        None
     }
 }
 
@@ -590,630 +582,620 @@ impl MethodHandler for PromptHandler {
         let cancel_token = started_run.cancel_token();
 
         // Spawn background execution
-            let orchestrator = ctx.orchestrator.clone();
-            let session_manager = ctx.session_manager.clone();
-            let broadcast = orchestrator.broadcast().clone();
-            let provider_factory = deps.provider_factory.clone();
-            let tool_factory = deps.tool_factory.clone();
-            let guardrails = deps.guardrails.clone();
-            let hooks = deps.hooks.clone();
-            let health_tracker = ctx.health_tracker.clone();
-            let session_id_clone = session_id.clone();
-            let run_id_clone = run_id.clone();
-            let model = session.latest_model.clone();
-            let working_dir = session.working_directory.clone();
-            let is_chat = session.source.as_deref() == Some("chat");
+        let orchestrator = ctx.orchestrator.clone();
+        let session_manager = ctx.session_manager.clone();
+        let broadcast = orchestrator.broadcast().clone();
+        let provider_factory = deps.provider_factory.clone();
+        let tool_factory = deps.tool_factory.clone();
+        let guardrails = deps.guardrails.clone();
+        let hooks = deps.hooks.clone();
+        let health_tracker = ctx.health_tracker.clone();
+        let session_id_clone = session_id.clone();
+        let run_id_clone = run_id.clone();
+        let model = session.latest_model.clone();
+        let working_dir = session.working_directory.clone();
+        let is_chat = session.source.as_deref() == Some("chat");
 
-            let event_store = ctx.event_store.clone();
-            let context_artifacts = ctx.context_artifacts.clone();
-            let embedding_controller = ctx.embedding_controller.clone();
-            let skill_registry = ctx.skill_registry.clone();
-            let subagent_manager = ctx.subagent_manager.clone();
-            let shutdown_coordinator = ctx.shutdown_coordinator.clone();
-            let shutdown_coordinator_for_register = ctx.shutdown_coordinator.clone();
-            let worktree_coordinator = ctx.worktree_coordinator.clone();
-            let prompt_clone = prompt.clone();
-            let reasoning_level_clone = reasoning_level.clone();
-            let images_clone = images.clone();
-            let attachments_clone = attachments.clone();
-            let skills_clone = skills.clone();
-            let spells_clone = spells.clone();
-            let raw_skills_clone = raw_skills_json.clone();
-            let raw_spells_clone = raw_spells_json.clone();
-            let server_origin = ctx.origin.clone();
-            let browser_service = ctx.browser_service.clone();
+        let event_store = ctx.event_store.clone();
+        let context_artifacts = ctx.context_artifacts.clone();
+        let embedding_controller = ctx.embedding_controller.clone();
+        let skill_registry = ctx.skill_registry.clone();
+        let subagent_manager = ctx.subagent_manager.clone();
+        let shutdown_coordinator = ctx.shutdown_coordinator.clone();
+        let shutdown_coordinator_for_register = ctx.shutdown_coordinator.clone();
+        let worktree_coordinator = ctx.worktree_coordinator.clone();
+        let prompt_clone = prompt.clone();
+        let reasoning_level_clone = reasoning_level.clone();
+        let images_clone = images.clone();
+        let attachments_clone = attachments.clone();
+        let skills_clone = skills.clone();
+        let spells_clone = spells.clone();
+        let raw_skills_clone = raw_skills_json.clone();
+        let raw_spells_clone = raw_spells_json.clone();
+        let server_origin = ctx.origin.clone();
+        let browser_service = ctx.browser_service.clone();
 
-            let handle = tokio::spawn(async move {
-                let _started_run = started_run;
+        let handle = tokio::spawn(async move {
+            let _started_run = started_run;
 
-                // Grab settings once — consistent snapshot for the entire run
-                let settings = tron_settings::get_settings();
+            // Grab settings once — consistent snapshot for the entire run
+            let settings = tron_settings::get_settings();
 
-                // 1. Resume session to get reconstructed state + persister
-                let (state, persister) = match session_manager.resume_session(&session_id_clone) {
-                    Ok(active) => (active.state.clone(), active.context.persister.clone()),
-                    Err(e) => {
-                        warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
-                        let fresh_state =
-                            tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
-                                model: model.clone(),
-                                working_directory: Some(working_dir.clone()),
-                                ..Default::default()
-                            };
-                        let fresh_persister = std::sync::Arc::new(
-                            tron_runtime::orchestrator::event_persister::EventPersister::new(
-                                event_store.clone(),
-                            ),
-                        );
-                        (fresh_state, fresh_persister)
-                    }
-                };
+            // 1. Resume session to get reconstructed state + persister
+            let (state, persister) = match session_manager.resume_session(&session_id_clone) {
+                Ok(active) => (active.state.clone(), active.context.persister.clone()),
+                Err(e) => {
+                    warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
+                    let fresh_state =
+                        tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
+                            model: model.clone(),
+                            working_directory: Some(working_dir.clone()),
+                            ..Default::default()
+                        };
+                    let fresh_persister = std::sync::Arc::new(
+                        tron_runtime::orchestrator::event_persister::EventPersister::new(
+                            event_store.clone(),
+                        ),
+                    );
+                    (fresh_state, fresh_persister)
+                }
+            };
 
-                // 1b. Worktree isolation — deferred acquisition at first prompt
-                let worktree_info: Option<tron_worktree::WorktreeInfo> =
-                    if let Some(wt_path) = &state.worktree_path {
-                        // Resumed session — reconstruct minimal info from coordinator
-                        worktree_coordinator
-                            .as_ref()
-                            .and_then(|c| c.get_info(&session_id_clone))
-                            .or_else(|| {
-                                // Fallback: create partial info from event data
-                                Some(tron_worktree::WorktreeInfo {
-                                    session_id: session_id_clone.clone(),
-                                    worktree_path: std::path::PathBuf::from(wt_path),
-                                    branch: String::new(),
-                                    base_commit: String::new(),
-                                    base_branch: None,
-                                    original_working_dir: std::path::PathBuf::from(&working_dir),
-                                    repo_root: std::path::PathBuf::from(&working_dir),
-                                })
+            // 1b. Worktree isolation — deferred acquisition at first prompt
+            let worktree_info: Option<tron_worktree::WorktreeInfo> =
+                if let Some(wt_path) = &state.worktree_path {
+                    // Resumed session — reconstruct minimal info from coordinator
+                    worktree_coordinator
+                        .as_ref()
+                        .and_then(|c| c.get_info(&session_id_clone))
+                        .or_else(|| {
+                            // Fallback: create partial info from event data
+                            Some(tron_worktree::WorktreeInfo {
+                                session_id: session_id_clone.clone(),
+                                worktree_path: std::path::PathBuf::from(wt_path),
+                                branch: String::new(),
+                                base_commit: String::new(),
+                                base_branch: None,
+                                original_working_dir: std::path::PathBuf::from(&working_dir),
+                                repo_root: std::path::PathBuf::from(&working_dir),
                             })
-                    } else if let Some(ref coord) = worktree_coordinator {
-                        match coord
-                            .maybe_acquire(&session_id_clone, std::path::Path::new(&working_dir))
-                            .await
-                        {
-                            Ok(tron_worktree::AcquireResult::Acquired(wt_info)) => {
-                                debug!(
-                                    session_id = %session_id_clone,
-                                    worktree = %wt_info.worktree_path.display(),
-                                    branch = %wt_info.branch,
-                                    "worktree acquired for session"
-                                );
-                                Some(wt_info)
-                            }
-                            Ok(tron_worktree::AcquireResult::Passthrough) => None,
-                            Err(e) => {
-                                warn!(
-                                    session_id = %session_id_clone,
-                                    error = %e,
-                                    "worktree acquisition failed, using original directory"
-                                );
-                                None
-                            }
+                        })
+                } else if let Some(ref coord) = worktree_coordinator {
+                    match coord
+                        .maybe_acquire(&session_id_clone, std::path::Path::new(&working_dir))
+                        .await
+                    {
+                        Ok(tron_worktree::AcquireResult::Acquired(wt_info)) => {
+                            debug!(
+                                session_id = %session_id_clone,
+                                worktree = %wt_info.worktree_path.display(),
+                                branch = %wt_info.branch,
+                                "worktree acquired for session"
+                            );
+                            Some(wt_info)
                         }
-                    } else {
-                        None
-                    };
-
-                let working_dir = worktree_info
-                    .as_ref()
-                    .map(|i| i.worktree_path.to_string_lossy().to_string())
-                    .unwrap_or(working_dir);
-
-                let is_resumed = !state.messages.is_empty();
-                let working_dir_for_artifacts = working_dir.clone();
-                let session_id_for_artifacts = session_id_clone.clone();
-                let event_store_for_artifacts = event_store.clone();
-                let context_artifacts_for_load = context_artifacts.clone();
-                let settings_for_artifacts = settings.clone();
-                let prompt_artifacts = match tokio::task::spawn_blocking(move || {
-                    load_prompt_context_artifacts(
-                        context_artifacts_for_load.as_ref(),
-                        event_store_for_artifacts.as_ref(),
-                        &session_id_for_artifacts,
-                        &working_dir_for_artifacts,
-                        &settings_for_artifacts,
-                        is_chat,
-                        is_resumed,
-                    )
-                })
-                .await
-                {
-                    Ok(artifacts) => artifacts,
-                    Err(error) => {
-                        warn!(
-                            session_id = %session_id_clone,
-                            working_dir = %working_dir,
-                            error = %error,
-                            "failed to load prompt context artifacts"
-                        );
-                        PromptContextArtifacts::default()
-                    }
-                };
-                let combined_rules = prompt_artifacts.rules_content;
-                let rules_index = prompt_artifacts.rules_index;
-                let pre_activated_rules = prompt_artifacts.pre_activated_rules;
-                let resolved_ws_id = prompt_artifacts.workspace_id;
-
-                // 5. Load workspace memory from ledger entries
-                // (rules.loaded / memory.loaded events are emitted optimistically
-                // at session.create time so clients show loading indicators immediately)
-                let memory = {
-                    let auto_inject = &settings.context.memory.auto_inject;
-
-                    if auto_inject.enabled && !is_chat {
-                        if let Some(ref ec) = embedding_controller {
-                            let ctrl = ec.lock().await;
-                            match resolved_ws_id.as_deref() {
-                                Some(ws_id) => {
-                                    let count = auto_inject.count.clamp(1, 10);
-                                    let ctx = if auto_inject.semantic_injection {
-                                        Some(prompt_clone.as_str())
-                                    } else {
-                                        None
-                                    };
-                                    ctrl.load_workspace_memory(
-                                        &event_store,
-                                        ws_id,
-                                        count,
-                                        ctx,
-                                        auto_inject.recency_anchor_count,
-                                    )
-                                    .await
-                                    .map(|wm| wm.content)
-                                }
-                                None => None,
-                            }
-                        } else {
+                        Ok(tron_worktree::AcquireResult::Passthrough) => None,
+                        Err(e) => {
+                            warn!(
+                                session_id = %session_id_clone,
+                                error = %e,
+                                "worktree acquisition failed, using original directory"
+                            );
                             None
                         }
+                    }
+                } else {
+                    None
+                };
+
+            let working_dir = worktree_info
+                .as_ref()
+                .map(|i| i.worktree_path.to_string_lossy().to_string())
+                .unwrap_or(working_dir);
+
+            let is_resumed = !state.messages.is_empty();
+            let working_dir_for_artifacts = working_dir.clone();
+            let session_id_for_artifacts = session_id_clone.clone();
+            let event_store_for_artifacts = event_store.clone();
+            let context_artifacts_for_load = context_artifacts.clone();
+            let settings_for_artifacts = settings.clone();
+            let prompt_artifacts = match tokio::task::spawn_blocking(move || {
+                load_prompt_context_artifacts(
+                    context_artifacts_for_load.as_ref(),
+                    event_store_for_artifacts.as_ref(),
+                    &session_id_for_artifacts,
+                    &working_dir_for_artifacts,
+                    &settings_for_artifacts,
+                    is_chat,
+                    is_resumed,
+                )
+            })
+            .await
+            {
+                Ok(artifacts) => artifacts,
+                Err(error) => {
+                    warn!(
+                        session_id = %session_id_clone,
+                        working_dir = %working_dir,
+                        error = %error,
+                        "failed to load prompt context artifacts"
+                    );
+                    PromptContextArtifacts::default()
+                }
+            };
+            let combined_rules = prompt_artifacts.rules_content;
+            let rules_index = prompt_artifacts.rules_index;
+            let pre_activated_rules = prompt_artifacts.pre_activated_rules;
+            let resolved_ws_id = prompt_artifacts.workspace_id;
+
+            // 5. Load workspace memory from ledger entries
+            // (rules.loaded / memory.loaded events are emitted optimistically
+            // at session.create time so clients show loading indicators immediately)
+            let memory = {
+                let auto_inject = &settings.context.memory.auto_inject;
+
+                if auto_inject.enabled && !is_chat {
+                    if let Some(ref ec) = embedding_controller {
+                        let ctrl = ec.lock().await;
+                        match resolved_ws_id.as_deref() {
+                            Some(ws_id) => {
+                                let count = auto_inject.count.clamp(1, 10);
+                                let ctx = if auto_inject.semantic_injection {
+                                    Some(prompt_clone.as_str())
+                                } else {
+                                    None
+                                };
+                                ctrl.load_workspace_memory(
+                                    &event_store,
+                                    ws_id,
+                                    count,
+                                    ctx,
+                                    auto_inject.recency_anchor_count,
+                                )
+                                .await
+                                .map(|wm| wm.content)
+                            }
+                            None => None,
+                        }
                     } else {
                         None
                     }
-                };
+                } else {
+                    None
+                }
+            };
 
-                // 5b. Append worktree isolation context to memory
-                let memory = if let Some(ref wt) = worktree_info {
-                    let wt_ctx = format!(
-                        "\n\n## Environment Isolation\n\
+            // 5b. Append worktree isolation context to memory
+            let memory = if let Some(ref wt) = worktree_info {
+                let wt_ctx = format!(
+                    "\n\n## Environment Isolation\n\
                          Working in git worktree: {}\n\
                          Branch: {}{}",
-                        wt.worktree_path.display(),
-                        wt.branch,
-                        wt.base_branch
-                            .as_ref()
-                            .map(|b| format!(" (based on {b})"))
-                            .unwrap_or_default(),
+                    wt.worktree_path.display(),
+                    wt.branch,
+                    wt.base_branch
+                        .as_ref()
+                        .map(|b| format!(" (based on {b})"))
+                        .unwrap_or_default(),
+                );
+                Some(match memory {
+                    Some(m) => format!("{m}{wt_ctx}"),
+                    None => wt_ctx,
+                })
+            } else {
+                memory
+            };
+
+            // 6. Get messages from reconstructed state
+            let messages = state.messages.clone();
+
+            let working_dir_for_memory = working_dir.clone();
+            let model_for_error = model.clone();
+
+            // Create a fresh provider for the session's current model.
+            // This is the key fix: model switches now take effect because
+            // we create the provider here (not at startup).
+            let provider = match provider_factory.create_for_model(&model).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(
+                        model = %model,
+                        error = %e,
+                        "failed to create provider for model"
                     );
-                    Some(match memory {
-                        Some(m) => format!("{m}{wt_ctx}"),
-                        None => wt_ctx,
-                    })
+                    let _ = broadcast.emit(tron_core::events::TronEvent::Error {
+                        base: tron_core::events::BaseEvent::now(&session_id_clone),
+                        error: e.to_string(),
+                        context: None,
+                        code: None,
+                        provider: None,
+                        category: Some(e.category().to_owned()),
+                        suggestion: None,
+                        retryable: Some(e.is_retryable()),
+                        status_code: None,
+                        error_type: Some(e.category().to_owned()),
+                        model: Some(model_for_error),
+                    });
+                    return;
+                }
+            };
+
+            let cs = &settings.context.compactor;
+
+            let config = AgentConfig {
+                model: model.clone(),
+                working_directory: Some(working_dir),
+                server_origin: Some(server_origin),
+                system_prompt: if is_chat {
+                    Some(tron_runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
                 } else {
-                    memory
-                };
+                    None
+                },
+                enable_thinking: true,
+                max_turns: settings.agent.max_turns,
+                compaction: tron_runtime::context::types::CompactionConfig {
+                    threshold: cs.compaction_threshold,
+                    preserve_ratio: cs.preserve_ratio,
+                    context_limit: tron_llm::model_context_window(&model),
+                },
+                retry: Some(tron_core::retry::RetryConfig {
+                    max_retries: settings.retry.max_retries,
+                    base_delay_ms: settings.retry.base_delay_ms,
+                    max_delay_ms: settings.retry.max_delay_ms,
+                    jitter_factor: settings.retry.jitter_factor,
+                }),
+                health_tracker: Some(health_tracker),
+                workspace_id: resolved_ws_id.clone(),
+                ..AgentConfig::default()
+            };
 
-                // 6. Get messages from reconstructed state
-                let messages = state.messages.clone();
+            let provider_type_str = provider.provider_type().as_str().to_string();
+            let tools = tool_factory();
+            let mut agent = AgentFactory::create_agent(
+                config,
+                session_id_clone.clone(),
+                CreateAgentOpts {
+                    provider,
+                    tools,
+                    guardrails,
+                    hooks: hooks.clone(),
+                    is_unattended: false,
+                    denied_tools: vec![],
+                    subagent_depth: 0,
+                    subagent_max_depth: settings.agent.subagent_max_depth,
+                    rules_content: combined_rules,
+                    initial_messages: messages,
+                    memory_content: memory,
+                    rules_index,
+                    pre_activated_rules,
+                },
+            );
 
-                let working_dir_for_memory = working_dir.clone();
-                let model_for_error = model.clone();
+            agent.set_abort_token(cancel_token);
 
-                // Create a fresh provider for the session's current model.
-                // This is the key fix: model switches now take effect because
-                // we create the provider here (not at startup).
-                let provider = match provider_factory.create_for_model(&model).await {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!(
-                            model = %model,
-                            error = %e,
-                            "failed to create provider for model"
-                        );
-                        let _ = broadcast.emit(tron_core::events::TronEvent::Error {
-                            base: tron_core::events::BaseEvent::now(&session_id_clone),
-                            error: e.to_string(),
-                            context: None,
-                            code: None,
-                            provider: None,
-                            category: Some(e.category().to_owned()),
-                            suggestion: None,
-                            retryable: Some(e.is_retryable()),
-                            status_code: None,
-                            error_type: Some(e.category().to_owned()),
-                            model: Some(model_for_error),
-                        });
-                        return;
+            // 7a. Attach the session's persister — events are written during turn execution
+            agent.set_persister(Some(persister.clone()));
+
+            // 7b. Persist message.user event BEFORE agent runs (matches TS server)
+            let user_event_payload = build_user_event_payload(
+                &prompt_clone,
+                images_clone.as_deref(),
+                attachments_clone.as_deref(),
+                raw_skills_clone.as_deref(),
+                raw_spells_clone.as_deref(),
+            );
+            let _ = event_store.append(&tron_events::AppendOptions {
+                session_id: &session_id_clone,
+                event_type: tron_events::EventType::MessageUser,
+                payload: user_event_payload,
+                parent_id: None,
+            });
+
+            // Build user content override for multimodal messages (images + attachments)
+            let user_content_override = {
+                let has_images = images_clone.as_ref().is_some_and(|v| !v.is_empty());
+                let has_attachments = attachments_clone.as_ref().is_some_and(|v| !v.is_empty());
+                if !has_images && !has_attachments {
+                    None
+                } else {
+                    let mut blocks = vec![tron_core::content::UserContent::Text {
+                        text: prompt.clone(),
+                    }];
+                    // Add images
+                    if let Some(imgs) = &images_clone {
+                        for img in imgs {
+                            if let (Some(data), Some(media_type)) = (
+                                img.get("data").and_then(|v| v.as_str()),
+                                img.get("mediaType")
+                                    .or_else(|| img.get("mimeType"))
+                                    .and_then(|v| v.as_str()),
+                            ) {
+                                blocks.push(tron_core::content::UserContent::Image {
+                                    data: data.to_string(),
+                                    mime_type: media_type.to_string(),
+                                });
+                            }
+                        }
                     }
-                };
-
-                let cs = &settings.context.compactor;
-
-                let config = AgentConfig {
-                    model: model.clone(),
-                    working_directory: Some(working_dir),
-                    server_origin: Some(server_origin),
-                    system_prompt: if is_chat {
-                        Some(tron_runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
-                    } else {
-                        None
-                    },
-                    enable_thinking: true,
-                    max_turns: settings.agent.max_turns,
-                    compaction: tron_runtime::context::types::CompactionConfig {
-                        threshold: cs.compaction_threshold,
-                        preserve_ratio: cs.preserve_ratio,
-                        context_limit: tron_llm::model_context_window(&model),
-                    },
-                    retry: Some(tron_core::retry::RetryConfig {
-                        max_retries: settings.retry.max_retries,
-                        base_delay_ms: settings.retry.base_delay_ms,
-                        max_delay_ms: settings.retry.max_delay_ms,
-                        jitter_factor: settings.retry.jitter_factor,
-                    }),
-                    health_tracker: Some(health_tracker),
-                    workspace_id: resolved_ws_id.clone(),
-                    ..AgentConfig::default()
-                };
-
-                let provider_type_str = provider.provider_type().as_str().to_string();
-                let tools = tool_factory();
-                let mut agent = AgentFactory::create_agent(
-                    config,
-                    session_id_clone.clone(),
-                    CreateAgentOpts {
-                        provider,
-                        tools,
-                        guardrails,
-                        hooks: hooks.clone(),
-                        is_unattended: false,
-                        denied_tools: vec![],
-                        subagent_depth: 0,
-                        subagent_max_depth: settings.agent.subagent_max_depth,
-                        rules_content: combined_rules,
-                        initial_messages: messages,
-                        memory_content: memory,
-                        rules_index,
-                        pre_activated_rules,
-                    },
-                );
-
-                agent.set_abort_token(cancel_token);
-
-                // 7a. Attach the session's persister — events are written during turn execution
-                agent.set_persister(Some(persister.clone()));
-
-                // 7b. Persist message.user event BEFORE agent runs (matches TS server)
-                let user_event_payload = build_user_event_payload(
-                    &prompt_clone,
-                    images_clone.as_deref(),
-                    attachments_clone.as_deref(),
-                    raw_skills_clone.as_deref(),
-                    raw_spells_clone.as_deref(),
-                );
-                let _ = event_store.append(&tron_events::AppendOptions {
-                    session_id: &session_id_clone,
-                    event_type: tron_events::EventType::MessageUser,
-                    payload: user_event_payload,
-                    parent_id: None,
-                });
-
-                // Build user content override for multimodal messages (images + attachments)
-                let user_content_override = {
-                    let has_images = images_clone.as_ref().is_some_and(|v| !v.is_empty());
-                    let has_attachments = attachments_clone.as_ref().is_some_and(|v| !v.is_empty());
-                    if !has_images && !has_attachments {
-                        None
-                    } else {
-                        let mut blocks = vec![tron_core::content::UserContent::Text {
-                            text: prompt.clone(),
-                        }];
-                        // Add images
-                        if let Some(imgs) = &images_clone {
-                            for img in imgs {
-                                if let (Some(data), Some(media_type)) = (
-                                    img.get("data").and_then(|v| v.as_str()),
-                                    img.get("mediaType")
-                                        .or_else(|| img.get("mimeType"))
-                                        .and_then(|v| v.as_str()),
-                                ) {
+                    // Add attachments (documents or images based on MIME type)
+                    if let Some(atts) = &attachments_clone {
+                        for att in atts {
+                            if let (Some(data), Some(mime)) = (
+                                att.get("data").and_then(|v| v.as_str()),
+                                att.get("mimeType").and_then(|v| v.as_str()),
+                            ) {
+                                let file_name = att
+                                    .get("fileName")
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from);
+                                if mime.starts_with("image/") {
                                     blocks.push(tron_core::content::UserContent::Image {
                                         data: data.to_string(),
-                                        mime_type: media_type.to_string(),
+                                        mime_type: mime.to_string(),
+                                    });
+                                } else {
+                                    blocks.push(tron_core::content::UserContent::Document {
+                                        data: data.to_string(),
+                                        mime_type: mime.to_string(),
+                                        file_name,
                                     });
                                 }
                             }
                         }
-                        // Add attachments (documents or images based on MIME type)
-                        if let Some(atts) = &attachments_clone {
-                            for att in atts {
-                                if let (Some(data), Some(mime)) = (
-                                    att.get("data").and_then(|v| v.as_str()),
-                                    att.get("mimeType").and_then(|v| v.as_str()),
-                                ) {
-                                    let file_name = att
-                                        .get("fileName")
-                                        .and_then(|v| v.as_str())
-                                        .map(String::from);
-                                    if mime.starts_with("image/") {
-                                        blocks.push(tron_core::content::UserContent::Image {
-                                            data: data.to_string(),
-                                            mime_type: mime.to_string(),
-                                        });
-                                    } else {
-                                        blocks.push(tron_core::content::UserContent::Document {
-                                            data: data.to_string(),
-                                            mime_type: mime.to_string(),
-                                            file_name,
-                                        });
-                                    }
-                                }
+                    }
+                    // Strip images if model doesn't support them
+                    if !tron_llm::model_supports_images(&model) {
+                        blocks.retain(|b| {
+                            !matches!(b, tron_core::content::UserContent::Image { .. })
+                        });
+                    }
+
+                    if blocks.len() > 1 {
+                        Some(tron_core::messages::UserMessageContent::Blocks(blocks))
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            // Subagent results (from event store — works for both live and resumed sessions)
+            let subagent_results_context = {
+                let pending = get_pending_subagent_results(&event_store, &session_id_clone);
+                if pending.is_empty() {
+                    None
+                } else {
+                    let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
+                    let formatted = format_subagent_results(&pending);
+                    // Persist consumption marker
+                    if formatted.is_some() {
+                        let _ = event_store.append(&tron_events::AppendOptions {
+                            session_id: &session_id_clone,
+                            event_type: EventType::SubagentResultsConsumed,
+                            payload: serde_json::json!({
+                                "consumedEventIds": event_ids,
+                                "count": pending.len(),
+                            }),
+                            parent_id: None,
+                        });
+                    }
+                    formatted
+                }
+            };
+
+            // Build RunContext with client params
+            let run_context = RunContext {
+                reasoning_level: reasoning_level_clone
+                    .and_then(|s| tron_runtime::types::ReasoningLevel::from_str_loose(&s)),
+                skill_context: {
+                    // Merge skills + spells, deduplicate
+                    let mut all_names = skills_clone.unwrap_or_default();
+                    if let Some(spell_names) = spells_clone {
+                        for name in spell_names {
+                            if !all_names.contains(&name) {
+                                all_names.push(name);
                             }
                         }
-                        // Strip images if model doesn't support them
-                        if !tron_llm::model_supports_images(&model) {
-                            blocks.retain(|b| {
-                                !matches!(b, tron_core::content::UserContent::Image { .. })
-                            });
-                        }
-
-                        if blocks.len() > 1 {
-                            Some(tron_core::messages::UserMessageContent::Blocks(blocks))
-                        } else {
-                            None
-                        }
                     }
-                };
-
-                // Subagent results (from event store — works for both live and resumed sessions)
-                let subagent_results_context = {
-                    let pending = get_pending_subagent_results(&event_store, &session_id_clone);
-                    if pending.is_empty() {
+                    if all_names.is_empty() {
                         None
                     } else {
-                        let event_ids: Vec<String> =
-                            pending.iter().map(|(id, _)| id.clone()).collect();
-                        let formatted = format_subagent_results(&pending);
-                        // Persist consumption marker
-                        if formatted.is_some() {
-                            let _ = event_store.append(&tron_events::AppendOptions {
-                                session_id: &session_id_clone,
-                                event_type: EventType::SubagentResultsConsumed,
-                                payload: serde_json::json!({
-                                    "consumedEventIds": event_ids,
-                                    "count": pending.len(),
-                                }),
-                                parent_id: None,
-                            });
-                        }
-                        formatted
-                    }
-                };
-
-                // Build RunContext with client params
-                let run_context = RunContext {
-                    reasoning_level: reasoning_level_clone
-                        .and_then(|s| tron_runtime::types::ReasoningLevel::from_str_loose(&s)),
-                    skill_context: {
-                        // Merge skills + spells, deduplicate
-                        let mut all_names = skills_clone.unwrap_or_default();
-                        if let Some(spell_names) = spells_clone {
-                            for name in spell_names {
-                                if !all_names.contains(&name) {
-                                    all_names.push(name);
-                                }
-                            }
-                        }
-                        if all_names.is_empty() {
+                        let registry = skill_registry.read();
+                        let name_refs: Vec<&str> = all_names.iter().map(String::as_str).collect();
+                        let (found, _not_found) = registry.get_many(&name_refs);
+                        if found.is_empty() {
                             None
                         } else {
-                            let registry = skill_registry.read();
-                            let name_refs: Vec<&str> =
-                                all_names.iter().map(String::as_str).collect();
-                            let (found, _not_found) = registry.get_many(&name_refs);
-                            if found.is_empty() {
-                                None
-                            } else {
-                                // Persist skill.added events (deduplicate against existing)
-                                let existing = event_store
-                                    .get_events_by_type(&session_id_clone, &["skill.added"], None)
-                                    .unwrap_or_default();
-                                let existing_names: std::collections::HashSet<String> = existing
-                                    .iter()
-                                    .filter_map(|e| {
-                                        serde_json::from_str::<serde_json::Value>(&e.payload)
-                                            .ok()
-                                            .and_then(|p| {
-                                                p.get("skillName")
-                                                    .and_then(|n| n.as_str())
-                                                    .map(String::from)
-                                            })
-                                    })
-                                    .collect();
-                                for skill in &found {
-                                    if !existing_names.contains(&skill.name) {
-                                        let _ = event_store.append(&tron_events::AppendOptions {
-                                            session_id: &session_id_clone,
-                                            event_type: tron_events::EventType::SkillAdded,
-                                            payload: serde_json::json!({
-                                                "skillName": skill.name,
-                                                "source": skill.source.to_string(),
-                                                "addedVia": "mention",
-                                                "tokens": skill.content.len() as u64 / 4,
-                                            }),
-                                            parent_id: None,
-                                        });
-                                    }
+                            // Persist skill.added events (deduplicate against existing)
+                            let existing = event_store
+                                .get_events_by_type(&session_id_clone, &["skill.added"], None)
+                                .unwrap_or_default();
+                            let existing_names: std::collections::HashSet<String> = existing
+                                .iter()
+                                .filter_map(|e| {
+                                    serde_json::from_str::<serde_json::Value>(&e.payload)
+                                        .ok()
+                                        .and_then(|p| {
+                                            p.get("skillName")
+                                                .and_then(|n| n.as_str())
+                                                .map(String::from)
+                                        })
+                                })
+                                .collect();
+                            for skill in &found {
+                                if !existing_names.contains(&skill.name) {
+                                    let _ = event_store.append(&tron_events::AppendOptions {
+                                        session_id: &session_id_clone,
+                                        event_type: tron_events::EventType::SkillAdded,
+                                        payload: serde_json::json!({
+                                            "skillName": skill.name,
+                                            "source": skill.source.to_string(),
+                                            "addedVia": "mention",
+                                            "tokens": skill.content.len() as u64 / 4,
+                                        }),
+                                        parent_id: None,
+                                    });
                                 }
-
-                                let ctx = tron_skills::injector::build_skill_context(&found);
-                                if ctx.is_empty() { None } else { Some(ctx) }
                             }
+
+                            let ctx = tron_skills::injector::build_skill_context(&found);
+                            if ctx.is_empty() { None } else { Some(ctx) }
                         }
-                    },
-                    subagent_results: subagent_results_context,
-                    user_content_override,
-                    device_context: device_context.clone(),
-                    ..Default::default()
+                    }
+                },
+                subagent_results: subagent_results_context,
+                user_content_override,
+                device_context: device_context.clone(),
+                ..Default::default()
+            };
+
+            let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
+
+            // 8. Flush persister to ensure all inline-persisted events are written
+            let _ = persister.flush().await;
+
+            // 8a. Persist notification.interrupted if the run was interrupted
+            if result.interrupted {
+                if let Err(e) = persister
+                    .append(
+                        &session_id_clone,
+                        tron_events::EventType::NotificationInterrupted,
+                        serde_json::json!({
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "turn": result.turns_executed,
+                        }),
+                    )
+                    .await
+                {
+                    tracing::error!(session_id = %session_id_clone, error = %e,
+                            "failed to persist notification.interrupted");
+                }
+                let _ = persister.flush().await;
+            }
+
+            // 8b. Close browser session so Chrome is cleaned up and iOS
+            //     hides the globe icon. Emits BrowserEvent::Closed over
+            //     WebSocket if a session existed.
+            if let Some(ref svc) = browser_service
+                && let Err(e) = svc.close_session(&session_id_clone).await
+            {
+                tracing::debug!(session_id = %session_id_clone, error = %e,
+                        "failed to close browser session after run");
+            }
+
+            // 8c. Emit agent.error if the run failed
+            if let Some(ref error_msg) = result.error {
+                let parsed = tron_core::errors::parse::parse_error(error_msg);
+                let _ = broadcast.emit(tron_core::events::TronEvent::Error {
+                    base: tron_core::events::BaseEvent::now(&session_id_clone),
+                    error: error_msg.clone(),
+                    context: None,
+                    code: None,
+                    provider: Some(provider_type_str.clone()),
+                    category: Some(parsed.category.to_string()),
+                    suggestion: parsed.suggestion,
+                    retryable: Some(parsed.is_retryable),
+                    status_code: None,
+                    error_type: Some(parsed.category.to_string()),
+                    model: Some(model_for_error.clone()),
+                });
+            }
+
+            // 9. Auto-ledger + auto-compaction pipeline (fail-silent)
+            {
+                let session_model = session_manager
+                    .get_session(&session_id_clone)
+                    .ok()
+                    .flatten()
+                    .map(|s| s.latest_model.clone())
+                    .unwrap_or_default();
+                let context_limit = tron_llm::model_context_window(&session_model);
+                let last_context_window = result.last_context_window_tokens.unwrap_or(0);
+                #[allow(clippy::cast_precision_loss)] // token counts never exceed 2^52
+                let token_ratio = if context_limit > 0 {
+                    last_context_window as f64 / context_limit as f64
+                } else {
+                    0.0
                 };
 
-                let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
+                let memory_deps = RuntimeMemoryDeps {
+                    subagent_manager: subagent_manager.clone(),
+                    event_store: event_store.clone(),
+                    session_manager: session_manager.clone(),
+                    broadcast: broadcast.clone(),
+                    session_id: session_id_clone.clone(),
+                    embedding_controller: embedding_controller.clone(),
+                    shutdown_coordinator: shutdown_coordinator.clone(),
+                    ledger_enabled: settings.context.memory.ledger.enabled,
+                };
 
-                // 8. Flush persister to ensure all inline-persisted events are written
-                let _ = persister.flush().await;
+                let (recent_event_types, recent_tool_calls) =
+                    gather_recent_events(&event_store, &session_id_clone);
 
-                // 8a. Persist notification.interrupted if the run was interrupted
-                if result.interrupted {
-                    if let Err(e) = persister
-                        .append(
-                            &session_id_clone,
-                            tron_events::EventType::NotificationInterrupted,
-                            serde_json::json!({
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                "turn": result.turns_executed,
-                            }),
-                        )
-                        .await
-                    {
-                        tracing::error!(session_id = %session_id_clone, error = %e,
-                            "failed to persist notification.interrupted");
-                    }
-                    let _ = persister.flush().await;
+                let cs_for_trigger = &settings.context.compactor;
+                let trigger_config =
+                    tron_events::memory::types::CompactionTriggerConfig::from(cs_for_trigger);
+                let mut trigger =
+                    tron_events::memory::trigger::CompactionTrigger::new(trigger_config);
+                if cs_for_trigger.force_always.unwrap_or(false) {
+                    trigger.set_force_always(true);
                 }
+                let mut memory_manager =
+                    tron_events::memory::manager::MemoryManager::new(memory_deps, trigger);
 
-                // 8b. Close browser session so Chrome is cleaned up and iOS
-                //     hides the globe icon. Emits BrowserEvent::Closed over
-                //     WebSocket if a session existed.
-                if let Some(ref svc) = browser_service
-                    && let Err(e) = svc.close_session(&session_id_clone).await
-                {
-                    tracing::debug!(session_id = %session_id_clone, error = %e,
-                        "failed to close browser session after run");
-                }
-
-                // 8c. Emit agent.error if the run failed
-                if let Some(ref error_msg) = result.error {
-                    let parsed = tron_core::errors::parse::parse_error(error_msg);
-                    let _ = broadcast.emit(tron_core::events::TronEvent::Error {
-                        base: tron_core::events::BaseEvent::now(&session_id_clone),
-                        error: error_msg.clone(),
-                        context: None,
-                        code: None,
-                        provider: Some(provider_type_str.clone()),
-                        category: Some(parsed.category.to_string()),
-                        suggestion: parsed.suggestion,
-                        retryable: Some(parsed.is_retryable),
-                        status_code: None,
-                        error_type: Some(parsed.category.to_string()),
-                        model: Some(model_for_error.clone()),
-                    });
-                }
-
-                // 9. Auto-ledger + auto-compaction pipeline (fail-silent)
-                {
-                    let session_model = session_manager
-                        .get_session(&session_id_clone)
-                        .ok()
-                        .flatten()
-                        .map(|s| s.latest_model.clone())
-                        .unwrap_or_default();
-                    let context_limit = tron_llm::model_context_window(&session_model);
-                    let last_context_window = result.last_context_window_tokens.unwrap_or(0);
-                    #[allow(clippy::cast_precision_loss)] // token counts never exceed 2^52
-                    let token_ratio = if context_limit > 0 {
-                        last_context_window as f64 / context_limit as f64
-                    } else {
-                        0.0
-                    };
-
-                    // Resolve workspace path → ID for embedding storage
-                    let resolved_workspace_id = event_store
-                        .get_workspace_by_path(&working_dir_for_memory)
-                        .ok()
-                        .flatten()
-                        .map_or_else(|| working_dir_for_memory.clone(), |ws| ws.id);
-
-                    let memory_deps = RuntimeMemoryDeps {
-                        subagent_manager: subagent_manager.clone(),
-                        event_store: event_store.clone(),
-                        session_manager: session_manager.clone(),
-                        broadcast: broadcast.clone(),
-                        session_id: session_id_clone.clone(),
-                        workspace_id: resolved_workspace_id,
-                        embedding_controller: embedding_controller.clone(),
-                        shutdown_coordinator: shutdown_coordinator.clone(),
-                        ledger_enabled: settings.context.memory.ledger.enabled,
-                    };
-
-                    let (recent_event_types, recent_tool_calls) =
-                        gather_recent_events(&event_store, &session_id_clone);
-
-                    let cs_for_trigger = &settings.context.compactor;
-                    let trigger_config =
-                        tron_events::memory::types::CompactionTriggerConfig::from(cs_for_trigger);
-                    let mut trigger =
-                        tron_events::memory::trigger::CompactionTrigger::new(trigger_config);
-                    if cs_for_trigger.force_always.unwrap_or(false) {
-                        trigger.set_force_always(true);
-                    }
-                    let mut memory_manager =
-                        tron_events::memory::manager::MemoryManager::new(memory_deps, trigger);
-
-                    memory_manager
-                        .on_cycle_complete(tron_events::memory::types::CycleInfo {
-                            model: session_model,
-                            working_directory: working_dir_for_memory,
-                            current_token_ratio: token_ratio,
-                            recent_event_types,
-                            recent_tool_calls,
-                        })
-                        .await;
-                }
-
-                // 10. Invalidate cached session so next resume reconstructs from events
-                session_manager.invalidate_session(&session_id_clone);
-
-                // 11. Emit session_updated so clients can refresh the session stat line
-                if let Ok(Some(updated_session)) = session_manager.get_session(&session_id_clone) {
-                    // Get message previews for last_user_prompt / last_assistant_response
-                    let preview = event_store
-                        .get_session_message_previews(&[session_id_clone.as_str()])
-                        .ok()
-                        .and_then(|mut map| map.remove(&session_id_clone));
-
-                    let _ = broadcast.emit(tron_core::events::TronEvent::SessionUpdated {
-                        base: tron_core::events::BaseEvent::now(&session_id_clone),
-                        title: updated_session.title.clone(),
-                        model: updated_session.latest_model.clone(),
-                        message_count: updated_session.message_count,
-                        input_tokens: updated_session.total_input_tokens,
-                        output_tokens: updated_session.total_output_tokens,
-                        last_turn_input_tokens: updated_session.last_turn_input_tokens,
-                        cache_read_tokens: updated_session.total_cache_read_tokens,
-                        cache_creation_tokens: updated_session.total_cache_creation_tokens,
-                        cost: updated_session.total_cost,
-                        last_activity: updated_session.last_activity_at.clone(),
-                        is_active: false,
-                        last_user_prompt: preview.as_ref().and_then(|p| p.last_user_prompt.clone()),
-                        last_assistant_response: preview
-                            .as_ref()
-                            .and_then(|p| p.last_assistant_response.clone()),
-                        parent_session_id: updated_session.parent_session_id.clone(),
-                    });
-                }
-
-                debug!(
-                    session_id = %session_id_clone,
-                    run_id = %run_id_clone,
-                    stop_reason = ?result.stop_reason,
-                    turns = result.turns_executed,
-                    "prompt run completed"
-                );
-            });
-            if let Some(ref coord) = shutdown_coordinator_for_register {
-                coord.register_task(handle);
+                memory_manager
+                    .on_cycle_complete(tron_events::memory::types::CycleInfo {
+                        model: session_model,
+                        working_directory: working_dir_for_memory,
+                        current_token_ratio: token_ratio,
+                        recent_event_types,
+                        recent_tool_calls,
+                    })
+                    .await;
             }
+
+            // 10. Invalidate cached session so next resume reconstructs from events
+            session_manager.invalidate_session(&session_id_clone);
+
+            // 11. Emit session_updated so clients can refresh the session stat line
+            if let Ok(Some(updated_session)) = session_manager.get_session(&session_id_clone) {
+                // Get message previews for last_user_prompt / last_assistant_response
+                let preview = event_store
+                    .get_session_message_previews(&[session_id_clone.as_str()])
+                    .ok()
+                    .and_then(|mut map| map.remove(&session_id_clone));
+
+                let _ = broadcast.emit(tron_core::events::TronEvent::SessionUpdated {
+                    base: tron_core::events::BaseEvent::now(&session_id_clone),
+                    title: updated_session.title.clone(),
+                    model: updated_session.latest_model.clone(),
+                    message_count: updated_session.message_count,
+                    input_tokens: updated_session.total_input_tokens,
+                    output_tokens: updated_session.total_output_tokens,
+                    last_turn_input_tokens: updated_session.last_turn_input_tokens,
+                    cache_read_tokens: updated_session.total_cache_read_tokens,
+                    cache_creation_tokens: updated_session.total_cache_creation_tokens,
+                    cost: updated_session.total_cost,
+                    last_activity: updated_session.last_activity_at.clone(),
+                    is_active: false,
+                    last_user_prompt: preview.as_ref().and_then(|p| p.last_user_prompt.clone()),
+                    last_assistant_response: preview
+                        .as_ref()
+                        .and_then(|p| p.last_assistant_response.clone()),
+                    parent_session_id: updated_session.parent_session_id.clone(),
+                });
+            }
+
+            debug!(
+                session_id = %session_id_clone,
+                run_id = %run_id_clone,
+                stop_reason = ?result.stop_reason,
+                turns = result.turns_executed,
+                "prompt run completed"
+            );
+        });
+        if let Some(ref coord) = shutdown_coordinator_for_register {
+            coord.register_task(handle);
+        }
 
         Ok(serde_json::json!({
             "acknowledged": true,
@@ -1239,9 +1221,7 @@ impl MethodHandler for AbortHandler {
             })?;
 
         // Clean up pending device requests to unblock any waiting tools immediately
-        if aborted
-            && let Some(ref broker) = ctx.device_request_broker
-        {
+        if aborted && let Some(ref broker) = ctx.device_request_broker {
             broker.cancel_all_pending();
         }
 
@@ -4007,8 +3987,14 @@ mod tests {
         let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
         // Only the message.user after the latest boundary
         assert!(types.contains(&"message.user".to_string()));
-        assert!(!types.contains(&"tool.call".to_string()), "stale tool calls leaked through");
-        assert!(calls.is_empty(), "stale bash commands leaked through: {calls:?}");
+        assert!(
+            !types.contains(&"tool.call".to_string()),
+            "stale tool calls leaked through"
+        );
+        assert!(
+            calls.is_empty(),
+            "stale bash commands leaked through: {calls:?}"
+        );
     }
 
     #[tokio::test]
@@ -4043,8 +4029,14 @@ mod tests {
 
         let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
         assert!(types.contains(&"message.user".to_string()));
-        assert!(!types.contains(&"tool.call".to_string()), "pre-summary tool call leaked");
-        assert!(calls.is_empty(), "pre-summary bash commands leaked: {calls:?}");
+        assert!(
+            !types.contains(&"tool.call".to_string()),
+            "pre-summary tool call leaked"
+        );
+        assert!(
+            calls.is_empty(),
+            "pre-summary bash commands leaked: {calls:?}"
+        );
     }
 
     #[tokio::test]
@@ -4086,8 +4078,10 @@ mod tests {
 
         let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
         // The stale git push must not appear
-        assert!(!calls.iter().any(|c| c.contains("git push")),
-            "stale git push should not be visible after boundary: {calls:?}");
+        assert!(
+            !calls.iter().any(|c| c.contains("git push")),
+            "stale git push should not be visible after boundary: {calls:?}"
+        );
         assert!(types.contains(&"message.user".to_string()));
         assert!(types.contains(&"message.assistant".to_string()));
         assert!(!types.contains(&"tool.call".to_string()));
@@ -4129,7 +4123,6 @@ mod tests {
             session_manager: ctx.session_manager.clone(),
             broadcast: broadcast.clone(),
             session_id: sid.clone(),
-            workspace_id: "/tmp".to_string(),
             embedding_controller: None,
             shutdown_coordinator: None,
             ledger_enabled: false,
@@ -4142,13 +4135,21 @@ mod tests {
             .event_store
             .get_events_by_type(&sid, &["compact.summary"], None)
             .unwrap();
-        assert_eq!(summaries.len(), 1, "expected exactly 1 compact.summary event");
+        assert_eq!(
+            summaries.len(),
+            1,
+            "expected exactly 1 compact.summary event"
+        );
 
         let boundaries = ctx
             .event_store
             .get_events_by_type(&sid, &["compact.boundary"], None)
             .unwrap();
-        assert_eq!(boundaries.len(), 1, "expected exactly 1 compact.boundary event");
+        assert_eq!(
+            boundaries.len(),
+            1,
+            "expected exactly 1 compact.boundary event"
+        );
 
         // Verify boundary payload has expected fields
         let bp: Value = serde_json::from_str(&boundaries[0].payload).unwrap();
@@ -4194,7 +4195,6 @@ mod tests {
             session_manager: ctx.session_manager.clone(),
             broadcast: broadcast.clone(),
             session_id: sid.clone(),
-            workspace_id: "/tmp".to_string(),
             embedding_controller: None,
             shutdown_coordinator: None,
             ledger_enabled: false,
@@ -4217,6 +4217,9 @@ mod tests {
                 found_context_tokens = true;
             }
         }
-        assert!(found_context_tokens, "no CompactionComplete event found in broadcast");
+        assert!(
+            found_context_tokens,
+            "no CompactionComplete event found in broadcast"
+        );
     }
 }

@@ -188,12 +188,7 @@ impl TurnAccumulator {
     }
 
     /// Transition a tool call to "completed" or "error" state.
-    pub fn update_tool_end(
-        &mut self,
-        tool_call_id: &str,
-        result: Option<&str>,
-        is_error: bool,
-    ) {
+    pub fn update_tool_end(&mut self, tool_call_id: &str, result: Option<&str>, is_error: bool) {
         if let Some(tc) = self
             .tool_calls
             .iter_mut()
@@ -212,7 +207,12 @@ impl TurnAccumulator {
 
     /// Serialize the current state to JSON triple: (text, `tool_calls`, `content_sequence`).
     pub fn to_json(&self) -> (String, Value, Value) {
-        let tools = Value::Array(self.tool_calls.iter().map(AccumulatedToolCall::to_json).collect());
+        let tools = Value::Array(
+            self.tool_calls
+                .iter()
+                .map(AccumulatedToolCall::to_json)
+                .collect(),
+        );
         let sequence = Value::Array(
             self.content_sequence
                 .iter()
@@ -283,7 +283,12 @@ impl TurnAccumulatorMap {
     }
 
     /// Transition a tool call to "running" state.
-    pub fn handle_tool_start(&self, session_id: &str, tool_call_id: &str, arguments: Option<&Value>) {
+    pub fn handle_tool_start(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        arguments: Option<&Value>,
+    ) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.update_tool_start(tool_call_id, arguments);
         }
@@ -296,10 +301,10 @@ impl TurnAccumulatorMap {
                 .tool_calls
                 .iter_mut()
                 .find(|tc| tc.tool_call_id == tool_call_id)
-            {
-                let streaming = tc.streaming_output.get_or_insert_with(String::new);
-                streaming.push_str(output);
-            }
+        {
+            let streaming = tc.streaming_output.get_or_insert_with(String::new);
+            streaming.push_str(output);
+        }
     }
 
     /// Record tool completion or error.
@@ -332,7 +337,10 @@ impl TurnAccumulatorMap {
             acc.to_json()
         });
         if result.is_none() {
-            tracing::warn!(session_id, "accumulator: get_state found no accumulator for session");
+            tracing::warn!(
+                session_id,
+                "accumulator: get_state found no accumulator for session"
+            );
         }
         result
     }
@@ -374,9 +382,7 @@ impl TurnAccumulatorMap {
                 arguments,
                 ..
             } => {
-                let args_value = arguments
-                    .as_ref()
-                    .map(|m| Value::Object(m.clone()));
+                let args_value = arguments.as_ref().map(|m| Value::Object(m.clone()));
                 self.handle_tool_start(session_id, tool_call_id, args_value.as_ref());
             }
             TronEvent::ToolExecutionEnd {
@@ -385,21 +391,19 @@ impl TurnAccumulatorMap {
                 result,
                 ..
             } => {
-                let result_text = result.as_ref().map(|r| {
-                    match &r.content {
-                        tron_core::tools::ToolResultBody::Text(t) => t.clone(),
-                        tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
-                            .iter()
-                            .filter_map(|b| {
-                                if let tron_core::content::ToolResultContent::Text { text } = b {
-                                    Some(text.as_str())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    }
+                let result_text = result.as_ref().map(|r| match &r.content {
+                    tron_core::tools::ToolResultBody::Text(t) => t.clone(),
+                    tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let tron_core::content::ToolResultContent::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                 });
                 self.handle_tool_end(
                     session_id,

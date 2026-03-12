@@ -94,7 +94,10 @@ impl DeviceRequestBroker {
     pub fn cancel_all_pending(&self) {
         let mut pending = self.pending.lock();
         if !pending.is_empty() {
-            tracing::debug!(count = pending.len(), "cancelling all pending device requests");
+            tracing::debug!(
+                count = pending.len(),
+                "cancelling all pending device requests"
+            );
             pending.clear();
         }
     }

@@ -129,5 +129,4 @@ mod tests {
         let args = json!({});
         assert_eq!(get_optional_string(&args, "key"), None);
     }
-
 }

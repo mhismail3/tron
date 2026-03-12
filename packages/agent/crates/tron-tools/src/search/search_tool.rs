@@ -18,8 +18,8 @@ use crate::errors::ToolError;
 use crate::search::ast_search;
 use crate::search::text_search;
 use crate::traits::{ProcessRunner, ToolContext, TronTool};
-use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::path::resolve_path;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
 /// Returns `true` if `pattern` contains AST metavariables (`$VAR` or `$$$`).

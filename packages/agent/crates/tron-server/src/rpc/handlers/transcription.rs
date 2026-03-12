@@ -50,11 +50,13 @@ pub async fn transcribe_audio(
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> TranscriptionResult {
-    if let Ok(resp) = transcribe_audio_full(ctx, audio_bytes, mime_type).await { TranscriptionResult {
-        text: resp.text,
-        language: resp.language,
-        duration_seconds: resp.duration_seconds,
-    } } else {
+    if let Ok(resp) = transcribe_audio_full(ctx, audio_bytes, mime_type).await {
+        TranscriptionResult {
+            text: resp.text,
+            language: resp.language,
+            duration_seconds: resp.duration_seconds,
+        }
+    } else {
         #[allow(clippy::cast_precision_loss)]
         let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
         TranscriptionResult {
@@ -73,9 +75,12 @@ async fn transcribe_audio_full(
 ) -> Result<TranscribeResponse, RpcError> {
     let start = std::time::Instant::now();
 
-    let engine = ctx.transcription_engine.get().ok_or(RpcError::NotAvailable {
-        message: "Transcription engine not loaded".into(),
-    })?;
+    let engine = ctx
+        .transcription_engine
+        .get()
+        .ok_or(RpcError::NotAvailable {
+            message: "Transcription engine not loaded".into(),
+        })?;
 
     match engine.transcribe(audio_bytes, mime_type).await {
         Ok(result) => {
@@ -145,11 +150,10 @@ pub struct TranscribeAudioHandler;
 impl MethodHandler for TranscribeAudioHandler {
     #[instrument(skip(self, ctx), fields(method = "transcribe.audio"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let audio_base64 = opt_string(params.as_ref(), "audioBase64").ok_or_else(|| {
-            RpcError::InvalidParams {
+        let audio_base64 =
+            opt_string(params.as_ref(), "audioBase64").ok_or_else(|| RpcError::InvalidParams {
                 message: "Missing required parameter: audioBase64".into(),
-            }
-        })?;
+            })?;
 
         // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")
         let audio_base64 = normalize_base64(&audio_base64);
@@ -433,26 +437,17 @@ mod tests {
 
     #[test]
     fn cleanup_strips_leading_semicolon() {
-        assert_eq!(
-            cleanup_transcription("; something else"),
-            "Something else"
-        );
+        assert_eq!(cleanup_transcription("; something else"), "Something else");
     }
 
     #[test]
     fn cleanup_capitalizes_first_letter() {
-        assert_eq!(
-            cleanup_transcription("hello world"),
-            "Hello world"
-        );
+        assert_eq!(cleanup_transcription("hello world"), "Hello world");
     }
 
     #[test]
     fn cleanup_preserves_already_capitalized() {
-        assert_eq!(
-            cleanup_transcription("Hello world"),
-            "Hello world"
-        );
+        assert_eq!(cleanup_transcription("Hello world"), "Hello world");
     }
 
     #[test]
@@ -465,10 +460,7 @@ mod tests {
 
     #[test]
     fn cleanup_trims_whitespace() {
-        assert_eq!(
-            cleanup_transcription("  hello world  "),
-            "Hello world"
-        );
+        assert_eq!(cleanup_transcription("  hello world  "), "Hello world");
     }
 
     #[test]
@@ -488,9 +480,6 @@ mod tests {
 
     #[test]
     fn cleanup_multiple_leading_punctuation() {
-        assert_eq!(
-            cleanup_transcription(",,, well then"),
-            "Well then"
-        );
+        assert_eq!(cleanup_transcription(",,, well then"), "Well then");
     }
 }

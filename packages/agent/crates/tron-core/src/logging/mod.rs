@@ -86,7 +86,10 @@ pub fn init_subscriber_with_sqlite(
         .with_writer(std::io::stderr)
         .compact();
 
-    let config = TransportConfig { origin, ..Default::default() };
+    let config = TransportConfig {
+        origin,
+        ..Default::default()
+    };
     let transport = SqliteTransport::new(conn, config);
     let handle = transport.handle();
 

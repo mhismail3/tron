@@ -7,11 +7,11 @@
 use super::model_ids::{
     ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_MINIMAX_MODEL_IDS, ALL_OPENAI_MODEL_IDS,
 };
-use tron_core::messages::Provider;
 use crate::anthropic::types::get_claude_model;
 use crate::google::types::get_gemini_model;
 use crate::minimax::types::get_minimax_model;
 use crate::openai::types::get_openai_model;
+use tron_core::messages::Provider;
 
 /// Detect which provider serves a given model ID.
 ///
@@ -34,9 +34,7 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
             "google" | "gemini" if ALL_GOOGLE_MODEL_IDS.contains(&bare_model) => {
                 Some(Provider::Google)
             }
-            "minimax" if ALL_MINIMAX_MODEL_IDS.contains(&bare_model) => {
-                Some(Provider::MiniMax)
-            }
+            "minimax" if ALL_MINIMAX_MODEL_IDS.contains(&bare_model) => Some(Provider::MiniMax),
             _ => None,
         };
     }
@@ -179,10 +177,7 @@ mod tests {
 
     #[test]
     fn detect_explicit_prefix_unknown() {
-        assert_eq!(
-            detect_provider_from_model("unknown/some-model"),
-            None
-        );
+        assert_eq!(detect_provider_from_model("unknown/some-model"), None);
     }
 
     #[test]
@@ -219,10 +214,7 @@ mod tests {
 
     #[test]
     fn detect_registry_lookup_openai_gpt_54() {
-        assert_eq!(
-            detect_provider_from_model(GPT_5_4),
-            Some(Provider::OpenAi)
-        );
+        assert_eq!(detect_provider_from_model(GPT_5_4), Some(Provider::OpenAi));
         assert_eq!(
             detect_provider_from_model(GPT_5_4_PRO),
             Some(Provider::OpenAi)
@@ -251,10 +243,7 @@ mod tests {
 
     #[test]
     fn detect_family_prefix_claude() {
-        assert_eq!(
-            detect_provider_from_model("claude-some-future-model"),
-            None
-        );
+        assert_eq!(detect_provider_from_model("claude-some-future-model"), None);
     }
 
     #[test]
@@ -274,18 +263,12 @@ mod tests {
 
     #[test]
     fn detect_prefixed_unknown_model_returns_none() {
-        assert_eq!(
-            detect_provider_from_model("openai/not-a-real-model"),
-            None
-        );
+        assert_eq!(detect_provider_from_model("openai/not-a-real-model"), None);
         assert_eq!(
             detect_provider_from_model("anthropic/not-a-real-model"),
             None
         );
-        assert_eq!(
-            detect_provider_from_model("google/not-a-real-model"),
-            None
-        );
+        assert_eq!(detect_provider_from_model("google/not-a-real-model"), None);
     }
 
     // ── strip_provider_prefix ────────────────────────────────────────────

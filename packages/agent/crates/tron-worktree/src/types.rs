@@ -42,9 +42,7 @@ impl Default for WorktreeConfig {
 
 impl WorktreeConfig {
     /// Build from settings types.
-    pub fn from_settings(
-        session: &tron_settings::types::SessionSettings,
-    ) -> Self {
+    pub fn from_settings(session: &tron_settings::types::SessionSettings) -> Self {
         let iso = &session.isolation;
         Self {
             mode: iso.mode.clone(),

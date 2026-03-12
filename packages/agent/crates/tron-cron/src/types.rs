@@ -664,7 +664,11 @@ mod tests {
 
     #[test]
     fn delivery_outcome_serde_roundtrip() {
-        for outcome in [DeliveryOutcome::Ok, DeliveryOutcome::Partial, DeliveryOutcome::Failed] {
+        for outcome in [
+            DeliveryOutcome::Ok,
+            DeliveryOutcome::Partial,
+            DeliveryOutcome::Failed,
+        ] {
             let json = serde_json::to_string(&outcome).unwrap();
             let back: DeliveryOutcome = serde_json::from_str(&json).unwrap();
             assert_eq!(back, outcome);
@@ -673,9 +677,18 @@ mod tests {
 
     #[test]
     fn delivery_outcome_serde_values() {
-        assert_eq!(serde_json::to_string(&DeliveryOutcome::Ok).unwrap(), "\"ok\"");
-        assert_eq!(serde_json::to_string(&DeliveryOutcome::Partial).unwrap(), "\"partial\"");
-        assert_eq!(serde_json::to_string(&DeliveryOutcome::Failed).unwrap(), "\"failed\"");
+        assert_eq!(
+            serde_json::to_string(&DeliveryOutcome::Ok).unwrap(),
+            "\"ok\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DeliveryOutcome::Partial).unwrap(),
+            "\"partial\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DeliveryOutcome::Failed).unwrap(),
+            "\"failed\""
+        );
     }
 
     #[test]
@@ -688,9 +701,15 @@ mod tests {
     #[test]
     fn delivery_outcome_from_sql() {
         assert_eq!(DeliveryOutcome::from_sql("ok"), DeliveryOutcome::Ok);
-        assert_eq!(DeliveryOutcome::from_sql("partial"), DeliveryOutcome::Partial);
+        assert_eq!(
+            DeliveryOutcome::from_sql("partial"),
+            DeliveryOutcome::Partial
+        );
         assert_eq!(DeliveryOutcome::from_sql("failed"), DeliveryOutcome::Failed);
-        assert_eq!(DeliveryOutcome::from_sql("garbage"), DeliveryOutcome::Failed);
+        assert_eq!(
+            DeliveryOutcome::from_sql("garbage"),
+            DeliveryOutcome::Failed
+        );
     }
 
     #[test]
@@ -898,7 +917,10 @@ mod tests {
         };
         let all = vec!["Bash".into(), "Write".into(), "Read".into(), "Grep".into()];
         let denied = tr.resolve_denied_tools(&all);
-        assert_eq!(denied, vec!["Bash".to_string(), "Write".to_string(), "Grep".to_string()]);
+        assert_eq!(
+            denied,
+            vec!["Bash".to_string(), "Write".to_string(), "Grep".to_string()]
+        );
     }
 
     #[test]
@@ -916,7 +938,10 @@ mod tests {
             name: "Restricted".into(),
             description: None,
             enabled: true,
-            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
             payload: Payload::ShellCommand {
                 command: "echo hi".into(),
                 working_directory: None,

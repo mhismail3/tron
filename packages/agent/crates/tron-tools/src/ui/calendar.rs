@@ -99,15 +99,18 @@ impl TronTool for ManageCalendarTool {
         }
 
         let method = format!("calendar.{action}");
-        let result = self.delegate.device_request(&method, params.clone()).await?;
+        let result = self
+            .delegate
+            .device_request(&method, params.clone())
+            .await?;
 
         // Include data in content so the LLM can see it (details is metadata-only)
         let content = serde_json::to_string_pretty(&result).unwrap_or_default();
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(&content),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                &content,
+            )]),
             details: Some(json!({
                 "action": action,
             })),
@@ -156,7 +159,10 @@ mod tests {
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("Meeting"), "should contain event data: {text}");
+        assert!(
+            text.contains("Meeting"),
+            "should contain event data: {text}"
+        );
         assert_eq!(
             *delegate.last_method.lock().unwrap(),
             Some("calendar.list".into())
@@ -176,24 +182,26 @@ mod tests {
 
     #[tokio::test]
     async fn write_allowed_when_enabled() {
-        let delegate = Arc::new(MockDeviceDelegate::with_response(json!({"title": "Test", "id": "1"})));
+        let delegate = Arc::new(MockDeviceDelegate::with_response(
+            json!({"title": "Test", "id": "1"}),
+        ));
         let tool = ManageCalendarTool::new(delegate, true);
         let r = tool
             .execute(json!({"action": "create", "title": "Test"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("Test"), "should contain event title");
+        assert!(
+            extract_text(&r).contains("Test"),
+            "should contain event title"
+        );
     }
 
     #[tokio::test]
     async fn missing_action_error() {
         let delegate = Arc::new(MockDeviceDelegate::with_response(json!(null)));
         let tool = ManageCalendarTool::new(delegate, false);
-        let r = tool
-            .execute(json!({}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -219,6 +227,9 @@ mod tests {
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("12:00:00"), "should contain slot data: {text}");
+        assert!(
+            text.contains("12:00:00"),
+            "should contain slot data: {text}"
+        );
     }
 }

@@ -23,12 +23,13 @@ impl MethodHandler for GetCanvasHandler {
         let canvas_path = format!("{home}/.tron/artifacts/canvases/{canvas_id}.json");
 
         if let Ok(content) = std::fs::read_to_string(&canvas_path)
-            && let Ok(canvas) = serde_json::from_str::<Value>(&content) {
-                return Ok(serde_json::json!({
-                    "found": true,
-                    "canvas": canvas,
-                }));
-            }
+            && let Ok(canvas) = serde_json::from_str::<Value>(&content)
+        {
+            return Ok(serde_json::json!({
+                "found": true,
+                "canvas": canvas,
+            }));
+        }
 
         Ok(serde_json::json!({
             "found": false,

@@ -7,6 +7,7 @@ use std::time::Instant;
 use crate::context::context_manager::ContextManager;
 use crate::guardrails::GuardrailEngine;
 use crate::hooks::engine::HookEngine;
+use crate::types::ReasoningLevel;
 use serde_json::json;
 use tron_core::content::AssistantContent;
 use tron_core::events::{
@@ -14,7 +15,6 @@ use tron_core::events::{
     TurnTokenUsage,
 };
 use tron_core::messages::{Message, ToolResultMessageContent};
-use crate::types::ReasoningLevel;
 use tron_llm::provider::{Provider, ProviderStreamOptions};
 use tron_llm::{ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_provider_retry};
 use tron_tools::registry::ToolRegistry;
@@ -514,13 +514,9 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                         workspace_id,
                     };
                     async move {
-                        let result = tool_executor::execute_tool(
-                            tc,
-                            session_id,
-                            working_dir,
-                            &tool_ctx,
-                        )
-                        .await;
+                        let result =
+                            tool_executor::execute_tool(tc, session_id, working_dir, &tool_ctx)
+                                .await;
                         (idx, result)
                     }
                 })

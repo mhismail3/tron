@@ -72,7 +72,13 @@ pub async fn load_server_auth(
     env_token: Option<&str>,
     env_api_key: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, env_token, env_api_key, super::shared_auth_client()).await
+    load_server_auth_with_client(
+        auth_path,
+        env_token,
+        env_api_key,
+        super::shared_auth_client(),
+    )
+    .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -97,24 +103,25 @@ pub async fn load_server_auth_with_client(
 
     // 2. OAuth tokens
     if let Some(ref pa) = pa
-        && let Some(oauth) = &pa.oauth {
-            match maybe_refresh_tokens(oauth, client).await {
-                Ok((tokens, refreshed)) => {
-                    if refreshed {
-                        tracing::info!("persisting refreshed OpenAI tokens");
-                        let _ = super::storage::save_provider_oauth_tokens(
-                            auth_path,
-                            PROVIDER_KEY,
-                            &tokens,
-                        );
-                    }
-                    return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+        && let Some(oauth) = &pa.oauth
+    {
+        match maybe_refresh_tokens(oauth, client).await {
+            Ok((tokens, refreshed)) => {
+                if refreshed {
+                    tracing::info!("persisting refreshed OpenAI tokens");
+                    let _ = super::storage::save_provider_oauth_tokens(
+                        auth_path,
+                        PROVIDER_KEY,
+                        &tokens,
+                    );
                 }
-                Err(e) => {
-                    tracing::warn!("`OpenAI` OAuth refresh failed: {e}");
-                }
+                return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+            }
+            Err(e) => {
+                tracing::warn!("`OpenAI` OAuth refresh failed: {e}");
             }
         }
+    }
 
     // 3. Env var API key
     if let Some(key) = env_api_key {
@@ -123,9 +130,10 @@ pub async fn load_server_auth_with_client(
 
     // 4. API key from auth.json
     if let Some(pa) = &pa
-        && let Some(key) = &pa.api_key {
-            return Ok(Some(ServerAuth::from_api_key(key)));
-        }
+        && let Some(key) = &pa.api_key
+    {
+        return Ok(Some(ServerAuth::from_api_key(key)));
+    }
 
     Ok(None)
 }

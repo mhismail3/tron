@@ -736,10 +736,7 @@ mod tests {
             .await
             .unwrap();
         let limit = result["contextLimit"].as_u64().unwrap();
-        assert_eq!(
-            limit,
-            tron_llm::model_context_window("claude-opus-4-6")
-        );
+        assert_eq!(limit, tron_llm::model_context_window("claude-opus-4-6"));
     }
 
     #[tokio::test]

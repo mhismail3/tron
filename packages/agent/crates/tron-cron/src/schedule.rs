@@ -76,7 +76,9 @@ impl CronExpression {
 
             // Check day of month and day of week
             if !self.days_of_month.contains(&date.day())
-                || !self.days_of_week.contains(&date.weekday().num_days_from_sunday())
+                || !self
+                    .days_of_week
+                    .contains(&date.weekday().num_days_from_sunday())
             {
                 date = date.succ_opt()?;
                 continue;
@@ -97,8 +99,7 @@ impl CronExpression {
                 };
 
                 for &minute in self.minutes.range(min_minute..) {
-                    let naive =
-                        NaiveDateTime::new(date, NaiveTime::from_hms_opt(hour, minute, 0)?);
+                    let naive = NaiveDateTime::new(date, NaiveTime::from_hms_opt(hour, minute, 0)?);
 
                     // Convert to timezone-aware, handling DST
                     match tz.from_local_datetime(&naive) {
@@ -151,9 +152,9 @@ fn parse_field(field: &str, min: u32, max: u32) -> Result<BTreeSet<u32>, CronErr
                 .split_once('/')
                 .ok_or_else(|| CronError::InvalidExpression(format!("invalid step: {part}")))?;
 
-            let step: u32 = step_part
-                .parse()
-                .map_err(|_| CronError::InvalidExpression(format!("invalid step value: {step_part}")))?;
+            let step: u32 = step_part.parse().map_err(|_| {
+                CronError::InvalidExpression(format!("invalid step value: {step_part}"))
+            })?;
 
             if step == 0 {
                 return Err(CronError::InvalidExpression(

@@ -353,9 +353,10 @@ impl OpenAIProvider {
 
             let account_id = extract_account_id(&tokens.access_token);
             if !account_id.is_empty()
-                && let Ok(val) = HeaderValue::from_str(&account_id) {
-                    let _ = headers.insert("chatgpt-account-id", val);
-                }
+                && let Ok(val) = HeaderValue::from_str(&account_id)
+            {
+                let _ = headers.insert("chatgpt-account-id", val);
+            }
         }
 
         Ok(headers)
@@ -398,23 +399,25 @@ impl OpenAIProvider {
 
         // Prepend tool clarification on first turn (before any assistant messages)
         if let Some(ref ctx_tools) = context.tools
-            && !ctx_tools.is_empty() && Self::is_first_turn(&context.messages) {
-                let clarification = generate_tool_clarification_message(
-                    ctx_tools,
-                    context.working_directory.as_deref(),
-                );
-                input.insert(
-                    0,
-                    ResponsesInputItem::Message {
-                        role: "user".into(),
-                        content: vec![MessageContent::InputText {
-                            text: clarification,
-                        }],
-                        id: None,
-                    },
-                );
-                debug!("Prepended tool clarification message (first turn)");
-            }
+            && !ctx_tools.is_empty()
+            && Self::is_first_turn(&context.messages)
+        {
+            let clarification = generate_tool_clarification_message(
+                ctx_tools,
+                context.working_directory.as_deref(),
+            );
+            input.insert(
+                0,
+                ResponsesInputItem::Message {
+                    role: "user".into(),
+                    content: vec![MessageContent::InputText {
+                        text: clarification,
+                    }],
+                    id: None,
+                },
+            );
+            debug!("Prepended tool clarification message (first turn)");
+        }
 
         // Inject context parts as developer message (rules, memory, skills, tasks)
         let context_parts = compose_context_parts(context);
@@ -533,7 +536,11 @@ impl OpenAIProvider {
             });
         }
 
-        Ok(crate::stream_pipeline::sse_to_event_stream::<ResponsesSseEvent, _, _>(
+        Ok(crate::stream_pipeline::sse_to_event_stream::<
+            ResponsesSseEvent,
+            _,
+            _,
+        >(
             response,
             &SSE_OPTIONS,
             create_stream_state(),
@@ -610,7 +617,10 @@ mod tests {
     #[test]
     fn provider_type_is_openai() {
         let provider = OpenAIProvider::new(test_config());
-        assert_eq!(provider.provider_type(), tron_core::messages::Provider::OpenAi);
+        assert_eq!(
+            provider.provider_type(),
+            tron_core::messages::Provider::OpenAi
+        );
     }
 
     #[test]
@@ -721,7 +731,10 @@ mod tests {
             refresh_token: "r".into(),
             expires_at: crate::auth::now_ms() + 3_600_000,
         };
-        assert!(!crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
+        assert!(!crate::auth::should_refresh(
+            &tokens,
+            TOKEN_EXPIRY_BUFFER_MS
+        ));
     }
 
     #[test]
@@ -894,7 +907,9 @@ mod tests {
     fn url_platform_endpoint() {
         let config = OpenAIConfig {
             model: "gpt-5.4".into(),
-            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            auth: OpenAIAuth::ApiKey {
+                api_key: "sk-test".into(),
+            },
             max_tokens: None,
             temperature: None,
             base_url: None,
@@ -910,7 +925,9 @@ mod tests {
     fn base_url_override_preserves_endpoint_path() {
         let config = OpenAIConfig {
             model: "gpt-5.4".into(),
-            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            auth: OpenAIAuth::ApiKey {
+                api_key: "sk-test".into(),
+            },
             max_tokens: None,
             temperature: None,
             base_url: Some("https://custom.example.com".into()),
@@ -946,7 +963,9 @@ mod tests {
     fn tool_search_enabled_on_platform_for_54() {
         let config = OpenAIConfig {
             model: "gpt-5.4".into(),
-            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            auth: OpenAIAuth::ApiKey {
+                api_key: "sk-test".into(),
+            },
             max_tokens: None,
             temperature: None,
             base_url: None,

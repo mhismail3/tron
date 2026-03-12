@@ -361,10 +361,7 @@ mod integration_tests {
 
         assert!(ids.len() >= 2, "need at least 2 frames, got {}", ids.len());
         for window in ids.windows(2) {
-            assert!(
-                window[1] > window[0],
-                "frame_ids should increment: {ids:?}"
-            );
+            assert!(window[1] > window[0], "frame_ids should increment: {ids:?}");
         }
 
         svc.close_session("s1").await.unwrap();

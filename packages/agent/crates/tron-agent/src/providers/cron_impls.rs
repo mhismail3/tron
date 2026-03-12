@@ -252,9 +252,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // 13. Write memory ledger entry (fail-silent — never blocks the result)
         let _ = write_cron_ledger(
             &session_id,
-            &workspace_path,
             &self.event_store,
-            &self.session_manager,
             &self.subagent_manager,
             &self.embedding_controller,
         )
@@ -288,26 +286,18 @@ impl Drop for SessionGuard {
 #[allow(clippy::ref_option)]
 async fn write_cron_ledger(
     session_id: &str,
-    workspace_path: &str,
     event_store: &Arc<tron_events::EventStore>,
-    session_manager: &Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
     subagent_manager: &Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
     embedding_controller: &Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 ) -> bool {
-    let deps = tron_server::rpc::handlers::memory::LedgerWriteDeps {
+    let deps = tron_server::rpc::memory_ledger::LedgerWriteDeps {
         event_store: event_store.clone(),
-        session_manager: session_manager.clone(),
         subagent_manager: subagent_manager.clone(),
         embedding_controller: embedding_controller.clone(),
         shutdown_coordinator: None,
     };
-    let result = tron_server::rpc::handlers::memory::execute_ledger_write(
-        session_id,
-        workspace_path,
-        &deps,
-        "cron",
-    )
-    .await;
+    let result =
+        tron_server::rpc::memory_ledger::execute_ledger_write(session_id, &deps, "cron").await;
     if result.written {
         tracing::debug!(
             session_id,
@@ -505,7 +495,7 @@ mod tests {
         });
         mgr.invalidate_session(&sid);
 
-        let result = write_cron_ledger(&sid, "/tmp", &store, &mgr, &None, &None).await;
+        let result = write_cron_ledger(&sid, &store, &None, &None).await;
         assert!(!result, "should skip when subagent_manager is None");
     }
 
@@ -515,18 +505,16 @@ mod tests {
         let sid = mgr.create_session("mock", "/tmp", Some("empty")).unwrap();
         mgr.invalidate_session(&sid);
 
-        let result = write_cron_ledger(&sid, "/tmp", &store, &mgr, &None, &None).await;
+        let result = write_cron_ledger(&sid, &store, &None, &None).await;
         assert!(!result, "should skip for session with no messages");
     }
 
     #[tokio::test]
     async fn write_cron_ledger_no_embedding_controller() {
-        let (store, mgr) = make_test_store_and_manager();
+        let (store, _mgr) = make_test_store_and_manager();
         let result = write_cron_ledger(
             "nonexistent",
-            "/tmp",
             &store,
-            &mgr,
             &None,
             &None::<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
         )
@@ -649,16 +637,13 @@ mod tests {
         let sid = seed_session_with_messages(&store, &mgr);
         let subagent = make_subagent_manager_with_mock_llm(&store, &mgr);
 
-        let deps = tron_server::rpc::handlers::memory::LedgerWriteDeps {
+        let deps = tron_server::rpc::memory_ledger::LedgerWriteDeps {
             event_store: store.clone(),
-            session_manager: mgr.clone(),
             subagent_manager: Some(subagent),
             embedding_controller: None,
             shutdown_coordinator: None,
         };
-        let lw =
-            tron_server::rpc::handlers::memory::execute_ledger_write(&sid, "/tmp", &deps, "cron")
-                .await;
+        let lw = tron_server::rpc::memory_ledger::execute_ledger_write(&sid, &deps, "cron").await;
         assert!(
             lw.written,
             "ledger write should succeed: reason={:?}",

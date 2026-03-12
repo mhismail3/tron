@@ -330,7 +330,8 @@ pub fn get_runs(
 ) -> Result<(Vec<CronRun>, u32), CronError> {
     let conn = pool.get()?;
 
-    let (where_clause, count_params, query_params) = build_run_filters(job_id, status, limit, offset);
+    let (where_clause, count_params, query_params) =
+        build_run_filters(job_id, status, limit, offset);
 
     let total: u32 = conn.query_row(
         &format!("SELECT COUNT(*) FROM cron_runs{where_clause}"),
@@ -383,7 +384,9 @@ pub fn update_delivery_status(
 }
 
 /// Get all jobs with a `running_since` value (for stuck detection).
-pub fn get_stuck_candidates(pool: &ConnectionPool) -> Result<Vec<(String, DateTime<Utc>, u64)>, CronError> {
+pub fn get_stuck_candidates(
+    pool: &ConnectionPool,
+) -> Result<Vec<(String, DateTime<Utc>, u64)>, CronError> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, running_since, stuck_timeout_secs FROM cron_jobs WHERE running_since IS NOT NULL",
@@ -586,7 +589,8 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
             },
             |t| t.to_utc(),
         ),
-        completed_at: completed_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc())),
+        completed_at: completed_str
+            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc())),
         duration_ms: row.get(6)?,
         output: row.get(7)?,
         output_truncated: row.get(8)?,
@@ -594,7 +598,9 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
         exit_code: row.get(10)?,
         attempt: row.get(11)?,
         session_id: row.get(12)?,
-        delivery_status: row.get::<_, Option<String>>(13)?.map(|s| DeliveryOutcome::from_sql(&s)),
+        delivery_status: row
+            .get::<_, Option<String>>(13)?
+            .map(|s| DeliveryOutcome::from_sql(&s)),
         id,
     })
 }
@@ -862,10 +868,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO cron_runs (id, job_id, job_name, status, started_at, created_at)
                  VALUES (?1, 'cron_1', 'Test', 'completed', ?2, ?2)",
-                params![
-                    format!("old_{i}"),
-                    "2025-01-01T00:00:00+00:00",
-                ],
+                params![format!("old_{i}"), "2025-01-01T00:00:00+00:00",],
             )
             .unwrap();
         }
@@ -1078,7 +1081,10 @@ mod tests {
         let loaded = get_job(&pool, "cron_tr").unwrap().unwrap();
         assert!(loaded.tool_restrictions.is_some());
         let tr = loaded.tool_restrictions.unwrap();
-        assert_eq!(tr.denied_tools, Some(vec!["Bash".to_string(), "Write".to_string()]));
+        assert_eq!(
+            tr.denied_tools,
+            Some(vec!["Bash".to_string(), "Write".to_string()])
+        );
         assert!(tr.allowed_tools.is_none());
     }
 

@@ -23,9 +23,7 @@ fn run_v2_migrations(conn: &Connection) -> Result<(), CronError> {
         .prepare("SELECT COUNT(*) FROM pragma_table_info('cron_jobs') WHERE name = 'tool_restrictions_json'")?
         .query_row([], |row| row.get(0))?;
     if !has_column {
-        conn.execute_batch(
-            "ALTER TABLE cron_jobs ADD COLUMN tool_restrictions_json TEXT;"
-        )?;
+        conn.execute_batch("ALTER TABLE cron_jobs ADD COLUMN tool_restrictions_json TEXT;")?;
     }
     Ok(())
 }

@@ -33,8 +33,8 @@ use super::types::{
     ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION, CLOUD_CODE_ASSIST_ENDPOINT,
     CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS,
     GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth, GoogleConfig,
-    GoogleOAuthEndpoint, SystemInstruction, SystemPart, ThinkingConfig,
-    default_safety_settings, get_gemini_model, is_gemini_3_model, map_to_antigravity_model,
+    GoogleOAuthEndpoint, SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings,
+    get_gemini_model, is_gemini_3_model, map_to_antigravity_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -279,9 +279,10 @@ impl GoogleProvider {
                     _ => {
                         // Cloud Code Assist requires project ID header
                         if let Some(ref pid) = self.project_id
-                            && let Ok(val) = HeaderValue::from_str(pid) {
-                                let _ = headers.insert("x-goog-user-project", val);
-                            }
+                            && let Ok(val) = HeaderValue::from_str(pid)
+                        {
+                            let _ = headers.insert("x-goog-user-project", val);
+                        }
                     }
                 }
 
@@ -318,12 +319,13 @@ impl GoogleProvider {
         let temperature = if is_gemini3 {
             let temp = options.temperature.or(self.config.temperature);
             if let Some(t) = temp
-                && (t - 1.0).abs() > f64::EPSILON {
-                    warn!(
-                        requested = t,
-                        "Gemini 3 requires temperature=1.0, overriding"
-                    );
-                }
+                && (t - 1.0).abs() > f64::EPSILON
+            {
+                warn!(
+                    requested = t,
+                    "Gemini 3 requires temperature=1.0, overriding"
+                );
+            }
             Some(1.0)
         } else {
             options.temperature.or(self.config.temperature)
@@ -572,7 +574,11 @@ impl GoogleProvider {
             });
         }
 
-        Ok(crate::stream_pipeline::sse_to_event_stream::<GeminiStreamChunk, _, _>(
+        Ok(crate::stream_pipeline::sse_to_event_stream::<
+            GeminiStreamChunk,
+            _,
+            _,
+        >(
             response,
             &SSE_OPTIONS,
             create_stream_state(),
@@ -661,7 +667,10 @@ mod tests {
     #[test]
     fn provider_type_is_google() {
         let provider = GoogleProvider::new(oauth_config());
-        assert_eq!(provider.provider_type(), tron_core::messages::Provider::Google);
+        assert_eq!(
+            provider.provider_type(),
+            tron_core::messages::Provider::Google
+        );
     }
 
     #[test]

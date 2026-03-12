@@ -11,10 +11,10 @@ use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::diff::generate_unified_diff;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 
 const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
@@ -52,10 +52,22 @@ impl TronTool for EditTool {
             "Edit",
             "Edit a file by replacing old_string with new_string. Requires exact match.",
         )
-        .required_property("file_path", json!({"type": "string", "description": "The path to the file to edit"}))
-        .required_property("old_string", json!({"type": "string", "description": "The exact string to find and replace"}))
-        .required_property("new_string", json!({"type": "string", "description": "The replacement string"}))
-        .property("replace_all", json!({"type": "boolean", "description": "Replace all occurrences (default: false)"}))
+        .required_property(
+            "file_path",
+            json!({"type": "string", "description": "The path to the file to edit"}),
+        )
+        .required_property(
+            "old_string",
+            json!({"type": "string", "description": "The exact string to find and replace"}),
+        )
+        .required_property(
+            "new_string",
+            json!({"type": "string", "description": "The replacement string"}),
+        )
+        .property(
+            "replace_all",
+            json!({"type": "boolean", "description": "Replace all occurrences (default: false)"}),
+        )
         .build()
     }
 
@@ -186,7 +198,7 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crate::testutil::{extract_text, make_ctx, MockFs};
+    use crate::testutil::{MockFs, extract_text, make_ctx};
 
     #[tokio::test]
     async fn exact_match_replace() {

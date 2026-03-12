@@ -172,7 +172,10 @@ impl Orchestrator {
 
     /// Check if a session has an active run.
     pub fn has_active_run(&self, session_id: &str) -> bool {
-        self.run_registry.active_runs.lock().contains_key(session_id)
+        self.run_registry
+            .active_runs
+            .lock()
+            .contains_key(session_id)
     }
 
     /// Number of active runs.
@@ -245,7 +248,10 @@ impl Orchestrator {
         {
             let mut runs = self.run_registry.active_runs.lock();
             if !runs.is_empty() {
-                warn!(count = runs.len(), "clearing orphaned active runs during shutdown");
+                warn!(
+                    count = runs.len(),
+                    "clearing orphaned active runs during shutdown"
+                );
                 for run in runs.values() {
                     run.cancel.cancel();
                 }
@@ -472,7 +478,10 @@ mod tests {
         // Fill to capacity
         let mut runs = Vec::new();
         for i in 0..10 {
-            runs.push(orch.begin_run(&format!("s{i}"), &format!("run_{i}")).unwrap());
+            runs.push(
+                orch.begin_run(&format!("s{i}"), &format!("run_{i}"))
+                    .unwrap(),
+            );
         }
         assert_eq!(orch.active_run_count(), 10);
 
@@ -488,7 +497,10 @@ mod tests {
         // Fill to capacity
         let mut runs = Vec::new();
         for i in 0..10 {
-            runs.push(orch.begin_run(&format!("s{i}"), &format!("run_{i}")).unwrap());
+            runs.push(
+                orch.begin_run(&format!("s{i}"), &format!("run_{i}"))
+                    .unwrap(),
+            );
         }
 
         // At capacity — can't start another
@@ -563,6 +575,10 @@ mod tests {
         orch.shutdown().await.unwrap();
         assert!(t1_token.is_cancelled());
         assert!(t2_token.is_cancelled());
-        assert_eq!(orch.active_run_count(), 0, "active_runs must be cleared after shutdown");
+        assert_eq!(
+            orch.active_run_count(),
+            0,
+            "active_runs must be cleared after shutdown"
+        );
     }
 }

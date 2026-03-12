@@ -11,8 +11,8 @@ use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error
 
 use crate::errors::ToolError;
 use crate::traits::{ToolContext, TronTool};
-use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::path::resolve_path;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{
     get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
 };

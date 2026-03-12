@@ -26,55 +26,65 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
 
     if let Some(ref sp) = context.system_prompt
-        && !sp.is_empty() {
-            parts.push(sp.clone());
-        }
+        && !sp.is_empty()
+    {
+        parts.push(sp.clone());
+    }
 
     if let Some(ref rules) = context.rules_content
-        && !rules.is_empty() {
-            parts.push(format!("# Project Rules\n\n{rules}"));
-        }
+        && !rules.is_empty()
+    {
+        parts.push(format!("# Project Rules\n\n{rules}"));
+    }
 
     if let Some(ref memory) = context.memory_content
-        && !memory.is_empty() {
-            parts.push(memory.clone());
-        }
+        && !memory.is_empty()
+    {
+        parts.push(memory.clone());
+    }
 
     if let Some(ref dynamic) = context.dynamic_rules_context
-        && !dynamic.is_empty() {
-            parts.push(format!("# Active Rules\n\n{dynamic}"));
-        }
+        && !dynamic.is_empty()
+    {
+        parts.push(format!("# Active Rules\n\n{dynamic}"));
+    }
 
     if let Some(ref skills) = context.skill_context
-        && !skills.is_empty() {
-            parts.push(skills.clone());
-        }
+        && !skills.is_empty()
+    {
+        parts.push(skills.clone());
+    }
 
     if let Some(ref subagent) = context.subagent_results_context
-        && !subagent.is_empty() {
-            parts.push(subagent.clone());
-        }
+        && !subagent.is_empty()
+    {
+        parts.push(subagent.clone());
+    }
 
     if let Some(ref tasks) = context.task_context
-        && !tasks.is_empty() {
-            parts.push(format!("<task-context>\n{tasks}\n</task-context>"));
-        }
+        && !tasks.is_empty()
+    {
+        parts.push(format!("<task-context>\n{tasks}\n</task-context>"));
+    }
 
     // Environment details: server origin + working directory + device context
     if let Some(ref origin) = context.server_origin
-        && !origin.is_empty() {
-            parts.push(format!("Server: {origin}"));
-        }
+        && !origin.is_empty()
+    {
+        parts.push(format!("Server: {origin}"));
+    }
 
     if let Some(ref wd) = context.working_directory
-        && !wd.is_empty() {
-            parts.push(format!("Current working directory: {wd}"));
-        }
+        && !wd.is_empty()
+    {
+        parts.push(format!("Current working directory: {wd}"));
+    }
 
     if let Some(ref dc) = context.device_context
-        && !dc.is_empty() {
-            parts.push(dc.clone());
-        }
+        && !dc.is_empty()
+    {
+        parts.push(dc.clone());
+    }
 
     parts
 }
@@ -103,56 +113,66 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
 
     // Stable parts
     if let Some(ref sp) = context.system_prompt
-        && !sp.is_empty() {
-            stable.push(sp.clone());
-        }
+        && !sp.is_empty()
+    {
+        stable.push(sp.clone());
+    }
 
     if let Some(ref rules) = context.rules_content
-        && !rules.is_empty() {
-            stable.push(format!("# Project Rules\n\n{rules}"));
-        }
+        && !rules.is_empty()
+    {
+        stable.push(format!("# Project Rules\n\n{rules}"));
+    }
 
     if let Some(ref memory) = context.memory_content
-        && !memory.is_empty() {
-            stable.push(memory.clone());
-        }
+        && !memory.is_empty()
+    {
+        stable.push(memory.clone());
+    }
 
     // Environment details: server origin + working directory
     if let Some(ref origin) = context.server_origin
-        && !origin.is_empty() {
-            stable.push(format!("Server: {origin}"));
-        }
+        && !origin.is_empty()
+    {
+        stable.push(format!("Server: {origin}"));
+    }
 
     if let Some(ref wd) = context.working_directory
-        && !wd.is_empty() {
-            stable.push(format!("Current working directory: {wd}"));
-        }
+        && !wd.is_empty()
+    {
+        stable.push(format!("Current working directory: {wd}"));
+    }
 
     // Volatile parts
     if let Some(ref dynamic) = context.dynamic_rules_context
-        && !dynamic.is_empty() {
-            volatile.push(format!("# Active Rules\n\n{dynamic}"));
-        }
+        && !dynamic.is_empty()
+    {
+        volatile.push(format!("# Active Rules\n\n{dynamic}"));
+    }
 
     if let Some(ref skills) = context.skill_context
-        && !skills.is_empty() {
-            volatile.push(skills.clone());
-        }
+        && !skills.is_empty()
+    {
+        volatile.push(skills.clone());
+    }
 
     if let Some(ref subagent) = context.subagent_results_context
-        && !subagent.is_empty() {
-            volatile.push(subagent.clone());
-        }
+        && !subagent.is_empty()
+    {
+        volatile.push(subagent.clone());
+    }
 
     if let Some(ref tasks) = context.task_context
-        && !tasks.is_empty() {
-            volatile.push(format!("<task-context>\n{tasks}\n</task-context>"));
-        }
+        && !tasks.is_empty()
+    {
+        volatile.push(format!("<task-context>\n{tasks}\n</task-context>"));
+    }
 
     if let Some(ref dc) = context.device_context
-        && !dc.is_empty() {
-            volatile.push(dc.clone());
-        }
+        && !dc.is_empty()
+    {
+        volatile.push(dc.clone());
+    }
 
     GroupedContextParts { stable, volatile }
 }

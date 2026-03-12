@@ -15,7 +15,10 @@ use tracing::info;
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "tron-backfill", about = "Import LEDGER.jsonl and embed memory entries")]
+#[command(
+    name = "tron-backfill",
+    about = "Import LEDGER.jsonl and embed memory entries"
+)]
 struct Cli {
     /// Path to the `SQLite` database file.
     #[arg(long, global = true)]
@@ -296,8 +299,7 @@ async fn run_embed(
         tron_embeddings::EmbeddingConfig::from_settings(&settings.context.memory.embedding);
 
     // Set up vector repository (dedicated connection, same DB)
-    let conn = rusqlite::Connection::open(db_path)
-        .context("Failed to open DB for vector repo")?;
+    let conn = rusqlite::Connection::open(db_path).context("Failed to open DB for vector repo")?;
     conn.execute_batch("PRAGMA busy_timeout = 5000;")
         .context("Failed to set busy timeout")?;
     let repo = tron_embeddings::VectorRepository::new(conn, config.dimensions);
@@ -337,7 +339,10 @@ async fn run_embed(
         return Ok(());
     }
 
-    println!("Found {} unembedded events. Initializing ONNX model...", unembedded.len());
+    println!(
+        "Found {} unembedded events. Initializing ONNX model...",
+        unembedded.len()
+    );
 
     // Initialize ONNX embedding service
     let ort_service = Arc::new(tron_embeddings::OnnxEmbeddingService::new(config.clone()));
@@ -519,13 +524,7 @@ mod tests {
         .unwrap();
 
         let (store, _) = open_store(Some(db_path.clone())).unwrap();
-        run_import(
-            &store,
-            &ledger_path,
-            Some("/Users/moose/tron"),
-            false,
-        )
-        .unwrap();
+        run_import(&store, &ledger_path, Some("/Users/moose/tron"), false).unwrap();
 
         let conn = store.pool().get().unwrap();
         let count: i64 = conn

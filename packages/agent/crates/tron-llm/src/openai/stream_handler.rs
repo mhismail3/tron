@@ -82,7 +82,9 @@ pub fn process_stream_event(
         SseEventType::OutputItemDone => handle_output_item_done(event, state),
         SseEventType::ReasoningSummaryPartAdded => handle_reasoning_summary_part_added(state),
         SseEventType::ReasoningTextDelta => handle_reasoning_text_delta(event, state),
-        SseEventType::ReasoningSummaryTextDelta => handle_reasoning_summary_text_delta(event, state),
+        SseEventType::ReasoningSummaryTextDelta => {
+            handle_reasoning_summary_text_delta(event, state)
+        }
         SseEventType::FunctionCallArgsDelta => handle_function_call_args_delta(event, state),
         SseEventType::ToolSearchCallSearching => {
             debug!("Tool search: model is searching for relevant tools");
@@ -200,17 +202,18 @@ fn handle_reasoning_summary_text_delta(
         return events;
     }
     if let Some(delta) = &event.delta
-        && !state.seen_thinking_texts.contains(delta.as_str()) {
-            let _ = state.seen_thinking_texts.insert(delta.clone());
-            if !state.thinking_started {
-                state.thinking_started = true;
-                events.push(StreamEvent::ThinkingStart);
-            }
-            state.accumulated_thinking.push_str(delta);
-            events.push(StreamEvent::ThinkingDelta {
-                delta: delta.clone(),
-            });
+        && !state.seen_thinking_texts.contains(delta.as_str())
+    {
+        let _ = state.seen_thinking_texts.insert(delta.clone());
+        if !state.thinking_started {
+            state.thinking_started = true;
+            events.push(StreamEvent::ThinkingStart);
         }
+        state.accumulated_thinking.push_str(delta);
+        events.push(StreamEvent::ThinkingDelta {
+            delta: delta.clone(),
+        });
+    }
     events
 }
 
@@ -221,13 +224,14 @@ fn handle_function_call_args_delta(
 ) -> Vec<StreamEvent> {
     let mut events = Vec::new();
     if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta)
-        && let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
-            tc.args.push_str(delta);
-            events.push(StreamEvent::ToolCallDelta {
-                tool_call_id: call_id.clone(),
-                arguments_delta: delta.clone(),
-            });
-        }
+        && let Some(tc) = state.tool_calls.get_mut(call_id.as_str())
+    {
+        tc.args.push_str(delta);
+        events.push(StreamEvent::ToolCallDelta {
+            tool_call_id: call_id.clone(),
+            arguments_delta: delta.clone(),
+        });
+    }
     events
 }
 
@@ -260,13 +264,14 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     if let Some(summary) = &item.summary {
         for part in summary {
             if part.content_type == "summary_text"
-                && let Some(text) = &part.text {
-                    let _ = state.seen_thinking_texts.insert(text.clone());
-                    state.accumulated_thinking.push_str(text);
-                    events.push(StreamEvent::ThinkingDelta {
-                        delta: text.clone(),
-                    });
-                }
+                && let Some(text) = &part.text
+            {
+                let _ = state.seen_thinking_texts.insert(text.clone());
+                state.accumulated_thinking.push_str(text);
+                events.push(StreamEvent::ThinkingDelta {
+                    delta: text.clone(),
+                });
+            }
         }
     }
     events
@@ -360,10 +365,11 @@ fn merge_message_item(item: &super::types::ResponsesOutputItem, state: &mut Stre
         for c in content {
             if c.content_type == "output_text"
                 && let Some(text) = &c.text
-                    && !state.text_started {
-                        state.text_started = true;
-                        state.accumulated_text.clone_from(text);
-                    }
+                && !state.text_started
+            {
+                state.text_started = true;
+                state.accumulated_text.clone_from(text);
+            }
         }
     }
 }
@@ -380,13 +386,14 @@ fn merge_reasoning_item(
     if let Some(summary) = &item.summary {
         for s in summary {
             if s.content_type == "summary_text"
-                && let Some(text) = &s.text {
-                    if !state.thinking_started {
-                        state.thinking_started = true;
-                        events.push(StreamEvent::ThinkingStart);
-                    }
-                    state.accumulated_thinking.clone_from(text);
+                && let Some(text) = &s.text
+            {
+                if !state.thinking_started {
+                    state.thinking_started = true;
+                    events.push(StreamEvent::ThinkingStart);
                 }
+                state.accumulated_thinking.clone_from(text);
+            }
         }
     }
 }
@@ -398,13 +405,15 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
     };
     if let Some(existing) = state.tool_calls.get_mut(call_id.as_str()) {
         if let Some(arguments) = &item.arguments
-            && existing.args.is_empty() {
-                existing.args.clone_from(arguments);
-            }
+            && existing.args.is_empty()
+        {
+            existing.args.clone_from(arguments);
+        }
         if let Some(name) = &item.name
-            && existing.name.is_empty() {
-                existing.name.clone_from(name);
-            }
+            && existing.name.is_empty()
+        {
+            existing.name.clone_from(name);
+        }
     } else {
         let _ = state.tool_calls.insert(
             call_id.clone(),
@@ -956,7 +965,10 @@ mod tests {
             &function_call_added_event("call_dup", "read_file"),
             &mut state,
         );
-        assert!(events2.is_empty(), "duplicate OutputItemAdded should not emit ToolCallStart");
+        assert!(
+            events2.is_empty(),
+            "duplicate OutputItemAdded should not emit ToolCallStart"
+        );
         // State should still have exactly one entry
         assert_eq!(state.tool_calls.len(), 1);
     }

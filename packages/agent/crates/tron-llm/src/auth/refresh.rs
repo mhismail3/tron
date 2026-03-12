@@ -24,7 +24,10 @@ where
         return Ok((tokens.clone(), false));
     }
 
-    tracing::info!(provider = provider_name, "OAuth token expired, refreshing...");
+    tracing::info!(
+        provider = provider_name,
+        "OAuth token expired, refreshing..."
+    );
     match refresh_fn(&tokens.refresh_token).await {
         Ok(new_tokens) => {
             metrics::counter!("auth_refresh_total", "provider" => provider_name.to_owned(), "status" => "success").increment(1);
@@ -52,8 +55,8 @@ mod tests {
     #[tokio::test]
     async fn fresh_token_no_refresh() {
         let tokens = make_tokens(now_ms() + 3_600_000); // 1 hour from now
-        let (result, refreshed) = maybe_refresh(&tokens, 300, "test", |_| {
-            async { panic!("refresh_fn should not be called for fresh tokens") }
+        let (result, refreshed) = maybe_refresh(&tokens, 300, "test", |_| async {
+            panic!("refresh_fn should not be called for fresh tokens")
         })
         .await
         .unwrap();
@@ -86,13 +89,11 @@ mod tests {
     #[tokio::test]
     async fn refresh_failure_propagates_error() {
         let tokens = make_tokens(now_ms() - 1000);
-        let result = maybe_refresh(&tokens, 300, "test", |_| {
-            async {
-                Err(AuthError::OAuth {
-                    status: 401,
-                    message: "invalid refresh token".to_string(),
-                })
-            }
+        let result = maybe_refresh(&tokens, 300, "test", |_| async {
+            Err(AuthError::OAuth {
+                status: 401,
+                message: "invalid refresh token".to_string(),
+            })
         })
         .await;
 
@@ -103,14 +104,12 @@ mod tests {
     async fn buffer_seconds_applied() {
         // Token expires in 30s, but buffer is 60s → should trigger refresh
         let tokens = make_tokens(now_ms() + 30_000);
-        let (_, refreshed) = maybe_refresh(&tokens, 60, "test", |_| {
-            async {
-                Ok(OAuthTokens {
-                    access_token: "new".to_string(),
-                    refresh_token: "ref".to_string(),
-                    expires_at: now_ms() + 3_600_000,
-                })
-            }
+        let (_, refreshed) = maybe_refresh(&tokens, 60, "test", |_| async {
+            Ok(OAuthTokens {
+                access_token: "new".to_string(),
+                refresh_token: "ref".to_string(),
+                expires_at: now_ms() + 3_600_000,
+            })
         })
         .await
         .unwrap();

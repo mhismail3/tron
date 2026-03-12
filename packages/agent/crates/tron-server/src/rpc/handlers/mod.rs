@@ -88,10 +88,7 @@ fn register_core(registry: &mut MethodRegistry) {
     // Model
     registry.register("model.list", model::ListModelsHandler);
     registry.register("model.switch", model::SwitchModelHandler);
-    registry.register(
-        "config.setReasoningLevel",
-        model::SetReasoningLevelHandler,
-    );
+    registry.register("config.setReasoningLevel", model::SetReasoningLevelHandler);
 
     // Context
     registry.register("context.getSnapshot", context::GetSnapshotHandler);

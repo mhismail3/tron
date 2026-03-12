@@ -35,7 +35,9 @@ pub mod loader;
 pub mod types;
 
 pub use errors::{Result, SettingsError};
-pub use loader::{deep_merge, deploy_dir, load_settings, load_settings_from_path, settings_path, tron_home_dir};
+pub use loader::{
+    deep_merge, deploy_dir, load_settings, load_settings_from_path, settings_path, tron_home_dir,
+};
 pub use types::*;
 
 use std::path::Path;

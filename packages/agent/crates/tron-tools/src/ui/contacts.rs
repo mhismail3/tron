@@ -73,19 +73,16 @@ impl TronTool for SearchContactsTool {
 
         let result = self
             .delegate
-            .device_request(
-                "contacts.search",
-                json!({"query": query, "limit": limit}),
-            )
+            .device_request("contacts.search", json!({"query": query, "limit": limit}))
             .await?;
 
         // Include data in content so the LLM can see it (details is metadata-only)
         let content = serde_json::to_string_pretty(&result).unwrap_or_default();
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(&content),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                &content,
+            )]),
             details: Some(json!({
                 "query": query,
             })),
@@ -145,7 +142,10 @@ mod tests {
             .execute(json!({"query": "Nobody"}), &make_ctx())
             .await
             .unwrap();
-        assert!(extract_text(&r).contains("[]"), "empty array for no results");
+        assert!(
+            extract_text(&r).contains("[]"),
+            "empty array for no results"
+        );
     }
 
     #[tokio::test]

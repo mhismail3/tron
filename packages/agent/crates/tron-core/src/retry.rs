@@ -340,5 +340,4 @@ mod tests {
         let result = parse_retry_after_header(&past);
         assert_eq!(result, Some(0));
     }
-
 }

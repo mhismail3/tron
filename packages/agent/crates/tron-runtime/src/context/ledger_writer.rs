@@ -552,8 +552,7 @@ mod tests {
 
     #[test]
     fn parse_preference_entry_type() {
-        let response =
-            r#"{"title": "Prefers bun over npm for package management", "entryType": "preference"}"#;
+        let response = r#"{"title": "Prefers bun over npm for package management", "entryType": "preference"}"#;
         match parse_ledger_response(response).unwrap() {
             LedgerParseResult::Entry(entry) => assert_eq!(entry.entry_type, "preference"),
             LedgerParseResult::Skip => panic!("expected entry"),

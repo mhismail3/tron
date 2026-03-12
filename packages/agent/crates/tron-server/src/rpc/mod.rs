@@ -15,6 +15,7 @@
 pub mod context;
 pub mod errors;
 pub mod handlers;
+pub mod memory_ledger;
 pub mod registry;
 pub mod session_context;
 pub mod types;

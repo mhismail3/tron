@@ -243,9 +243,7 @@ fn check_deploy(deploy_dir: &Path) -> DeepHealthCheck {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
 
-    let status = sentinel
-        .as_ref()
-        .map_or("none", |s| s.status.as_str());
+    let status = sentinel.as_ref().map_or("none", |s| s.status.as_str());
 
     let check_status = if status == "restarting" { "warn" } else { "ok" };
 
@@ -261,10 +259,7 @@ fn check_deploy(deploy_dir: &Path) -> DeepHealthCheck {
 
 fn check_disk(tron_home: &Path) -> DeepHealthCheck {
     let dir = tron_home.to_string_lossy();
-    match std::process::Command::new("df")
-        .args(["-m", &dir])
-        .output()
-    {
+    match std::process::Command::new("df").args(["-m", &dir]).output() {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout);
             let free_mb: Option<u64> = text
@@ -389,12 +384,24 @@ mod tests {
             status: "ok".into(),
             detail: None,
         }];
-        assert!(checks.iter().all(|c| c.status != "fail" && c.status != "warn"));
+        assert!(
+            checks
+                .iter()
+                .all(|c| c.status != "fail" && c.status != "warn")
+        );
 
         // Any warn = degraded
         let checks = vec![
-            DeepHealthCheck { name: "a".into(), status: "ok".into(), detail: None },
-            DeepHealthCheck { name: "b".into(), status: "warn".into(), detail: None },
+            DeepHealthCheck {
+                name: "a".into(),
+                status: "ok".into(),
+                detail: None,
+            },
+            DeepHealthCheck {
+                name: "b".into(),
+                status: "warn".into(),
+                detail: None,
+            },
         ];
         let has_fail = checks.iter().any(|c| c.status == "fail");
         let has_warn = checks.iter().any(|c| c.status == "warn");
@@ -403,8 +410,16 @@ mod tests {
 
         // Any fail = unhealthy
         let checks = vec![
-            DeepHealthCheck { name: "a".into(), status: "ok".into(), detail: None },
-            DeepHealthCheck { name: "b".into(), status: "fail".into(), detail: None },
+            DeepHealthCheck {
+                name: "a".into(),
+                status: "ok".into(),
+                detail: None,
+            },
+            DeepHealthCheck {
+                name: "b".into(),
+                status: "fail".into(),
+                detail: None,
+            },
         ];
         let has_fail = checks.iter().any(|c| c.status == "fail");
         assert!(has_fail);

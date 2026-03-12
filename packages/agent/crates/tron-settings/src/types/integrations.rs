@@ -27,7 +27,6 @@ pub struct IntegrationSettings {
     pub location: LocationSettings,
 }
 
-
 /// Device context signals piggybacked on agent prompts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -71,7 +70,6 @@ pub struct ClipboardSettings {
     pub enabled: bool,
 }
 
-
 /// Haptic feedback on agent events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -108,7 +106,6 @@ pub struct CalendarSettings {
     pub allow_write: bool,
 }
 
-
 /// Contact search access via Contacts framework.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -117,7 +114,6 @@ pub struct ContactsSettings {
     /// Master toggle for contact search access.
     pub enabled: bool,
 }
-
 
 /// `HealthKit` read access.
 #[derive(Clone, Debug, Serialize, Deserialize)]

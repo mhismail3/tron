@@ -10,12 +10,11 @@
 //! - **Status reopening**: Moving from terminal → non-terminal clears `completed_at`.
 //! - **Circular dependency detection**: Only for `Blocks` relationships (BFS).
 
-use std::time::Duration;
-
 use rusqlite::Connection;
 use tracing::warn;
 
 use serde_json::{Value, json};
+use tron_events::sqlite::contention::{self, RetryError};
 
 use super::errors::TaskError;
 use super::repository::TaskRepository;
@@ -27,13 +26,53 @@ use super::types::{
     TaskWithDetails,
 };
 
-/// Maximum retries for `SQLITE_BUSY` in batch operations.
-const BATCH_BUSY_MAX_RETRIES: u32 = 16;
-
 /// Resolved batch operation target — eliminates unwraps via type-safe branching.
 enum ResolvedTarget<'a> {
     Ids(&'a [String]),
     Filter(TaskFilter),
+}
+
+enum ImmediateTxnError {
+    Begin(rusqlite::Error),
+    Task(TaskError),
+}
+
+impl ImmediateTxnError {
+    fn into_task_error(self, operation: &'static str, attempts: u32) -> TaskError {
+        match self {
+            Self::Begin(error) => {
+                if contention::is_rusqlite_busy(&error) {
+                    TaskError::Busy {
+                        operation,
+                        attempts,
+                    }
+                } else {
+                    TaskError::Database(error)
+                }
+            }
+            Self::Task(error) => match error {
+                TaskError::Database(database_error)
+                    if contention::is_rusqlite_busy(&database_error) =>
+                {
+                    TaskError::Busy {
+                        operation,
+                        attempts,
+                    }
+                }
+                other => other,
+            },
+        }
+    }
+
+    fn is_busy(&self) -> bool {
+        match self {
+            Self::Begin(error) | Self::Task(TaskError::Database(error)) => {
+                contention::is_rusqlite_busy(error)
+            }
+            Self::Task(TaskError::Busy { .. }) => true,
+            Self::Task(_) => false,
+        }
+    }
 }
 
 /// Task service with business logic and validation.
@@ -43,74 +82,40 @@ impl TaskService {
     /// Run a closure inside a `BEGIN IMMEDIATE` transaction with retry on
     /// `SQLITE_BUSY`. Unlike `BEGIN DEFERRED`, `IMMEDIATE` acquires the write
     /// lock upfront so contention is detected at `BEGIN` rather than mid-txn.
-    /// Retries with linear backoff (matches `EventStore` pattern).
     fn with_immediate_txn<T>(
         conn: &Connection,
         mut f: impl FnMut(&Connection) -> Result<T, TaskError>,
     ) -> Result<T, TaskError> {
-        let mut attempts = 0u32;
-        loop {
-            // Acquire write lock upfront via BEGIN IMMEDIATE
-            match conn.execute_batch("BEGIN IMMEDIATE") {
-                Ok(()) => {
-                    match f(conn) {
-                        Ok(val) => {
-                            conn.execute_batch("COMMIT")?;
-                            return Ok(val);
-                        }
-                        Err(e) => {
-                            // Always rollback on error
+        const OPERATION: &str = "task batch transaction";
+
+        match contention::retry_on_busy(
+            contention::BusyRetryPolicy::sqlite_write(),
+            || {
+                conn.execute_batch("BEGIN IMMEDIATE")
+                    .map_err(ImmediateTxnError::Begin)?;
+
+                match f(conn) {
+                    Ok(value) => {
+                        if let Err(error) = conn.execute_batch("COMMIT") {
                             let _ = conn.execute_batch("ROLLBACK");
-                            if Self::is_sqlite_busy(&e) && attempts < BATCH_BUSY_MAX_RETRIES {
-                                attempts += 1;
-                                let backoff_ms = u64::from(attempts).saturating_mul(10).min(500);
-                                std::thread::sleep(Duration::from_millis(backoff_ms));
-                                continue;
-                            }
-                            return Err(e);
+                            return Err(ImmediateTxnError::Begin(error));
                         }
+                        Ok(value)
+                    }
+                    Err(error) => {
+                        let _ = conn.execute_batch("ROLLBACK");
+                        Err(ImmediateTxnError::Task(error))
                     }
                 }
-                Err(e) if Self::is_rusqlite_busy(&e) && attempts < BATCH_BUSY_MAX_RETRIES => {
-                    attempts += 1;
-                    let backoff_ms = u64::from(attempts).saturating_mul(10).min(500);
-                    std::thread::sleep(Duration::from_millis(backoff_ms));
-                }
-                Err(e) => return Err(TaskError::Database(e)),
-            }
+            },
+            ImmediateTxnError::is_busy,
+        ) {
+            Ok(value) => Ok(value),
+            Err(RetryError::Inner(error)) => Err(error.into_task_error(OPERATION, 0)),
+            Err(RetryError::BusyTimeout(timeout)) => Err(timeout
+                .last_error
+                .into_task_error(OPERATION, timeout.attempts)),
         }
-    }
-
-    fn is_sqlite_busy(err: &TaskError) -> bool {
-        matches!(
-            err,
-            TaskError::Database(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
-                    ..
-                } | rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
-                    ..
-                },
-                _
-            ))
-        )
-    }
-
-    fn is_rusqlite_busy(err: &rusqlite::Error) -> bool {
-        matches!(
-            err,
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
-                    ..
-                } | rusqlite::ffi::Error {
-                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
-                    ..
-                },
-                _
-            )
-        )
     }
 
     // ─────────────────────────────────────────────────────────────────────
