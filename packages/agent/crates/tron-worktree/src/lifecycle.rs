@@ -27,12 +27,11 @@ pub async fn create(
         .map_err(|_| WorktreeError::NotGitRepo(working_dir.display().to_string()))?;
     let repo_root = PathBuf::from(&repo_root_str);
 
-    let prefix = &session_id[..session_id.len().min(12)];
-    let branch = format!("{}{prefix}", config.branch_prefix);
+    let branch = format!("{}{session_id}", config.branch_prefix);
     let worktree_path = repo_root
         .join(&config.base_dir_name)
         .join("session")
-        .join(prefix);
+        .join(session_id);
 
     let base_commit = git.head_commit(&repo_root).await?;
     let base_branch = git.current_branch(&repo_root).await.ok();
@@ -237,9 +236,26 @@ mod tests {
             .unwrap();
 
         assert!(info.worktree_path.exists());
-        assert_eq!(info.branch, "session/test-session");
+        assert_eq!(info.branch, "session/test-session-abc");
         assert_eq!(info.session_id, "test-session-abc");
         assert!(!info.base_commit.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_uses_full_session_id_for_unique_branch_names() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        let first = create("sess_sameprefix_aaaa", dir.path(), &config, &git)
+            .await
+            .unwrap();
+        let second = create("sess_sameprefix_bbbb", dir.path(), &config, &git)
+            .await
+            .unwrap();
+
+        assert_ne!(first.branch, second.branch);
+        assert_ne!(first.worktree_path, second.worktree_path);
     }
 
     #[tokio::test]
@@ -271,10 +287,10 @@ mod tests {
             .path()
             .join(".worktrees")
             .join("session")
-            .join("session-");
+            .join("session-aaaa1234");
         let _ = git.worktree_remove(dir.path(), &wt_path, true).await;
         let _ = git
-            .branch_delete(dir.path(), "session/session-", true)
+            .branch_delete(dir.path(), "session/session-aaaa1234", true)
             .await;
 
         let _ = create("session-bbbb5678", dir.path(), &config, &git)

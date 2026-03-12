@@ -4,11 +4,11 @@
 //! The coordinator manages the lifecycle of worktrees across all sessions,
 //! tracks active worktrees, and delegates to specialized modules.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dashmap::DashMap;
+use parking_lot::Mutex;
 use serde_json::json;
 use tokio::sync::broadcast;
 use tracing::{debug, info, instrument, warn};
@@ -32,10 +32,92 @@ pub struct WorktreeCoordinator {
     event_store: Arc<EventStore>,
     /// Broadcast sender for real-time WebSocket events.
     broadcast_tx: Option<broadcast::Sender<TronEvent>>,
-    /// Active worktrees by session ID.
-    active: DashMap<String, WorktreeInfo>,
-    /// Sessions grouped by repo root.
-    repo_sessions: DashMap<PathBuf, HashSet<String>>,
+    /// All active worktree state, kept coherent behind a single lock.
+    state: Mutex<CoordinatorState>,
+}
+
+#[derive(Default)]
+struct CoordinatorState {
+    active_by_session: HashMap<String, WorktreeInfo>,
+    sessions_by_repo: HashMap<PathBuf, HashSet<String>>,
+}
+
+impl CoordinatorState {
+    fn active_info(&self, session_id: &str) -> Option<WorktreeInfo> {
+        self.active_by_session.get(session_id).cloned()
+    }
+
+    fn active_ids(&self) -> HashSet<String> {
+        self.active_by_session.keys().cloned().collect()
+    }
+
+    fn repo_session_count(&self, repo_root: &std::path::Path) -> usize {
+        self.sessions_by_repo.get(repo_root).map_or(0, HashSet::len)
+    }
+
+    fn track(&mut self, info: WorktreeInfo) {
+        let session_id = info.session_id.clone();
+        let repo_root = info.repo_root.clone();
+        self.active_by_session.insert(session_id.clone(), info);
+        self.sessions_by_repo
+            .entry(repo_root)
+            .or_default()
+            .insert(session_id);
+    }
+
+    fn untrack(&mut self, session_id: &str) -> Option<WorktreeInfo> {
+        let info = self.active_by_session.remove(session_id)?;
+        if let Some(sessions) = self.sessions_by_repo.get_mut(&info.repo_root) {
+            sessions.remove(session_id);
+            if sessions.is_empty() {
+                self.sessions_by_repo.remove(&info.repo_root);
+            }
+        }
+        Some(info)
+    }
+
+    fn replace_active(&mut self, infos: impl IntoIterator<Item = WorktreeInfo>) {
+        self.active_by_session.clear();
+        self.sessions_by_repo.clear();
+        for info in infos {
+            self.track(info);
+        }
+    }
+
+    fn list_active(&self) -> Vec<WorktreeInfo> {
+        self.active_by_session.values().cloned().collect()
+    }
+
+    fn active_branch_snapshot(&self) -> HashMap<String, (String, Option<String>)> {
+        self.active_by_session
+            .iter()
+            .map(|(session_id, info)| {
+                (
+                    info.branch.clone(),
+                    (session_id.clone(), info.base_branch.clone()),
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn repo_count(&self) -> usize {
+        self.sessions_by_repo.len()
+    }
+
+    #[cfg(test)]
+    fn repo_root_for_session(&self, session_id: &str) -> Option<PathBuf> {
+        self.active_by_session
+            .get(session_id)
+            .map(|info| info.repo_root.clone())
+    }
+
+    #[cfg(test)]
+    fn is_session_tracked_for_repo(&self, repo_root: &std::path::Path, session_id: &str) -> bool {
+        self.sessions_by_repo
+            .get(repo_root)
+            .is_some_and(|sessions| sessions.contains(session_id))
+    }
 }
 
 impl WorktreeCoordinator {
@@ -47,8 +129,7 @@ impl WorktreeCoordinator {
             git,
             event_store,
             broadcast_tx: None,
-            active: DashMap::new(),
-            repo_sessions: DashMap::new(),
+            state: Mutex::new(CoordinatorState::default()),
         }
     }
 
@@ -64,8 +145,7 @@ impl WorktreeCoordinator {
             git,
             event_store,
             broadcast_tx: Some(tx),
-            active: DashMap::new(),
-            repo_sessions: DashMap::new(),
+            state: Mutex::new(CoordinatorState::default()),
         }
     }
 
@@ -87,15 +167,14 @@ impl WorktreeCoordinator {
         working_dir: &std::path::Path,
     ) -> Result<AcquireResult> {
         // Idempotent: return existing worktree
-        if let Some(info) = self.active.get(session_id) {
+        if let Some(info) = self.state.lock().active_info(session_id) {
             return Ok(AcquireResult::Acquired(info.clone()));
         }
 
         let is_git = self.git.is_git_repo(working_dir).await;
         let repo_count = if is_git {
             if let Ok(root) = self.git.repo_root(working_dir).await {
-                let root_path = PathBuf::from(&root);
-                self.repo_sessions.get(&root_path).map_or(0, |v| v.len())
+                self.state.lock().repo_session_count(root.as_ref())
             } else {
                 0
             }
@@ -127,11 +206,7 @@ impl WorktreeCoordinator {
         });
 
         // Track
-        self.active.insert(session_id.to_string(), info.clone());
-        self.repo_sessions
-            .entry(info.repo_root.clone())
-            .or_default()
-            .insert(session_id.to_string());
+        self.state.lock().track(info.clone());
 
         // Broadcast to WebSocket clients
         self.broadcast(TronEvent::WorktreeAcquired {
@@ -152,12 +227,18 @@ impl WorktreeCoordinator {
     /// Emits `worktree.released` event.
     #[instrument(skip(self), fields(session_id))]
     pub async fn release(&self, session_id: &str) -> Result<()> {
-        let Some((_, info)) = self.active.remove(session_id) else {
+        let Some(info) = self.state.lock().untrack(session_id) else {
             debug!(session_id, "no active worktree to release");
             return Ok(());
         };
 
-        let release_info = crate::lifecycle::remove(&info, &self.config, &self.git).await?;
+        let release_info = match crate::lifecycle::remove(&info, &self.config, &self.git).await {
+            Ok(release_info) => release_info,
+            Err(error) => {
+                self.state.lock().track(info);
+                return Err(error);
+            }
+        };
 
         // Emit event
         let _ = self.event_store.append(&AppendOptions {
@@ -179,15 +260,6 @@ impl WorktreeCoordinator {
             deleted: release_info.deleted,
         });
 
-        // Untrack from repo_sessions — remove entry entirely if empty
-        if let Some(mut sessions) = self.repo_sessions.get_mut(&info.repo_root) {
-            sessions.remove(session_id);
-            if sessions.is_empty() {
-                drop(sessions);
-                self.repo_sessions.remove(&info.repo_root);
-            }
-        }
-
         Ok(())
     }
 
@@ -195,8 +267,9 @@ impl WorktreeCoordinator {
     ///
     /// Returns the worktree path if active, None otherwise.
     pub fn effective_working_dir(&self, session_id: &str) -> Option<String> {
-        self.active
-            .get(session_id)
+        self.state
+            .lock()
+            .active_info(session_id)
             .map(|info| info.worktree_path.to_string_lossy().to_string())
     }
 
@@ -210,8 +283,9 @@ impl WorktreeCoordinator {
         message: &str,
     ) -> Result<Option<crate::types::CommitResult>> {
         let info = self
-            .active
-            .get(session_id)
+            .state
+            .lock()
+            .active_info(session_id)
             .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
 
         if !self.git.has_changes(&info.worktree_path).await? {
@@ -288,8 +362,9 @@ impl WorktreeCoordinator {
         strategy: MergeStrategy,
     ) -> Result<MergeResult> {
         let info = self
-            .active
-            .get(session_id)
+            .state
+            .lock()
+            .active_info(session_id)
             .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
 
         let result = crate::merge::merge_session(
@@ -334,7 +409,7 @@ impl WorktreeCoordinator {
 
     /// List all active worktrees.
     pub fn list_active(&self) -> Vec<WorktreeInfo> {
-        self.active.iter().map(|r| r.value().clone()).collect()
+        self.state.lock().list_active()
     }
 
     /// List worktrees for a specific repo via `git worktree list`.
@@ -347,7 +422,7 @@ impl WorktreeCoordinator {
 
     /// Get info for a specific session's worktree.
     pub fn get_info(&self, session_id: &str) -> Option<WorktreeInfo> {
-        self.active.get(session_id).map(|r| r.value().clone())
+        self.state.lock().active_info(session_id)
     }
 
     /// Get enriched status for a session's worktree.
@@ -357,9 +432,8 @@ impl WorktreeCoordinator {
         &self,
         session_id: &str,
     ) -> Result<Option<crate::types::WorktreeStatus>> {
-        let info = match self.active.get(session_id) {
-            Some(r) => r.value().clone(),
-            None => return Ok(None),
+        let Some(info) = self.state.lock().active_info(session_id) else {
+            return Ok(None);
         };
 
         let has_changes = self
@@ -400,7 +474,7 @@ impl WorktreeCoordinator {
     /// Rebuild active worktree state from persisted events.
     ///
     /// Scans for sessions with `worktree.acquired` events (without a subsequent
-    /// `worktree.released`) and re-populates the in-memory `active` `DashMap`.
+    /// `worktree.released`) and re-populates the in-memory state.
     /// Must be called before `recover_orphans` to prevent deleting valid worktrees.
     pub fn rebuild_from_events(&self) {
         let sessions = self
@@ -411,7 +485,7 @@ impl WorktreeCoordinator {
             })
             .unwrap_or_default();
 
-        let mut restored = 0usize;
+        let mut restored_infos = Vec::new();
         for session in &sessions {
             let Ok(Some(acq)) = self.event_store.get_active_worktree(&session.id) else {
                 continue;
@@ -449,9 +523,11 @@ impl WorktreeCoordinator {
                 base_branch,
             };
 
-            self.active.insert(session.id.clone(), info);
-            restored += 1;
+            restored_infos.push(info);
         }
+
+        let restored = restored_infos.len();
+        self.state.lock().replace_active(restored_infos);
 
         if restored > 0 {
             info!(restored, "rebuilt active worktrees from events");
@@ -464,7 +540,7 @@ impl WorktreeCoordinator {
     /// IMPORTANT: Call `rebuild_from_events` first to avoid deleting valid worktrees.
     pub async fn recover_orphans(&self) -> usize {
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
-        let active_ids: HashSet<String> = self.active.iter().map(|r| r.key().clone()).collect();
+        let active_ids = self.state.lock().active_ids();
 
         let mut total = 0;
         for ws in &workspaces {
@@ -502,6 +578,7 @@ impl WorktreeCoordinator {
 
         // Build branch→base_branch map from events for preserved branches
         let event_base_branches = self.load_base_branches_from_events();
+        let active_branches = self.state.lock().active_branch_snapshot();
 
         let mut results = Vec::with_capacity(branches.len());
         for branch in &branches {
@@ -511,21 +588,18 @@ impl WorktreeCoordinator {
             };
 
             // Cross-reference with active map to get session_id, is_active, and base_branch
-            let (is_active, session_id, base_branch) =
-                if let Some(entry) = self.active.iter().find(|r| r.value().branch == *branch) {
-                    (
-                        true,
-                        Some(entry.key().clone()),
-                        entry.value().base_branch.clone(),
-                    )
-                } else {
-                    let event_base = event_base_branches.get(branch.as_str()).cloned();
-                    let base = match event_base {
-                        Some(b) => b,
-                        None => self.detect_default_branch(repo_root).await,
-                    };
-                    (false, None, Some(base))
+            let (is_active, session_id, base_branch) = if let Some((session_id, base_branch)) =
+                active_branches.get(branch.as_str()).cloned()
+            {
+                (true, Some(session_id), base_branch)
+            } else {
+                let event_base = event_base_branches.get(branch.as_str()).cloned();
+                let base = match event_base {
+                    Some(b) => b,
+                    None => self.detect_default_branch(repo_root).await,
                 };
+                (false, None, Some(base))
+            };
 
             let commit_count = if let Some(ref base) = base_branch {
                 let mb = self.git.merge_base(repo_root, base, branch).await.ok();
@@ -586,7 +660,8 @@ impl WorktreeCoordinator {
         session_id: &str,
     ) -> Result<Option<CommittedDiffResult>> {
         // First check active worktrees
-        if let Some(info) = self.active.get(session_id) {
+        let active_info = { self.state.lock().active_info(session_id) };
+        if let Some(info) = active_info {
             return self
                 .committed_diff_for_branch(&info.repo_root, &info.branch, &info.base_commit)
                 .await
@@ -594,11 +669,7 @@ impl WorktreeCoordinator {
         }
 
         // For preserved branches: find branch and base from WorktreeAcquired events
-        let branch_prefix = format!(
-            "{}{}",
-            self.config.branch_prefix,
-            &session_id[..session_id.len().min(12)]
-        );
+        let branch_prefix = format!("{}{session_id}", self.config.branch_prefix);
 
         // Try event store first — it has the original baseBranch and repoRoot
         let events = self
@@ -811,6 +882,28 @@ impl WorktreeCoordinator {
     /// Resolve the git repository root for a given path.
     pub async fn resolve_repo_root(&self, path: &std::path::Path) -> Result<String> {
         self.git.repo_root(path).await
+    }
+
+    #[cfg(test)]
+    fn tracked_repo_count(&self) -> usize {
+        self.state.lock().repo_count()
+    }
+
+    #[cfg(test)]
+    fn tracked_repo_root_for_session(&self, session_id: &str) -> Option<PathBuf> {
+        self.state.lock().repo_root_for_session(session_id)
+    }
+
+    #[cfg(test)]
+    fn tracked_session_count_for_repo(&self, repo_root: &std::path::Path) -> usize {
+        self.state.lock().repo_session_count(repo_root)
+    }
+
+    #[cfg(test)]
+    fn is_session_tracked_for_repo(&self, repo_root: &std::path::Path, session_id: &str) -> bool {
+        self.state
+            .lock()
+            .is_session_tracked_for_repo(repo_root, session_id)
     }
 }
 
@@ -1154,6 +1247,57 @@ mod tests {
         assert_eq!(coord.list_active().len(), 2);
     }
 
+    #[tokio::test]
+    async fn rebuild_from_events_restores_repo_tracking_for_lazy_mode() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let first = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("first"),
+                None,
+                None,
+            )
+            .unwrap();
+        let second = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("second"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        let seed_coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+        let acquired = seed_coord
+            .maybe_acquire(&first.session.id, dir.path())
+            .await
+            .unwrap();
+        assert!(matches!(acquired, AcquireResult::Acquired(_)));
+
+        let lazy_coord = WorktreeCoordinator::new(
+            WorktreeConfig {
+                mode: tron_settings::types::IsolationMode::Lazy,
+                ..WorktreeConfig::default()
+            },
+            store,
+        );
+        lazy_coord.rebuild_from_events();
+
+        let rebuilt = lazy_coord
+            .maybe_acquire(&second.session.id, dir.path())
+            .await
+            .unwrap();
+        assert!(
+            matches!(rebuilt, AcquireResult::Acquired(_)),
+            "lazy mode should isolate when an active worktree was rebuilt"
+        );
+    }
+
     // ── list_session_branches tests ────────────────────────────────
 
     #[tokio::test]
@@ -1336,10 +1480,10 @@ mod tests {
 
         coord.release("sess-clean").await.unwrap();
 
-        // The repo_sessions DashMap entry should be fully removed, not just empty
-        assert!(
-            coord.repo_sessions.is_empty(),
-            "repo_sessions should be empty after last session released"
+        assert_eq!(
+            coord.tracked_repo_count(),
+            0,
+            "repo tracking should be empty after last session released"
         );
     }
 
@@ -1364,11 +1508,9 @@ mod tests {
         coord.maybe_acquire("sess-dup", dir.path()).await.unwrap();
         coord.maybe_acquire("sess-dup", dir.path()).await.unwrap();
 
-        // repo_sessions should have exactly 1 entry for this session
-        let repo_root = coord.active.get("sess-dup").unwrap().repo_root.clone();
-        let sessions = coord.repo_sessions.get(&repo_root).unwrap();
+        let repo_root = coord.tracked_repo_root_for_session("sess-dup").unwrap();
         assert_eq!(
-            sessions.len(),
+            coord.tracked_session_count_for_repo(&repo_root),
             1,
             "duplicate acquire should not create duplicate tracking entries"
         );
@@ -1392,23 +1534,18 @@ mod tests {
         assert!(matches!(r1, AcquireResult::Acquired(_)));
         assert!(matches!(r2, AcquireResult::Acquired(_)));
 
-        // Get repo root from first session
-        let repo_root = coord.active.get(sid1).unwrap().repo_root.clone();
-
-        assert_eq!(coord.repo_sessions.get(&repo_root).unwrap().len(), 2);
+        let repo_root = coord.tracked_repo_root_for_session(sid1).unwrap();
+        assert_eq!(coord.tracked_session_count_for_repo(&repo_root), 2);
 
         // Release one session
         coord.release(sid1).await.unwrap();
 
-        // Entry should still exist with 1 session
-        let sessions = coord.repo_sessions.get(&repo_root).unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert!(sessions.contains(sid2));
-        drop(sessions); // must drop before next release to avoid DashMap deadlock
+        assert_eq!(coord.tracked_session_count_for_repo(&repo_root), 1);
+        assert!(coord.is_session_tracked_for_repo(&repo_root, sid2));
 
         // Release second session — entry should be fully removed
         coord.release(sid2).await.unwrap();
-        assert!(coord.repo_sessions.is_empty());
+        assert_eq!(coord.tracked_repo_count(), 0);
     }
 
     #[tokio::test]

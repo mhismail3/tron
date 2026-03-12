@@ -25,6 +25,20 @@ fn require_coordinator(ctx: &RpcContext) -> Result<&tron_worktree::WorktreeCoord
         })
 }
 
+fn require_session_working_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
+    let session = ctx
+        .session_manager
+        .get_session(session_id)
+        .map_err(|e| RpcError::Internal {
+            message: format!("Session lookup failed: {e}"),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: "SESSION_NOT_FOUND".into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+    Ok(session.working_directory)
+}
+
 /// Resolve the directory to diff for a session.
 ///
 /// Prefers the coordinator's worktree path (if active), otherwise uses the
@@ -38,18 +52,7 @@ fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcErr
         return Ok(dir);
     }
 
-    // Fall back to session's original working directory
-    let session = ctx
-        .session_manager
-        .get_session(session_id)
-        .map_err(|e| RpcError::Internal {
-            message: format!("Session lookup failed: {e}"),
-        })?
-        .ok_or_else(|| RpcError::NotFound {
-            code: "SESSION_NOT_FOUND".into(),
-            message: format!("Session '{session_id}' not found"),
-        })?;
-    Ok(session.working_directory)
+    require_session_working_dir(ctx, session_id)
 }
 
 // ── GetStatus ───────────────────────────────────────────────────────
@@ -223,19 +226,8 @@ impl MethodHandler for AcquireHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
-        // Resolve session working directory
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: format!("Session lookup failed: {e}"),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: "SESSION_NOT_FOUND".into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        let working_dir = std::path::Path::new(&session.working_directory);
+        let working_dir = require_session_working_dir(ctx, &session_id)?;
+        let working_dir = std::path::Path::new(&working_dir);
 
         match coord.maybe_acquire(&session_id, working_dir).await {
             Ok(tron_worktree::AcquireResult::Acquired(info)) => Ok(serde_json::json!({
