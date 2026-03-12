@@ -16,6 +16,7 @@ pub(crate) mod client_logs;
 pub mod context;
 pub mod errors;
 pub mod handlers;
+pub(crate) mod memory_commands;
 pub mod memory_ledger;
 pub(crate) mod memory_queries;
 pub(crate) mod notification_inbox;

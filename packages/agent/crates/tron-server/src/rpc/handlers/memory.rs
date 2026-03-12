@@ -15,35 +15,16 @@ use tron_core::messages::{Message, UserMessageContent};
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::memory_ledger::{LedgerWriteDeps, execute_ledger_write};
+use crate::rpc::memory_commands::{LedgerUpdateTarget, MemoryCommandService};
 #[cfg(test)]
 use crate::rpc::memory_ledger::{
-    build_cycle_snapshot as compute_cycle_messages, cron_assistant_text_len,
-    prepare_cron_transcript,
+    LedgerWriteDeps, build_cycle_snapshot as compute_cycle_messages, cron_assistant_text_len,
+    execute_ledger_write, prepare_cron_transcript,
 };
 use crate::rpc::memory_queries::MemoryQueryService;
 use crate::rpc::registry::MethodHandler;
 
 use super::{opt_array, opt_string, opt_u64};
-
-/// Emit `MemoryUpdated` event via the orchestrator broadcast.
-fn emit_memory_updated(
-    ctx: &RpcContext,
-    session_id: &str,
-    title: Option<&str>,
-    entry_type: Option<&str>,
-    event_id: Option<&str>,
-) {
-    let _ = ctx
-        .orchestrator
-        .broadcast()
-        .emit(tron_core::events::TronEvent::MemoryUpdated {
-            base: tron_core::events::BaseEvent::now(session_id),
-            title: title.map(String::from),
-            entry_type: entry_type.map(String::from),
-            event_id: event_id.map(String::from),
-        });
-}
 
 // =============================================================================
 // RPC Handlers
@@ -95,81 +76,17 @@ pub struct UpdateLedgerHandler;
 impl MethodHandler for UpdateLedgerHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.updateLedger"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        // Accept either sessionId directly or workingDirectory (find most recent session)
-        let session_id_owned: String;
-        if let Some(sid) = opt_string(params.as_ref(), "sessionId") {
-            session_id_owned = sid;
+        let target = if let Some(session_id) = opt_string(params.as_ref(), "sessionId") {
+            LedgerUpdateTarget::SessionId(session_id)
         } else if let Some(wd) = opt_string(params.as_ref(), "workingDirectory") {
-            // Find most recent session for this workspace
-            let filter = tron_runtime::SessionFilter {
-                workspace_path: Some(wd),
-                limit: Some(1),
-                ..Default::default()
-            };
-            let sessions = ctx
-                .session_manager
-                .list_sessions(&filter)
-                .unwrap_or_default();
-            if let Some(s) = sessions.first() {
-                session_id_owned = s.id.clone();
-            } else {
-                return Ok(serde_json::json!({
-                    "written": false,
-                    "title": null,
-                    "entryType": null,
-                    "reason": "no sessions found for workspace",
-                }));
-            }
+            LedgerUpdateTarget::WorkingDirectory(wd)
         } else {
             return Err(RpcError::InvalidParams {
                 message: "Missing required parameter: sessionId or workingDirectory".into(),
             });
-        }
-        let session_id = &session_id_owned;
-
-        // Emit memory_updating immediately so clients can show a spinner
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(tron_core::events::TronEvent::MemoryUpdating {
-                base: tron_core::events::BaseEvent::now(session_id),
-            });
-
-        // Delegate to the shared pipeline
-        let deps = LedgerWriteDeps {
-            event_store: ctx.event_store.clone(),
-            subagent_manager: ctx.subagent_manager.clone(),
-            embedding_controller: ctx.embedding_controller.clone(),
-            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         };
-        let result = execute_ledger_write(session_id, &deps, "manual").await;
 
-        // Emit memory_updated based on result
-        if result.written {
-            emit_memory_updated(
-                ctx,
-                session_id,
-                result.title.as_deref(),
-                result.entry_type.as_deref(),
-                result.event_id.as_deref(),
-            );
-        } else {
-            let entry_type = result.entry_type.as_deref().unwrap_or("skipped");
-            let title = if entry_type == "error" {
-                result.reason.as_deref()
-            } else {
-                None
-            };
-            emit_memory_updated(ctx, session_id, title, Some(entry_type), None);
-        }
-
-        // Convert to RPC response
-        Ok(serde_json::json!({
-            "written": result.written,
-            "title": result.title,
-            "entryType": result.entry_type,
-            "reason": result.reason.as_deref().unwrap_or(if result.written { "written" } else { "unknown" }),
-        }))
+        MemoryCommandService::update_ledger(ctx, target).await
     }
 }
 
@@ -866,6 +783,97 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["written"], false);
+    }
+
+    #[tokio::test]
+    async fn update_ledger_with_working_directory_targets_most_recent_session() {
+        let ctx = make_test_context();
+        let older = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/shared", Some("older"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &older,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Older request"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &older,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Older response"}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let newer = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/shared", Some("newer"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &newer,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Newer request"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &newer,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Newer response"}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+
+        let mut rx = ctx.orchestrator.subscribe();
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/shared"})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "LLM call failed");
+
+        match rx.recv().await.unwrap() {
+            tron_core::events::TronEvent::MemoryUpdating { base } => {
+                assert_eq!(base.session_id, newer);
+            }
+            other => panic!("expected memory_updating event, got {other:?}"),
+        }
+
+        match rx.recv().await.unwrap() {
+            tron_core::events::TronEvent::MemoryUpdated { base, .. } => {
+                assert_eq!(base.session_id, newer);
+            }
+            other => panic!("expected memory_updated event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn update_ledger_missing_working_directory_returns_without_emitting_events() {
+        let ctx = make_test_context();
+        let mut rx = ctx.orchestrator.subscribe();
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/missing"})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "no sessions found for workspace");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "missing workspace should not emit memory events"
+        );
     }
 
     #[tokio::test]
