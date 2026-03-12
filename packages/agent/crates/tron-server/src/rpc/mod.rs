@@ -12,10 +12,12 @@
 //! - Skills: list, get, refresh, remove
 //! - Plus: browser, canvas, device, task, transcription, worktree, tree
 
+pub(crate) mod client_logs;
 pub mod context;
 pub mod errors;
 pub mod handlers;
 pub mod memory_ledger;
+pub(crate) mod notification_inbox;
 pub mod registry;
 pub mod session_context;
 pub mod types;

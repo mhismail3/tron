@@ -1,94 +1,13 @@
 //! Logs handler: ingest client logs into the database.
 
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::Value;
 use tracing::instrument;
-use tron_core::logging::LogLevel;
-use tron_events::PooledConnection;
 
+use crate::rpc::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::RpcError;
+use crate::rpc::errors::{RpcError, to_json_value};
 use crate::rpc::registry::MethodHandler;
-
-/// A single log entry sent from the iOS client.
-#[derive(Debug, Deserialize)]
-struct ClientLogEntry {
-    timestamp: String,
-    level: String,
-    category: String,
-    message: String,
-}
-
-/// Map an iOS level string to `LogLevel`.
-/// iOS sends "verbose" which has no direct match in `from_str_lossy` (it would
-/// default to Info), so we handle it explicitly.
-fn map_ios_level(s: &str) -> LogLevel {
-    match s.to_lowercase().as_str() {
-        "verbose" => LogLevel::Trace,
-        other => LogLevel::from_str_lossy(other),
-    }
-}
-
-/// Insert client log entries into the `logs` table with deduplication.
-///
-/// Uses the partial unique index on `(timestamp, component, message)` for
-/// `origin = 'ios-client'`, so out-of-order delivery remains correct and
-/// duplicate replays are ignored at insert time.
-///
-/// Returns the number of rows actually inserted.
-fn insert_client_logs(
-    conn: &PooledConnection,
-    entries: &[ClientLogEntry],
-) -> Result<usize, RpcError> {
-    if entries.is_empty() {
-        return Ok(0);
-    }
-
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| RpcError::Internal {
-            message: format!("Failed to begin transaction: {e}"),
-        })?;
-
-    let inserted = {
-        let mut stmt = tx
-            .prepare_cached(
-                "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'ios-client')",
-            )
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to prepare statement: {e}"),
-            })?;
-
-        let mut count = 0usize;
-        for entry in entries {
-            let level = map_ios_level(&entry.level);
-            let component = format!("ios.{}", entry.category);
-            let level_str = level.to_string();
-            let level_num = level.as_num();
-
-            count += stmt
-                .execute([
-                    entry.timestamp.as_str(),
-                    level_str.as_str(),
-                    &level_num.to_string(),
-                    component.as_str(),
-                    entry.message.as_str(),
-                ])
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to insert log entry: {e}"),
-                })?;
-        }
-        count
-    };
-
-    tx.commit().map_err(|e| RpcError::Internal {
-        message: format!("Failed to commit transaction: {e}"),
-    })?;
-
-    Ok(inserted)
-}
 
 /// Ingest structured client logs into the database.
 pub struct IngestLogsHandler;
@@ -109,26 +28,17 @@ impl MethodHandler for IngestLogsHandler {
                 message: format!("Invalid entries: {e}"),
             })?;
 
-        if entries.len() > 10_000 {
-            return Err(RpcError::InvalidParams {
-                message: format!("Too many entries: {} (max 10000)", entries.len()),
-            });
-        }
-
         let pool = ctx.event_store.pool().clone();
-        let inserted = ctx
+        let result = ctx
             .run_blocking("logs.ingest", move || {
-                let conn = pool.get().map_err(|e| RpcError::Internal {
+                let mut conn = pool.get().map_err(|e| RpcError::Internal {
                     message: format!("Failed to get DB connection: {e}"),
                 })?;
-                insert_client_logs(&conn, &entries)
+                ClientLogsService::ingest(&mut conn, &entries)
             })
             .await?;
 
-        Ok(serde_json::json!({
-            "success": true,
-            "inserted": inserted,
-        }))
+        to_json_value(&result)
     }
 }
 

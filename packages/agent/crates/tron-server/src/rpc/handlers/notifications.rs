@@ -7,12 +7,13 @@
 //! - `notifications.markAllRead` — Mark all unread notifications as read
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
-use tracing::{instrument, warn};
+use serde_json::Value;
+use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::RpcError;
+use crate::rpc::errors::{RpcError, to_json_value};
 use crate::rpc::handlers::{opt_u64, require_string_param};
+use crate::rpc::notification_inbox::NotificationInboxService;
 use crate::rpc::registry::MethodHandler;
 
 // ── notifications.list ──────────────────────────────────────────────
@@ -31,119 +32,10 @@ impl MethodHandler for ListHandler {
             let conn = pool.get().map_err(|e| RpcError::Internal {
                 message: format!("Failed to get DB connection: {e}"),
             })?;
-
-            let mut stmt = conn
-                .prepare(
-                    "SELECT
-                        e.id,
-                        e.session_id,
-                        e.tool_call_id,
-                        e.timestamp,
-                        e.payload,
-                        s.title AS session_title,
-                        s.source,
-                        s.spawning_session_id,
-                        nrs.read_at
-                     FROM events e
-                     JOIN sessions s ON s.id = e.session_id
-                     LEFT JOIN notification_read_state nrs ON nrs.event_id = e.id
-                     WHERE e.tool_name = 'NotifyApp'
-                       AND e.type = 'tool.call'
-                     ORDER BY e.timestamp DESC
-                     LIMIT ?1",
-                )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to prepare notification query: {e}"),
-                })?;
-
-            let mut notifications = Vec::new();
-            let mut unread_count: u64 = 0;
-
-            let rows = stmt
-                .query_map([limit], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                        row.get::<_, Option<String>>(8)?,
-                    ))
-                })
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to query notifications: {e}"),
-                })?;
-
-            for row in rows {
-                let (
-                    event_id,
-                    session_id,
-                    tool_call_id,
-                    timestamp,
-                    payload_str,
-                    session_title,
-                    source,
-                    spawning_session_id,
-                    read_at,
-                ) = row.map_err(|e| RpcError::Internal {
-                    message: format!("Failed to read notification row: {e}"),
-                })?;
-
-                let is_read = read_at.is_some();
-                if !is_read {
-                    unread_count += 1;
-                }
-
-                let payload: Value = match serde_json::from_str(&payload_str) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(
-                            event_id,
-                            "skipping notification with malformed payload: {e}"
-                        );
-                        continue;
-                    }
-                };
-
-                let arguments = payload.get("arguments").unwrap_or(&payload);
-                let title = arguments
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let body = arguments
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let sheet_content = arguments.get("sheetContent").cloned();
-
-                let is_user_session = source.is_none() && spawning_session_id.is_none();
-
-                notifications.push(json!({
-                    "eventId": event_id,
-                    "sessionId": session_id,
-                    "toolCallId": tool_call_id,
-                    "timestamp": timestamp,
-                    "title": title,
-                    "body": body,
-                    "sheetContent": sheet_content,
-                    "isRead": is_read,
-                    "readAt": read_at,
-                    "sessionTitle": session_title,
-                    "isUserSession": is_user_session,
-                }));
-            }
-
-            Ok(json!({
-                "notifications": notifications,
-                "unreadCount": unread_count,
-            }))
+            NotificationInboxService::list(&conn, limit)
         })
         .await
+        .and_then(|result| to_json_value(&result))
     }
 }
 
@@ -163,19 +55,10 @@ impl MethodHandler for MarkReadHandler {
             let conn = pool.get().map_err(|e| RpcError::Internal {
                 message: format!("Failed to get DB connection: {e}"),
             })?;
-
-            let _ = conn
-                .execute(
-                    "INSERT OR IGNORE INTO notification_read_state (event_id, read_at) VALUES (?1, datetime('now'))",
-                    [&event_id],
-                )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to mark notification as read: {e}"),
-                })?;
-
-            Ok(json!({ "success": true }))
+            NotificationInboxService::mark_read(&conn, &event_id)
         })
         .await
+        .and_then(|result| to_json_value(&result))
     }
 }
 
@@ -194,24 +77,10 @@ impl MethodHandler for MarkAllReadHandler {
             let conn = pool.get().map_err(|e| RpcError::Internal {
                 message: format!("Failed to get DB connection: {e}"),
             })?;
-
-            let marked = conn
-                .execute(
-                    "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
-                     SELECT e.id, datetime('now')
-                     FROM events e
-                     WHERE e.tool_name = 'NotifyApp'
-                       AND e.type = 'tool.call'
-                       AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
-                    [],
-                )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to mark all notifications as read: {e}"),
-                })?;
-
-            Ok(json!({ "marked": marked }))
+            NotificationInboxService::mark_all_read(&conn)
         })
         .await
+        .and_then(|result| to_json_value(&result))
     }
 }
 
@@ -219,6 +88,7 @@ impl MethodHandler for MarkAllReadHandler {
 mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::make_test_context;
+    use serde_json::json;
 
     fn setup_test_data(ctx: &RpcContext) {
         let conn = ctx.event_store.pool().get().unwrap();
@@ -563,6 +433,7 @@ mod tests {
         let notifs = result["notifications"].as_array().unwrap();
         assert_eq!(notifs.len(), 1);
         assert_eq!(notifs[0]["title"], "Good");
+        assert_eq!(result["unreadCount"], 1);
     }
 
     #[tokio::test]
