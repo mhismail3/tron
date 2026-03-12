@@ -832,10 +832,10 @@ mod tests {
 
         // Cancel after 100ms — tool should NOT run for 60s
         let cancel2 = cancel.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             cancel2.cancel();
-        });
+        }));
 
         let start = Instant::now();
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
@@ -861,10 +861,10 @@ mod tests {
         let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
 
         let cancel2 = cancel.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             cancel2.cancel();
-        });
+        }));
 
         let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 
@@ -897,10 +897,10 @@ mod tests {
         let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
 
         let cancel2 = cancel.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             cancel2.cancel();
-        });
+        }));
 
         let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
 

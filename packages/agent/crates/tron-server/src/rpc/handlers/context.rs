@@ -148,7 +148,7 @@ fn build_active_skill_context(
 
 /// Build the best available summarizer for compaction.
 ///
-/// Uses `LlmSummarizer` (via SubagentManager) when available for high-quality
+/// Uses `LlmSummarizer` (via `SubagentManager`) when available for high-quality
 /// narrative summaries; falls back to `KeywordSummarizer` otherwise.
 fn build_summarizer(
     ctx: &RpcContext,

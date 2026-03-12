@@ -134,8 +134,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         base: BaseEvent::now(session_id),
         turn,
     });
-    if let Some(p) = persister {
-        if let Err(error) = p
+    if let Some(p) = persister
+        && let Err(error) = p
             .append_background(
                 session_id,
                 EventType::StreamTurnStart,
@@ -144,9 +144,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 }),
             )
             .await
-        {
-            warn!(session_id, turn, error = %error, "failed to queue turn-start event");
-        }
+    {
+        warn!(session_id, turn, error = %error, "failed to queue turn-start event");
     }
     debug!(session_id, turn, "turn started");
 
@@ -479,8 +478,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
         // --- Phase 1: Persist all tool.call events upfront ---
         for tc in &stream_result.tool_calls {
-            if let Some(p) = persister {
-                if let Err(error) = p
+            if let Some(p) = persister
+                && let Err(error) = p
                     .append_background(
                         session_id,
                         EventType::ToolCall,
@@ -492,15 +491,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                         }),
                     )
                     .await
-                {
-                    warn!(
-                        session_id,
-                        turn,
-                        tool_call_id = %tc.id,
-                        error = %error,
-                        "failed to queue tool-call event"
-                    );
-                }
+            {
+                warn!(
+                    session_id,
+                    turn,
+                    tool_call_id = %tc.id,
+                    error = %error,
+                    "failed to queue tool-call event"
+                );
             }
         }
 
@@ -553,8 +551,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             let result_text = extract_result_text(&exec_result);
             let is_error = exec_result.result.is_error.unwrap_or(false);
 
-            if let Some(p) = persister {
-                if let Err(error) = p
+            if let Some(p) = persister
+                && let Err(error) = p
                     .append_background(
                         session_id,
                         EventType::ToolResult,
@@ -567,15 +565,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                         }),
                     )
                     .await
-                {
-                    warn!(
-                        session_id,
-                        turn,
-                        tool_call_id = %tc.id,
-                        error = %error,
-                        "failed to queue tool-result event"
-                    );
-                }
+            {
+                warn!(
+                    session_id,
+                    turn,
+                    tool_call_id = %tc.id,
+                    error = %error,
+                    "failed to queue tool-result event"
+                );
             }
 
             context_manager.add_message(Message::ToolResult {
@@ -597,10 +594,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             }
 
             // Record bash commands for compaction progress-signal detection
-            if tc.name == "Bash" {
-                if let Some(cmd) = tc.arguments.get("command").and_then(|v| v.as_str()) {
-                    compaction.record_bash_command(cmd);
-                }
+            if tc.name == "Bash"
+                && let Some(cmd) = tc.arguments.get("command").and_then(|v| v.as_str())
+            {
+                compaction.record_bash_command(cmd);
             }
 
             if exec_result.stops_turn {
@@ -619,8 +616,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             rules: all_activations.clone(),
             total_activated: total,
         });
-        if let Some(p) = persister {
-            if let Err(error) = p
+        if let Some(p) = persister
+            && let Err(error) = p
                 .append_background(
                     session_id,
                     EventType::RulesActivated,
@@ -633,9 +630,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                     }),
                 )
                 .await
-            {
-                warn!(session_id, turn, error = %error, "failed to queue rules-activated event");
-            }
+        {
+            warn!(session_id, turn, error = %error, "failed to queue rules-activated event");
         }
     }
 

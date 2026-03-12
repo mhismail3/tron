@@ -166,7 +166,7 @@ impl SubagentManager {
 
     /// Upgrade the weak self-reference to an Arc (returns None if dropped).
     fn arc_self(&self) -> Option<Arc<Self>> {
-        self.self_ref.get().and_then(|w| w.upgrade())
+        self.self_ref.get().and_then(std::sync::Weak::upgrade)
     }
 
     /// Set the worktree coordinator for subagent isolation.

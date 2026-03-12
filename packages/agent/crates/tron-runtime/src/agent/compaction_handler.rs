@@ -203,7 +203,7 @@ impl CompactionHandler {
     }
 
     /// Record a bash command for progress-signal detection.
-    /// Called by turn_runner after each bash tool execution.
+    /// Called by `turn_runner` after each bash tool execution.
     pub fn record_bash_command(&self, command: &str) {
         self.pending_bash_commands
             .lock()

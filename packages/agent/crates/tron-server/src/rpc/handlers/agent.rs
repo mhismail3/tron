@@ -1377,11 +1377,10 @@ mod tests {
                             break true;
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
                     Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
                         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
                     Err(err) => panic!("unexpected broadcast error: {err}"),
                 }
             }
@@ -2869,7 +2868,9 @@ mod tests {
                     tron_core::content::UserContent::Document { .. }
                 ));
             }
-            other => panic!("unexpected override content: {other:?}"),
+            tron_core::messages::UserMessageContent::Text(text) => {
+                panic!("unexpected text override content: {text:?}")
+            }
         }
     }
 
@@ -2893,7 +2894,9 @@ mod tests {
                     tron_core::content::UserContent::Image { .. }
                 ));
             }
-            other => panic!("unexpected override content: {other:?}"),
+            tron_core::messages::UserMessageContent::Text(text) => {
+                panic!("unexpected text override content: {text:?}")
+            }
         }
     }
 

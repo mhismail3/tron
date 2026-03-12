@@ -834,7 +834,7 @@ mod tests {
 
     // -- split_messages: orphaned tool result prevention --
 
-    /// Helper: create an assistant message with tool_use blocks.
+    /// Helper: create an assistant message with `tool_use` blocks.
     fn assistant_with_tool_use(ids: &[&str]) -> Message {
         use tron_core::content::AssistantContent;
         Message::Assistant {
@@ -989,9 +989,9 @@ mod tests {
         assert_eq!(preserved2.len(), 1);
     }
 
-    /// Assert that every ToolResult in messages has a preceding Assistant
-    /// containing a ToolUse with the matching ID. This mirrors the Anthropic
-    /// API validation that rejects orphaned tool_result blocks.
+    /// Assert that every `ToolResult` in `messages` has a preceding `Assistant`
+    /// containing a `ToolUse` with the matching ID. This mirrors the Anthropic
+    /// API validation that rejects orphaned `tool_result` blocks.
     fn assert_no_orphaned_tool_results(messages: &[Message]) {
         for (i, msg) in messages.iter().enumerate() {
             if let Message::ToolResult { tool_call_id, .. } = msg {
