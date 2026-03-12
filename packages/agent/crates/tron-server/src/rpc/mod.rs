@@ -21,6 +21,8 @@ pub mod memory_ledger;
 pub(crate) mod memory_queries;
 pub(crate) mod notification_inbox;
 pub mod registry;
+pub(crate) mod session_commands;
 pub mod session_context;
+pub(crate) mod session_queries;
 pub mod types;
 pub mod validation;

@@ -3,14 +3,13 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
-use tron_core::events::{BaseEvent, TronEvent};
-use tron_runtime::agent::event_emitter::EventEmitter;
 
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::{self, RpcError};
+use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
-use crate::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
+use crate::rpc::session_commands::{CreateSessionRequest, SessionCommandService};
+use crate::rpc::session_queries::SessionQueryService;
 
 /// Create a new session.
 pub struct CreateSessionHandler;
@@ -20,145 +19,19 @@ impl MethodHandler for CreateSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let working_dir = require_string_param(params.as_ref(), "workingDirectory")?;
-        let model_owned = opt_string(params.as_ref(), "model");
-        let model = model_owned.as_deref().unwrap_or("claude-sonnet-4-20250514");
+        let model = opt_string(params.as_ref(), "model")
+            .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
         let title = opt_string(params.as_ref(), "title");
 
-        let session_id = ctx
-            .session_manager
-            .create_session(model, &working_dir, title.as_deref())
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionCreated {
-                base: BaseEvent::now(&session_id),
-                model: model.to_string(),
-                working_directory: working_dir.clone(),
-                source: None,
-            });
-
-        // Optimistically discover rules and memory so clients can display loading
-        // indicators immediately (content is loaded later at prompt time).
-        let event_store = ctx.event_store.clone();
-        let context_artifacts = ctx.context_artifacts.clone();
-        let broadcast = ctx.orchestrator.broadcast().clone();
-        let shutdown_coordinator = ctx.shutdown_coordinator.clone();
-        let session_id_for_task = session_id.clone();
-        let working_dir_for_task = working_dir.clone();
-        let handle = tokio::spawn(async move {
-            let join = tokio::task::spawn_blocking(move || {
-                emit_optimistic_context_events(
-                    &event_store,
-                    context_artifacts.as_ref(),
-                    &broadcast,
-                    &session_id_for_task,
-                    &working_dir_for_task,
-                );
-            })
-            .await;
-            if let Err(e) = join {
-                tracing::warn!(error = %e, "optimistic context preload task panicked");
-            }
-        });
-        if let Some(ref coord) = shutdown_coordinator {
-            coord.register_task(handle);
-        }
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "model": model,
-            "workingDirectory": working_dir,
-            "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            "isActive": true,
-            "isArchived": false,
-            "messageCount": 0,
-            "eventCount": 1,
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cost": 0.0,
-        }))
-    }
-}
-
-/// Discover rules files and memory, then persist + broadcast notification events.
-///
-/// This runs at session.create time so clients can show "Loaded N rules" / "Loaded memory"
-/// indicators immediately. The actual content is loaded later when the first prompt is sent.
-fn emit_optimistic_context_events(
-    event_store: &std::sync::Arc<tron_events::EventStore>,
-    context_artifacts: &ContextArtifactsService,
-    broadcast: &std::sync::Arc<EventEmitter>,
-    session_id: &str,
-    working_dir: &str,
-) {
-    let settings = tron_settings::get_settings();
-    let artifacts = context_artifacts.load(event_store.as_ref(), working_dir, &settings, false);
-
-    let files_json: Vec<serde_json::Value> = artifacts
-        .session
-        .rules
-        .files
-        .iter()
-        .map(|file| {
-            let depth = if file.level == RuleFileLevel::Global {
-                0
-            } else {
-                file.depth
-            };
-            serde_json::json!({
-                "path": file.path.to_string_lossy(),
-                "relativePath": file.relative_path,
-                "level": file.level.as_str(),
-                "depth": depth,
-                "sizeBytes": file.size_bytes,
-            })
-        })
-        .collect();
-
-    if !files_json.is_empty() {
-        #[allow(clippy::cast_possible_truncation)]
-        let total = files_json.len() as u32;
-        let merged_tokens = artifacts.session.rules.merged_tokens_estimate();
-        let _ = event_store.append(&tron_events::AppendOptions {
-            session_id,
-            event_type: tron_events::EventType::RulesLoaded,
-            payload: serde_json::json!({
-                "files": files_json,
-                "totalFiles": total,
-                "mergedTokens": merged_tokens,
-                "dynamicRulesCount": 0,
-            }),
-            parent_id: None,
-        });
-        let _ = broadcast.emit(TronEvent::RulesLoaded {
-            base: BaseEvent::now(session_id),
-            total_files: total,
-            dynamic_rules_count: 0,
-        });
-    }
-
-    if let Some(memory) = artifacts.session.memory {
-        #[allow(clippy::cast_possible_truncation)]
-        let count = memory.raw_event_count as u32;
-
-        let _ = event_store.append(&tron_events::AppendOptions {
-            session_id,
-            event_type: tron_events::EventType::MemoryLoaded,
-            payload: serde_json::json!({
-                "count": count,
-                "tokens": memory.raw_payload_tokens,
-                "workspaceId": memory.workspace_id,
-            }),
-            parent_id: None,
-        });
-        let _ = broadcast.emit(TronEvent::MemoryLoaded {
-            base: BaseEvent::now(session_id),
-            count,
-        });
+        SessionCommandService::create(
+            ctx,
+            CreateSessionRequest {
+                working_directory: working_dir,
+                model,
+                title,
+            },
+        )
+        .await
     }
 }
 
@@ -170,24 +43,7 @@ impl MethodHandler for ResumeSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.resume", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        let active = ctx
-            .session_manager
-            .resume_session(&session_id)
-            .map_err(|e| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: e.to_string(),
-            })?;
-
-        let message_count = active.state.messages.len();
-        let last_activity = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "model": active.state.model,
-            "messageCount": message_count,
-            "lastActivity": last_activity,
-        }))
+        SessionQueryService::resume(ctx, session_id).await
     }
 }
 
@@ -206,62 +62,7 @@ impl MethodHandler for ListSessionsHandler {
             .and_then(|p| p.get("limit"))
             .and_then(serde_json::Value::as_u64)
             .map(|v| v as usize);
-
-        let filter = tron_runtime::SessionFilter {
-            include_archived,
-            exclude_subagents: true,
-            user_only: true,
-            limit,
-            ..Default::default()
-        };
-
-        let sessions =
-            ctx.session_manager
-                .list_sessions(&filter)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
-
-        // Get message previews for all sessions
-        let session_ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-        let previews = ctx
-            .event_store
-            .get_session_message_previews(&session_ids)
-            .unwrap_or_default();
-
-        let items: Vec<Value> = sessions
-            .into_iter()
-            .map(|s| {
-                let is_active = ctx.session_manager.is_active(&s.id);
-                let preview = previews.get(&s.id);
-                serde_json::json!({
-                    "sessionId": s.id,
-                    "model": s.latest_model,
-                    "title": s.title,
-                    "workingDirectory": s.working_directory,
-                    "createdAt": s.created_at,
-                    "lastActivity": s.last_activity_at,
-                    "endedAt": s.ended_at,
-                    "isActive": is_active,
-                    "isArchived": s.ended_at.is_some(),
-                    "isChat": s.source.as_deref() == Some("chat"),
-                    "source": s.source,
-                    "eventCount": s.event_count,
-                    "messageCount": s.message_count,
-                    "inputTokens": s.total_input_tokens,
-                    "outputTokens": s.total_output_tokens,
-                    "lastTurnInputTokens": s.last_turn_input_tokens,
-                    "cacheReadTokens": s.total_cache_read_tokens,
-                    "cacheCreationTokens": s.total_cache_creation_tokens,
-                    "cost": s.total_cost,
-                    "parentSessionId": s.parent_session_id,
-                    "lastUserPrompt": preview.and_then(|p| p.last_user_prompt.as_deref()),
-                    "lastAssistantResponse": preview.and_then(|p| p.last_assistant_response.as_deref()),
-                })
-            })
-            .collect();
-
-        Ok(serde_json::json!({ "sessions": items }))
+        SessionQueryService::list(ctx, include_archived, limit).await
     }
 }
 
@@ -273,30 +74,7 @@ impl MethodHandler for DeleteSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.delete", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Protect chat session from deletion
-        if ctx.session_manager.is_chat_session(&session_id) {
-            return Err(RpcError::Custom {
-                code: "CHAT_SESSION_PROTECTED".into(),
-                message: "The default chat session cannot be deleted".into(),
-                details: None,
-            });
-        }
-
-        ctx.session_manager
-            .delete_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionDeleted {
-                base: BaseEvent::now(&session_id),
-            });
-
-        Ok(serde_json::json!({ "deleted": true }))
+        SessionCommandService::delete(ctx, session_id).await
     }
 }
 
@@ -309,26 +87,7 @@ impl MethodHandler for ForkSessionHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let title = opt_string(params.as_ref(), "title");
-
-        let fork_result = ctx
-            .session_manager
-            .fork_session(&session_id, None, title.as_deref())
-            .map_err(|e| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: e.to_string(),
-            })?;
-
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionForked {
-            base: BaseEvent::now(&session_id),
-            new_session_id: fork_result.new_session_id.clone(),
-        });
-
-        Ok(serde_json::json!({
-            "newSessionId": fork_result.new_session_id,
-            "forkedFromSessionId": session_id,
-            "forkedFromEventId": fork_result.forked_from_event_id,
-            "rootEventId": fork_result.root_event_id,
-        }))
+        SessionCommandService::fork(ctx, session_id, title).await
     }
 }
 
@@ -340,22 +99,7 @@ impl MethodHandler for GetHeadHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getHead", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        Ok(serde_json::json!({
-            "sessionId": session.id,
-            "headEventId": session.head_event_id,
-        }))
+        SessionQueryService::get_head(ctx, session_id).await
     }
 }
 
@@ -367,46 +111,7 @@ impl MethodHandler for GetStateHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getState", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Get session row for metadata
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        let active = ctx
-            .session_manager
-            .resume_session(&session_id)
-            .map_err(|e| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: e.to_string(),
-            })?;
-
-        let event_count = ctx.event_store.count_events(&session_id).unwrap_or(0);
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "headEventId": session.head_event_id,
-            "model": active.state.model,
-            "turnCount": active.state.turn_count,
-            "isEnded": active.state.is_ended,
-            "workingDirectory": active.state.working_directory,
-            "workspaceId": session.working_directory,
-            "eventCount": event_count,
-            "lastTurnInputTokens": session.last_turn_input_tokens,
-            "tokenUsage": {
-                "inputTokens": active.state.token_usage.input_tokens,
-                "outputTokens": active.state.token_usage.output_tokens,
-                "cacheReadTokens": session.total_cache_read_tokens,
-                "cacheCreationTokens": session.total_cache_creation_tokens,
-            },
-        }))
+        SessionQueryService::get_state(ctx, session_id).await
     }
 }
 
@@ -418,30 +123,7 @@ impl MethodHandler for ArchiveSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.archive", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Protect chat session from archiving
-        if ctx.session_manager.is_chat_session(&session_id) {
-            return Err(RpcError::Custom {
-                code: "CHAT_SESSION_PROTECTED".into(),
-                message: "The default chat session cannot be archived".into(),
-                details: None,
-            });
-        }
-
-        ctx.session_manager
-            .archive_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionArchived {
-                base: BaseEvent::now(&session_id),
-            });
-
-        Ok(serde_json::json!({ "archived": true }))
+        SessionCommandService::archive(ctx, session_id).await
     }
 }
 
@@ -462,91 +144,7 @@ impl MethodHandler for GetHistoryHandler {
             .map(|v| v as usize);
 
         let before_id = opt_string(params.as_ref(), "beforeId");
-
-        // Verify session exists
-        let _ = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        // Get message-type events.
-        // Tool calls are embedded as tool_use content blocks inside message.assistant events.
-        // Tool results are persisted as "tool.result" events (NOT "message.tool_result").
-        let message_types = ["message.user", "message.assistant", "tool.result"];
-        let type_strs: Vec<&str> = message_types.to_vec();
-        let events = ctx
-            .event_store
-            .get_events_by_type(&session_id, &type_strs, None)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        // Apply beforeId pagination
-        let events = if let Some(bid) = before_id {
-            events
-                .into_iter()
-                .take_while(|e| e.id != bid)
-                .collect::<Vec<_>>()
-        } else {
-            events
-        };
-
-        // Apply limit and determine hasMore
-        let has_more = limit.is_some_and(|l| events.len() > l);
-        let events = if let Some(l) = limit {
-            events.into_iter().take(l).collect::<Vec<_>>()
-        } else {
-            events
-        };
-
-        // Convert to message shape
-        let messages: Vec<Value> = events
-            .iter()
-            .map(|e| {
-                let role = match e.event_type.as_str() {
-                    "message.user" => "user",
-                    "message.assistant" => "assistant",
-                    "tool.result" => "tool",
-                    _ => "unknown",
-                };
-                let content = serde_json::from_str::<Value>(&e.payload).unwrap_or_else(|err| {
-                    tracing::warn!(event_id = %e.id, error = %err, "corrupt event payload");
-                    Value::Null
-                });
-
-                let mut msg = serde_json::json!({
-                    "id": e.id,
-                    "role": role,
-                    "content": content,
-                    "timestamp": e.timestamp,
-                });
-                if let Some(ref tool_name) = e.tool_name {
-                    msg["toolUse"] = serde_json::json!({ "name": tool_name });
-                }
-                // Hoist toolCallId and isError from content to message level
-                // for tool.result messages (wire format expects them at top level)
-                if e.event_type == "tool.result" {
-                    if let Some(tc_id) = content.get("toolCallId") {
-                        msg["toolCallId"] = tc_id.clone();
-                    }
-                    if let Some(is_err) = content.get("isError") {
-                        msg["isError"] = is_err.clone();
-                    }
-                }
-                msg
-            })
-            .collect();
-
-        Ok(serde_json::json!({
-            "messages": messages,
-            "hasMore": has_more,
-        }))
+        SessionQueryService::get_history(ctx, session_id, limit, before_id).await
     }
 }
 
@@ -557,61 +155,7 @@ pub struct GetChatSessionHandler;
 impl MethodHandler for GetChatSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getChat"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = tron_settings::get_settings();
-        if !settings.session.chat.enabled {
-            return Err(RpcError::Custom {
-                code: "CHAT_DISABLED".into(),
-                message: "Default chat mode is disabled".into(),
-                details: None,
-            });
-        }
-
-        let model = &settings.server.default_model;
-        let working_dir = &settings.session.chat.working_directory;
-
-        let (session_id, created) = ctx
-            .session_manager
-            .get_or_create_chat_session(model, working_dir)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        if created {
-            let _ = ctx
-                .orchestrator
-                .broadcast()
-                .emit(TronEvent::SessionCreated {
-                    base: BaseEvent::now(&session_id),
-                    model: model.clone(),
-                    working_directory: working_dir.clone(),
-                    source: Some("chat".into()),
-                });
-
-            // Chat sessions are clean slates — no auto-injected rules or memory
-        }
-
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::Internal {
-                message: "Chat session disappeared after creation".into(),
-            })?;
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "created": created,
-            "model": session.latest_model,
-            "workingDirectory": session.working_directory,
-            "createdAt": session.created_at,
-            "isActive": true,
-            "isArchived": false,
-            "isChat": true,
-            "messageCount": session.message_count,
-            "eventCount": session.event_count,
-        }))
+        SessionCommandService::get_chat(ctx).await
     }
 }
 
@@ -626,66 +170,7 @@ pub struct ResetChatSessionHandler;
 impl MethodHandler for ResetChatSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.resetChat"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = tron_settings::get_settings();
-        if !settings.session.chat.enabled {
-            return Err(RpcError::Custom {
-                code: "CHAT_DISABLED".into(),
-                message: "Default chat mode is disabled".into(),
-                details: None,
-            });
-        }
-
-        let model = &settings.server.default_model;
-        let working_dir = &settings.session.chat.working_directory;
-
-        let (new_id, old_id) = ctx
-            .session_manager
-            .reset_chat_session(model, working_dir)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        // Broadcast archive of old + creation of new
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionArchived {
-                base: BaseEvent::now(&old_id),
-            });
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionCreated {
-                base: BaseEvent::now(&new_id),
-                model: model.clone(),
-                working_directory: working_dir.clone(),
-                source: Some("chat".into()),
-            });
-
-        // Chat sessions are clean slates — no optimistic context events
-
-        let session = ctx
-            .session_manager
-            .get_session(&new_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::Internal {
-                message: "New chat session disappeared after creation".into(),
-            })?;
-
-        Ok(serde_json::json!({
-            "sessionId": new_id,
-            "previousSessionId": old_id,
-            "model": session.latest_model,
-            "workingDirectory": session.working_directory,
-            "createdAt": session.created_at,
-            "isActive": true,
-            "isArchived": false,
-            "isChat": true,
-            "messageCount": 0,
-            "eventCount": session.event_count,
-        }))
+        SessionCommandService::reset_chat(ctx).await
     }
 }
 
@@ -697,21 +182,7 @@ impl MethodHandler for UnarchiveSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.unarchive", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        ctx.session_manager
-            .unarchive_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionUnarchived {
-                base: BaseEvent::now(&session_id),
-            });
-
-        Ok(serde_json::json!({ "unarchived": true }))
+        SessionCommandService::unarchive(ctx, session_id).await
     }
 }
 
@@ -1657,6 +1128,63 @@ mod tests {
             "totalFiles should be >= 1, got: {}",
             payload["totalFiles"]
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn create_session_emits_memory_loaded_when_workspace_has_memory() {
+        let tmp =
+            std::env::temp_dir().join(format!("tron-session-test-memory-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let working_dir = tmp.to_string_lossy().to_string();
+
+        let ctx = make_test_context();
+        let existing = ctx
+            .session_manager
+            .create_session("m", &working_dir, Some("existing"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &existing,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({
+                "title": "Existing memory",
+                "entryType": "lesson",
+                "input": "Already learned this"
+            }),
+            parent_id: None,
+        });
+
+        let mut rx = ctx.orchestrator.subscribe();
+
+        let result = CreateSessionHandler
+            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
+            .await
+            .unwrap();
+
+        let sid = result["sessionId"].as_str().unwrap();
+        let memory_events = wait_for_event_count(&ctx, sid, &["memory.loaded"], 1).await;
+        let payload: serde_json::Value = serde_json::from_str(&memory_events[0].payload).unwrap();
+        assert_eq!(payload["count"], 1);
+        assert!(payload["tokens"].as_u64().unwrap() > 0);
+
+        let e1 = rx.try_recv().unwrap();
+        assert_eq!(e1.event_type(), "session_created");
+        let e2 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                match rx.try_recv() {
+                    Ok(event) if event.event_type() == "memory_loaded" => break event,
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                    Err(err) => panic!("unexpected broadcast error: {err}"),
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for memory_loaded broadcast");
+        assert_eq!(e2.event_type(), "memory_loaded");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
