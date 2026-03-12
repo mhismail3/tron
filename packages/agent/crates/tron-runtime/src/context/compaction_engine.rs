@@ -301,13 +301,31 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 // =============================================================================
 
 /// Split messages into those to summarize and those to preserve.
+///
+/// After computing the naive split point from `preserve_count`, adjusts
+/// the boundary backward so that no `ToolResult` at the start of the
+/// preserved set is orphaned. The Anthropic API rejects `tool_result`
+/// blocks whose `tool_use_id` has no matching `tool_use` in a preceding
+/// assistant message — if compaction summarizes away the assistant with
+/// the `tool_use`, the remaining `tool_result` becomes invalid.
+///
+/// The adjustment walks backward past any contiguous `ToolResult` messages
+/// at the split boundary, then one more step to include the preceding
+/// `Assistant` (which contains the corresponding `ToolUse` blocks).
 fn split_messages(messages: &[Message], preserve_count: usize) -> (Vec<Message>, Vec<Message>) {
     if preserve_count == 0 {
         return (messages.to_vec(), Vec::new());
     }
 
     if messages.len() > preserve_count {
-        let split_at = messages.len() - preserve_count;
+        let mut split_at = messages.len() - preserve_count;
+
+        // Walk backward while the split point lands on a ToolResult —
+        // these need their preceding Assistant (with ToolUse) to stay paired.
+        while split_at > 0 && messages[split_at].is_tool_result() {
+            split_at -= 1;
+        }
+
         (messages[..split_at].to_vec(), messages[split_at..].to_vec())
     } else {
         (Vec::new(), messages.to_vec())
@@ -812,5 +830,239 @@ mod tests {
         let result = engine.estimate_tokens_after_compaction("s", &preserved);
         // summary: 1, context: 50, ack: 50, preserved: 250
         assert_eq!(result, 351);
+    }
+
+    // -- split_messages: orphaned tool result prevention --
+
+    /// Helper: create an assistant message with tool_use blocks.
+    fn assistant_with_tool_use(ids: &[&str]) -> Message {
+        use tron_core::content::AssistantContent;
+        Message::Assistant {
+            content: ids
+                .iter()
+                .map(|id| AssistantContent::ToolUse {
+                    id: (*id).into(),
+                    name: "test_tool".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                })
+                .collect(),
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }
+    }
+
+    /// Helper: create a tool result message.
+    fn tool_result(id: &str) -> Message {
+        Message::ToolResult {
+            tool_call_id: id.into(),
+            content: tron_core::messages::ToolResultMessageContent::Text("ok".into()),
+            is_error: None,
+        }
+    }
+
+    #[test]
+    fn split_does_not_orphan_single_tool_result() {
+        // [User, Asst(tc1), ToolResult(tc1), User, Asst(text)]
+        //                    ^ naive split_at=2 (preserve 3)
+        // ToolResult at split → must walk back to include its Assistant
+        let msgs = vec![
+            Message::user("q1"),
+            assistant_with_tool_use(&["tc1"]),
+            tool_result("tc1"),
+            Message::user("q2"),
+            Message::assistant("done"),
+        ];
+        let (to_summarize, preserved) = split_messages(&msgs, 3);
+        // Naive split would be at index 2 (ToolResult), orphaning it.
+        // Fix: walk back to index 1 (the Assistant), so it's preserved too.
+        assert!(
+            !preserved.first().unwrap().is_tool_result(),
+            "preserved must not start with orphaned ToolResult"
+        );
+        assert_eq!(preserved.len(), 4); // Asst + TR + User + Asst
+        assert_eq!(to_summarize.len(), 1); // just User q1
+    }
+
+    #[test]
+    fn split_does_not_orphan_parallel_tool_results() {
+        // Parallel tool calls: Assistant with 2 ToolUse, followed by 2 ToolResults
+        // [User, Asst(tc1,tc2), TR(tc1), TR(tc2), User, Asst(text)]
+        //                                ^ naive split_at=3 (preserve 3)
+        let msgs = vec![
+            Message::user("q1"),
+            assistant_with_tool_use(&["tc1", "tc2"]),
+            tool_result("tc1"),
+            tool_result("tc2"),
+            Message::user("q2"),
+            Message::assistant("done"),
+        ];
+        let (to_summarize, preserved) = split_messages(&msgs, 3);
+        // Naive split at 3 lands on TR(tc2). Walk back past TR(tc1) to Asst.
+        assert!(
+            !preserved.first().unwrap().is_tool_result(),
+            "preserved must not start with orphaned ToolResult"
+        );
+        assert_eq!(preserved.len(), 5); // Asst + TR + TR + User + Asst
+        assert_eq!(to_summarize.len(), 1);
+    }
+
+    #[test]
+    fn split_walks_back_through_multiple_tool_results() {
+        // 3 parallel tool calls
+        let msgs = vec![
+            Message::user("q1"),
+            Message::assistant("r1"),
+            Message::user("q2"),
+            assistant_with_tool_use(&["tc1", "tc2", "tc3"]),
+            tool_result("tc1"),
+            tool_result("tc2"),
+            tool_result("tc3"),
+            Message::user("q3"),
+            Message::assistant("done"),
+        ];
+        // preserve 2 → naive split_at = 7 (User q3) → fine, no orphan
+        let (_, preserved) = split_messages(&msgs, 2);
+        assert_eq!(preserved.len(), 2);
+
+        // preserve 4 → naive split_at = 5, lands on TR(tc2)
+        let (to_summarize, preserved) = split_messages(&msgs, 4);
+        assert!(
+            !preserved.first().unwrap().is_tool_result(),
+            "preserved must not start with orphaned ToolResult"
+        );
+        // Walk back: 5→TR(tc2), 4→TR(tc1), 3→Asst (stop). Preserved from index 3.
+        assert_eq!(preserved.len(), 6); // Asst + 3 TRs + User + Asst
+        assert_eq!(to_summarize.len(), 3); // User + Asst + User
+    }
+
+    #[test]
+    fn split_no_adjustment_when_boundary_is_clean() {
+        // Split lands on a User message — no orphan, no adjustment needed
+        let msgs = vec![
+            Message::user("q1"),
+            assistant_with_tool_use(&["tc1"]),
+            tool_result("tc1"),
+            Message::user("q2"),
+            Message::assistant("done"),
+        ];
+        let (to_summarize, preserved) = split_messages(&msgs, 2);
+        // Naive split at 3 (User q2) — clean boundary
+        assert_eq!(to_summarize.len(), 3);
+        assert_eq!(preserved.len(), 2);
+        assert!(preserved[0].is_user());
+    }
+
+    #[test]
+    fn split_walkback_to_zero_preserves_everything() {
+        // Degenerate: all messages are tool-related, walkback reaches index 0
+        let msgs = vec![
+            assistant_with_tool_use(&["tc1"]),
+            tool_result("tc1"),
+            tool_result("tc2"),
+        ];
+        let (to_summarize, preserved) = split_messages(&msgs, 1);
+        // Naive split at 2 (TR tc2). Walk back: 2→TR, 1→TR, 0→Asst (stop).
+        // Now split_at=0, so to_summarize is empty, all preserved.
+        assert!(to_summarize.is_empty());
+        assert_eq!(preserved.len(), 3);
+    }
+
+    #[test]
+    fn split_tool_result_at_index_zero_safe() {
+        // Edge: first message is a ToolResult (shouldn't happen but must not panic)
+        let msgs = vec![
+            tool_result("tc_orphan"),
+            Message::user("q"),
+            Message::assistant("a"),
+        ];
+        let (to_summarize, preserved) = split_messages(&msgs, 2);
+        // Naive split at 1 (User) — no ToolResult at boundary, no adjustment
+        assert_eq!(to_summarize.len(), 1);
+        assert_eq!(preserved.len(), 2);
+
+        // Now try preserve=1, naive split at 2 (Asst) — also clean
+        let (to_summarize2, preserved2) = split_messages(&msgs, 1);
+        assert_eq!(to_summarize2.len(), 2);
+        assert_eq!(preserved2.len(), 1);
+    }
+
+    /// Assert that every ToolResult in messages has a preceding Assistant
+    /// containing a ToolUse with the matching ID. This mirrors the Anthropic
+    /// API validation that rejects orphaned tool_result blocks.
+    fn assert_no_orphaned_tool_results(messages: &[Message]) {
+        for (i, msg) in messages.iter().enumerate() {
+            if let Message::ToolResult { tool_call_id, .. } = msg {
+                // Must have a preceding Assistant with a ToolUse matching this ID
+                let has_matching_tool_use = (0..i).rev().any(|j| {
+                    if let Message::Assistant { content, .. } = &messages[j] {
+                        content.iter().any(|c| {
+                            if let AssistantContent::ToolUse { id, .. } = c {
+                                id == tool_call_id
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                });
+                assert!(
+                    has_matching_tool_use,
+                    "ToolResult(tool_call_id={tool_call_id}) at index {i} has no \
+                     preceding Assistant with matching ToolUse"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_compaction_no_orphaned_tool_results() {
+        // Full integration test: compaction with tool-use messages in the mix
+        let msgs = vec![
+            Message::user("q1"),
+            assistant_with_tool_use(&["tc1"]),
+            tool_result("tc1"),
+            Message::user("q2"),
+            assistant_with_tool_use(&["tc2", "tc3"]),
+            tool_result("tc2"),
+            tool_result("tc3"),
+            Message::user("q3"),
+            Message::assistant("final"),
+        ];
+        // 9 messages, preserve 20% → ceil(9*0.2) = 2, split_at = 7
+        // msgs[7] = User q3 — clean boundary, no adjustment needed
+        let deps = MockDeps::new(msgs);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        let summarizer = MockSummarizer::new("Summary of tool usage");
+
+        let result = engine.execute(&summarizer, None).await.unwrap();
+        assert!(result.success);
+
+        assert_no_orphaned_tool_results(&engine.deps.get_messages());
+    }
+
+    #[tokio::test]
+    async fn execute_compaction_boundary_on_tool_result() {
+        // 4 messages, preserve 20% → ceil(4*0.2) = 1, min 2 → 2, split_at = 2
+        let msgs = vec![
+            Message::user("q1"),
+            assistant_with_tool_use(&["tc1"]),
+            tool_result("tc1"),  // index 2 ← naive split lands here
+            Message::assistant("done"),
+        ];
+        let deps = MockDeps::new(msgs);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        let summarizer = MockSummarizer::new("Summary");
+
+        let result = engine.execute(&summarizer, None).await.unwrap();
+        assert!(result.success);
+
+        let new_msgs = engine.deps.get_messages();
+        // After fix: summary + ack + Asst(tc1) + TR(tc1) + Asst(done) = 5
+        assert_eq!(new_msgs.len(), 5);
+        assert_no_orphaned_tool_results(&new_msgs);
     }
 }

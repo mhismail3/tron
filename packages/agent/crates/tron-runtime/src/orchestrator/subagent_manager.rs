@@ -128,6 +128,8 @@ pub struct SubagentManager {
     hooks: Option<Arc<HookEngine>>,
     /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
     worktree_coordinator: std::sync::OnceLock<Arc<tron_worktree::WorktreeCoordinator>>,
+    /// Self-reference for passing to child agents (set after wrapping in Arc).
+    self_ref: std::sync::OnceLock<std::sync::Weak<Self>>,
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
 }
@@ -151,8 +153,20 @@ impl SubagentManager {
             guardrails,
             hooks,
             worktree_coordinator: std::sync::OnceLock::new(),
+            self_ref: std::sync::OnceLock::new(),
             subagents: DashMap::new(),
         }
+    }
+
+    /// Store a weak self-reference so child agents can receive `Arc<SubagentManager>`.
+    /// Must be called once after wrapping in `Arc`.
+    pub fn set_self_ref(self: &Arc<Self>) {
+        let _ = self.self_ref.set(Arc::downgrade(self));
+    }
+
+    /// Upgrade the weak self-reference to an Arc (returns None if dropped).
+    fn arc_self(&self) -> Option<Arc<Self>> {
+        self.self_ref.get().and_then(|w| w.upgrade())
     }
 
     /// Set the worktree coordinator for subagent isolation.
@@ -279,6 +293,7 @@ impl SubagentManager {
         let parent_session_id = config.parent_session_id.clone();
         let tracker_clone = tracker.clone();
         let wt_coordinator = self.worktree_coordinator.get().cloned();
+        let child_subagent_manager = self.arc_self();
 
         let subsession_span = info_span!(
             "subsession",
@@ -354,7 +369,7 @@ impl SubagentManager {
                     memory_content: None,
                     rules_index: None,
                     pre_activated_rules: vec![],
-                    subagent_manager: None,
+                    subagent_manager: child_subagent_manager,
                 },
             );
 
@@ -625,6 +640,7 @@ impl SubagentSpawner for SubagentManager {
         let blocking = config.blocking;
         let tracker_clone = tracker.clone();
         let wt_coordinator = self.worktree_coordinator.get().cloned();
+        let child_subagent_manager = self.arc_self();
 
         let subagent_span = info_span!(
             "subagent",
@@ -702,7 +718,7 @@ impl SubagentSpawner for SubagentManager {
                     memory_content: None,
                     rules_index: None,
                     pre_activated_rules: vec![],
-                    subagent_manager: None,
+                    subagent_manager: child_subagent_manager,
                 },
             );
 

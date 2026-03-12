@@ -633,6 +633,7 @@ async fn main() -> Result<()> {
             None,
             None,
         ));
+        subagent_manager.set_self_ref();
 
         // Build tool factory that includes subagent tools + summarizer-backed WebFetch
         let config = tool_config.clone();
