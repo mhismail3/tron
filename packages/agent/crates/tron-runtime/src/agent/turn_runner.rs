@@ -135,13 +135,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
     });
     if let Some(p) = persister {
-        p.append_fire_and_forget(
-            session_id,
-            EventType::StreamTurnStart,
-            json!({
-                "turn": turn,
-            }),
-        );
+        if let Err(error) = p
+            .append_background(
+                session_id,
+                EventType::StreamTurnStart,
+                json!({
+                    "turn": turn,
+                }),
+            )
+            .await
+        {
+            warn!(session_id, turn, error = %error, "failed to queue turn-start event");
+        }
     }
     debug!(session_id, turn, "turn started");
 
@@ -475,16 +480,27 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         // --- Phase 1: Persist all tool.call events upfront ---
         for tc in &stream_result.tool_calls {
             if let Some(p) = persister {
-                p.append_fire_and_forget(
-                    session_id,
-                    EventType::ToolCall,
-                    json!({
-                        "toolCallId": tc.id,
-                        "name": tc.name,
-                        "arguments": tc.arguments,
-                        "turn": turn,
-                    }),
-                );
+                if let Err(error) = p
+                    .append_background(
+                        session_id,
+                        EventType::ToolCall,
+                        json!({
+                            "toolCallId": tc.id,
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                            "turn": turn,
+                        }),
+                    )
+                    .await
+                {
+                    warn!(
+                        session_id,
+                        turn,
+                        tool_call_id = %tc.id,
+                        error = %error,
+                        "failed to queue tool-call event"
+                    );
+                }
             }
         }
 
@@ -538,17 +554,28 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             let is_error = exec_result.result.is_error.unwrap_or(false);
 
             if let Some(p) = persister {
-                p.append_fire_and_forget(
-                    session_id,
-                    EventType::ToolResult,
-                    json!({
-                        "toolCallId": tc.id,
-                        "name": tc.name,
-                        "content": result_text,
-                        "isError": is_error,
-                        "duration": exec_result.duration_ms,
-                    }),
-                );
+                if let Err(error) = p
+                    .append_background(
+                        session_id,
+                        EventType::ToolResult,
+                        json!({
+                            "toolCallId": tc.id,
+                            "name": tc.name,
+                            "content": result_text,
+                            "isError": is_error,
+                            "duration": exec_result.duration_ms,
+                        }),
+                    )
+                    .await
+                {
+                    warn!(
+                        session_id,
+                        turn,
+                        tool_call_id = %tc.id,
+                        error = %error,
+                        "failed to queue tool-result event"
+                    );
+                }
             }
 
             context_manager.add_message(Message::ToolResult {
@@ -593,17 +620,22 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             total_activated: total,
         });
         if let Some(p) = persister {
-            p.append_fire_and_forget(
-                session_id,
-                EventType::RulesActivated,
-                json!({
-                    "rules": all_activations.iter().map(|a| json!({
-                        "relativePath": a.relative_path,
-                        "scopeDir": a.scope_dir,
-                    })).collect::<Vec<_>>(),
-                    "totalActivated": total,
-                }),
-            );
+            if let Err(error) = p
+                .append_background(
+                    session_id,
+                    EventType::RulesActivated,
+                    json!({
+                        "rules": all_activations.iter().map(|a| json!({
+                            "relativePath": a.relative_path,
+                            "scopeDir": a.scope_dir,
+                        })).collect::<Vec<_>>(),
+                        "totalActivated": total,
+                    }),
+                )
+                .await
+            {
+                warn!(session_id, turn, error = %error, "failed to queue rules-activated event");
+            }
         }
     }
 
@@ -655,7 +687,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         if let Some(c) = cost {
             turn_end_payload["cost"] = json!(c);
         }
-        p.append_fire_and_forget(session_id, EventType::StreamTurnEnd, turn_end_payload);
+        if let Err(error) = p
+            .append_background(session_id, EventType::StreamTurnEnd, turn_end_payload)
+            .await
+        {
+            warn!(session_id, turn, error = %error, "failed to queue turn-end event");
+        }
     }
 
     debug!(

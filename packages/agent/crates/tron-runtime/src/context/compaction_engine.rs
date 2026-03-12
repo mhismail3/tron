@@ -1050,7 +1050,7 @@ mod tests {
         let msgs = vec![
             Message::user("q1"),
             assistant_with_tool_use(&["tc1"]),
-            tool_result("tc1"),  // index 2 ← naive split lands here
+            tool_result("tc1"), // index 2 ← naive split lands here
             Message::assistant("done"),
         ];
         let deps = MockDeps::new(msgs);

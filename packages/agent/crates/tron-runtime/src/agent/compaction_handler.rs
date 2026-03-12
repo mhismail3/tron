@@ -19,7 +19,7 @@ use tron_events::memory::trigger::CompactionTrigger;
 use tron_events::memory::types::{CompactionTriggerConfig, CompactionTriggerInput};
 
 use metrics::{counter, histogram};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::errors::RuntimeError;
@@ -337,7 +337,8 @@ impl CompactionHandler {
             emitter,
             reason,
             self.persister.as_ref(),
-        ))
+        )
+        .await)
     }
 
     /// Execute `PreCompact` hooks; returns `false` if hooks blocked compaction.
@@ -407,7 +408,7 @@ impl CompactionHandler {
         }
     }
 
-    fn emit_compaction_events(
+    async fn emit_compaction_events(
         result: Result<
             crate::context::types::CompactionResult,
             Box<dyn std::error::Error + Send + Sync>,
@@ -458,11 +459,20 @@ impl CompactionHandler {
                         "summary": summary_text,
                         "estimatedContextTokens": tokens_after as i64,
                     });
-                    persister.append_fire_and_forget(
-                        session_id,
-                        tron_events::EventType::CompactBoundary,
-                        payload,
-                    );
+                    if let Err(error) = persister
+                        .append_background(
+                            session_id,
+                            tron_events::EventType::CompactBoundary,
+                            payload,
+                        )
+                        .await
+                    {
+                        warn!(
+                            session_id,
+                            error = %error,
+                            "failed to queue compaction boundary event"
+                        );
+                    }
                 }
                 true
             }
