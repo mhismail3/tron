@@ -1,6 +1,10 @@
-//! Compaction handler — monitors token usage and triggers compaction.
+//! Compaction handler — sole owner of compaction logic.
+//!
+//! Uses multi-signal triggering: token threshold, turn count fallback,
+//! and progress signals (git push, gh pr, etc.). Runs at pre-turn.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
 
@@ -11,6 +15,8 @@ use crate::hooks::types::{HookAction, HookContext};
 use async_trait::async_trait;
 use tron_core::events::HookResult as EventHookResult;
 use tron_core::events::{BaseEvent, CompactionReason, TronEvent};
+use tron_events::memory::trigger::CompactionTrigger;
+use tron_events::memory::types::{CompactionTriggerConfig, CompactionTriggerInput};
 
 use metrics::{counter, histogram};
 use tracing::{debug, info};
@@ -126,13 +132,22 @@ impl tron_tools::traits::ContentSummarizer for SubagentContentSummarizer {
 // CompactionHandler
 // =============================================================================
 
-/// Compaction handler state.
+/// Compaction handler state — sole owner of all compaction logic.
+///
+/// Uses multi-signal triggering via `CompactionTrigger`:
+/// 1. Token threshold (safety net)
+/// 2. Progress signals (git push, gh pr, etc.)
+/// 3. Turn count fallback (shorter in alert zone)
 pub struct CompactionHandler {
     is_compacting: AtomicBool,
     compaction_done: Arc<Notify>,
     subagent_manager: Option<Arc<SubagentManager>>,
     /// Optional event persister for `compact.boundary` persistence.
     persister: Option<Arc<crate::orchestrator::event_persister::EventPersister>>,
+    /// Multi-signal compaction trigger.
+    trigger: Mutex<CompactionTrigger>,
+    /// Bash commands accumulated between compactions for progress-signal detection.
+    pending_bash_commands: Mutex<Vec<String>>,
 }
 
 /// RAII guard that resets `is_compacting` and notifies waiters on drop.
@@ -157,6 +172,8 @@ impl CompactionHandler {
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: None,
             persister: None,
+            trigger: Mutex::new(CompactionTrigger::new(CompactionTriggerConfig::default())),
+            pending_bash_commands: Mutex::new(Vec::new()),
         }
     }
 
@@ -167,6 +184,8 @@ impl CompactionHandler {
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: Some(manager),
             persister: None,
+            trigger: Mutex::new(CompactionTrigger::new(CompactionTriggerConfig::default())),
+            pending_bash_commands: Mutex::new(Vec::new()),
         }
     }
 
@@ -183,6 +202,20 @@ impl CompactionHandler {
         self.is_compacting.load(Ordering::Relaxed)
     }
 
+    /// Record a bash command for progress-signal detection.
+    /// Called by turn_runner after each bash tool execution.
+    pub fn record_bash_command(&self, command: &str) {
+        self.pending_bash_commands
+            .lock()
+            .unwrap()
+            .push(command.to_owned());
+    }
+
+    /// Get the current turn count since last compaction.
+    pub fn turns_since_compaction(&self) -> u32 {
+        self.trigger.lock().unwrap().turns_since_compaction()
+    }
+
     /// Wait for an in-progress compaction to complete, with timeout.
     ///
     /// Returns immediately if no compaction is running.
@@ -193,7 +226,7 @@ impl CompactionHandler {
         let _ = tokio::time::timeout(timeout, self.compaction_done.notified()).await;
     }
 
-    /// Check if compaction is needed and execute if so.
+    /// Check if compaction is needed (using multi-signal trigger) and execute if so.
     ///
     /// Returns `true` if compaction was performed.
     pub async fn check_and_compact(
@@ -204,12 +237,44 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
     ) -> Result<bool, RuntimeError> {
-        if !context_manager.should_compact() {
+        // Build trigger input from current state
+        let current_tokens = context_manager.get_current_tokens();
+        let context_limit = context_manager.get_context_limit();
+        #[allow(clippy::cast_precision_loss)]
+        let token_ratio = if context_limit > 0 {
+            current_tokens as f64 / context_limit as f64
+        } else {
+            0.0
+        };
+
+        let pending_commands = self.pending_bash_commands.lock().unwrap().clone();
+        let trigger_input = CompactionTriggerInput {
+            current_token_ratio: token_ratio,
+            recent_event_types: Vec::new(), // No DB event access at pre-turn
+            recent_tool_calls: pending_commands,
+        };
+
+        let trigger_result = self.trigger.lock().unwrap().should_compact(&trigger_input);
+        if !trigger_result.compact {
             return Ok(false);
         }
 
-        self.execute_compaction(context_manager, hooks, session_id, emitter, reason)
-            .await
+        debug!(
+            reason = %trigger_result.reason,
+            session_id,
+            "compaction triggered by multi-signal"
+        );
+
+        let success = self
+            .execute_compaction(context_manager, hooks, session_id, emitter, reason)
+            .await?;
+
+        if success {
+            self.trigger.lock().unwrap().reset();
+            self.pending_bash_commands.lock().unwrap().clear();
+        }
+
+        Ok(success)
     }
 
     /// Force-execute compaction regardless of threshold.
@@ -462,7 +527,6 @@ mod tests {
     #[tokio::test]
     async fn wait_returns_immediately_when_idle() {
         let handler = CompactionHandler::new();
-        // Should return immediately since nothing is compacting
         handler
             .wait_for_compaction(std::time::Duration::from_millis(10))
             .await;
@@ -482,7 +546,6 @@ mod tests {
             };
             assert!(is_compacting.load(Ordering::SeqCst));
         }
-        // After guard drops, is_compacting should be false
         assert!(!is_compacting.load(Ordering::SeqCst));
     }
 
@@ -492,16 +555,13 @@ mod tests {
         let done = Arc::new(Notify::new());
         let done_clone = done.clone();
 
-        // Spawn a waiter
         let waiter = tokio::spawn(async move {
             done_clone.notified().await;
             true
         });
 
-        // Small yield to let the waiter register
         tokio::task::yield_now().await;
 
-        // Drop the guard — should notify the waiter
         {
             let _guard = CompactionGuard {
                 is_compacting: &is_compacting,
@@ -519,9 +579,7 @@ mod tests {
     #[test]
     fn concurrent_compaction_rejected() {
         let handler = CompactionHandler::new();
-        // Simulate first compaction holding the lock
         handler.is_compacting.store(true, Ordering::SeqCst);
-        // CAS should fail
         let cas =
             handler
                 .is_compacting
@@ -537,5 +595,21 @@ mod tests {
         assert!(handler.is_compacting());
     }
 
-    // SubagentManagerSpawner is tested end-to-end through subagent_manager::tests::spawn_subsession_*
+    // -- Multi-signal trigger --
+
+    #[test]
+    fn record_bash_command_accumulates() {
+        let handler = CompactionHandler::new();
+        handler.record_bash_command("git status");
+        handler.record_bash_command("cargo build");
+        handler.record_bash_command("git push origin main");
+        let cmds = handler.pending_bash_commands.lock().unwrap();
+        assert_eq!(cmds.len(), 3);
+    }
+
+    #[test]
+    fn turns_since_compaction_starts_at_zero() {
+        let handler = CompactionHandler::new();
+        assert_eq!(handler.turns_since_compaction(), 0);
+    }
 }

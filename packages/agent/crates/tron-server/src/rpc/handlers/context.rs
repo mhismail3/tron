@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tracing::instrument;
 
 use tron_runtime::context::context_manager::ContextManager;
-use tron_runtime::context::summarizer::KeywordSummarizer;
+use tron_runtime::context::summarizer::{KeywordSummarizer, Summarizer};
 use tron_runtime::context::types::{CompactionConfig, ContextManagerConfig};
 use tron_skills::registry::SkillRegistry;
 
@@ -140,6 +140,34 @@ fn build_active_skill_context(
     }
     let ctx = tron_skills::injector::build_skill_context(&found);
     if ctx.is_empty() { None } else { Some(ctx) }
+}
+
+// =============================================================================
+// Summarizer helper — builds LLM or keyword summarizer from RpcContext
+// =============================================================================
+
+/// Build the best available summarizer for compaction.
+///
+/// Uses `LlmSummarizer` (via SubagentManager) when available for high-quality
+/// narrative summaries; falls back to `KeywordSummarizer` otherwise.
+fn build_summarizer(
+    ctx: &RpcContext,
+    session_id: &str,
+    working_directory: &str,
+) -> Box<dyn Summarizer> {
+    if let Some(ref manager) = ctx.subagent_manager {
+        let spawner = tron_runtime::agent::compaction_handler::SubagentManagerSpawner {
+            manager: manager.clone(),
+            parent_session_id: session_id.to_owned(),
+            working_directory: working_directory.to_owned(),
+            system_prompt: tron_runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
+                .to_string(),
+            model: None,
+        };
+        Box::new(tron_runtime::context::llm_summarizer::LlmSummarizer::new(spawner))
+    } else {
+        Box::new(KeywordSummarizer::new())
+    }
 }
 
 // =============================================================================
@@ -461,11 +489,11 @@ impl MethodHandler for PreviewCompactionHandler {
     )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
-
-        let summarizer = KeywordSummarizer::new();
-        let preview = cm
-            .preview_compaction(&summarizer)
+        let prepared = build_context_manager_for_session(&session_id, ctx)?;
+        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
+        let preview = prepared
+            .context_manager
+            .preview_compaction(summarizer.as_ref())
             .await
             .map_err(|e| RpcError::Internal {
                 message: format!("Compaction preview failed: {e}"),
@@ -496,11 +524,23 @@ impl MethodHandler for ConfirmCompactionHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let edited_summary = opt_string(params.as_ref(), "editedSummary");
 
-        let mut cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
-        let summarizer = KeywordSummarizer::new();
+        let prepared = build_context_manager_for_session(&session_id, ctx)?;
+        let mut cm = prepared.context_manager;
+        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
+
+        // Emit CompactionStart so iOS shows the spinner pill
+        let tokens_before = cm.get_current_tokens();
+        let _ =
+            ctx.orchestrator
+                .broadcast()
+                .emit(tron_core::events::TronEvent::CompactionStart {
+                    base: tron_core::events::BaseEvent::now(&session_id),
+                    reason: tron_core::events::CompactionReason::Manual,
+                    tokens_before,
+                });
 
         let result = cm
-            .execute_compaction(&summarizer, edited_summary.as_deref())
+            .execute_compaction(summarizer.as_ref(), edited_summary.as_deref())
             .await
             .map_err(|e| RpcError::Internal {
                 message: format!("Compaction failed: {e}"),
@@ -521,7 +561,7 @@ impl MethodHandler for ConfirmCompactionHandler {
             parent_id: None,
         });
 
-        // Broadcast compaction complete event
+        // Broadcast compaction complete event (replaces spinner with final pill)
         let _ =
             ctx.orchestrator
                 .broadcast()
@@ -533,7 +573,7 @@ impl MethodHandler for ConfirmCompactionHandler {
                     compression_ratio: result.compression_ratio,
                     reason: Some(tron_core::events::CompactionReason::Manual),
                     summary: Some(result.summary.clone()),
-                    estimated_context_tokens: None,
+                    estimated_context_tokens: Some(result.tokens_after),
                 });
 
         // Invalidate cached session
@@ -619,11 +659,23 @@ impl MethodHandler for CompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.compact", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let mut cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
+        let prepared = build_context_manager_for_session(&session_id, ctx)?;
+        let mut cm = prepared.context_manager;
+        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
 
-        let summarizer = KeywordSummarizer::new();
+        // Emit CompactionStart so iOS shows the spinner pill
+        let tokens_before = cm.get_current_tokens();
+        let _ =
+            ctx.orchestrator
+                .broadcast()
+                .emit(tron_core::events::TronEvent::CompactionStart {
+                    base: tron_core::events::BaseEvent::now(&session_id),
+                    reason: tron_core::events::CompactionReason::Manual,
+                    tokens_before,
+                });
+
         let result = cm
-            .execute_compaction(&summarizer, None)
+            .execute_compaction(summarizer.as_ref(), None)
             .await
             .map_err(|e| RpcError::Internal {
                 message: format!("Compaction failed: {e}"),
@@ -644,7 +696,7 @@ impl MethodHandler for CompactHandler {
             parent_id: None,
         });
 
-        // Broadcast compaction complete event
+        // Broadcast compaction complete event (replaces spinner with final pill)
         let _ =
             ctx.orchestrator
                 .broadcast()
@@ -656,7 +708,7 @@ impl MethodHandler for CompactHandler {
                     compression_ratio: result.compression_ratio,
                     reason: Some(tron_core::events::CompactionReason::Manual),
                     summary: Some(result.summary.clone()),
-                    estimated_context_tokens: None,
+                    estimated_context_tokens: Some(result.tokens_after),
                 });
 
         // Invalidate cached session

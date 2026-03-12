@@ -45,6 +45,8 @@ pub struct CreateAgentOpts {
     pub rules_index: Option<RulesIndex>,
     /// Rule relative paths to pre-activate (from session reconstruction).
     pub pre_activated_rules: Vec<String>,
+    /// Optional subagent manager for LLM-backed compaction summarization.
+    pub subagent_manager: Option<std::sync::Arc<crate::orchestrator::subagent_manager::SubagentManager>>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -129,6 +131,7 @@ impl AgentFactory {
                 guardrails: opts.guardrails,
                 hooks: opts.hooks,
                 context_manager,
+                subagent_manager: opts.subagent_manager,
             },
             session_id,
         )
@@ -159,6 +162,7 @@ mod tests {
             memory_content: None,
             rules_index: None,
             pre_activated_rules: vec![],
+            subagent_manager: None,
         }
     }
 

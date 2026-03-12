@@ -234,9 +234,12 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     registry.register(Arc::new(tron_tools::fs::write::WriteTool::new(fs.clone())));
     registry.register(Arc::new(tron_tools::fs::edit::EditTool::new(fs.clone())));
 
-    // 4: Bash
+    // 4: Bash (with blob store for large output storage)
+    let blob_store: Arc<dyn tron_tools::traits::BlobStore> =
+        Arc::new(providers::SqliteBlobStore::new(config.event_store.clone()));
     registry.register(Arc::new(tron_tools::system::bash::BashTool::new(
         runner.clone(),
+        Some(blob_store),
     )));
 
     // 5: Search

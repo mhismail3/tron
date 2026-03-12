@@ -354,6 +354,7 @@ impl SubagentManager {
                     memory_content: None,
                     rules_index: None,
                     pre_activated_rules: vec![],
+                    subagent_manager: None,
                 },
             );
 
@@ -701,6 +702,7 @@ impl SubagentSpawner for SubagentManager {
                     memory_content: None,
                     rules_index: None,
                     pre_activated_rules: vec![],
+                    subagent_manager: None,
                 },
             );
 

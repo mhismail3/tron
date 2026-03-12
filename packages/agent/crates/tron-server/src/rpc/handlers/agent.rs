@@ -38,7 +38,6 @@ use prompt_runtime::{format_subagent_results, get_pending_subagent_results};
 struct RuntimeMemoryDeps {
     subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
     event_store: Arc<tron_events::EventStore>,
-    session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
     broadcast: Arc<tron_runtime::EventEmitter>,
     session_id: String,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
@@ -48,106 +47,6 @@ struct RuntimeMemoryDeps {
 
 #[async_trait]
 impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
-    async fn execute_compaction(&self) -> Result<(), tron_events::memory::errors::MemoryError> {
-        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
-
-        // Build a context manager from the session (same approach as CompactHandler)
-        let state = self
-            .session_manager
-            .resume_session(&self.session_id)
-            .map_err(|e| tron_events::memory::errors::MemoryError::Compaction(e.to_string()))?;
-
-        if state.state.messages.is_empty() {
-            return Ok(());
-        }
-
-        let context_limit = tron_llm::model_context_window(&state.state.model);
-        let tools = Vec::new(); // Tool defs not needed for compaction summary
-        let mut cm = tron_runtime::context::context_manager::ContextManager::new(
-            tron_runtime::context::types::ContextManagerConfig {
-                model: state.state.model.clone(),
-                system_prompt: None,
-                working_directory: state.state.working_directory.clone(),
-                tools,
-                rules_content: None,
-                compaction: tron_runtime::context::types::CompactionConfig {
-                    context_limit,
-                    ..Default::default()
-                },
-            },
-        );
-        for msg in &state.state.messages {
-            cm.add_message(msg.clone());
-        }
-
-        // Execute compaction via subsession (LLM) or keyword fallback
-        let result = if let Some(ref manager) = self.subagent_manager {
-            let spawner = SubagentManagerSpawner {
-                manager: manager.clone(),
-                parent_session_id: self.session_id.clone(),
-                working_directory: state.state.working_directory.clone().unwrap_or_default(),
-                system_prompt: tron_runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
-                    .to_string(),
-                model: None, // Use session's model
-            };
-            let summarizer = tron_runtime::context::llm_summarizer::LlmSummarizer::new(spawner);
-            cm.execute_compaction(&summarizer, None).await
-        } else {
-            let summarizer = tron_runtime::context::summarizer::KeywordSummarizer;
-            cm.execute_compaction(&summarizer, None).await
-        };
-
-        let result = result
-            .map_err(|e| tron_events::memory::errors::MemoryError::Compaction(e.to_string()))?;
-
-        // Persist compact.summary event
-        let _ = self.event_store.append(&tron_events::AppendOptions {
-            session_id: &self.session_id,
-            event_type: tron_events::EventType::CompactSummary,
-            payload: serde_json::json!({
-                "summary": result.summary,
-                "tokensBefore": result.tokens_before,
-                "tokensAfter": result.tokens_after,
-                "compressionRatio": result.compression_ratio,
-            }),
-            parent_id: None,
-        });
-
-        // Persist compact.boundary marker (scopes gather_recent_events)
-        let _ = self.event_store.append(&tron_events::AppendOptions {
-            session_id: &self.session_id,
-            event_type: tron_events::EventType::CompactBoundary,
-            payload: serde_json::json!({
-                "originalTokens": result.tokens_before,
-                "compactedTokens": result.tokens_after,
-                "compressionRatio": result.compression_ratio,
-                "reason": "auto",
-            }),
-            parent_id: None,
-        });
-
-        let estimated_context = cm.get_current_tokens();
-
-        // Broadcast compaction complete
-        let _ = self
-            .broadcast
-            .emit(tron_core::events::TronEvent::CompactionComplete {
-                base: tron_core::events::BaseEvent::now(&self.session_id),
-                success: result.success,
-                tokens_before: result.tokens_before,
-                tokens_after: result.tokens_after,
-                compression_ratio: result.compression_ratio,
-                reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
-                summary: Some(result.summary),
-                estimated_context_tokens: Some(estimated_context),
-            });
-
-        // Invalidate cached session
-        self.session_manager.invalidate_session(&self.session_id);
-
-        Ok(())
-    }
-
     async fn write_ledger_entry(
         &self,
         _opts: &tron_events::memory::types::LedgerWriteOpts,
@@ -558,6 +457,7 @@ impl MethodHandler for PromptHandler {
                     memory_content: memory,
                     rules_index,
                     pre_activated_rules,
+                    subagent_manager: subagent_manager.clone(),
                 },
             );
 
@@ -714,7 +614,6 @@ impl MethodHandler for PromptHandler {
                 let memory_deps = RuntimeMemoryDeps {
                     subagent_manager: subagent_manager.clone(),
                     event_store: event_store.clone(),
-                    session_manager: session_manager.clone(),
                     broadcast: broadcast.clone(),
                     session_id: session_id_clone.clone(),
                     embedding_controller: embedding_controller.clone(),
@@ -735,16 +634,8 @@ impl MethodHandler for PromptHandler {
                         }
                     };
 
-                let cs_for_trigger = &settings.context.compactor;
-                let trigger_config =
-                    tron_events::memory::types::CompactionTriggerConfig::from(cs_for_trigger);
-                let mut trigger =
-                    tron_events::memory::trigger::CompactionTrigger::new(trigger_config);
-                if cs_for_trigger.force_always.unwrap_or(false) {
-                    trigger.set_force_always(true);
-                }
                 let mut memory_manager =
-                    tron_events::memory::manager::MemoryManager::new(memory_deps, trigger);
+                    tron_events::memory::manager::MemoryManager::new(memory_deps);
 
                 memory_manager
                     .on_cycle_complete(tron_events::memory::types::CycleInfo {
@@ -3767,139 +3658,4 @@ mod tests {
         assert!(!types.contains(&"tool.call".to_string()));
     }
 
-    #[tokio::test]
-    async fn auto_compaction_persists_boundary_event() {
-        use tron_events::memory::manager::MemoryManagerDeps;
-
-        let ctx = make_test_context();
-        let sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
-            .unwrap();
-
-        // Seed messages so compaction has something to work with
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"content": "hello"}),
-            parent_id: None,
-        });
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({
-                "content": [{"type": "text", "text": "hi there"}],
-                "turn": 1,
-                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
-            }),
-            parent_id: None,
-        });
-        ctx.session_manager.invalidate_session(&sid);
-
-        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
-        let deps = super::RuntimeMemoryDeps {
-            subagent_manager: None, // Uses KeywordSummarizer
-            event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
-            broadcast: broadcast.clone(),
-            session_id: sid.clone(),
-            embedding_controller: None,
-            shutdown_coordinator: None,
-            ledger_enabled: false,
-        };
-
-        deps.execute_compaction().await.unwrap();
-
-        // Verify both compact.summary and compact.boundary were persisted
-        let summaries = ctx
-            .event_store
-            .get_events_by_type(&sid, &["compact.summary"], None)
-            .unwrap();
-        assert_eq!(
-            summaries.len(),
-            1,
-            "expected exactly 1 compact.summary event"
-        );
-
-        let boundaries = ctx
-            .event_store
-            .get_events_by_type(&sid, &["compact.boundary"], None)
-            .unwrap();
-        assert_eq!(
-            boundaries.len(),
-            1,
-            "expected exactly 1 compact.boundary event"
-        );
-
-        // Verify boundary payload has expected fields
-        let bp: Value = serde_json::from_str(&boundaries[0].payload).unwrap();
-        assert!(bp["originalTokens"].is_number());
-        assert!(bp["compactedTokens"].is_number());
-        assert_eq!(bp["reason"], "auto");
-    }
-
-    #[tokio::test]
-    async fn auto_compaction_broadcast_includes_estimated_context_tokens() {
-        use tron_events::memory::manager::MemoryManagerDeps;
-
-        let ctx = make_test_context();
-        let sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
-            .unwrap();
-
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"content": "hello"}),
-            parent_id: None,
-        });
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({
-                "content": [{"type": "text", "text": "hi there"}],
-                "turn": 1,
-                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
-            }),
-            parent_id: None,
-        });
-        ctx.session_manager.invalidate_session(&sid);
-
-        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
-        let mut rx = broadcast.subscribe();
-
-        let deps = super::RuntimeMemoryDeps {
-            subagent_manager: None,
-            event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
-            broadcast: broadcast.clone(),
-            session_id: sid.clone(),
-            embedding_controller: None,
-            shutdown_coordinator: None,
-            ledger_enabled: false,
-        };
-
-        deps.execute_compaction().await.unwrap();
-
-        // Drain broadcast events to find CompactionComplete
-        let mut found_context_tokens = false;
-        while let Ok(event) = rx.try_recv() {
-            if let tron_core::events::TronEvent::CompactionComplete {
-                estimated_context_tokens,
-                ..
-            } = event
-            {
-                assert!(
-                    estimated_context_tokens.is_some(),
-                    "estimated_context_tokens must be Some, got None"
-                );
-                found_context_tokens = true;
-            }
-        }
-        assert!(
-            found_context_tokens,
-            "no CompactionComplete event found in broadcast"
-        );
-    }
 }

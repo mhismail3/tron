@@ -179,6 +179,7 @@ mod tests {
                     rules_content: None,
                     compaction: crate::context::types::CompactionConfig::default(),
                 }),
+                subagent_manager: None,
             },
             "test-session".into(),
         )
@@ -313,6 +314,7 @@ mod tests {
                     rules_content: None,
                     compaction: crate::context::types::CompactionConfig::default(),
                 }),
+                subagent_manager: None,
             },
             "test-session".into(),
         );
@@ -388,6 +390,7 @@ mod tests {
                     rules_content: None,
                     compaction: crate::context::types::CompactionConfig::default(),
                 }),
+                subagent_manager: None,
             },
             "test-session".into(),
         );

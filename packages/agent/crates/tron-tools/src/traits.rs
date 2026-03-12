@@ -563,6 +563,16 @@ pub trait EventStoreQuery: Send + Sync {
     async fn read_blob(&self, blob_id: &str) -> Result<String, ToolError>;
 }
 
+/// Stores large content externally, returning a reference ID.
+///
+/// Used by `BashTool` to offload large outputs to blob storage instead of
+/// sending them verbatim to the LLM. Content-addressable (deduplicates by hash).
+#[async_trait]
+pub trait BlobStore: Send + Sync {
+    /// Store content, returns blob ID.
+    async fn store(&self, content: &[u8], mime_type: &str) -> Result<String, crate::errors::ToolError>;
+}
+
 /// Task management (`TaskManager` tool).
 #[async_trait]
 pub trait TaskManagerDelegate: Send + Sync {

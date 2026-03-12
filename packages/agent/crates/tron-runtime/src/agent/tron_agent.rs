@@ -53,6 +53,8 @@ pub struct AgentDeps {
     pub hooks: Option<Arc<HookEngine>>,
     /// Context manager for conversation history.
     pub context_manager: ContextManager,
+    /// Optional subagent manager for LLM-backed compaction summarization.
+    pub subagent_manager: Option<Arc<crate::orchestrator::subagent_manager::SubagentManager>>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -78,7 +80,10 @@ pub struct TronAgent {
 impl TronAgent {
     /// Create a new agent from bundled dependencies.
     pub fn new(config: AgentConfig, deps: AgentDeps, session_id: String) -> Self {
-        let compaction = CompactionHandler::new();
+        let compaction = match deps.subagent_manager {
+            Some(ref mgr) => CompactionHandler::with_subagent_manager(mgr.clone()),
+            None => CompactionHandler::new(),
+        };
         Self {
             config,
             provider: deps.provider,
@@ -555,6 +560,7 @@ mod tests {
             guardrails: None,
             hooks: None,
             context_manager: test_context_manager("mock-model"),
+            subagent_manager: None,
         }
     }
 
@@ -937,6 +943,7 @@ mod tests {
                 guardrails: None,
                 hooks: None,
                 context_manager: test_context_manager("mock-model"),
+                subagent_manager: None,
             },
             sid.clone(),
         );
@@ -1303,6 +1310,7 @@ mod tests {
             guardrails: None,
             hooks: None,
             context_manager: test_context_manager("mock-model"),
+            subagent_manager: None,
         };
         for tool in tools {
             deps.registry.register(tool);

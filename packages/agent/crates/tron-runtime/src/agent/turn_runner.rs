@@ -569,6 +569,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 all_activations.extend(new_acts);
             }
 
+            // Record bash commands for compaction progress-signal detection
+            if tc.name == "Bash" {
+                if let Some(cmd) = tc.arguments.get("command").and_then(|v| v.as_str()) {
+                    compaction.record_bash_command(cmd);
+                }
+            }
+
             if exec_result.stops_turn {
                 stop_turn_requested = true;
             }
