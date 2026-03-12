@@ -99,7 +99,7 @@ impl TronServer {
         rpc_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         // Inject device request broker (uses broadcast for device.request events)
         rpc_context.device_request_broker = Some(Arc::new(
-            crate::device::DeviceRequestBroker::new(broadcast.clone()),
+            crate::device::DeviceRequestBroker::new(broadcast.clone(), shutdown.token()),
         ));
         Self {
             config,
@@ -230,17 +230,37 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.broadcast.connection_count();
     let sessions = state.rpc_context.orchestrator.active_session_count();
-    let pool = state.rpc_context.event_store.pool();
+    let pool = state.rpc_context.event_store.pool().clone();
     let tron_home = tron_settings::tron_home_dir();
-    let resp = health::deep_health_check(
-        state.start_time,
-        connections,
-        sessions,
-        pool,
-        &tron_home,
-        &state.deploy_dir,
-    );
-    Json(resp)
+    let deploy_dir = state.deploy_dir.clone();
+    let response = state
+        .rpc_context
+        .run_blocking("http.health.deep", move || {
+            Ok(health::deep_health_check(
+                state.start_time,
+                connections,
+                sessions,
+                &pool,
+                &tron_home,
+                &deploy_dir,
+            ))
+        })
+        .await;
+
+    match response {
+        Ok(resp) => Json(resp),
+        Err(error) => Json(health::DeepHealthResponse {
+            status: "unhealthy".into(),
+            uptime_secs: state.start_time.elapsed().as_secs(),
+            connections,
+            active_sessions: sessions,
+            checks: vec![health::DeepHealthCheck {
+                name: "deepHealth".into(),
+                status: "fail".into(),
+                detail: Some(serde_json::json!({ "error": error.to_string() })),
+            }],
+        }),
+    }
 }
 
 /// GET /metrics — Prometheus text format.

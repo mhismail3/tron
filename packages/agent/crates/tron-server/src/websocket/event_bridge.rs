@@ -12,6 +12,18 @@ use tron_tools::cdp::types::BrowserEvent;
 
 use super::broadcast::BroadcastManager;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BroadcastScope {
+    All,
+    Session(String),
+}
+
+#[derive(Debug, Clone)]
+struct BridgedEvent {
+    rpc_event: RpcEvent,
+    scope: BroadcastScope,
+}
+
 /// Bridges orchestrator events and browser events to WebSocket clients.
 pub struct EventBridge {
     rx: broadcast::Receiver<TronEvent>,
@@ -122,75 +134,63 @@ impl EventBridge {
 
         let event_type = event.event_type();
         tracing::debug!(event_type, "bridging event to client");
-        let rpc_event = tron_event_to_rpc(event);
+        let bridged = tron_event_to_bridged(event);
 
-        // Session lifecycle events affect the session list, not just one session's
-        // content. Broadcasting to all clients ensures dashboards stay in sync.
-        // Processing-state events (turn_start, agent_end) enable instant
-        // "Thinking..." indicators on dashboards without polling delay.
-        let is_global = matches!(
-            event,
-            TronEvent::SessionCreated { .. }
-                | TronEvent::SessionUpdated { .. }
-                | TronEvent::SessionArchived { .. }
-                | TronEvent::SessionUnarchived { .. }
-                | TronEvent::SessionDeleted { .. }
-                | TronEvent::SessionForked { .. }
-                | TronEvent::TurnStart { .. }
-                | TronEvent::AgentEnd { .. }
-                | TronEvent::AgentReady { .. }
-                | TronEvent::Error { .. }
-        );
-
-        let session_id = event.session_id();
-        if is_global || session_id.is_empty() {
-            self.broadcast.broadcast_all(&rpc_event).await;
-        } else {
-            self.broadcast
-                .broadcast_to_session(session_id, &rpc_event)
-                .await;
+        match bridged.scope {
+            BroadcastScope::All => self.broadcast.broadcast_all(&bridged.rpc_event).await,
+            BroadcastScope::Session(session_id) => {
+                self.broadcast
+                    .broadcast_to_session(&session_id, &bridged.rpc_event)
+                    .await;
+            }
         }
     }
 
     async fn bridge_browser_event(&self, event: &BrowserEvent) {
-        let rpc_event = browser_event_to_rpc(event);
-        let session_id = match event {
-            BrowserEvent::Frame { session_id, .. } | BrowserEvent::Closed { session_id } => {
-                session_id
+        let bridged = browser_event_to_bridged(event);
+        match bridged.scope {
+            BroadcastScope::All => self.broadcast.broadcast_all(&bridged.rpc_event).await,
+            BroadcastScope::Session(session_id) => {
+                self.broadcast
+                    .broadcast_to_session(&session_id, &bridged.rpc_event)
+                    .await;
             }
-        };
-        self.broadcast
-            .broadcast_to_session(session_id, &rpc_event)
-            .await;
+        }
     }
 }
 
-/// Convert a `BrowserEvent` to an `RpcEvent` for WebSocket transmission.
-fn browser_event_to_rpc(event: &BrowserEvent) -> RpcEvent {
+/// Convert a `BrowserEvent` into its wire event plus routing scope.
+fn browser_event_to_bridged(event: &BrowserEvent) -> BridgedEvent {
     match event {
         BrowserEvent::Frame {
             session_id, frame, ..
-        } => RpcEvent {
-            event_type: "browser.frame".to_string(),
-            session_id: Some(session_id.clone()),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            data: Some(serde_json::json!({
-                "sessionId": frame.session_id,
-                "data": frame.data,
-                "frameId": frame.frame_id,
-                "timestamp": frame.timestamp,
-                "metadata": frame.metadata,
-            })),
-            run_id: None,
+        } => BridgedEvent {
+            rpc_event: RpcEvent {
+                event_type: "browser.frame".to_string(),
+                session_id: Some(session_id.clone()),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                data: Some(serde_json::json!({
+                    "sessionId": frame.session_id,
+                    "data": frame.data,
+                    "frameId": frame.frame_id,
+                    "timestamp": frame.timestamp,
+                    "metadata": frame.metadata,
+                })),
+                run_id: None,
+            },
+            scope: BroadcastScope::Session(session_id.clone()),
         },
-        BrowserEvent::Closed { session_id } => RpcEvent {
-            event_type: "browser.closed".to_string(),
-            session_id: Some(session_id.clone()),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            data: Some(serde_json::json!({
-                "sessionId": session_id,
-            })),
-            run_id: None,
+        BrowserEvent::Closed { session_id } => BridgedEvent {
+            rpc_event: RpcEvent {
+                event_type: "browser.closed".to_string(),
+                session_id: Some(session_id.clone()),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                data: Some(serde_json::json!({
+                    "sessionId": session_id,
+                })),
+                run_id: None,
+            },
+            scope: BroadcastScope::Session(session_id.clone()),
         },
     }
 }
@@ -205,23 +205,48 @@ fn set_opt<T: serde::Serialize>(data: &mut serde_json::Value, key: &str, val: &O
 
 /// Convert a `TronEvent` to an `RpcEvent` for WebSocket transmission.
 pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
-    if let Some(rpc) = convert_message_event(event) {
-        return rpc;
-    }
-    if let Some(rpc) = convert_turn_event(event) {
-        return rpc;
-    }
-    if let Some(rpc) = convert_tool_event(event) {
-        return rpc;
-    }
-    if let Some(rpc) = convert_hook_event(event) {
-        return rpc;
-    }
-    if let Some(rpc) = convert_streaming_event(event) {
-        return rpc;
-    }
-    convert_session_event(event)
-        .unwrap_or_else(|| make_rpc(event, event.event_type(), Some(serde_json::json!({}))))
+    tron_event_to_bridged(event).rpc_event
+}
+
+/// Convert a `TronEvent` into its wire event plus routing scope.
+fn tron_event_to_bridged(event: &TronEvent) -> BridgedEvent {
+    let rpc_event = if let Some(rpc) = convert_message_event(event) {
+        rpc
+    } else if let Some(rpc) = convert_turn_event(event) {
+        rpc
+    } else if let Some(rpc) = convert_tool_event(event) {
+        rpc
+    } else if let Some(rpc) = convert_hook_event(event) {
+        rpc
+    } else if let Some(rpc) = convert_streaming_event(event) {
+        rpc
+    } else {
+        convert_session_event(event)
+            .unwrap_or_else(|| make_rpc(event, event.event_type(), Some(serde_json::json!({}))))
+    };
+
+    let scope = match event {
+        TronEvent::SessionCreated { .. }
+        | TronEvent::SessionUpdated { .. }
+        | TronEvent::SessionArchived { .. }
+        | TronEvent::SessionUnarchived { .. }
+        | TronEvent::SessionDeleted { .. }
+        | TronEvent::SessionForked { .. }
+        | TronEvent::TurnStart { .. }
+        | TronEvent::AgentEnd { .. }
+        | TronEvent::AgentReady { .. }
+        | TronEvent::Error { .. } => BroadcastScope::All,
+        _ => {
+            let session_id = event.session_id();
+            if session_id.is_empty() {
+                BroadcastScope::All
+            } else {
+                BroadcastScope::Session(session_id.to_string())
+            }
+        }
+    };
+
+    BridgedEvent { rpc_event, scope }
 }
 
 fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<serde_json::Value>) -> RpcEvent {
@@ -1090,12 +1115,12 @@ mod tests {
         let bm = Arc::new(BroadcastManager::new());
 
         // Two clients: C1 bound to "s1", C2 unbound (dashboard)
-        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
         conn1.bind_session("s1");
         bm.add(Arc::new(conn1)).await;
 
-        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
         bm.add(Arc::new(conn2)).await;
 
@@ -1131,12 +1156,12 @@ mod tests {
         let bm = Arc::new(BroadcastManager::new());
 
         // C1 bound to "s1", C2 unbound (dashboard)
-        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
         conn1.bind_session("s1");
         bm.add(Arc::new(conn1)).await;
 
-        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
         bm.add(Arc::new(conn2)).await;
 
@@ -1180,12 +1205,12 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
         conn1.bind_session("s1");
         bm.add(Arc::new(conn1)).await;
 
-        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
         bm.add(Arc::new(conn2)).await;
 
@@ -1220,12 +1245,12 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
         conn1.bind_session("s1");
         bm.add(Arc::new(conn1)).await;
 
-        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
         bm.add(Arc::new(conn2)).await;
 
@@ -1266,7 +1291,7 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
+        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         bm.add(Arc::new(conn)).await;
 
@@ -1302,7 +1327,7 @@ mod tests {
         let (browser_tx, browser_rx) = broadcast::channel::<BrowserEvent>(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
+        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         conn.bind_session("s1");
         bm.add(Arc::new(conn)).await;
@@ -2251,7 +2276,7 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
+        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         conn.bind_session("s1");
         bm.add(Arc::new(conn)).await;

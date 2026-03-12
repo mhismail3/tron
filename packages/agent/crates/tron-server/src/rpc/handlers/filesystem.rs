@@ -14,83 +14,84 @@ pub struct ListDirHandler;
 
 #[async_trait]
 impl MethodHandler for ListDirHandler {
-    #[instrument(skip(self, _ctx), fields(method = "filesystem.listDir"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "filesystem.listDir"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
         let path = opt_string(params.as_ref(), "path").unwrap_or(home);
         let show_hidden = opt_bool(params.as_ref(), "showHidden").unwrap_or(false);
 
-        let entries = std::fs::read_dir(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                RpcError::NotFound {
-                    code: errors::FILE_NOT_FOUND.into(),
-                    message: format!("Directory not found: {path}"),
-                }
-            } else {
-                RpcError::Custom {
-                    code: errors::FILESYSTEM_ERROR.into(),
-                    message: e.to_string(),
-                    details: None,
-                }
-            }
-        })?;
-
-        let mut items: Vec<Value> = entries
-            .filter_map(std::result::Result::ok)
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                if !show_hidden && name.starts_with('.') {
-                    return None;
-                }
-                let ft = e.file_type().ok()?;
-                let is_dir = ft.is_dir();
-                let is_symlink = ft.is_symlink();
-                let entry_path = format!("{path}/{name}");
-
-                let mut entry = serde_json::json!({
-                    "name": name,
-                    "path": entry_path,
-                    "isDirectory": is_dir,
-                    "isSymlink": is_symlink,
-                });
-
-                // Add size and modifiedAt for files
-                if !is_dir && let Ok(meta) = e.metadata() {
-                    entry["size"] = serde_json::json!(meta.len());
-                    if let Ok(modified) = meta.modified() {
-                        let dt: chrono::DateTime<chrono::Utc> = modified.into();
-                        entry["modifiedAt"] = serde_json::json!(dt.to_rfc3339());
+        ctx.run_blocking("filesystem.listDir", move || {
+            let entries = std::fs::read_dir(&path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    RpcError::NotFound {
+                        code: errors::FILE_NOT_FOUND.into(),
+                        message: format!("Directory not found: {path}"),
+                    }
+                } else {
+                    RpcError::Custom {
+                        code: errors::FILESYSTEM_ERROR.into(),
+                        message: e.to_string(),
+                        details: None,
                     }
                 }
+            })?;
 
-                Some(entry)
-            })
-            .collect();
+            let mut items: Vec<Value> = entries
+                .filter_map(std::result::Result::ok)
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if !show_hidden && name.starts_with('.') {
+                        return None;
+                    }
+                    let ft = e.file_type().ok()?;
+                    let is_dir = ft.is_dir();
+                    let is_symlink = ft.is_symlink();
+                    let entry_path = format!("{path}/{name}");
 
-        // Sort: directories first, then alphabetically
-        items.sort_by(|a, b| {
-            let a_dir = a["isDirectory"].as_bool().unwrap_or(false);
-            let b_dir = b["isDirectory"].as_bool().unwrap_or(false);
-            match (a_dir, b_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => {
-                    let a_name = a["name"].as_str().unwrap_or("");
-                    let b_name = b["name"].as_str().unwrap_or("");
-                    a_name.to_lowercase().cmp(&b_name.to_lowercase())
+                    let mut entry = serde_json::json!({
+                        "name": name,
+                        "path": entry_path,
+                        "isDirectory": is_dir,
+                        "isSymlink": is_symlink,
+                    });
+
+                    if !is_dir && let Ok(meta) = e.metadata() {
+                        entry["size"] = serde_json::json!(meta.len());
+                        if let Ok(modified) = meta.modified() {
+                            let dt: chrono::DateTime<chrono::Utc> = modified.into();
+                            entry["modifiedAt"] = serde_json::json!(dt.to_rfc3339());
+                        }
+                    }
+
+                    Some(entry)
+                })
+                .collect();
+
+            items.sort_by(|a, b| {
+                let a_dir = a["isDirectory"].as_bool().unwrap_or(false);
+                let b_dir = b["isDirectory"].as_bool().unwrap_or(false);
+                match (a_dir, b_dir) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => {
+                        let a_name = a["name"].as_str().unwrap_or("");
+                        let b_name = b["name"].as_str().unwrap_or("");
+                        a_name.to_lowercase().cmp(&b_name.to_lowercase())
+                    }
                 }
-            }
-        });
+            });
 
-        let parent = std::path::Path::new(&path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string());
+            let parent = std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string());
 
-        Ok(serde_json::json!({
-            "path": path,
-            "parent": parent,
-            "entries": items,
-        }))
+            Ok(serde_json::json!({
+                "path": path,
+                "parent": parent,
+                "entries": items,
+            }))
+        })
+        .await
     }
 }
 
@@ -99,35 +100,36 @@ pub struct GetHomeHandler;
 
 #[async_trait]
 impl MethodHandler for GetHomeHandler {
-    #[instrument(skip(self, _ctx), fields(method = "filesystem.getHome"))]
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "filesystem.getHome"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-
-        // Build suggested paths (common workspaces)
-        let mut suggested = Vec::new();
-        for name in &[
-            "Desktop",
-            "Documents",
-            "Projects",
-            "Workspace",
-            "Developer",
-            "Code",
-        ] {
-            let path = format!("{home}/{name}");
-            let exists = std::path::Path::new(&path).is_dir();
-            if exists {
-                suggested.push(serde_json::json!({
-                    "name": name,
-                    "path": path,
-                    "exists": true,
-                }));
+        ctx.run_blocking("filesystem.getHome", move || {
+            let mut suggested = Vec::new();
+            for name in &[
+                "Desktop",
+                "Documents",
+                "Projects",
+                "Workspace",
+                "Developer",
+                "Code",
+            ] {
+                let path = format!("{home}/{name}");
+                let exists = std::path::Path::new(&path).is_dir();
+                if exists {
+                    suggested.push(serde_json::json!({
+                        "name": name,
+                        "path": path,
+                        "exists": true,
+                    }));
+                }
             }
-        }
 
-        Ok(serde_json::json!({
-            "homePath": home,
-            "suggestedPaths": suggested,
-        }))
+            Ok(serde_json::json!({
+                "homePath": home,
+                "suggestedPaths": suggested,
+            }))
+        })
+        .await
     }
 }
 
@@ -136,17 +138,19 @@ pub struct CreateDirHandler;
 
 #[async_trait]
 impl MethodHandler for CreateDirHandler {
-    #[instrument(skip(self, _ctx), fields(method = "filesystem.mkdir"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "filesystem.mkdir"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let path = require_string_param(params.as_ref(), "path")?;
+        ctx.run_blocking("filesystem.mkdir", move || {
+            std::fs::create_dir_all(&path).map_err(|e| RpcError::Custom {
+                code: errors::FILESYSTEM_ERROR.into(),
+                message: e.to_string(),
+                details: None,
+            })?;
 
-        std::fs::create_dir_all(&path).map_err(|e| RpcError::Custom {
-            code: errors::FILESYSTEM_ERROR.into(),
-            message: e.to_string(),
-            details: None,
-        })?;
-
-        Ok(serde_json::json!({ "created": true, "path": path }))
+            Ok(serde_json::json!({ "created": true, "path": path }))
+        })
+        .await
     }
 }
 
@@ -155,26 +159,28 @@ pub struct ReadFileHandler;
 
 #[async_trait]
 impl MethodHandler for ReadFileHandler {
-    #[instrument(skip(self, _ctx), fields(method = "file.read"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "file.read"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let path = require_string_param(params.as_ref(), "path")?;
-
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                RpcError::NotFound {
-                    code: errors::FILE_NOT_FOUND.into(),
-                    message: format!("File not found: {path}"),
+        ctx.run_blocking("file.read", move || {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    RpcError::NotFound {
+                        code: errors::FILE_NOT_FOUND.into(),
+                        message: format!("File not found: {path}"),
+                    }
+                } else {
+                    RpcError::Custom {
+                        code: errors::FILE_ERROR.into(),
+                        message: e.to_string(),
+                        details: None,
+                    }
                 }
-            } else {
-                RpcError::Custom {
-                    code: errors::FILE_ERROR.into(),
-                    message: e.to_string(),
-                    details: None,
-                }
-            }
-        })?;
+            })?;
 
-        Ok(serde_json::json!({ "content": content, "path": path }))
+            Ok(serde_json::json!({ "content": content, "path": path }))
+        })
+        .await
     }
 }
 

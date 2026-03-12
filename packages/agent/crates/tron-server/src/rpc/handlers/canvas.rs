@@ -14,27 +14,29 @@ pub struct GetCanvasHandler;
 
 #[async_trait]
 impl MethodHandler for GetCanvasHandler {
-    #[instrument(skip(self, _ctx), fields(method = "canvas.get"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "canvas.get"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let canvas_id = require_string_param(params.as_ref(), "canvasId")?;
 
-        // Check ~/.tron/artifacts/canvases/ for the canvas file
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         let canvas_path = format!("{home}/.tron/artifacts/canvases/{canvas_id}.json");
 
-        if let Ok(content) = std::fs::read_to_string(&canvas_path)
-            && let Ok(canvas) = serde_json::from_str::<Value>(&content)
-        {
-            return Ok(serde_json::json!({
-                "found": true,
-                "canvas": canvas,
-            }));
-        }
+        ctx.run_blocking("canvas.get", move || {
+            if let Ok(content) = std::fs::read_to_string(&canvas_path)
+                && let Ok(canvas) = serde_json::from_str::<Value>(&content)
+            {
+                return Ok(serde_json::json!({
+                    "found": true,
+                    "canvas": canvas,
+                }));
+            }
 
-        Ok(serde_json::json!({
-            "found": false,
-            "canvas": null,
-        }))
+            Ok(serde_json::json!({
+                "found": false,
+                "canvas": null,
+            }))
+        })
+        .await
     }
 }
 

@@ -81,11 +81,7 @@ impl TronTool for ManageCalendarTool {
         .build()
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        _ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let action = match validate_required_string(&params, "action", "calendar action") {
             Ok(a) => a,
             Err(e) => return Ok(e),
@@ -101,7 +97,7 @@ impl TronTool for ManageCalendarTool {
         let method = format!("calendar.{action}");
         let result = self
             .delegate
-            .device_request(&method, params.clone())
+            .device_request(&ctx.session_id, &method, params.clone())
             .await?;
 
         // Include data in content so the LLM can see it (details is metadata-only)
@@ -127,6 +123,7 @@ mod tests {
     use std::sync::Mutex;
 
     struct MockDeviceDelegate {
+        last_session_id: Mutex<Option<String>>,
         last_method: Mutex<Option<String>>,
         response: Value,
     }
@@ -134,6 +131,7 @@ mod tests {
     impl MockDeviceDelegate {
         fn with_response(response: Value) -> Self {
             Self {
+                last_session_id: Mutex::new(None),
                 last_method: Mutex::new(None),
                 response,
             }
@@ -142,7 +140,13 @@ mod tests {
 
     #[async_trait]
     impl DeviceDelegate for MockDeviceDelegate {
-        async fn device_request(&self, method: &str, _params: Value) -> Result<Value, ToolError> {
+        async fn device_request(
+            &self,
+            session_id: &str,
+            method: &str,
+            _params: Value,
+        ) -> Result<Value, ToolError> {
+            *self.last_session_id.lock().unwrap() = Some(session_id.to_string());
             *self.last_method.lock().unwrap() = Some(method.to_string());
             Ok(self.response.clone())
         }
@@ -166,6 +170,10 @@ mod tests {
         assert_eq!(
             *delegate.last_method.lock().unwrap(),
             Some("calendar.list".into())
+        );
+        assert_eq!(
+            *delegate.last_session_id.lock().unwrap(),
+            Some("sess-1".into())
         );
     }
 

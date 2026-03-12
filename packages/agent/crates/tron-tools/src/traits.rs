@@ -574,7 +574,12 @@ pub trait TaskManagerDelegate: Send + Sync {
 #[async_trait]
 pub trait DeviceDelegate: Send + Sync {
     /// Send a request to the iOS device and await the response.
-    async fn device_request(&self, method: &str, params: Value) -> Result<Value, ToolError>;
+    async fn device_request(
+        &self,
+        session_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, ToolError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

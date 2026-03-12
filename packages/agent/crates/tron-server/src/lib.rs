@@ -16,6 +16,7 @@
 pub mod config;
 pub mod deploy;
 pub mod device;
+pub mod disk;
 pub mod health;
 pub mod metrics;
 pub mod platform;

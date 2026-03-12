@@ -258,42 +258,30 @@ fn check_deploy(deploy_dir: &Path) -> DeepHealthCheck {
 }
 
 fn check_disk(tron_home: &Path) -> DeepHealthCheck {
-    let dir = tron_home.to_string_lossy();
-    match std::process::Command::new("df").args(["-m", &dir]).output() {
-        Ok(output) if output.status.success() => {
-            let text = String::from_utf8_lossy(&output.stdout);
-            let free_mb: Option<u64> = text
-                .lines()
-                .nth(1)
-                .and_then(|line| line.split_whitespace().nth(3))
-                .and_then(|s| s.parse().ok());
-            match free_mb {
-                Some(mb) if mb < 100 => DeepHealthCheck {
-                    name: "disk".into(),
-                    status: "fail".into(),
-                    detail: Some(json!({ "freeMb": mb })),
-                },
-                Some(mb) if mb < 500 => DeepHealthCheck {
-                    name: "disk".into(),
-                    status: "warn".into(),
-                    detail: Some(json!({ "freeMb": mb })),
-                },
-                Some(mb) => DeepHealthCheck {
-                    name: "disk".into(),
-                    status: "ok".into(),
-                    detail: Some(json!({ "freeMb": mb })),
-                },
-                None => DeepHealthCheck {
-                    name: "disk".into(),
-                    status: "ok".into(),
-                    detail: Some(json!("could not parse df output")),
-                },
-            }
-        }
-        _ => DeepHealthCheck {
+    disk_check_from_result(crate::disk::available_megabytes(tron_home))
+}
+
+fn disk_check_from_result(result: std::io::Result<u64>) -> DeepHealthCheck {
+    match result {
+        Ok(mb) if mb < 100 => DeepHealthCheck {
+            name: "disk".into(),
+            status: "fail".into(),
+            detail: Some(json!({ "freeMb": mb })),
+        },
+        Ok(mb) if mb < 500 => DeepHealthCheck {
+            name: "disk".into(),
+            status: "warn".into(),
+            detail: Some(json!({ "freeMb": mb })),
+        },
+        Ok(mb) => DeepHealthCheck {
             name: "disk".into(),
             status: "ok".into(),
-            detail: Some(json!("df command failed")),
+            detail: Some(json!({ "freeMb": mb })),
+        },
+        Err(error) => DeepHealthCheck {
+            name: "disk".into(),
+            status: "warn".into(),
+            detail: Some(json!({ "error": error.to_string() })),
         },
     }
 }
@@ -379,7 +367,7 @@ mod tests {
     #[test]
     fn deep_health_status_logic() {
         // All ok = healthy
-        let checks = vec![DeepHealthCheck {
+        let checks = [DeepHealthCheck {
             name: "test".into(),
             status: "ok".into(),
             detail: None,
@@ -391,7 +379,7 @@ mod tests {
         );
 
         // Any warn = degraded
-        let checks = vec![
+        let checks = [
             DeepHealthCheck {
                 name: "a".into(),
                 status: "ok".into(),
@@ -409,7 +397,7 @@ mod tests {
         assert!(has_warn);
 
         // Any fail = unhealthy
-        let checks = vec![
+        let checks = [
             DeepHealthCheck {
                 name: "a".into(),
                 status: "ok".into(),
@@ -423,5 +411,20 @@ mod tests {
         ];
         let has_fail = checks.iter().any(|c| c.status == "fail");
         assert!(has_fail);
+    }
+
+    #[test]
+    fn disk_check_warns_on_probe_error() {
+        let check = disk_check_from_result(Err(std::io::Error::other("statvfs failed")));
+        assert_eq!(check.name, "disk");
+        assert_eq!(check.status, "warn");
+        assert!(check.detail.is_some());
+    }
+
+    #[test]
+    fn disk_check_classifies_free_space_thresholds() {
+        assert_eq!(disk_check_from_result(Ok(99)).status, "fail");
+        assert_eq!(disk_check_from_result(Ok(250)).status, "warn");
+        assert_eq!(disk_check_from_result(Ok(900)).status, "ok");
     }
 }

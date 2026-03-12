@@ -55,11 +55,7 @@ impl TronTool for SearchContactsTool {
         .build()
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        _ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let query = match validate_required_string(&params, "query", "search query") {
             Ok(q) => q,
             Err(e) => return Ok(e),
@@ -73,7 +69,11 @@ impl TronTool for SearchContactsTool {
 
         let result = self
             .delegate
-            .device_request("contacts.search", json!({"query": query, "limit": limit}))
+            .device_request(
+                &ctx.session_id,
+                "contacts.search",
+                json!({"query": query, "limit": limit}),
+            )
             .await?;
 
         // Include data in content so the LLM can see it (details is metadata-only)
@@ -99,6 +99,7 @@ mod tests {
     use std::sync::Mutex;
 
     struct MockDeviceDelegate {
+        last_session_id: Mutex<Option<String>>,
         last_params: Mutex<Option<Value>>,
         response: Value,
     }
@@ -106,6 +107,7 @@ mod tests {
     impl MockDeviceDelegate {
         fn with_response(response: Value) -> Self {
             Self {
+                last_session_id: Mutex::new(None),
                 last_params: Mutex::new(None),
                 response,
             }
@@ -114,7 +116,13 @@ mod tests {
 
     #[async_trait]
     impl DeviceDelegate for MockDeviceDelegate {
-        async fn device_request(&self, _method: &str, params: Value) -> Result<Value, ToolError> {
+        async fn device_request(
+            &self,
+            session_id: &str,
+            _method: &str,
+            params: Value,
+        ) -> Result<Value, ToolError> {
+            *self.last_session_id.lock().unwrap() = Some(session_id.to_string());
             *self.last_params.lock().unwrap() = Some(params);
             Ok(self.response.clone())
         }
@@ -164,6 +172,10 @@ mod tests {
             .execute(json!({"query": "test", "limit": 100}), &make_ctx())
             .await
             .unwrap();
+        assert_eq!(
+            *delegate.last_session_id.lock().unwrap(),
+            Some("sess-1".into())
+        );
         let params = delegate.last_params.lock().unwrap().clone().unwrap();
         assert_eq!(params["limit"], 50);
     }

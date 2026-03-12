@@ -48,7 +48,7 @@ pub async fn run_ws_session(
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Create the client connection and send channel
-    let (send_tx, mut send_rx) = mpsc::channel::<Arc<String>>(4096);
+    let (send_tx, mut send_rx) = mpsc::unbounded_channel();
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
     let connection_start = std::time::Instant::now();
@@ -86,14 +86,19 @@ pub async fn run_ws_session(
             tokio::select! {
                 msg = send_rx.recv() => {
                     match msg {
-                        Some(text) => {
-                            let s = Arc::unwrap_or_clone(text);
+                        Some(message) => {
+                            let s = Arc::unwrap_or_clone(message.text);
+                            outbound_conn.complete_send(message.size_bytes);
                             if ws_tx.send(Message::Text(s.into())).await.is_err() {
                                 break;
                             }
                         }
                         None => break,
                     }
+                }
+                () = outbound_conn.close_requested() => {
+                    warn!(client_id = %outbound_conn.id, "closing overloaded websocket connection");
+                    break;
                 }
                 _ = ping_ticker.tick() => {
                     // Check if client responded to previous ping
@@ -111,8 +116,9 @@ pub async fn run_ws_session(
                 }
                 () = shutdown_signal.notified() => {
                     // Drain any remaining queued messages
-                    while let Ok(text) = send_rx.try_recv() {
-                        let s = Arc::unwrap_or_clone(text);
+                    while let Ok(message) = send_rx.try_recv() {
+                        let s = Arc::unwrap_or_clone(message.text);
+                        outbound_conn.complete_send(message.size_bytes);
                         if ws_tx.send(Message::Text(s.into())).await.is_err() {
                             break;
                         }
@@ -125,7 +131,12 @@ pub async fn run_ws_session(
     let outbound_abort = outbound.abort_handle();
 
     // Process incoming messages
-    while let Some(Ok(msg)) = ws_rx.next().await {
+    loop {
+        let next = tokio::select! {
+            () = connection.close_requested() => None,
+            next = ws_rx.next() => next,
+        };
+        let Some(Ok(msg)) = next else { break };
         // Extract text from either Text or Binary frames (some clients send binary).
         // Borrow from `msg` instead of allocating — the borrow outlives `handle_message`.
         let text: Option<&str> = match &msg {
@@ -170,11 +181,24 @@ pub async fn run_ws_session(
             debug!(client_id, session_id = sid, "session bound to client");
         }
 
-        if !connection.send(Arc::new(result.response_json)) {
-            debug!(
-                client_id,
-                "failed to enqueue response (channel full or closed)"
-            );
+        match connection.send(Arc::new(result.response_json)) {
+            super::connection::SendOutcome::Enqueued => {}
+            super::connection::SendOutcome::Closed => {
+                debug!(client_id, "failed to enqueue response (connection closed)");
+                break;
+            }
+            super::connection::SendOutcome::Overloaded(health) => {
+                debug!(
+                    client_id,
+                    recent_drops = health.recent_drops,
+                    total_drops = health.total_drops,
+                    "failed to enqueue response (connection overloaded)"
+                );
+                if health.should_disconnect {
+                    connection.request_close();
+                    break;
+                }
+            }
         }
     }
 

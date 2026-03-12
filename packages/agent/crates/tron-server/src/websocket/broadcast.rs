@@ -9,10 +9,7 @@ use metrics::counter;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
-use super::connection::ClientConnection;
-
-/// Maximum total lifetime message drops before forcibly disconnecting a slow client.
-const MAX_TOTAL_DROPS: u64 = 100;
+use super::connection::{ClientConnection, SendOutcome};
 
 /// Manages event broadcasting to connected clients.
 pub struct BroadcastManager {
@@ -83,14 +80,33 @@ impl BroadcastManager {
             for conn in conns.values() {
                 if filter(conn) {
                     recipients += 1;
-                    if !conn.send(Arc::clone(&json)) {
-                        counter!("ws_broadcast_drops_total").increment(1);
-                        let drops = conn.drop_count();
-                        if drops >= MAX_TOTAL_DROPS {
-                            debug!(conn_id = %conn.id, label, drops, "disconnecting slow client");
+                    match conn.send(Arc::clone(&json)) {
+                        SendOutcome::Enqueued => {}
+                        SendOutcome::Closed => {
+                            debug!(conn_id = %conn.id, label, "removing closed connection");
                             to_remove.push(conn.id.clone());
-                        } else {
-                            debug!(conn_id = %conn.id, label, total_drops = drops, "failed to send event to client (channel full)");
+                        }
+                        SendOutcome::Overloaded(health) => {
+                            counter!("ws_broadcast_drops_total").increment(1);
+                            if health.should_disconnect {
+                                conn.request_close();
+                                debug!(
+                                    conn_id = %conn.id,
+                                    label,
+                                    recent_drops = health.recent_drops,
+                                    total_drops = health.total_drops,
+                                    "disconnecting persistently overloaded client"
+                                );
+                                to_remove.push(conn.id.clone());
+                            } else {
+                                debug!(
+                                    conn_id = %conn.id,
+                                    label,
+                                    recent_drops = health.recent_drops,
+                                    total_drops = health.total_drops,
+                                    "failed to enqueue event to client"
+                                );
+                            }
                         }
                     }
                 }
@@ -135,13 +151,17 @@ impl Default for BroadcastManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::websocket::connection::{ConnectionLimits, OutboundMessage};
     use tokio::sync::mpsc;
 
     fn make_connection_with_rx(
         id: &str,
         session: Option<&str>,
-    ) -> (Arc<ClientConnection>, mpsc::Receiver<Arc<String>>) {
-        let (tx, rx) = mpsc::channel(32);
+    ) -> (
+        Arc<ClientConnection>,
+        mpsc::UnboundedReceiver<OutboundMessage>,
+    ) {
+        let (tx, rx) = mpsc::unbounded_channel();
         let conn = ClientConnection::new(id.into(), tx);
         if let Some(sid) = session {
             conn.bind_session(sid);
@@ -163,7 +183,7 @@ mod tests {
     async fn add_connection() {
         let bm = BroadcastManager::new();
         let (conn, _rx) = make_connection_with_rx("c1", None);
-        bm.add(conn).await;
+        bm.add(conn.clone()).await;
         assert_eq!(bm.connection_count(), 1);
     }
 
@@ -282,7 +302,7 @@ mod tests {
     async fn broadcast_event_is_valid_json() {
         let bm = BroadcastManager::new();
         let (conn, mut rx) = make_connection_with_rx("c1", Some("sess_a"));
-        bm.add(conn).await;
+        bm.add(conn.clone()).await;
 
         let event = RpcEvent {
             event_type: "agent.text_delta".into(),
@@ -294,11 +314,12 @@ mod tests {
         bm.broadcast_to_session("sess_a", &event).await;
 
         let msg = rx.recv().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg.text).unwrap();
         assert_eq!(parsed["type"], "agent.text_delta");
         assert_eq!(parsed["sessionId"], "sess_a");
         assert_eq!(parsed["data"]["text"], "hello");
         assert_eq!(parsed["runId"], "run_1");
+        conn.complete_send(msg.size_bytes);
     }
 
     #[tokio::test]
@@ -352,30 +373,32 @@ mod tests {
     #[tokio::test]
     async fn broadcast_disconnects_slow_client_after_threshold() {
         let bm = BroadcastManager::new();
-        // Create a slow client with buffer of 1
-        let (tx, _rx) = mpsc::channel(1);
-        let slow_conn = Arc::new(ClientConnection::new("slow".into(), tx));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slow_conn = Arc::new(ClientConnection::new_with_limits(
+            "slow".into(),
+            tx,
+            ConnectionLimits {
+                max_pending_bytes: 1,
+                drop_window: std::time::Duration::from_secs(60),
+                max_recent_drops: 4,
+            },
+        ));
         slow_conn.bind_session("s");
 
-        // Create a fast client with large buffer
         let (fast_conn, mut fast_rx) = make_connection_with_rx("fast", Some("s"));
 
         bm.add(slow_conn.clone()).await;
         bm.add(fast_conn).await;
 
-        // Fill slow client's channel
         let event = make_event("test.event", Some("s"));
-        // First send fills the buffer
         bm.broadcast_to_session("s", &event).await;
-        // Now send MAX_TOTAL_DROPS more to exceed the threshold
-        for _ in 0..MAX_TOTAL_DROPS {
+        for _ in 0..4 {
             bm.broadcast_to_session("s", &event).await;
         }
 
-        // Slow client should have been disconnected
         assert_eq!(bm.connection_count(), 1);
-        // Fast client should still be connected and received all messages
         assert!(fast_rx.try_recv().is_ok());
+        assert!(slow_conn.should_close());
     }
 
     #[tokio::test]
@@ -396,8 +419,9 @@ mod tests {
     }
 
     #[test]
-    fn slow_client_threshold_constant_value() {
-        assert_eq!(MAX_TOTAL_DROPS, 100);
+    fn broadcast_manager_starts_empty() {
+        let bm = BroadcastManager::new();
+        assert_eq!(bm.connection_count(), 0);
     }
 
     #[tokio::test]
@@ -420,8 +444,16 @@ mod tests {
     #[tokio::test]
     async fn connection_count_decremented_on_slow_client_removal() {
         let bm = BroadcastManager::new();
-        let (tx, _rx) = mpsc::channel(1);
-        let slow = Arc::new(ClientConnection::new("slow".into(), tx));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slow = Arc::new(ClientConnection::new_with_limits(
+            "slow".into(),
+            tx,
+            ConnectionLimits {
+                max_pending_bytes: 1,
+                drop_window: std::time::Duration::from_secs(60),
+                max_recent_drops: 3,
+            },
+        ));
         slow.bind_session("s");
         let (fast, _fast_rx) = make_connection_with_rx("fast", Some("s"));
         bm.add(slow).await;
@@ -429,28 +461,32 @@ mod tests {
         assert_eq!(bm.connection_count(), 2);
 
         let event = make_event("test.drop", Some("s"));
-        // Fill channel + exceed threshold
-        for _ in 0..=MAX_TOTAL_DROPS {
+        for _ in 0..3 {
             bm.broadcast_to_session("s", &event).await;
         }
-        // Slow client removed, count decremented
         assert_eq!(bm.connection_count(), 1);
     }
 
     #[tokio::test]
     async fn broadcast_all_disconnects_slow_client() {
         let bm = BroadcastManager::new();
-        let (tx, _rx) = mpsc::channel(1);
-        let slow = Arc::new(ClientConnection::new("slow".into(), tx));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slow = Arc::new(ClientConnection::new_with_limits(
+            "slow".into(),
+            tx,
+            ConnectionLimits {
+                max_pending_bytes: 1,
+                drop_window: std::time::Duration::from_secs(60),
+                max_recent_drops: 4,
+            },
+        ));
         let (fast, mut fast_rx) = make_connection_with_rx("fast", None);
         bm.add(slow).await;
         bm.add(fast).await;
 
         let event = make_event("test.event", None);
-        // First send fills the slow client's buffer
         bm.broadcast_all(&event).await;
-        // Exceed threshold
-        for _ in 0..MAX_TOTAL_DROPS {
+        for _ in 0..4 {
             bm.broadcast_all(&event).await;
         }
         assert_eq!(bm.connection_count(), 1);
@@ -460,21 +496,26 @@ mod tests {
     #[tokio::test]
     async fn broadcast_to_session_only_removes_slow_in_target() {
         let bm = BroadcastManager::new();
-        // Slow client in session A
-        let (tx, _rx) = mpsc::channel(1);
-        let slow_a = Arc::new(ClientConnection::new("slow_a".into(), tx));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slow_a = Arc::new(ClientConnection::new_with_limits(
+            "slow_a".into(),
+            tx,
+            ConnectionLimits {
+                max_pending_bytes: 1,
+                drop_window: std::time::Duration::from_secs(60),
+                max_recent_drops: 4,
+            },
+        ));
         slow_a.bind_session("a");
-        // Fast client in session B
         let (fast_b, _fast_rx) = make_connection_with_rx("fast_b", Some("b"));
         bm.add(slow_a).await;
         bm.add(fast_b).await;
 
         let event = make_event("test.event", Some("a"));
         bm.broadcast_to_session("a", &event).await;
-        for _ in 0..MAX_TOTAL_DROPS {
+        for _ in 0..4 {
             bm.broadcast_to_session("a", &event).await;
         }
-        // Slow client in A removed, B unaffected
         assert_eq!(bm.connection_count(), 1);
         let b_conns = bm.session_connections("b").await;
         assert_eq!(b_conns.len(), 1);
@@ -493,13 +534,10 @@ mod tests {
 
         let msg1 = rx1.recv().await.unwrap();
         let msg2 = rx2.recv().await.unwrap();
-        // Both receivers share the same Arc — same pointer, refcount == 2
-        assert!(Arc::ptr_eq(&msg1, &msg2));
-        assert_eq!(Arc::strong_count(&msg1), 2);
-        // Content is identical
-        assert_eq!(&*msg1, &*msg2);
-        // After dropping one, the other becomes sole owner
+        assert!(Arc::ptr_eq(&msg1.text, &msg2.text));
+        assert_eq!(Arc::strong_count(&msg1.text), 2);
+        assert_eq!(&*msg1.text, &*msg2.text);
         drop(msg2);
-        assert_eq!(Arc::strong_count(&msg1), 1);
+        assert_eq!(Arc::strong_count(&msg1.text), 1);
     }
 }

@@ -25,9 +25,14 @@ impl BrokerDeviceDelegate {
 
 #[async_trait]
 impl DeviceDelegate for BrokerDeviceDelegate {
-    async fn device_request(&self, method: &str, params: Value) -> Result<Value, ToolError> {
+    async fn device_request(
+        &self,
+        session_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, ToolError> {
         self.broker
-            .request(method, params, DEVICE_REQUEST_TIMEOUT)
+            .request(session_id, method, params, DEVICE_REQUEST_TIMEOUT)
             .await
             .map_err(|e| ToolError::Internal {
                 message: e.to_string(),

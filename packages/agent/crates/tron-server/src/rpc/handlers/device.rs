@@ -32,22 +32,25 @@ impl MethodHandler for RegisterTokenHandler {
         let workspace_id = opt_string(params.as_ref(), "workspaceId");
         let environment = opt_string(params.as_ref(), "environment");
 
-        let result = ctx
-            .event_store
-            .register_device_token(
-                &device_token,
-                session_id.as_deref(),
-                workspace_id.as_deref(),
-                environment.as_deref().unwrap_or("production"),
-            )
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to register device token: {e}"),
-            })?;
+        let event_store = ctx.event_store.clone();
+        ctx.run_blocking("device.register", move || {
+            let result = event_store
+                .register_device_token(
+                    &device_token,
+                    session_id.as_deref(),
+                    workspace_id.as_deref(),
+                    environment.as_deref().unwrap_or("production"),
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to register device token: {e}"),
+                })?;
 
-        Ok(serde_json::json!({
-            "id": result.id,
-            "created": result.created,
-        }))
+            Ok(serde_json::json!({
+                "id": result.id,
+                "created": result.created,
+            }))
+        })
+        .await
     }
 }
 
@@ -85,14 +88,17 @@ impl MethodHandler for UnregisterTokenHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let device_token = require_string_param(params.as_ref(), "deviceToken")?;
 
-        let success = ctx
-            .event_store
-            .unregister_device_token(&device_token)
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to unregister device token: {e}"),
-            })?;
+        let event_store = ctx.event_store.clone();
+        ctx.run_blocking("device.unregister", move || {
+            let success = event_store
+                .unregister_device_token(&device_token)
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to unregister device token: {e}"),
+                })?;
 
-        Ok(serde_json::json!({ "success": success }))
+            Ok(serde_json::json!({ "success": success }))
+        })
+        .await
     }
 }
 

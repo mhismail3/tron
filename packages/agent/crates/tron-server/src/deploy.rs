@@ -226,6 +226,19 @@ fn write_last_deployment_inner(
     std::fs::write(artifacts_dir.join("last-deployment.json"), pretty)
 }
 
+async fn read_deployed_commit_async(artifacts_dir: &Path) -> String {
+    tokio::fs::read_to_string(artifacts_dir.join("deployed-commit"))
+        .await
+        .map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
+}
+
+async fn read_sentinel_async(artifacts_dir: &Path) -> Option<RestartSentinel> {
+    let data = tokio::fs::read_to_string(artifacts_dir.join("restart-sentinel.json"))
+        .await
+        .ok()?;
+    serde_json::from_str(&data).ok()
+}
+
 // ── Self-test & auto-rollback ─────────────────────────────────────────────
 
 /// Run post-deploy self-test checks against critical infrastructure.
@@ -403,42 +416,26 @@ fn check_binary(binary_path: &Path) -> SelfTestCheck {
 }
 
 fn check_disk_space(reference_path: &Path) -> SelfTestCheck {
-    let dir = reference_path
-        .parent()
-        .unwrap_or(Path::new("/"))
-        .to_string_lossy();
-    // Use `df -m` to get available space in MB
-    match std::process::Command::new("df").args(["-m", &dir]).output() {
-        Ok(output) if output.status.success() => {
-            let text = String::from_utf8_lossy(&output.stdout);
-            // Second line, fourth column = available MB
-            let free_mb: Option<u64> = text
-                .lines()
-                .nth(1)
-                .and_then(|line| line.split_whitespace().nth(3))
-                .and_then(|s| s.parse().ok());
-            match free_mb {
-                Some(mb) if mb < 100 => SelfTestCheck {
-                    name: "disk".into(),
-                    passed: false,
-                    detail: Some(format!("{mb}MB free (< 100MB)")),
-                },
-                Some(mb) => SelfTestCheck {
-                    name: "disk".into(),
-                    passed: true,
-                    detail: Some(format!("{mb}MB free")),
-                },
-                None => SelfTestCheck {
-                    name: "disk".into(),
-                    passed: true,
-                    detail: Some("could not parse df output (non-fatal)".into()),
-                },
-            }
-        }
-        _ => SelfTestCheck {
+    let path = reference_path.parent().unwrap_or(Path::new("/"));
+    disk_self_test_from_result(crate::disk::available_megabytes(path))
+}
+
+fn disk_self_test_from_result(result: io::Result<u64>) -> SelfTestCheck {
+    match result {
+        Ok(mb) if mb < 100 => SelfTestCheck {
+            name: "disk".into(),
+            passed: false,
+            detail: Some(format!("{mb}MB free (< 100MB)")),
+        },
+        Ok(mb) => SelfTestCheck {
             name: "disk".into(),
             passed: true,
-            detail: Some("df command failed (non-fatal)".into()),
+            detail: Some(format!("{mb}MB free")),
+        },
+        Err(error) => SelfTestCheck {
+            name: "disk".into(),
+            passed: false,
+            detail: Some(format!("disk probe failed: {error}")),
         },
     }
 }
@@ -646,21 +643,20 @@ pub async fn status_handler(State(state): State<AppState>) -> Json<DeployStatusR
     let binary_path = &state.deploy_binary_path;
     let deploy_dir = &state.deploy_dir;
 
-    let deployed_commit = read_deployed_commit(deploy_dir);
-    let sentinel = read_sentinel(deploy_dir);
-    let binary_exists = binary_path.exists();
-    let binary_modified = if binary_exists {
-        tokio::fs::metadata(&binary_path)
-            .await
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .map(|t| {
-                let dt: chrono::DateTime<chrono::Utc> = t.into();
-                dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-            })
-    } else {
-        None
-    };
+    let (deployed_commit, sentinel, binary_metadata) = tokio::join!(
+        read_deployed_commit_async(deploy_dir),
+        read_sentinel_async(deploy_dir),
+        tokio::fs::metadata(binary_path),
+    );
+
+    let binary_exists = binary_metadata.is_ok();
+    let binary_modified = binary_metadata
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|t| {
+            let dt: chrono::DateTime<chrono::Utc> = t.into();
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        });
 
     let restart_initiated = state.deploy_restart_initiated.load(Ordering::Relaxed);
 
@@ -711,7 +707,7 @@ pub async fn restart_handler(
         })?;
 
     // Validate source exists
-    if !source.exists() {
+    if tokio::fs::metadata(&source).await.is_err() {
         state
             .deploy_restart_initiated
             .store(false, Ordering::SeqCst);
@@ -724,11 +720,24 @@ pub async fn restart_handler(
     }
 
     // Read commits
-    let previous_commit = read_deployed_commit(deploy_dir);
-    let new_commit = workspace_root
-        .as_deref()
-        .and_then(git_head_commit)
-        .unwrap_or_else(|| "unknown".to_string());
+    let previous_commit = read_deployed_commit_async(deploy_dir).await;
+    let workspace_root_for_git = workspace_root.clone();
+    let new_commit = tokio::task::spawn_blocking(move || {
+        workspace_root_for_git
+            .as_deref()
+            .and_then(git_head_commit)
+            .unwrap_or_else(|| "unknown".to_string())
+    })
+    .await
+    .map_err(|error| {
+        state
+            .deploy_restart_initiated
+            .store(false, Ordering::SeqCst);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("failed to resolve git commit: {error}") })),
+        )
+    })?;
 
     // Ensure deployment dir exists
     let _ = tokio::fs::create_dir_all(&deploy_dir).await;
@@ -761,7 +770,14 @@ pub async fn restart_handler(
         initiated_by: req.session_id.or_else(|| Some("api".to_string())),
         self_test: None,
     };
-    if let Err(e) = write_sentinel(deploy_dir, &sentinel) {
+    let deploy_dir_for_sentinel = deploy_dir.clone();
+    let sentinel_for_write = sentinel.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        write_sentinel(&deploy_dir_for_sentinel, &sentinel_for_write)
+    })
+    .await
+    .unwrap_or_else(|error| Err(io::Error::other(error.to_string())))
+    {
         warn!(error = %e, "failed to write restart sentinel (non-fatal)");
     }
 
@@ -1692,5 +1708,19 @@ mod tests {
         let contents = std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
         let v: Value = serde_json::from_str(&contents).unwrap();
         assert!(v["error"].is_null());
+    }
+
+    #[test]
+    fn disk_self_test_fails_on_probe_error() {
+        let check = disk_self_test_from_result(Err(io::Error::other("statvfs failed")));
+        assert_eq!(check.name, "disk");
+        assert!(!check.passed);
+        assert!(check.detail.unwrap().contains("disk probe failed"));
+    }
+
+    #[test]
+    fn disk_self_test_thresholds() {
+        assert!(!disk_self_test_from_result(Ok(80)).passed);
+        assert!(disk_self_test_from_result(Ok(500)).passed);
     }
 }

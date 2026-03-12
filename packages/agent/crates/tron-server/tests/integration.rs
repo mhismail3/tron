@@ -1314,7 +1314,7 @@ async fn e2e_bridge_session_isolation() {
                 Some(msg) if msg.get("type").and_then(|v| v.as_str()) == Some("agent.start") => {
                     break Some(msg);
                 }
-                Some(_) => continue,
+                Some(_) => {}
                 None => break None,
             }
         }
