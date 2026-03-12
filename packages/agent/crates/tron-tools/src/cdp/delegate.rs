@@ -304,7 +304,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<h1>Hi</h1>"}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
 
         let action = BrowserAction {
             action: "screenshot".into(),
@@ -325,7 +326,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<h1>Accessible</h1>"}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         let action = BrowserAction {
@@ -387,7 +389,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": r#"data:text/html,<p id="t">hello world</p>"#}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let action = BrowserAction {
@@ -406,7 +409,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": r#"data:text/html,<div id="t" data-foo="bar">x</div>"#}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let action = BrowserAction {
@@ -425,7 +429,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<div style='height:5000px'>tall</div>"}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
 
         let action = BrowserAction {
             action: "scroll".into(),
@@ -443,7 +448,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<p>page</p>"}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
 
         let action = BrowserAction {
             action: "pressKey".into(),
@@ -461,7 +467,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<p>page</p>"}),
         };
-        d.execute_action("s1", &nav).await.unwrap();
+        let nav_result = d.execute_action("s1", &nav).await.unwrap();
+        assert!(nav_result.content.contains("Navigated"));
 
         let action = BrowserAction {
             action: "reload".into(),
@@ -482,7 +489,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<h1>Auto</h1>"}),
         };
-        d.execute_action("s1", &action).await.unwrap();
+        let result = d.execute_action("s1", &action).await.unwrap();
+        assert!(result.content.contains("Navigated"));
 
         let status = svc.get_status("s1");
         assert!(
@@ -503,7 +511,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<h1>First</h1>"}),
         };
-        d.execute_action("s1", &action).await.unwrap();
+        let first_result = d.execute_action("s1", &action).await.unwrap();
+        assert!(first_result.content.contains("Navigated"));
         assert!(svc.get_status("s1").is_streaming);
 
         // Second action: should NOT restart (already streaming)
@@ -511,7 +520,8 @@ mod integration_tests {
             action: "navigate".into(),
             params: serde_json::json!({"url": "data:text/html,<h1>Second</h1>"}),
         };
-        d.execute_action("s1", &action2).await.unwrap();
+        let second_result = d.execute_action("s1", &action2).await.unwrap();
+        assert!(second_result.content.contains("Navigated"));
         assert!(svc.get_status("s1").is_streaming);
 
         d.close_session("s1").await.unwrap();

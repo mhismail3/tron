@@ -358,14 +358,14 @@ mod tests {
             result: make_result("b"),
             expires_at: Instant::now() + Duration::from_secs(60),
         };
-        cache.entries.insert(cache_key("b", "q"), long_config_entry);
+        let _ = cache.entries.insert(cache_key("b", "q"), long_config_entry);
 
         // Insert "c" — should evict expired "a", not LRU "b"
         let long_entry = CacheEntry {
             result: make_result("c"),
             expires_at: Instant::now() + Duration::from_secs(60),
         };
-        cache.entries.insert(cache_key("c", "q"), long_entry);
+        let _ = cache.entries.insert(cache_key("c", "q"), long_entry);
 
         // Trigger eviction since we're at capacity
         while cache.entries.len() >= cache.config.max_entries {

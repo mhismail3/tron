@@ -570,7 +570,11 @@ pub trait EventStoreQuery: Send + Sync {
 #[async_trait]
 pub trait BlobStore: Send + Sync {
     /// Store content, returns blob ID.
-    async fn store(&self, content: &[u8], mime_type: &str) -> Result<String, crate::errors::ToolError>;
+    async fn store(
+        &self,
+        content: &[u8],
+        mime_type: &str,
+    ) -> Result<String, crate::errors::ToolError>;
 }
 
 /// Task management (`TaskManager` tool).

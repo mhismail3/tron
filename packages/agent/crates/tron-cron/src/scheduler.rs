@@ -1320,7 +1320,7 @@ mod tests {
         };
         scheduler.reload_job(job);
 
-        let count = scheduler.with_jobs(|jobs| jobs.len());
+        let count = scheduler.with_jobs(std::collections::HashMap::len);
         assert_eq!(count, 1);
     }
 

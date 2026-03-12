@@ -244,7 +244,7 @@ mod integration_tests {
             .unwrap();
         match event {
             BrowserEvent::Closed { session_id } => assert_eq!(session_id, "s1"),
-            other => panic!("expected Closed, got: {other:?}"),
+            other @ BrowserEvent::Frame { .. } => panic!("expected Closed, got: {other:?}"),
         }
     }
 
@@ -304,7 +304,7 @@ mod integration_tests {
                 assert!(frame.frame_id >= 1);
                 assert!(frame.timestamp > 0);
             }
-            other => panic!("expected Frame, got: {other:?}"),
+            other @ BrowserEvent::Closed { .. } => panic!("expected Frame, got: {other:?}"),
         }
 
         svc.close_session("s1").await.unwrap();

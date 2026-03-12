@@ -275,7 +275,7 @@ mod tests {
         let defs1 = reg.definitions();
         assert_eq!(defs1.len(), 2);
 
-        reg.remove("Write");
+        let _ = reg.remove("Write");
         let defs2 = reg.definitions();
         assert_eq!(defs2.len(), 1);
         assert_eq!(defs2[0].name, "Read");

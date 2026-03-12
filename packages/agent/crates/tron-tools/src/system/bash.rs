@@ -187,7 +187,8 @@ impl TronTool for BashTool {
                 format!("\n\n... [{omitted} chars omitted] ...\n\n")
             };
 
-            let mut inline = String::with_capacity(head_end + marker.len() + (combined.len() - tail_start));
+            let mut inline =
+                String::with_capacity(head_end + marker.len() + (combined.len() - tail_start));
             inline.push_str(&combined[..head_end]);
             inline.push_str(&marker);
             inline.push_str(&combined[tail_start..]);
@@ -221,8 +222,8 @@ impl TronTool for BashTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct MockRunner {
         handler: Box<dyn Fn(&str) -> crate::traits::ProcessOutput + Send + Sync>,
@@ -349,14 +350,14 @@ mod tests {
         }
 
         fn last_stored_size(&self) -> Option<usize> {
-            self.stored.lock().unwrap().last().map(|v| v.len())
+            self.stored.lock().unwrap().last().map(std::vec::Vec::len)
         }
     }
 
     #[async_trait]
     impl BlobStore for MockBlobStore {
         async fn store(&self, content: &[u8], _mime_type: &str) -> Result<String, ToolError> {
-            self.call_count.fetch_add(1, Ordering::SeqCst);
+            let _ = self.call_count.fetch_add(1, Ordering::SeqCst);
             if self.should_fail {
                 return Err(ToolError::Internal {
                     message: "blob store error".into(),
@@ -752,7 +753,7 @@ mod tests {
             .unwrap();
         let text = extract_text(&r);
         // Must be valid UTF-8 (extract_text would panic otherwise)
-        assert!(text.len() > 0);
+        assert!(!text.is_empty());
         assert!(text.contains("chars omitted"));
     }
 

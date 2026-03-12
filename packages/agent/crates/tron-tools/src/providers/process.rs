@@ -327,7 +327,7 @@ mod tests {
         // Generate exactly MAX_OUTPUT_BYTES
         let result = runner
             .run_command(
-                &format!("head -c {} /dev/zero | tr '\\0' 'B'", MAX_OUTPUT_BYTES),
+                &format!("head -c {MAX_OUTPUT_BYTES} /dev/zero | tr '\\0' 'B'"),
                 &opts,
             )
             .await
