@@ -12,6 +12,8 @@
 //! - Skills: list, get, refresh, remove
 //! - Plus: browser, canvas, device, task, transcription, worktree, tree
 
+pub(crate) mod agent_commands;
+pub(crate) mod agent_queries;
 pub(crate) mod client_logs;
 pub mod context;
 pub mod errors;

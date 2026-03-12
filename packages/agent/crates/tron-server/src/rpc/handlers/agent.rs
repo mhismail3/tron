@@ -11,8 +11,10 @@ use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use tron_runtime::orchestrator::agent_runner::run_agent;
 use tron_runtime::types::{AgentConfig, RunContext};
 
+use crate::rpc::agent_commands::AgentCommandService;
+use crate::rpc::agent_queries::AgentQueryService;
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::{self, RpcError};
+use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 #[path = "agent_prompt_runtime.rs"]
@@ -138,16 +140,7 @@ impl MethodHandler for PromptHandler {
         };
 
         // Verify the session exists and get its details
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
+        let session = AgentCommandService::load_prompt_session(ctx, &session_id).await?;
 
         let deps = ctx
             .agent_deps
@@ -719,20 +712,7 @@ impl MethodHandler for AbortHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.abort", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        let aborted = ctx
-            .orchestrator
-            .abort(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        // Clean up pending device requests to unblock any waiting tools immediately
-        if aborted && let Some(ref broker) = ctx.device_request_broker {
-            broker.cancel_session_pending(&session_id);
-        }
-
-        Ok(serde_json::json!({ "aborted": aborted }))
+        AgentCommandService::abort(ctx, &session_id)
     }
 }
 
@@ -744,88 +724,7 @@ impl MethodHandler for GetAgentStateHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.getState", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        let is_running = ctx.orchestrator.has_active_run(&session_id);
-        let run_id = ctx.orchestrator.get_run_id(&session_id);
-
-        // Try to get session metadata for model/turn/message info
-        let (
-            model,
-            current_turn,
-            message_count,
-            total_input,
-            total_output,
-            cache_read,
-            cache_creation,
-        ) = if let Ok(Some(session)) = ctx.session_manager.get_session(&session_id) {
-            let model = session.latest_model.clone();
-            let input = session.total_input_tokens;
-            let output = session.total_output_tokens;
-            let turn = session.turn_count;
-            let msg = session.message_count;
-            let cr = session.total_cache_read_tokens;
-            let cc = session.total_cache_creation_tokens;
-            (model, turn, msg, input, output, cr, cc)
-        } else {
-            (String::new(), 0, 0, 0, 0, 0, 0)
-        };
-
-        // Get tool names from the tool factory (if configured)
-        let tool_names: Vec<String> = ctx
-            .agent_deps
-            .as_ref()
-            .map(|deps| (deps.tool_factory)().names())
-            .unwrap_or_default();
-
-        // Check if session was interrupted (last turn didn't complete)
-        let was_interrupted = if is_running {
-            false
-        } else {
-            ctx.event_store
-                .was_session_interrupted(&session_id)
-                .unwrap_or(false)
-        };
-
-        let (current_turn_text, current_turn_tool_calls, content_sequence) = if is_running {
-            tracing::trace!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
-            if let Some((text, tools, seq)) =
-                ctx.orchestrator.turn_accumulators().get_state(&session_id)
-            {
-                tracing::trace!(
-                    session_id = %session_id,
-                    text_len = text.len(),
-                    tool_count = tools.as_array().map_or(0, std::vec::Vec::len),
-                    seq_count = seq.as_array().map_or(0, std::vec::Vec::len),
-                    "agent.getState: returning accumulated content"
-                );
-                (Some(Value::String(text)), Some(tools), Some(seq))
-            } else {
-                tracing::warn!(session_id = %session_id, "agent.getState: no accumulator found despite isRunning=true");
-                (None, None, None)
-            }
-        } else {
-            (None, None, None)
-        };
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "isRunning": is_running,
-            "currentTurn": current_turn,
-            "messageCount": message_count,
-            "model": model,
-            "runId": run_id,
-            "tokenUsage": {
-                "input": total_input,
-                "output": total_output,
-                "cacheReadTokens": cache_read,
-                "cacheCreationTokens": cache_creation,
-            },
-            "tools": tool_names,
-            "wasInterrupted": was_interrupted,
-            "currentTurnText": current_turn_text,
-            "currentTurnToolCalls": current_turn_tool_calls,
-            "contentSequence": content_sequence,
-        }))
+        AgentQueryService::get_state(ctx, session_id).await
     }
 }
 
@@ -838,12 +737,16 @@ mod tests {
     use futures::stream;
     use serde_json::json;
     use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
     use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::registry::ToolRegistry;
+
+    use crate::device::{DeviceRequestBroker, DeviceRequestError};
+    use crate::websocket::broadcast::BroadcastManager;
 
     // ── extract_skills tests ──
 
@@ -1169,6 +1072,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn abort_active_cancels_pending_device_requests() {
+        let mut ctx = make_slow_context();
+        let broker = Arc::new(DeviceRequestBroker::new(
+            Arc::new(BroadcastManager::new()),
+            CancellationToken::new(),
+        ));
+        ctx.device_request_broker = Some(broker.clone());
+
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
+            .await
+            .unwrap();
+
+        let broker_for_request = broker.clone();
+        let sid_for_request = sid.clone();
+        let pending = tokio::spawn(async move {
+            broker_for_request
+                .request(
+                    &sid_for_request,
+                    "device.test",
+                    json!({"k": "v"}),
+                    std::time::Duration::from_secs(5),
+                )
+                .await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(broker.pending_count(), 1);
+
+        let result = AbortHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["aborted"], true);
+        assert_eq!(broker.pending_count(), 0);
+
+        let request_result = pending.await.unwrap();
+        assert!(matches!(request_result, Err(DeviceRequestError::Cancelled)));
+    }
+
+    #[tokio::test]
     async fn abort_missing_param() {
         let ctx = make_test_context();
         let err = AbortHandler
@@ -1258,6 +1207,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["isRunning"], true);
         assert!(result["runId"].is_string());
+        assert_eq!(result["wasInterrupted"], false);
     }
 
     #[tokio::test]
