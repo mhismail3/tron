@@ -73,18 +73,6 @@ final class MiscClient {
         )
     }
 
-    func getHandoffs(workingDirectory: String? = nil, limit: Int = 10) async throws -> [Handoff] {
-        let ws = try transport.requireConnection()
-
-        let params = HandoffsParams(workingDirectory: workingDirectory, limit: limit)
-        let result: HandoffsResult = try await ws.send(
-            method: "memory.getHandoffs",
-            params: params
-        )
-
-        return result.handoffs
-    }
-
     /// Get paginated ledger entries, optionally scoped to a workspace
     func getLedgerEntries(
         workingDirectory: String? = nil,

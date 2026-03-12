@@ -1,4 +1,4 @@
-//! Memory handlers: getLedger, updateLedger, search, getHandoffs.
+//! Memory handlers: getLedger, updateLedger, search.
 //!
 //! The ledger write pipeline is shared between two callers:
 //! - **Auto path**: `MemoryManager.on_cycle_complete()` → `RuntimeMemoryDeps.write_ledger_entry()`
@@ -21,6 +21,7 @@ use crate::rpc::memory_ledger::{
     build_cycle_snapshot as compute_cycle_messages, cron_assistant_text_len,
     prepare_cron_transcript,
 };
+use crate::rpc::memory_queries::MemoryQueryService;
 use crate::rpc::registry::MethodHandler;
 
 use super::{opt_array, opt_string, opt_u64};
@@ -47,27 +48,6 @@ fn emit_memory_updated(
 // =============================================================================
 // RPC Handlers
 // =============================================================================
-
-/// Transform an event row into the `LedgerEntryDTO` wire format.
-fn event_to_ledger_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
-    let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
-    serde_json::json!({
-        "id": event.id,
-        "sessionId": event.session_id,
-        "timestamp": event.timestamp,
-        "title": payload.get("title"),
-        "entryType": payload.get("entryType"),
-        "input": payload.get("input"),
-        "actions": payload.get("actions").unwrap_or(&serde_json::json!([])),
-        "decisions": payload.get("decisions").unwrap_or(&serde_json::json!([])),
-        "lessons": payload.get("lessons").unwrap_or(&serde_json::json!([])),
-        "insights": payload.get("thinkingInsights").unwrap_or(&serde_json::json!([])),
-        "tags": payload.get("tags").unwrap_or(&serde_json::json!([])),
-        "files": payload.get("files").unwrap_or(&serde_json::json!([])),
-        "model": payload.get("model"),
-        "tokenCost": payload.get("tokenCost"),
-    })
-}
 
 /// Get ledger entries, optionally scoped to a workspace.
 ///
@@ -96,111 +76,13 @@ impl MethodHandler for GetLedgerHandler {
 
         let event_store = ctx.event_store.clone();
         ctx.run_blocking("memory.get_ledger", move || {
-            // Fetch raw events — either workspace-scoped or global
-            let (all_events_for_tags, count_and_page) = if let Some(ref dir) = working_dir {
-                let workspaces = event_store
-                    .find_workspaces_by_path_prefix(dir)
-                    .unwrap_or_default();
-
-                if workspaces.is_empty() {
-                    return Ok(serde_json::json!({
-                        "entries": [],
-                        "hasMore": false,
-                        "totalCount": 0,
-                    }));
-                }
-
-                let workspace_ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
-
-                if tags_filter.is_some() {
-                    let events = event_store
-                        .get_events_by_workspaces_and_types(
-                            &workspace_ids,
-                            &["memory.ledger"],
-                            None,
-                            None,
-                        )
-                        .unwrap_or_default();
-                    (Some(events), None)
-                } else {
-                    let total_count = event_store
-                        .count_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"])
-                        .unwrap_or(0);
-                    let events = event_store
-                        .get_events_by_workspaces_and_types(
-                            &workspace_ids,
-                            &["memory.ledger"],
-                            Some(limit),
-                            Some(offset),
-                        )
-                        .unwrap_or_default();
-                    (None, Some((events, total_count)))
-                }
-            } else if tags_filter.is_some() {
-                let events = event_store
-                    .get_all_events_by_types(&["memory.ledger"], None, None)
-                    .unwrap_or_default();
-                (Some(events), None)
-            } else {
-                let total_count = event_store
-                    .count_all_events_by_types(&["memory.ledger"])
-                    .unwrap_or(0);
-                let events = event_store
-                    .get_all_events_by_types(&["memory.ledger"], Some(limit), Some(offset))
-                    .unwrap_or_default();
-                (None, Some((events, total_count)))
-            };
-
-            if let Some(all_events) = all_events_for_tags {
-                let tags = tags_filter.as_ref().ok_or_else(|| RpcError::Internal {
-                    message: "memory tag filter state was inconsistent".into(),
-                })?;
-                let filtered: Vec<Value> = all_events
-                    .iter()
-                    .map(event_to_ledger_dto)
-                    .filter(|dto| {
-                        let entry_tags = dto["tags"]
-                            .as_array()
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(Value::as_str)
-                                    .map(String::from)
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        tags.iter().any(|tag| entry_tags.contains(tag))
-                    })
-                    .collect();
-
-                let total_count = filtered.len();
-                let offset_usize = usize::try_from(offset).unwrap_or(0);
-                let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
-                let entries: Vec<Value> = filtered
-                    .into_iter()
-                    .skip(offset_usize)
-                    .take(limit_usize)
-                    .collect();
-                let has_more = offset_usize + limit_usize < total_count;
-
-                return Ok(serde_json::json!({
-                    "entries": entries,
-                    "hasMore": has_more,
-                    "totalCount": total_count,
-                }));
-            }
-
-            let (events, total_count) = count_and_page.ok_or_else(|| RpcError::Internal {
-                message: "memory ledger pagination state was inconsistent".into(),
-            })?;
-            let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
-            #[allow(clippy::cast_possible_wrap)]
-            let has_more = (offset + limit) < total_count;
-
-            Ok(serde_json::json!({
-                "entries": entries,
-                "hasMore": has_more,
-                "totalCount": total_count,
-            }))
+            MemoryQueryService::get_ledger(
+                &event_store,
+                working_dir.as_deref(),
+                limit,
+                offset,
+                tags_filter.as_deref(),
+            )
         })
         .await
     }
@@ -291,33 +173,6 @@ impl MethodHandler for UpdateLedgerHandler {
     }
 }
 
-/// Transform an event row into the `MemoryEntry` wire format.
-fn event_to_search_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
-    let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
-    let content = payload
-        .get("input")
-        .and_then(Value::as_str)
-        .or_else(|| payload.get("title").and_then(Value::as_str))
-        .unwrap_or("");
-    let entry_type = payload
-        .get("entryType")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let source = payload
-        .get("source")
-        .and_then(Value::as_str)
-        .unwrap_or("ledger");
-    serde_json::json!({
-        "id": event.id,
-        "type": entry_type,
-        "content": content,
-        "source": source,
-        "relevance": null,
-        "timestamp": event.timestamp,
-        "sessionId": event.session_id,
-    })
-}
-
 /// Search memory entries across sessions.
 pub struct SearchMemoryHandler;
 
@@ -334,115 +189,13 @@ impl MethodHandler for SearchMemoryHandler {
         let event_store = ctx.event_store.clone();
         let session_manager = ctx.session_manager.clone();
         ctx.run_blocking("memory.search", move || {
-            let sessions = session_manager
-                .list_sessions(&tron_runtime::SessionFilter {
-                    include_archived: true,
-                    ..Default::default()
-                })
-                .unwrap_or_default();
-
-            let mut entries = Vec::new();
-            let search_lower = search_text.to_lowercase();
-
-            for session in sessions {
-                let events = event_store
-                    .get_events_by_type(&session.id, &["memory.ledger"], Some(100))
-                    .unwrap_or_default();
-
-                for event in events {
-                    let payload: Value = match serde_json::from_str(&event.payload) {
-                        Ok(value) => value,
-                        Err(_) => continue,
-                    };
-
-                    if !search_lower.is_empty()
-                        && !payload.to_string().to_lowercase().contains(&search_lower)
-                    {
-                        continue;
-                    }
-
-                    if let Some(type_filter) = type_filter.as_deref() {
-                        let entry_type = payload
-                            .get("entryType")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if entry_type != type_filter {
-                            continue;
-                        }
-                    }
-
-                    entries.push(event_to_search_dto(&event));
-
-                    if entries.len() >= limit {
-                        break;
-                    }
-                }
-                if entries.len() >= limit {
-                    break;
-                }
-            }
-
-            let total_count = entries.len();
-
-            Ok(serde_json::json!({
-                "entries": entries,
-                "totalCount": total_count,
-            }))
-        })
-        .await
-    }
-}
-
-/// Get handoff entries for recent sessions.
-pub struct GetHandoffsHandler;
-
-#[async_trait]
-impl MethodHandler for GetHandoffsHandler {
-    #[instrument(skip(self, ctx), fields(method = "memory.getHandoffs"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 10)).unwrap_or(usize::MAX);
-        let event_store = ctx.event_store.clone();
-        let session_manager = ctx.session_manager.clone();
-        ctx.run_blocking("memory.get_handoffs", move || {
-            let sessions = session_manager
-                .list_sessions(&tron_runtime::SessionFilter {
-                    include_archived: true,
-                    limit: Some(limit * 2),
-                    ..Default::default()
-                })
-                .unwrap_or_default();
-
-            let mut handoffs = Vec::new();
-
-            for session in sessions {
-                if let Some(event) = event_store
-                    .get_latest_event_by_type(&session.id, "memory.ledger")
-                    .unwrap_or_default()
-                    && let Ok(parsed) = serde_json::from_str::<Value>(&event.payload)
-                {
-                    let summary = parsed
-                        .get("input")
-                        .and_then(Value::as_str)
-                        .or_else(|| parsed.get("summary").and_then(Value::as_str))
-                        .unwrap_or("");
-                    handoffs.push(serde_json::json!({
-                        "id": event.id,
-                        "sessionId": session.id,
-                        "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
-                        "createdAt": event.timestamp,
-                        "summary": summary,
-                        "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
-                    }));
-                }
-
-                if handoffs.len() >= limit {
-                    break;
-                }
-            }
-
-            Ok(serde_json::json!({
-                "handoffs": handoffs,
-            }))
+            MemoryQueryService::search(
+                &event_store,
+                &session_manager,
+                &search_text,
+                type_filter.as_deref(),
+                limit,
+            )
         })
         .await
     }
@@ -1231,6 +984,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_memory_returns_oldest_matching_entry_first_within_session() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
+
+        let first = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({
+                    "title": "First dark mode note",
+                    "entryType": "feature",
+                    "input": "dark mode groundwork"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        let _second = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({
+                    "title": "Second dark mode note",
+                    "entryType": "feature",
+                    "input": "dark mode follow-up"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = SearchMemoryHandler
+            .handle(Some(json!({"searchText": "dark mode", "limit": 1})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"].as_str().unwrap(), first.id);
+        assert_eq!(
+            entries[0]["content"].as_str().unwrap(),
+            "dark mode groundwork"
+        );
+    }
+
+    #[tokio::test]
     async fn search_memory_missing_no_error() {
         let ctx = make_test_context();
         let result = SearchMemoryHandler
@@ -1238,59 +1040,6 @@ mod tests {
             .await
             .unwrap();
         assert!(result["entries"].is_array());
-    }
-
-    // ── GetHandoffsHandler: DTO shape tests ──
-
-    #[tokio::test]
-    async fn get_handoffs_returns_dto_shape() {
-        let ctx = make_test_context();
-        let (sid, eid) = seed_ledger_event(
-            &ctx,
-            "/tmp/proj",
-            json!({
-                "title": "Implement auth",
-                "entryType": "feature",
-                "input": "Add OAuth2 authentication flow",
-                "lessons": ["Use PKCE for mobile"],
-            }),
-        );
-
-        let result = GetHandoffsHandler.handle(None, &ctx).await.unwrap();
-
-        let handoffs = result["handoffs"].as_array().unwrap();
-        assert_eq!(handoffs.len(), 1);
-        let h = &handoffs[0];
-
-        assert_eq!(h["id"].as_str().unwrap(), eid);
-        assert_eq!(h["sessionId"].as_str().unwrap(), sid);
-        assert_eq!(h["title"].as_str().unwrap(), "Implement auth");
-        assert_eq!(
-            h["summary"].as_str().unwrap(),
-            "Add OAuth2 authentication flow"
-        );
-        assert!(h["createdAt"].as_str().is_some());
-        // Should NOT have "timestamp" — wire format uses "createdAt"
-        assert!(h.get("timestamp").is_none());
-        let lessons = h["lessons"].as_array().unwrap();
-        assert_eq!(lessons.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn get_handoffs_returns_empty() {
-        let ctx = make_test_context();
-        let result = GetHandoffsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["handoffs"].as_array().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn get_handoffs_with_workspace() {
-        let ctx = make_test_context();
-        let result = GetHandoffsHandler
-            .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
-            .await
-            .unwrap();
-        assert!(result["handoffs"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1394,16 +1143,6 @@ mod tests {
         };
         let result = execute_ledger_write(&sid, &deps, "manual").await;
         assert!(!result.written); // No LLM available
-    }
-
-    #[tokio::test]
-    async fn get_handoffs_missing_no_error() {
-        let ctx = make_test_context();
-        let result = GetHandoffsHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap();
-        assert!(result["handoffs"].is_array());
     }
 
     // ── Cycle boundary tests ──

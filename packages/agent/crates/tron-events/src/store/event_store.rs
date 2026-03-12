@@ -1560,6 +1560,53 @@ mod tests {
     }
 
     #[test]
+    fn get_events_by_sessions_and_types_returns_all_matching_events() {
+        let store = setup();
+        let first = store
+            .create_session("claude-opus-4-6", "/tmp/project-a", None, None, None)
+            .unwrap();
+        let second = store
+            .create_session("claude-opus-4-6", "/tmp/project-b", None, None, None)
+            .unwrap();
+
+        let first_user = store
+            .append(&AppendOptions {
+                session_id: &first.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "first"}),
+                parent_id: None,
+            })
+            .unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: &first.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({"content": "reply"}),
+                parent_id: None,
+            })
+            .unwrap();
+        let second_user = store
+            .append(&AppendOptions {
+                session_id: &second.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "second"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let events = store
+            .get_events_by_sessions_and_types(
+                &[&first.session.id, &second.session.id],
+                &["message.user"],
+            )
+            .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, first_user.id);
+        assert_eq!(events[1].id, second_user.id);
+    }
+
+    #[test]
     fn get_events_by_type_basic() {
         let store = setup();
         let cr = store

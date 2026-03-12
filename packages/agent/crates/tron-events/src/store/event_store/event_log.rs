@@ -206,6 +206,16 @@ impl EventStore {
         EventRepo::get_by_ids(&conn, event_ids)
     }
 
+    /// Get events of specific types across multiple sessions.
+    pub fn get_events_by_sessions_and_types(
+        &self,
+        session_ids: &[&str],
+        types: &[&str],
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_sessions_and_types(&conn, session_ids, types)
+    }
+
     /// Get events of specific types within a session.
     pub fn get_events_by_type(
         &self,

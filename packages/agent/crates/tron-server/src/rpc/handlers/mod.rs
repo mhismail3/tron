@@ -130,7 +130,6 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("memory.getLedger", memory::GetLedgerHandler);
     registry.register("memory.updateLedger", memory::UpdateLedgerHandler);
     registry.register("memory.search", memory::SearchMemoryHandler);
-    registry.register("memory.getHandoffs", memory::GetHandoffsHandler);
 
     // Logs
     registry.register("logs.ingest", logs::IngestLogsHandler);
@@ -530,6 +529,7 @@ mod tests {
         assert!(reg.has_method("session.create"));
         assert!(reg.has_method("agent.prompt"));
         assert!(reg.has_method("git.clone"));
+        assert!(!reg.has_method("memory.getHandoffs"));
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            125,
+            124,
             "expected 124 methods, got {}",
             reg.methods().len()
         );

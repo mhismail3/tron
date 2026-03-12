@@ -246,8 +246,6 @@ pub enum HookContext {
         timestamp: String,
         /// Working directory for the session.
         working_directory: String,
-        /// Parent session ID if this is a handoff.
-        parent_handoff_id: Option<String>,
     },
     /// Context for [`HookType::SessionEnd`].
     #[serde(rename_all = "camelCase")]
@@ -606,7 +604,6 @@ mod tests {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             working_directory: "/tmp".to_string(),
-            parent_handoff_id: None,
         };
         assert_eq!(ctx.hook_type(), HookType::SessionStart);
     }

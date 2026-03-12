@@ -12,7 +12,7 @@
 //! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
 //! - **`AskUserQuestion`**: [`ask_user_question::AskUserQuestion`] interactive tool types
-//! - **Memory**: [`memory::SessionMemory`] and [`memory::HandoffRecord`]
+//! - **Memory**: [`memory::SessionMemory`]
 //!
 //! ## Crate Position
 //!

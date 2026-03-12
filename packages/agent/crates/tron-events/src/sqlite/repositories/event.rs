@@ -23,6 +23,8 @@ const EVENT_COLUMNS: &str = "\
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, \
     model, latency_ms, stop_reason, has_thinking, provider_type, cost";
 
+const SQLITE_BIND_LIMIT: usize = 900;
+
 /// Options for listing events.
 #[derive(Default)]
 pub struct ListEventsOptions {
@@ -338,6 +340,54 @@ impl EventRepo {
             let _ = result.insert(row.id.clone(), row);
         }
         Ok(result)
+    }
+
+    /// Get events of specific types across multiple sessions.
+    ///
+    /// Results are ordered by `session_id`, then by sequence ascending within each session.
+    pub fn get_by_sessions_and_types(
+        conn: &Connection,
+        session_ids: &[&str],
+        types: &[&str],
+    ) -> Result<Vec<EventRow>> {
+        if session_ids.is_empty() || types.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let max_chunk_size = SQLITE_BIND_LIMIT.saturating_sub(types.len()).max(1);
+        let mut all_rows = Vec::new();
+
+        for session_chunk in session_ids.chunks(max_chunk_size) {
+            let session_placeholders: Vec<String> =
+                (1..=session_chunk.len()).map(|i| format!("?{i}")).collect();
+            let type_placeholders: Vec<String> = (0..types.len())
+                .map(|i| format!("?{}", session_chunk.len() + i + 1))
+                .collect();
+            let sql = format!(
+                "SELECT {EVENT_COLUMNS}
+                 FROM events
+                 WHERE session_id IN ({})
+                   AND type IN ({})
+                 ORDER BY session_id ASC, sequence ASC",
+                session_placeholders.join(", "),
+                type_placeholders.join(", ")
+            );
+
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let mut param_values = Vec::with_capacity(session_chunk.len() + types.len());
+            param_values.extend(session_chunk.iter().map(std::string::ToString::to_string));
+            param_values.extend(types.iter().map(std::string::ToString::to_string));
+
+            let rows = stmt
+                .query_map(
+                    rusqlite::params_from_iter(param_values.iter()),
+                    Self::map_row,
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            all_rows.extend(rows);
+        }
+
+        Ok(all_rows)
     }
 
     /// Get events of specific types within a session.

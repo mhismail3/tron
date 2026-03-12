@@ -17,6 +17,7 @@ pub mod context;
 pub mod errors;
 pub mod handlers;
 pub mod memory_ledger;
+pub(crate) mod memory_queries;
 pub(crate) mod notification_inbox;
 pub mod registry;
 pub mod session_context;

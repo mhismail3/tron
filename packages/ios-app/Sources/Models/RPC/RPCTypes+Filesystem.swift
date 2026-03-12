@@ -90,19 +90,3 @@ struct MemorySearchResult: Decodable {
     let entries: [MemoryEntry]
     let totalCount: Int
 }
-
-struct HandoffsParams: Encodable {
-    let workingDirectory: String?
-    let limit: Int?
-}
-
-struct Handoff: Decodable, Identifiable {
-    let id: String
-    let sessionId: String
-    let summary: String
-    let createdAt: String
-}
-
-struct HandoffsResult: Decodable {
-    let handoffs: [Handoff]
-}

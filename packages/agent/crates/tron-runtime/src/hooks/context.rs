@@ -34,11 +34,7 @@ pub trait HookContextFactory: Send + Sync {
     fn create_stop_context(&self, stop_reason: &str, final_message: Option<&str>) -> HookContext;
 
     /// Create a [`HookContext::SessionStart`] context.
-    fn create_session_start_context(
-        &self,
-        working_directory: &str,
-        parent_handoff_id: Option<&str>,
-    ) -> HookContext;
+    fn create_session_start_context(&self, working_directory: &str) -> HookContext;
 
     /// Create a [`HookContext::SessionEnd`] context.
     fn create_session_end_context(&self, message_count: u64, tool_call_count: u64) -> HookContext;
@@ -130,16 +126,11 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_session_start_context(
-        &self,
-        working_directory: &str,
-        parent_handoff_id: Option<&str>,
-    ) -> HookContext {
+    fn create_session_start_context(&self, working_directory: &str) -> HookContext {
         HookContext::SessionStart {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
             working_directory: working_directory.to_string(),
-            parent_handoff_id: parent_handoff_id.map(ToString::to_string),
         }
     }
 
@@ -258,30 +249,13 @@ mod tests {
     #[test]
     fn test_session_start_context() {
         let factory = make_factory();
-        let ctx = factory.create_session_start_context("/tmp/project", None);
+        let ctx = factory.create_session_start_context("/tmp/project");
         assert_eq!(ctx.hook_type(), HookType::SessionStart);
         if let HookContext::SessionStart {
-            working_directory,
-            parent_handoff_id,
-            ..
+            working_directory, ..
         } = &ctx
         {
             assert_eq!(working_directory, "/tmp/project");
-            assert!(parent_handoff_id.is_none());
-        } else {
-            panic!("Expected SessionStart context");
-        }
-    }
-
-    #[test]
-    fn test_session_start_with_handoff() {
-        let factory = make_factory();
-        let ctx = factory.create_session_start_context("/tmp", Some("parent-1"));
-        if let HookContext::SessionStart {
-            parent_handoff_id, ..
-        } = &ctx
-        {
-            assert_eq!(parent_handoff_id.as_deref(), Some("parent-1"));
         } else {
             panic!("Expected SessionStart context");
         }

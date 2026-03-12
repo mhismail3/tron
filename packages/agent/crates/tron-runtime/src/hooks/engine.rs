@@ -440,7 +440,6 @@ mod tests {
                 session_id: "s1".to_string(),
                 timestamp: "t".to_string(),
                 working_directory: "/tmp".to_string(),
-                parent_handoff_id: None,
             },
         }
     }

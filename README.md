@@ -325,7 +325,7 @@ All messages use JSON-RPC 2.0 format:
 
 **Message** (1): `message.delete`
 
-**Memory** (4): `memory.getLedger`, `memory.updateLedger`, `memory.search`, `memory.getHandoffs`
+**Memory** (3): `memory.getLedger`, `memory.updateLedger`, `memory.search`
 
 **Logs** (1): `logs.export`
 
