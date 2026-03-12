@@ -1,12 +1,11 @@
 //! Agent handlers: prompt, abort, getState.
 
-use std::collections::HashSet;
-use std::fmt::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{debug, instrument, warn};
+#[cfg(test)]
 use tron_events::EventType;
 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use tron_runtime::orchestrator::agent_runner::run_agent;
@@ -16,271 +15,17 @@ use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
-use crate::rpc::session_context::{ContextArtifactsService, collect_dynamic_rule_paths};
+#[path = "agent_prompt_runtime.rs"]
+mod prompt_runtime;
 
-/// Extract skill/spell names from a JSON array.
-///
-/// Clients may send objects `[{name: "skill-name", source: "global"}]` or
-/// plain strings `["skill-name"]`. This handles both.
-fn extract_skills(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .or_else(|| v.as_str())
-                        .map(String::from)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-// =============================================================================
-// User event payload builder
-// =============================================================================
-
-/// Build the JSON payload for a `message.user` event.
-///
-/// When the prompt includes images, attachments, skills, or spells, the payload
-/// is enriched so that session resume can reconstruct client UI chips and the
-/// LLM can see previously-sent images in reconstructed history.
-///
-/// Format matches `UserContent` serde (`content.rs`) and the reconstruction
-/// pipeline
-/// (`reconstruct.rs` + `session_reconstructor.rs`).
-fn build_user_event_payload(
-    prompt: &str,
-    images: Option<&[Value]>,
-    attachments: Option<&[Value]>,
-    raw_skills: Option<&[Value]>,
-    raw_spells: Option<&[Value]>,
-) -> Value {
-    let has_images = images.is_some_and(|v| !v.is_empty());
-    let has_attachments = attachments.is_some_and(|v| !v.is_empty());
-
-    let (content, image_count) = if !has_images && !has_attachments {
-        (Value::String(prompt.to_owned()), None)
-    } else {
-        let mut blocks = vec![serde_json::json!({"type": "text", "text": prompt})];
-        let mut img_count: i64 = 0;
-
-        // Add images from `images` param
-        if let Some(imgs) = images {
-            for img in imgs {
-                let data = img.get("data").and_then(|v| v.as_str());
-                let mime = img
-                    .get("mediaType")
-                    .or_else(|| img.get("mimeType"))
-                    .and_then(|v| v.as_str());
-                if let (Some(d), Some(m)) = (data, mime) {
-                    blocks.push(serde_json::json!({
-                        "type": "image",
-                        "data": d,
-                        "mimeType": m,
-                    }));
-                    img_count += 1;
-                }
-            }
-        }
-
-        // Add attachments (images or documents based on MIME type)
-        if let Some(atts) = attachments {
-            for att in atts {
-                let data = att.get("data").and_then(|v| v.as_str());
-                let mime = att.get("mimeType").and_then(|v| v.as_str());
-                if let (Some(d), Some(m)) = (data, mime) {
-                    if m.starts_with("image/") {
-                        blocks.push(serde_json::json!({
-                            "type": "image",
-                            "data": d,
-                            "mimeType": m,
-                        }));
-                        img_count += 1;
-                    } else {
-                        let mut block = serde_json::json!({
-                            "type": "document",
-                            "data": d,
-                            "mimeType": m,
-                        });
-                        if let Some(name) = att.get("fileName").and_then(|v| v.as_str()) {
-                            block["fileName"] = Value::String(name.to_owned());
-                        }
-                        blocks.push(block);
-                    }
-                }
-            }
-        }
-
-        // If all images/attachments were malformed and skipped, fall back to string
-        if blocks.len() == 1 {
-            (Value::String(prompt.to_owned()), None)
-        } else {
-            let count = if img_count > 0 { Some(img_count) } else { None };
-            (Value::Array(blocks), count)
-        }
-    };
-
-    let mut payload = serde_json::json!({ "content": content });
-    if let Some(c) = image_count {
-        payload["imageCount"] = Value::Number(c.into());
-    }
-    if let Some(skills) = raw_skills.filter(|s| !s.is_empty()) {
-        payload["skills"] = Value::Array(skills.to_vec());
-    }
-    if let Some(spells) = raw_spells.filter(|s| !s.is_empty()) {
-        payload["spells"] = Value::Array(spells.to_vec());
-    }
-    payload
-}
-
-#[derive(Default)]
-struct PromptContextArtifacts {
-    rules_content: Option<String>,
-    rules_index: Option<tron_runtime::context::rules_index::RulesIndex>,
-    pre_activated_rules: Vec<String>,
-    workspace_id: Option<String>,
-}
-
-fn load_prompt_context_artifacts(
-    context_artifacts: &ContextArtifactsService,
-    event_store: &tron_events::EventStore,
-    session_id: &str,
-    working_dir: &str,
-    settings: &tron_settings::TronSettings,
-    is_chat: bool,
-    is_resumed: bool,
-) -> PromptContextArtifacts {
-    if is_chat {
-        return PromptContextArtifacts::default();
-    }
-
-    let artifacts = context_artifacts.load(event_store, working_dir, settings, is_chat);
-    let pre_activated_rules = if is_resumed {
-        collect_dynamic_rule_paths(event_store, session_id)
-    } else {
-        Vec::new()
-    };
-
-    PromptContextArtifacts {
-        rules_content: artifacts.session.rules.merged_content,
-        rules_index: artifacts.rules_index,
-        pre_activated_rules,
-        workspace_id: artifacts.workspace_id,
-    }
-}
-
-// =============================================================================
-// Subagent results — reconstruction from event store
-// =============================================================================
-
-/// Query unconsumed subagent results from the event store.
-///
-/// Returns `(event_id, payload_json)` pairs for `notification.subagent_result`
-/// events that have no matching `subagent.results_consumed` event referencing
-/// their ID. Works identically for live sessions and session resume.
-fn get_pending_subagent_results(
-    event_store: &tron_events::EventStore,
-    session_id: &str,
-) -> Vec<(String, Value)> {
-    let notifications = event_store
-        .get_events_by_type(session_id, &["notification.subagent_result"], None)
-        .unwrap_or_default();
-
-    if notifications.is_empty() {
-        return vec![];
-    }
-
-    // Build set of consumed notification event IDs
-    let consumed_events = event_store
-        .get_events_by_type(session_id, &["subagent.results_consumed"], None)
-        .unwrap_or_default();
-
-    let mut consumed_ids: HashSet<String> = HashSet::new();
-    for event in &consumed_events {
-        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
-            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array())
-        {
-            for id in ids {
-                if let Some(s) = id.as_str() {
-                    let _ = consumed_ids.insert(s.to_owned());
-                }
-            }
-        }
-    }
-
-    // Filter unconsumed notifications
-    notifications
-        .into_iter()
-        .filter(|e| !consumed_ids.contains(&e.id))
-        .filter_map(|e| {
-            serde_json::from_str::<Value>(&e.payload)
-                .ok()
-                .map(|p| (e.id, p))
-        })
-        .collect()
-}
-
-/// Format pending subagent results into markdown context string.
-fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
-    if results.is_empty() {
-        return None;
-    }
-
-    let mut ctx = String::from("# Completed Sub-Agent Results\n\n");
-    ctx.push_str(
-        "The following sub-agent(s) have completed since your last turn. \
-         Review their results and incorporate them into your response.\n\n",
-    );
-
-    for (_event_id, payload) in results {
-        let success = payload
-            .get("success")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let icon = if success { "+" } else { "x" };
-        let subagent_id = payload
-            .get("subagentSessionId")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        let task = payload
-            .get("task")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        let total_turns = payload
-            .get("totalTurns")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let duration = payload.get("duration").and_then(Value::as_i64).unwrap_or(0);
-
-        let _ = writeln!(ctx, "## [{icon}] Sub-Agent: `{subagent_id}`\n");
-        let _ = writeln!(ctx, "**Task**: {task}");
-        let _ = writeln!(
-            ctx,
-            "**Status**: {}",
-            if success { "Completed" } else { "Failed" }
-        );
-        let _ = writeln!(ctx, "**Turns**: {total_turns}");
-        #[allow(clippy::cast_precision_loss)]
-        let duration_secs = duration as f64 / 1000.0;
-        let _ = writeln!(ctx, "**Duration**: {duration_secs:.1}s");
-
-        if let Some(output) = payload.get("output").and_then(Value::as_str)
-            && !output.is_empty()
-        {
-            let truncated = if output.len() > 2000 {
-                format!("{}\n\n... [Output truncated]", &output[..2000])
-            } else {
-                output.to_string()
-            };
-            let _ = write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n");
-        }
-        ctx.push_str("\n---\n\n");
-    }
-    Some(ctx)
-}
+use prompt_runtime::{
+    PromptContextArtifacts, build_skill_context, build_user_content_override,
+    build_user_event_payload, extract_skills, load_prompt_bootstrap, load_recent_events,
+    load_session_model, load_session_update_data, persist_user_message_event,
+    resume_prompt_session,
+};
+#[cfg(test)]
+use prompt_runtime::{format_subagent_results, get_pending_subagent_results};
 
 // =============================================================================
 // RuntimeMemoryDeps — implements MemoryManagerDeps for the prompt handler
@@ -459,61 +204,6 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
     }
 }
 
-/// Gather recent event types and Bash tool call commands since the last compact.boundary.
-///
-/// Returns `(event_types, bash_commands)` for the compaction trigger's progress-signal check.
-fn gather_recent_events(
-    event_store: &tron_events::EventStore,
-    session_id: &str,
-) -> (Vec<String>, Vec<String>) {
-    // Find last compact.boundary event (fetch all, take last for correct ordering)
-    let boundary = event_store
-        .get_events_by_type(session_id, &["compact.boundary"], None)
-        .ok()
-        .and_then(|rows| rows.into_iter().last())
-        .or_else(|| {
-            // Fallback: use compact.summary if no boundary exists (legacy sessions)
-            event_store
-                .get_events_by_type(session_id, &["compact.summary"], None)
-                .ok()
-                .and_then(|rows| rows.into_iter().last())
-        });
-
-    // Get events after boundary (or all events if no boundary)
-    let events = if let Some(ref b) = boundary {
-        event_store
-            .get_events_since(session_id, b.sequence)
-            .unwrap_or_default()
-    } else {
-        event_store
-            .get_events_by_session(
-                session_id,
-                &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
-            )
-            .unwrap_or_default()
-    };
-
-    let mut event_types = Vec::new();
-    let mut bash_commands = Vec::new();
-
-    for event in &events {
-        event_types.push(event.event_type.clone());
-
-        if event.event_type == "tool.call"
-            && event.tool_name.as_deref() == Some("Bash")
-            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-            && let Some(cmd) = payload
-                .get("arguments")
-                .and_then(|a| a.get("command"))
-                .and_then(|c| c.as_str())
-        {
-            bash_commands.push(cmd.to_string());
-        }
-    }
-
-    (event_types, bash_commands)
-}
-
 /// Submit a prompt to the agent for a session.
 pub struct PromptHandler;
 
@@ -616,15 +306,17 @@ impl MethodHandler for PromptHandler {
         let browser_service = ctx.browser_service.clone();
 
         let handle = tokio::spawn(async move {
-            let _started_run = started_run;
+            let started_run_guard = started_run;
 
             // Grab settings once — consistent snapshot for the entire run
             let settings = tron_settings::get_settings();
 
             // 1. Resume session to get reconstructed state + persister
-            let (state, persister) = match session_manager.resume_session(&session_id_clone) {
-                Ok(active) => (active.state.clone(), active.context.persister.clone()),
-                Err(e) => {
+            let (state, persister) =
+                match resume_prompt_session(session_manager.clone(), session_id_clone.clone()).await
+                {
+                    Ok(active) => (active.state, active.persister),
+                    Err(e) => {
                     warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
                     let fresh_state =
                         tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
@@ -638,8 +330,8 @@ impl MethodHandler for PromptHandler {
                         ),
                     );
                     (fresh_state, fresh_persister)
-                }
-            };
+                    }
+                };
 
             // 1b. Worktree isolation — deferred acquisition at first prompt
             let worktree_info: Option<tron_worktree::WorktreeInfo> =
@@ -694,22 +386,15 @@ impl MethodHandler for PromptHandler {
                 .unwrap_or(working_dir);
 
             let is_resumed = !state.messages.is_empty();
-            let working_dir_for_artifacts = working_dir.clone();
-            let session_id_for_artifacts = session_id_clone.clone();
-            let event_store_for_artifacts = event_store.clone();
-            let context_artifacts_for_load = context_artifacts.clone();
-            let settings_for_artifacts = settings.clone();
-            let prompt_artifacts = match tokio::task::spawn_blocking(move || {
-                load_prompt_context_artifacts(
-                    context_artifacts_for_load.as_ref(),
-                    event_store_for_artifacts.as_ref(),
-                    &session_id_for_artifacts,
-                    &working_dir_for_artifacts,
-                    &settings_for_artifacts,
-                    is_chat,
-                    is_resumed,
-                )
-            })
+            let prompt_bootstrap = match load_prompt_bootstrap(
+                context_artifacts.clone(),
+                event_store.clone(),
+                session_id_clone.clone(),
+                working_dir.clone(),
+                settings.as_ref().clone(),
+                is_chat,
+                is_resumed,
+            )
             .await
             {
                 Ok(artifacts) => artifacts,
@@ -718,11 +403,15 @@ impl MethodHandler for PromptHandler {
                         session_id = %session_id_clone,
                         working_dir = %working_dir,
                         error = %error,
-                        "failed to load prompt context artifacts"
+                        "failed to load prompt bootstrap"
                     );
-                    PromptContextArtifacts::default()
+                    prompt_runtime::PromptBootstrapData {
+                        artifacts: PromptContextArtifacts::default(),
+                        subagent_results_context: None,
+                    }
                 }
             };
+            let prompt_artifacts = prompt_bootstrap.artifacts;
             let combined_rules = prompt_artifacts.rules_content;
             let rules_index = prompt_artifacts.rules_index;
             let pre_activated_rules = prompt_artifacts.pre_activated_rules;
@@ -764,6 +453,7 @@ impl MethodHandler for PromptHandler {
                     None
                 }
             };
+            let subagent_results_context = prompt_bootstrap.subagent_results_context;
 
             // 5b. Append worktree isolation context to memory
             let memory = if let Some(ref wt) = worktree_info {
@@ -884,164 +574,52 @@ impl MethodHandler for PromptHandler {
                 raw_skills_clone.as_deref(),
                 raw_spells_clone.as_deref(),
             );
-            let _ = event_store.append(&tron_events::AppendOptions {
-                session_id: &session_id_clone,
-                event_type: tron_events::EventType::MessageUser,
-                payload: user_event_payload,
-                parent_id: None,
-            });
+            if let Err(error) = persist_user_message_event(
+                event_store.clone(),
+                session_id_clone.clone(),
+                user_event_payload,
+            )
+            .await
+            {
+                warn!(
+                    session_id = %session_id_clone,
+                    error = %error,
+                    "failed to persist message.user event"
+                );
+            }
 
             // Build user content override for multimodal messages (images + attachments)
-            let user_content_override = {
-                let has_images = images_clone.as_ref().is_some_and(|v| !v.is_empty());
-                let has_attachments = attachments_clone.as_ref().is_some_and(|v| !v.is_empty());
-                if !has_images && !has_attachments {
-                    None
-                } else {
-                    let mut blocks = vec![tron_core::content::UserContent::Text {
-                        text: prompt.clone(),
-                    }];
-                    // Add images
-                    if let Some(imgs) = &images_clone {
-                        for img in imgs {
-                            if let (Some(data), Some(media_type)) = (
-                                img.get("data").and_then(|v| v.as_str()),
-                                img.get("mediaType")
-                                    .or_else(|| img.get("mimeType"))
-                                    .and_then(|v| v.as_str()),
-                            ) {
-                                blocks.push(tron_core::content::UserContent::Image {
-                                    data: data.to_string(),
-                                    mime_type: media_type.to_string(),
-                                });
-                            }
-                        }
-                    }
-                    // Add attachments (documents or images based on MIME type)
-                    if let Some(atts) = &attachments_clone {
-                        for att in atts {
-                            if let (Some(data), Some(mime)) = (
-                                att.get("data").and_then(|v| v.as_str()),
-                                att.get("mimeType").and_then(|v| v.as_str()),
-                            ) {
-                                let file_name = att
-                                    .get("fileName")
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from);
-                                if mime.starts_with("image/") {
-                                    blocks.push(tron_core::content::UserContent::Image {
-                                        data: data.to_string(),
-                                        mime_type: mime.to_string(),
-                                    });
-                                } else {
-                                    blocks.push(tron_core::content::UserContent::Document {
-                                        data: data.to_string(),
-                                        mime_type: mime.to_string(),
-                                        file_name,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    // Strip images if model doesn't support them
-                    if !tron_llm::model_supports_images(&model) {
-                        blocks.retain(|b| {
-                            !matches!(b, tron_core::content::UserContent::Image { .. })
-                        });
-                    }
-
-                    if blocks.len() > 1 {
-                        Some(tron_core::messages::UserMessageContent::Blocks(blocks))
-                    } else {
-                        None
-                    }
-                }
-            };
-
-            // Subagent results (from event store — works for both live and resumed sessions)
-            let subagent_results_context = {
-                let pending = get_pending_subagent_results(&event_store, &session_id_clone);
-                if pending.is_empty() {
-                    None
-                } else {
-                    let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
-                    let formatted = format_subagent_results(&pending);
-                    // Persist consumption marker
-                    if formatted.is_some() {
-                        let _ = event_store.append(&tron_events::AppendOptions {
-                            session_id: &session_id_clone,
-                            event_type: EventType::SubagentResultsConsumed,
-                            payload: serde_json::json!({
-                                "consumedEventIds": event_ids,
-                                "count": pending.len(),
-                            }),
-                            parent_id: None,
-                        });
-                    }
-                    formatted
-                }
-            };
+            let user_content_override = build_user_content_override(
+                &prompt_clone,
+                &model,
+                images_clone.as_deref(),
+                attachments_clone.as_deref(),
+            );
 
             // Build RunContext with client params
+            let skill_context = match build_skill_context(
+                skill_registry.clone(),
+                event_store.clone(),
+                session_id_clone.clone(),
+                skills_clone.clone(),
+                spells_clone.clone(),
+            )
+            .await
+            {
+                Ok(context) => context,
+                Err(error) => {
+                    warn!(
+                        session_id = %session_id_clone,
+                        error = %error,
+                        "failed to build skill context"
+                    );
+                    None
+                }
+            };
             let run_context = RunContext {
                 reasoning_level: reasoning_level_clone
                     .and_then(|s| tron_runtime::types::ReasoningLevel::from_str_loose(&s)),
-                skill_context: {
-                    // Merge skills + spells, deduplicate
-                    let mut all_names = skills_clone.unwrap_or_default();
-                    if let Some(spell_names) = spells_clone {
-                        for name in spell_names {
-                            if !all_names.contains(&name) {
-                                all_names.push(name);
-                            }
-                        }
-                    }
-                    if all_names.is_empty() {
-                        None
-                    } else {
-                        let registry = skill_registry.read();
-                        let name_refs: Vec<&str> = all_names.iter().map(String::as_str).collect();
-                        let (found, _not_found) = registry.get_many(&name_refs);
-                        if found.is_empty() {
-                            None
-                        } else {
-                            // Persist skill.added events (deduplicate against existing)
-                            let existing = event_store
-                                .get_events_by_type(&session_id_clone, &["skill.added"], None)
-                                .unwrap_or_default();
-                            let existing_names: std::collections::HashSet<String> = existing
-                                .iter()
-                                .filter_map(|e| {
-                                    serde_json::from_str::<serde_json::Value>(&e.payload)
-                                        .ok()
-                                        .and_then(|p| {
-                                            p.get("skillName")
-                                                .and_then(|n| n.as_str())
-                                                .map(String::from)
-                                        })
-                                })
-                                .collect();
-                            for skill in &found {
-                                if !existing_names.contains(&skill.name) {
-                                    let _ = event_store.append(&tron_events::AppendOptions {
-                                        session_id: &session_id_clone,
-                                        event_type: tron_events::EventType::SkillAdded,
-                                        payload: serde_json::json!({
-                                            "skillName": skill.name,
-                                            "source": skill.source.to_string(),
-                                            "addedVia": "mention",
-                                            "tokens": skill.content.len() as u64 / 4,
-                                        }),
-                                        parent_id: None,
-                                    });
-                                }
-                            }
-
-                            let ctx = tron_skills::injector::build_skill_context(&found);
-                            if ctx.is_empty() { None } else { Some(ctx) }
-                        }
-                    }
-                },
+                skill_context,
                 subagent_results: subagent_results_context,
                 user_content_override,
                 device_context: device_context.clone(),
@@ -1100,14 +678,30 @@ impl MethodHandler for PromptHandler {
                 });
             }
 
+            // Invalidate cached session before follow-up tasks so the next prompt
+            // resumes from freshly persisted events instead of stale in-memory state.
+            session_manager.invalidate_session(&session_id_clone);
+            drop(started_run_guard);
+
             // 9. Auto-ledger + auto-compaction pipeline (fail-silent)
             {
-                let session_model = session_manager
-                    .get_session(&session_id_clone)
-                    .ok()
-                    .flatten()
-                    .map(|s| s.latest_model.clone())
-                    .unwrap_or_default();
+                let session_model = match load_session_model(
+                    session_manager.clone(),
+                    session_id_clone.clone(),
+                )
+                .await
+                {
+                    Ok(Some(session_model)) => session_model,
+                    Ok(None) => String::new(),
+                    Err(error) => {
+                        warn!(
+                            session_id = %session_id_clone,
+                            error = %error,
+                            "failed to load session model for memory pipeline"
+                        );
+                        String::new()
+                    }
+                };
                 let context_limit = tron_llm::model_context_window(&session_model);
                 let last_context_window = result.last_context_window_tokens.unwrap_or(0);
                 #[allow(clippy::cast_precision_loss)] // token counts never exceed 2^52
@@ -1129,7 +723,17 @@ impl MethodHandler for PromptHandler {
                 };
 
                 let (recent_event_types, recent_tool_calls) =
-                    gather_recent_events(&event_store, &session_id_clone);
+                    match load_recent_events(event_store.clone(), session_id_clone.clone()).await {
+                        Ok(recent) => recent,
+                        Err(error) => {
+                            warn!(
+                                session_id = %session_id_clone,
+                                error = %error,
+                                "failed to gather recent events for memory pipeline"
+                            );
+                            (Vec::new(), Vec::new())
+                        }
+                    };
 
                 let cs_for_trigger = &settings.context.compactor;
                 let trigger_config =
@@ -1153,36 +757,47 @@ impl MethodHandler for PromptHandler {
                     .await;
             }
 
-            // 10. Invalidate cached session so next resume reconstructs from events
-            session_manager.invalidate_session(&session_id_clone);
-
             // 11. Emit session_updated so clients can refresh the session stat line
-            if let Ok(Some(updated_session)) = session_manager.get_session(&session_id_clone) {
-                // Get message previews for last_user_prompt / last_assistant_response
-                let preview = event_store
-                    .get_session_message_previews(&[session_id_clone.as_str()])
-                    .ok()
-                    .and_then(|mut map| map.remove(&session_id_clone));
-
-                let _ = broadcast.emit(tron_core::events::TronEvent::SessionUpdated {
-                    base: tron_core::events::BaseEvent::now(&session_id_clone),
-                    title: updated_session.title.clone(),
-                    model: updated_session.latest_model.clone(),
-                    message_count: updated_session.message_count,
-                    input_tokens: updated_session.total_input_tokens,
-                    output_tokens: updated_session.total_output_tokens,
-                    last_turn_input_tokens: updated_session.last_turn_input_tokens,
-                    cache_read_tokens: updated_session.total_cache_read_tokens,
-                    cache_creation_tokens: updated_session.total_cache_creation_tokens,
-                    cost: updated_session.total_cost,
-                    last_activity: updated_session.last_activity_at.clone(),
-                    is_active: false,
-                    last_user_prompt: preview.as_ref().and_then(|p| p.last_user_prompt.clone()),
-                    last_assistant_response: preview
-                        .as_ref()
-                        .and_then(|p| p.last_assistant_response.clone()),
-                    parent_session_id: updated_session.parent_session_id.clone(),
-                });
+            match load_session_update_data(
+                session_manager.clone(),
+                event_store.clone(),
+                session_id_clone.clone(),
+            )
+            .await
+            {
+                Ok(Some(update)) => {
+                    let _ = broadcast.emit(tron_core::events::TronEvent::SessionUpdated {
+                        base: tron_core::events::BaseEvent::now(&session_id_clone),
+                        title: update.session.title.clone(),
+                        model: update.session.latest_model.clone(),
+                        message_count: update.session.message_count,
+                        input_tokens: update.session.total_input_tokens,
+                        output_tokens: update.session.total_output_tokens,
+                        last_turn_input_tokens: update.session.last_turn_input_tokens,
+                        cache_read_tokens: update.session.total_cache_read_tokens,
+                        cache_creation_tokens: update.session.total_cache_creation_tokens,
+                        cost: update.session.total_cost,
+                        last_activity: update.session.last_activity_at.clone(),
+                        is_active: false,
+                        last_user_prompt: update
+                            .preview
+                            .as_ref()
+                            .and_then(|preview| preview.last_user_prompt.clone()),
+                        last_assistant_response: update
+                            .preview
+                            .as_ref()
+                            .and_then(|preview| preview.last_assistant_response.clone()),
+                        parent_session_id: update.session.parent_session_id.clone(),
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    warn!(
+                        session_id = %session_id_clone,
+                        error = %error,
+                        "failed to load session update data"
+                    );
+                }
             }
 
             debug!(
@@ -3043,7 +2658,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, _calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         assert!(types.contains(&"message.user".to_string()));
         assert!(types.contains(&"message.assistant".to_string()));
     }
@@ -3078,7 +2693,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, _calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         // Should only have events after boundary
         assert!(!types.contains(&"message.user".to_string()));
         assert!(types.contains(&"message.assistant".to_string()));
@@ -3105,7 +2720,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, _calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         // session.created + message.user + message.assistant = 3
         assert!(
             types.len() >= 2,
@@ -3131,7 +2746,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         assert!(types.contains(&"tool.call".to_string()));
         assert_eq!(calls, vec!["ls -la".to_string()]);
     }
@@ -3151,7 +2766,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (_types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (_types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         assert!(calls.is_empty());
     }
 
@@ -3938,6 +3553,71 @@ mod tests {
         assert!(payload.get("skills").is_none());
     }
 
+    #[test]
+    fn user_content_override_none_without_multimodal_input() {
+        let override_content =
+            prompt_runtime::build_user_content_override("hello", "mock", None, None);
+        assert!(override_content.is_none());
+    }
+
+    #[test]
+    fn user_content_override_strips_images_for_non_image_models() {
+        let images = vec![json!({"data": "img", "mediaType": "image/png"})];
+        let attachments =
+            vec![json!({"data": "doc", "mimeType": "application/pdf", "fileName": "spec.pdf"})];
+
+        let override_content = prompt_runtime::build_user_content_override(
+            "review",
+            "gpt-5.3-codex-spark",
+            Some(&images),
+            Some(&attachments),
+        )
+        .expect("expected multimodal override");
+
+        match override_content {
+            tron_core::messages::UserMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 2, "text + document");
+                assert!(matches!(
+                    blocks[0],
+                    tron_core::content::UserContent::Text { .. }
+                ));
+                assert!(matches!(
+                    blocks[1],
+                    tron_core::content::UserContent::Document { .. }
+                ));
+            }
+            other => panic!("unexpected override content: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_content_override_keeps_images_for_image_models() {
+        let images = vec![json!({"data": "img", "mediaType": "image/png"})];
+
+        let override_content = prompt_runtime::build_user_content_override(
+            "review",
+            "gpt-4.1",
+            Some(&images),
+            None,
+        )
+        .expect("expected multimodal override");
+
+        match override_content {
+            tron_core::messages::UserMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 2, "text + image");
+                assert!(matches!(
+                    blocks[0],
+                    tron_core::content::UserContent::Text { .. }
+                ));
+                assert!(matches!(
+                    blocks[1],
+                    tron_core::content::UserContent::Image { .. }
+                ));
+            }
+            other => panic!("unexpected override content: {other:?}"),
+        }
+    }
+
     // ── Fix: spurious auto-compaction in persistent chat sessions ──
 
     #[tokio::test]
@@ -3984,7 +3664,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         // Only the message.user after the latest boundary
         assert!(types.contains(&"message.user".to_string()));
         assert!(
@@ -4027,7 +3707,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         assert!(types.contains(&"message.user".to_string()));
         assert!(
             !types.contains(&"tool.call".to_string()),
@@ -4076,7 +3756,7 @@ mod tests {
             parent_id: None,
         });
 
-        let (types, calls) = super::gather_recent_events(&ctx.event_store, &sid);
+        let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
         // The stale git push must not appear
         assert!(
             !calls.iter().any(|c| c.contains("git push")),

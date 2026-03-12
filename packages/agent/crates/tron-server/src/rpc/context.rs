@@ -85,18 +85,29 @@ impl RpcContext {
         T: Send + 'static,
         F: FnOnce() -> Result<T, RpcError> + Send + 'static,
     {
-        let start = Instant::now();
-        let result = tokio::task::spawn_blocking(f).await.map_err(|error| {
-            counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
-            RpcError::Internal {
-                message: format!("Blocking task '{task_name}' failed: {error}"),
-            }
-        })?;
-
-        histogram!("rpc_blocking_task_duration_seconds", "task" => task_name.to_owned())
-            .record(start.elapsed().as_secs_f64());
-        result
+        run_blocking_task(task_name, f).await
     }
+}
+
+pub(crate) async fn run_blocking_task<T, F>(
+    task_name: &'static str,
+    f: F,
+) -> Result<T, RpcError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+{
+    let start = Instant::now();
+    let result = tokio::task::spawn_blocking(f).await.map_err(|error| {
+        counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
+        RpcError::Internal {
+            message: format!("Blocking task '{task_name}' failed: {error}"),
+        }
+    })?;
+
+    histogram!("rpc_blocking_task_duration_seconds", "task" => task_name.to_owned())
+        .record(start.elapsed().as_secs_f64());
+    result
 }
 
 #[cfg(test)]
