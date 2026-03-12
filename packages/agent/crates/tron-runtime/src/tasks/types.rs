@@ -521,6 +521,17 @@ pub struct ProjectWithProgress {
     pub completed_task_count: u32,
 }
 
+/// Project with its tasks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectWithTasks {
+    /// The project itself.
+    #[serde(flatten)]
+    pub project: Project,
+    /// Tasks assigned to this project.
+    pub tasks: Vec<Task>,
+}
+
 /// Area with related counts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

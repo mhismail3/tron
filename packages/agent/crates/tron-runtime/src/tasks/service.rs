@@ -22,8 +22,8 @@ use super::types::{
     ActivityAction, Area, AreaCreateParams, AreaFilter, AreaListResult, AreaUpdateParams,
     BatchResult, BatchTarget, DependencyRelationship, LogActivityParams, Project,
     ProjectCreateParams, ProjectFilter, ProjectListResult, ProjectStatus, ProjectUpdateParams,
-    Task, TaskCreateParams, TaskFilter, TaskListResult, TaskStatus, TaskUpdateParams,
-    TaskWithDetails,
+    ProjectWithTasks, Task, TaskActivity, TaskCreateParams, TaskFilter, TaskListResult, TaskStatus,
+    TaskUpdateParams, TaskWithDetails,
 };
 
 /// Resolved batch operation target — eliminates unwraps via type-safe branching.
@@ -343,6 +343,15 @@ impl TaskService {
         limit: u32,
     ) -> Result<Vec<Task>, TaskError> {
         TaskRepository::search_tasks(conn, query, limit)
+    }
+
+    /// Get activity log entries for a task.
+    pub fn get_task_activity(
+        conn: &Connection,
+        task_id: &str,
+        limit: u32,
+    ) -> Result<Vec<TaskActivity>, TaskError> {
+        TaskRepository::get_activity(conn, task_id, limit)
     }
 
     /// Add a dependency with circular detection for `Blocks` relationships.
@@ -742,6 +751,28 @@ impl TaskService {
     /// Get a project by ID.
     pub fn get_project(conn: &Connection, id: &str) -> Result<Project, TaskError> {
         TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
+    }
+
+    /// Get a project with its tasks.
+    pub fn get_project_details(
+        conn: &Connection,
+        id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<ProjectWithTasks, TaskError> {
+        let project = Self::get_project(conn, id)?;
+        let tasks = Self::list_tasks(
+            conn,
+            &TaskFilter {
+                project_id: Some(id.to_string()),
+                ..Default::default()
+            },
+            limit,
+            offset,
+        )?
+        .tasks;
+
+        Ok(ProjectWithTasks { project, tasks })
     }
 
     /// Delete a project.
@@ -1269,6 +1300,35 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 
+    #[test]
+    fn test_get_task_activity_returns_recent_entries() {
+        let conn = setup_db();
+        let task = TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Activity Task".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        TaskService::update_task(
+            &conn,
+            &task.id,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+            Some("session-1"),
+        )
+        .unwrap();
+
+        let activity = TaskService::get_task_activity(&conn, &task.id, 10).unwrap();
+        assert_eq!(activity.len(), 2);
+        assert_eq!(activity[0].action, ActivityAction::StatusChanged);
+        assert_eq!(activity[1].action, ActivityAction::Created);
+    }
+
     // --- Project queries ---
 
     #[test]
@@ -1323,6 +1383,55 @@ mod tests {
         let result = TaskService::list_projects(&conn, &filter, 20, 0).unwrap();
         assert_eq!(result.total, 1);
         assert_eq!(result.projects[0].project.title, "P1");
+    }
+
+    #[test]
+    fn test_get_project_details_returns_project_tasks() {
+        let conn = setup_db();
+        let project = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "Project".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Inside".to_string(),
+                project_id: Some(project.id.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Outside".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let details = TaskService::get_project_details(&conn, &project.id, 100, 0).unwrap();
+        assert_eq!(details.project.title, "Project");
+        assert_eq!(details.tasks.len(), 1);
+        assert_eq!(details.tasks[0].title, "Inside");
+    }
+
+    #[test]
+    fn test_get_project_details_not_found() {
+        let conn = setup_db();
+        let result = TaskService::get_project_details(&conn, "proj-missing", 100, 0);
+        assert!(matches!(
+            result,
+            Err(TaskError::NotFound {
+                entity: "Project",
+                ..
+            })
+        ));
     }
 
     // --- Area queries ---

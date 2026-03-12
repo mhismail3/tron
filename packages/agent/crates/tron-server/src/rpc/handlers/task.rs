@@ -44,13 +44,18 @@ where
     .await
 }
 
-fn task_error_to_rpc(e: &tron_runtime::tasks::TaskError, entity: &str, id: &str) -> RpcError {
+fn task_error_to_rpc(e: &tron_runtime::tasks::TaskError) -> RpcError {
     match e {
-        tron_runtime::tasks::TaskError::NotFound { .. } => RpcError::NotFound {
+        tron_runtime::tasks::TaskError::NotFound { entity, id } => RpcError::NotFound {
             code: errors::NOT_FOUND.into(),
             message: format!("{entity} '{id}' not found"),
         },
         tron_runtime::tasks::TaskError::Busy { .. } => RpcError::NotAvailable {
+            message: e.to_string(),
+        },
+        tron_runtime::tasks::TaskError::Validation(_)
+        | tron_runtime::tasks::TaskError::CircularDependency { .. }
+        | tron_runtime::tasks::TaskError::Hierarchy(_) => RpcError::InvalidParams {
             message: e.to_string(),
         },
         _ => RpcError::Internal {
@@ -80,9 +85,7 @@ impl MethodHandler for CreateTaskHandler {
                     ..Default::default()
                 },
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -100,7 +103,7 @@ impl MethodHandler for GetTaskHandler {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let details = with_task_conn(ctx, "task.get", move |conn| {
             tron_runtime::tasks::TaskService::get_task(conn, &task_id)
-                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -130,7 +133,7 @@ impl MethodHandler for UpdateTaskHandler {
 
         let task = with_task_conn(ctx, "task.update", move |conn| {
             tron_runtime::tasks::TaskService::update_task(conn, &task_id, &updates, None)
-                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -161,11 +164,8 @@ impl MethodHandler for ListTasksHandler {
         let offset = get_u32_param(params.as_ref(), "offset", 0);
 
         let result = with_task_conn(ctx, "task.list", move |conn| {
-            tron_runtime::tasks::TaskRepository::list_tasks(conn, &filter, limit, offset).map_err(
-                |e| RpcError::Internal {
-                    message: e.to_string(),
-                },
-            )
+            tron_runtime::tasks::TaskService::list_tasks(conn, &filter, limit, offset)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -183,7 +183,7 @@ impl MethodHandler for DeleteTaskHandler {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let deleted = with_task_conn(ctx, "task.delete", move |conn| {
             tron_runtime::tasks::TaskService::delete_task(conn, &task_id, None)
-                .map_err(|e| task_error_to_rpc(&e, "Task", &task_id))
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -202,11 +202,8 @@ impl MethodHandler for SearchTasksHandler {
         let limit = get_u32_param(params.as_ref(), "limit", 50);
 
         let results = with_task_conn(ctx, "task.search", move |conn| {
-            tron_runtime::tasks::TaskRepository::search_tasks(conn, &query, limit).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::search_tasks(conn, &query, limit)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -225,11 +222,8 @@ impl MethodHandler for GetTaskActivityHandler {
         let limit = get_u32_param(params.as_ref(), "limit", 20);
 
         let activity = with_task_conn(ctx, "task.get_activity", move |conn| {
-            tron_runtime::tasks::TaskRepository::get_activity(conn, &task_id, limit).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::get_task_activity(conn, &task_id, limit)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -258,9 +252,7 @@ impl MethodHandler for CreateProjectHandler {
                     ..Default::default()
                 },
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -276,15 +268,13 @@ impl MethodHandler for ListProjectsHandler {
     #[instrument(skip(self, ctx), fields(method = "project.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let result = with_task_conn(ctx, "project.list", move |conn| {
-            tron_runtime::tasks::TaskRepository::list_projects(
+            tron_runtime::tasks::TaskService::list_projects(
                 conn,
                 &tron_runtime::tasks::ProjectFilter::default(),
                 100,
                 0,
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -300,23 +290,13 @@ impl MethodHandler for GetProjectHandler {
     #[instrument(skip(self, ctx), fields(method = "project.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
-        let project_id_for_lookup = project_id.clone();
         let project = with_task_conn(ctx, "project.get", move |conn| {
-            tron_runtime::tasks::TaskRepository::get_project(conn, &project_id_for_lookup).map_err(
-                |e| RpcError::Internal {
-                    message: e.to_string(),
-                },
-            )
+            tron_runtime::tasks::TaskService::get_project(conn, &project_id)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
-        match project {
-            Some(p) => Ok(serde_json::to_value(&p).unwrap_or_default()),
-            None => Err(RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Project '{project_id}' not found"),
-            }),
-        }
+        Ok(serde_json::to_value(&project).unwrap_or_default())
     }
 }
 
@@ -338,7 +318,7 @@ impl MethodHandler for UpdateProjectHandler {
 
         let project = with_task_conn(ctx, "project.update", move |conn| {
             tron_runtime::tasks::TaskService::update_project(conn, &project_id, &updates)
-                .map_err(|e| task_error_to_rpc(&e, "Project", &project_id))
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -355,11 +335,8 @@ impl MethodHandler for DeleteProjectHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let deleted = with_task_conn(ctx, "project.delete", move |conn| {
-            tron_runtime::tasks::TaskRepository::delete_project(conn, &project_id).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::delete_project(conn, &project_id)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -376,33 +353,11 @@ impl MethodHandler for GetProjectDetailsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         with_task_conn(ctx, "project.get_details", move |conn| {
-            let project = tron_runtime::tasks::TaskRepository::get_project(conn, &project_id)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
+            let project =
+                tron_runtime::tasks::TaskService::get_project_details(conn, &project_id, 1000, 0)
+                    .map_err(|e| task_error_to_rpc(&e))?;
 
-            let project = project.ok_or_else(|| RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Project '{project_id}' not found"),
-            })?;
-
-            let filter = tron_runtime::tasks::TaskFilter {
-                project_id: Some(project_id),
-                ..Default::default()
-            };
-            let task_result = tron_runtime::tasks::TaskRepository::list_tasks(
-                conn, &filter, 1000, 0,
-            )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-            let mut project_json = serde_json::to_value(&project).unwrap_or_default();
-            if let Some(obj) = project_json.as_object_mut() {
-                let _ = obj.insert("tasks".into(), serde_json::json!(task_result.tasks));
-            }
-
-            Ok(project_json)
+            Ok(serde_json::to_value(&project).unwrap_or_default())
         })
         .await
     }
@@ -427,9 +382,7 @@ impl MethodHandler for CreateAreaHandler {
                     ..Default::default()
                 },
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -445,15 +398,13 @@ impl MethodHandler for ListAreasHandler {
     #[instrument(skip(self, ctx), fields(method = "area.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let result = with_task_conn(ctx, "area.list", move |conn| {
-            tron_runtime::tasks::TaskRepository::list_areas(
+            tron_runtime::tasks::TaskService::list_areas(
                 conn,
                 &tron_runtime::tasks::AreaFilter::default(),
                 100,
                 0,
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -469,23 +420,13 @@ impl MethodHandler for GetAreaHandler {
     #[instrument(skip(self, ctx), fields(method = "area.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
-        let area_id_for_lookup = area_id.clone();
         let area = with_task_conn(ctx, "area.get", move |conn| {
-            tron_runtime::tasks::TaskRepository::get_area(conn, &area_id_for_lookup).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::get_area(conn, &area_id)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
-        match area {
-            Some(a) => Ok(serde_json::to_value(&a).unwrap_or_default()),
-            None => Err(RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Area '{area_id}' not found"),
-            }),
-        }
+        Ok(serde_json::to_value(&area).unwrap_or_default())
     }
 }
 
@@ -506,12 +447,8 @@ impl MethodHandler for UpdateAreaHandler {
         }
 
         let area = with_task_conn(ctx, "area.update", move |conn| {
-            tron_runtime::tasks::TaskRepository::update_area(conn, &area_id, &updates)
-                .map_err(|e| task_error_to_rpc(&e, "Area", &area_id))?
-                .ok_or_else(|| RpcError::NotFound {
-                    code: errors::NOT_FOUND.into(),
-                    message: format!("Area '{area_id}' not found"),
-                })
+            tron_runtime::tasks::TaskService::update_area(conn, &area_id, &updates)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -528,11 +465,8 @@ impl MethodHandler for DeleteAreaHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
         let deleted = with_task_conn(ctx, "area.delete", move |conn| {
-            tron_runtime::tasks::TaskRepository::delete_area(conn, &area_id).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::delete_area(conn, &area_id)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -565,9 +499,7 @@ impl MethodHandler for BatchDeleteTasksHandler {
         let target = tron_runtime::tasks::BatchTarget { ids, filter };
         let result = with_task_conn(ctx, "tasks.batch_delete", move |conn| {
             tron_runtime::tasks::TaskService::batch_delete_tasks(conn, &target, dry_run, None)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -623,9 +555,7 @@ impl MethodHandler for BatchUpdateTasksHandler {
             tron_runtime::tasks::TaskService::batch_update_tasks(
                 conn, &target, &updates, dry_run, None,
             )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })
+            .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -647,11 +577,8 @@ impl MethodHandler for BatchCreateTasksHandler {
             .unwrap_or_default();
 
         let result = with_task_conn(ctx, "tasks.batch_create", move |conn| {
-            tron_runtime::tasks::TaskService::batch_create_tasks(conn, &items, None).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })
+            tron_runtime::tasks::TaskService::batch_create_tasks(conn, &items, None)
+                .map_err(|e| task_error_to_rpc(&e))
         })
         .await?;
 
@@ -797,6 +724,65 @@ mod tests {
         assert!(result["total"].is_number());
     }
 
+    #[tokio::test]
+    async fn search_tasks_matches_query() {
+        let ctx = make_test_context_with_tasks();
+        let _ = CreateTaskHandler
+            .handle(Some(json!({"title": "fix login flow"})), &ctx)
+            .await
+            .unwrap();
+        let _ = CreateTaskHandler
+            .handle(Some(json!({"title": "write release notes"})), &ctx)
+            .await
+            .unwrap();
+
+        let result = SearchTasksHandler
+            .handle(Some(json!({"query": "login", "limit": 10})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["tasks"].as_array().unwrap().len(), 1);
+        assert_eq!(result["tasks"][0]["title"], "fix login flow");
+    }
+
+    #[tokio::test]
+    async fn get_task_activity_returns_recent_entries() {
+        let ctx = make_test_context_with_tasks();
+        let created = CreateTaskHandler
+            .handle(Some(json!({"title": "track activity"})), &ctx)
+            .await
+            .unwrap();
+        let task_id = created["id"].as_str().unwrap();
+
+        let _ = UpdateTaskHandler
+            .handle(
+                Some(json!({"taskId": task_id, "status": "in_progress"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let result = GetTaskActivityHandler
+            .handle(Some(json!({"taskId": task_id, "limit": 10})), &ctx)
+            .await
+            .unwrap();
+
+        let activity = result["activity"].as_array().unwrap();
+        assert_eq!(activity.len(), 2);
+        assert_eq!(activity[0]["action"], "status_changed");
+        assert_eq!(activity[1]["action"], "created");
+    }
+
+    #[tokio::test]
+    async fn get_task_activity_missing_task_returns_empty() {
+        let ctx = make_test_context_with_tasks();
+        let result = GetTaskActivityHandler
+            .handle(Some(json!({"taskId": "task-missing", "limit": 10})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["activity"].as_array().unwrap().len(), 0);
+    }
+
     // Project tests
     #[tokio::test]
     async fn create_project() {
@@ -807,6 +793,16 @@ mod tests {
             .unwrap();
         assert!(result["id"].is_string());
         assert_eq!(result["title"], "my project");
+    }
+
+    #[tokio::test]
+    async fn create_project_empty_title_is_invalid_params() {
+        let ctx = make_test_context_with_tasks();
+        let err = CreateProjectHandler
+            .handle(Some(json!({"title": "   "})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[tokio::test]
@@ -835,6 +831,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["title"], "proj");
+    }
+
+    #[tokio::test]
+    async fn get_project_not_found() {
+        let ctx = make_test_context_with_tasks();
+        let err = GetProjectHandler
+            .handle(Some(json!({"projectId": "proj-missing"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn update_project_not_found() {
+        let ctx = make_test_context_with_tasks();
+        let err = UpdateProjectHandler
+            .handle(
+                Some(json!({"projectId": "proj-missing", "title": "updated"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
     }
 
     #[tokio::test]
@@ -998,6 +1017,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_area_empty_title_is_invalid_params() {
+        let ctx = make_test_context_with_tasks();
+        let err = CreateAreaHandler
+            .handle(Some(json!({"title": "   "})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
     async fn list_areas() {
         let ctx = make_test_context_with_tasks();
         let _ = CreateAreaHandler
@@ -1023,6 +1052,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["title"], "area");
+    }
+
+    #[tokio::test]
+    async fn get_area_not_found() {
+        let ctx = make_test_context_with_tasks();
+        let err = GetAreaHandler
+            .handle(Some(json!({"areaId": "area-missing"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn update_area_not_found() {
+        let ctx = make_test_context_with_tasks();
+        let err = UpdateAreaHandler
+            .handle(
+                Some(json!({"areaId": "area-missing", "title": "updated"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
     }
 
     #[tokio::test]

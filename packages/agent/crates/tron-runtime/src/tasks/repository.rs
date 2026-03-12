@@ -918,25 +918,6 @@ impl TaskRepository {
         Ok(AreaListResult { areas, total })
     }
 
-    /// Search areas using FTS5.
-    pub fn search_areas(
-        conn: &Connection,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<Area>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT a.* FROM areas a \
-             JOIN areas_fts f ON f.area_id = a.id \
-             WHERE areas_fts MATCH ?1 \
-             ORDER BY rank LIMIT ?2",
-        )?;
-        let areas = stmt
-            .query_map(params![query, limit], |row| Ok(area_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(areas)
-    }
-
     // ─────────────────────────────────────────────────────────────────────
     // Dependencies
     // ─────────────────────────────────────────────────────────────────────
@@ -2194,31 +2175,6 @@ mod tests {
         assert_eq!(result.areas[0].project_count, 1);
         assert_eq!(result.areas[0].task_count, 2);
         assert_eq!(result.areas[0].active_task_count, 1);
-    }
-
-    #[test]
-    fn test_search_areas() {
-        let conn = setup_db();
-        TaskRepository::create_area(
-            &conn,
-            &AreaCreateParams {
-                title: "Engineering".to_string(),
-                description: Some("Core product development".to_string()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        TaskRepository::create_area(
-            &conn,
-            &AreaCreateParams {
-                title: "Marketing".to_string(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let results = TaskRepository::search_areas(&conn, "engineering", 10).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].title, "Engineering");
     }
 
     // --- Dependencies ---

@@ -9,6 +9,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 
 use crate::errors::{EventStoreError, Result};
+use crate::sqlite::contention::BusyRetryPolicy;
 
 /// Alias for the connection pool type.
 pub type ConnectionPool = Pool<SqliteConnectionManager>;
@@ -21,7 +22,11 @@ pub type PooledConnection = r2d2::PooledConnection<SqliteConnectionManager>;
 pub struct ConnectionConfig {
     /// Maximum pool size (default: 16).
     pub pool_size: u32,
-    /// Busy timeout in milliseconds (default: 30000).
+    /// Connection-level `busy_timeout` in milliseconds.
+    ///
+    /// Keep this short so `SQLite` hands write contention back to the shared
+    /// application-level retry policy instead of blocking threads internally
+    /// for long stretches.
     pub busy_timeout_ms: u32,
     /// Cache size in KiB (default: 8192 = 8 MB).
     pub cache_size_kib: i64,
@@ -33,7 +38,7 @@ impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
             pool_size: 16,
-            busy_timeout_ms: 30_000,
+            busy_timeout_ms: BusyRetryPolicy::sqlite_busy_timeout_ms(),
             cache_size_kib: 8192,
             mmap_size: 268_435_456,
         }
@@ -103,9 +108,13 @@ pub fn verify_pragmas(conn: &Connection) -> Result<PragmaState> {
     let foreign_keys: i32 = conn
         .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
         .map_err(EventStoreError::Sqlite)?;
+    let busy_timeout_ms: u32 = conn
+        .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+        .map_err(EventStoreError::Sqlite)?;
     Ok(PragmaState {
         journal_mode,
         foreign_keys_enabled: foreign_keys == 1,
+        busy_timeout_ms,
     })
 }
 
@@ -116,6 +125,8 @@ pub struct PragmaState {
     pub journal_mode: String,
     /// Whether foreign keys are enabled.
     pub foreign_keys_enabled: bool,
+    /// Current `SQLite` engine `busy_timeout` in milliseconds.
+    pub busy_timeout_ms: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +149,7 @@ mod tests {
             pragmas.journal_mode
         );
         assert!(pragmas.foreign_keys_enabled);
+        assert_eq!(pragmas.busy_timeout_ms, config.busy_timeout_ms);
     }
 
     #[test]
@@ -150,6 +162,7 @@ mod tests {
         let pragmas = verify_pragmas(&conn).unwrap();
         assert_eq!(pragmas.journal_mode, "wal");
         assert!(pragmas.foreign_keys_enabled);
+        assert_eq!(pragmas.busy_timeout_ms, config.busy_timeout_ms);
     }
 
     #[test]
@@ -181,9 +194,51 @@ mod tests {
     fn default_config_values() {
         let config = ConnectionConfig::default();
         assert_eq!(config.pool_size, 16);
-        assert_eq!(config.busy_timeout_ms, 30_000);
+        assert_eq!(
+            config.busy_timeout_ms,
+            BusyRetryPolicy::sqlite_busy_timeout_ms()
+        );
         assert_eq!(config.cache_size_kib, 8192);
         assert_eq!(config.mmap_size, 268_435_456);
+    }
+
+    #[test]
+    fn write_lock_surfaces_busy_quickly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("busy_timeout.db");
+        let pool = new_file(path.to_str().unwrap(), &ConnectionConfig::default()).unwrap();
+        let conn1 = pool.get().unwrap();
+        let conn2 = pool.get().unwrap();
+
+        conn1
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS busy_timeout_test (
+                    id INTEGER PRIMARY KEY,
+                    value TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+        conn1.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let started = std::time::Instant::now();
+        let err = conn2
+            .execute(
+                "INSERT INTO busy_timeout_test (value) VALUES ('blocked')",
+                [],
+            )
+            .unwrap_err();
+        let elapsed = started.elapsed();
+
+        assert!(
+            crate::sqlite::contention::is_rusqlite_busy(&err),
+            "expected busy/locked error, got {err:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "engine busy timeout should surface lock quickly, elapsed: {elapsed:?}"
+        );
+
+        conn1.execute_batch("ROLLBACK").unwrap();
     }
 
     #[test]

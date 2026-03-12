@@ -6,6 +6,11 @@
 
 use std::time::{Duration, Instant};
 
+/// Keep `SQLite`'s built-in `busy_timeout` short so contention is surfaced
+/// back to the shared retry loop quickly. Longer engine-level waits block a
+/// thread inside `SQLite` and undermine the application-level deadline.
+pub const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
+
 /// Retry policy for blocking `SQLite` write contention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BusyRetryPolicy {
@@ -29,6 +34,12 @@ impl BusyRetryPolicy {
             max_backoff: Duration::from_millis(500),
             jitter_percent: 25,
         }
+    }
+
+    /// Connection-level `busy_timeout` used for pooled `SQLite` connections.
+    #[must_use]
+    pub fn sqlite_busy_timeout_ms() -> u32 {
+        u32::try_from(SQLITE_BUSY_TIMEOUT.as_millis()).unwrap_or(u32::MAX)
     }
 
     #[must_use]
