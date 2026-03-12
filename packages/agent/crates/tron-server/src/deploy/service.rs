@@ -91,13 +91,11 @@ impl DeployService {
         let new_commit = self.resolve_commit(workspace_root).await?;
         self.ensure_deploy_dir_ready().await?;
 
-        let _backup = atomic_binary_install(
-            &source,
-            &self.binary_path,
-            &self.deploy_dir,
-        )
-        .await
-        .map_err(|error| DeployHttpError::internal(format!("binary install failed: {error}")))?;
+        let _backup = atomic_binary_install(&source, &self.binary_path, &self.deploy_dir)
+            .await
+            .map_err(|error| {
+                DeployHttpError::internal(format!("binary install failed: {error}"))
+            })?;
 
         let sentinel = self
             .persist_restart_artifacts(&req, &new_commit, &previous_commit)

@@ -211,11 +211,14 @@ impl MethodHandler for PromptHandler {
             let settings = tron_settings::get_settings();
 
             // 1. Resume session to get reconstructed state + persister
-            let (state, persister) =
-                match resume_prompt_session(session_manager.clone(), session_id_clone.clone()).await
-                {
-                    Ok(active) => (active.state, active.persister),
-                    Err(e) => {
+            let (state, persister) = match resume_prompt_session(
+                session_manager.clone(),
+                session_id_clone.clone(),
+            )
+            .await
+            {
+                Ok(active) => (active.state, active.persister),
+                Err(e) => {
                     warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
                     let fresh_state =
                         tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
@@ -229,8 +232,8 @@ impl MethodHandler for PromptHandler {
                         ),
                     );
                     (fresh_state, fresh_persister)
-                    }
-                };
+                }
+            };
 
             // 1b. Worktree isolation — deferred acquisition at first prompt
             let worktree_info: Option<tron_worktree::WorktreeInfo> =
@@ -585,23 +588,21 @@ impl MethodHandler for PromptHandler {
 
             // 9. Auto-ledger + auto-compaction pipeline (fail-silent)
             {
-                let session_model = match load_session_model(
-                    session_manager.clone(),
-                    session_id_clone.clone(),
-                )
-                .await
-                {
-                    Ok(Some(session_model)) => session_model,
-                    Ok(None) => String::new(),
-                    Err(error) => {
-                        warn!(
-                            session_id = %session_id_clone,
-                            error = %error,
-                            "failed to load session model for memory pipeline"
-                        );
-                        String::new()
-                    }
-                };
+                let session_model =
+                    match load_session_model(session_manager.clone(), session_id_clone.clone())
+                        .await
+                    {
+                        Ok(Some(session_model)) => session_model,
+                        Ok(None) => String::new(),
+                        Err(error) => {
+                            warn!(
+                                session_id = %session_id_clone,
+                                error = %error,
+                                "failed to load session model for memory pipeline"
+                            );
+                            String::new()
+                        }
+                    };
                 let context_limit = tron_llm::model_context_window(&session_model);
                 let last_context_window = result.last_context_window_tokens.unwrap_or(0);
                 #[allow(clippy::cast_precision_loss)] // token counts never exceed 2^52
@@ -3485,13 +3486,9 @@ mod tests {
     fn user_content_override_keeps_images_for_image_models() {
         let images = vec![json!({"data": "img", "mediaType": "image/png"})];
 
-        let override_content = prompt_runtime::build_user_content_override(
-            "review",
-            "gpt-4.1",
-            Some(&images),
-            None,
-        )
-        .expect("expected multimodal override");
+        let override_content =
+            prompt_runtime::build_user_content_override("review", "gpt-4.1", Some(&images), None)
+                .expect("expected multimodal override");
 
         match override_content {
             tron_core::messages::UserMessageContent::Blocks(blocks) => {
@@ -3657,5 +3654,4 @@ mod tests {
         assert!(types.contains(&"message.assistant".to_string()));
         assert!(!types.contains(&"tool.call".to_string()));
     }
-
 }

@@ -89,10 +89,7 @@ impl RpcContext {
     }
 }
 
-pub(crate) async fn run_blocking_task<T, F>(
-    task_name: &'static str,
-    f: F,
-) -> Result<T, RpcError>
+pub(crate) async fn run_blocking_task<T, F>(task_name: &'static str, f: F) -> Result<T, RpcError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, RpcError> + Send + 'static,

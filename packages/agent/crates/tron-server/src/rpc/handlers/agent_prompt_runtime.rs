@@ -305,8 +305,14 @@ pub fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
             .get("subagentSessionId")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        let task = payload.get("task").and_then(Value::as_str).unwrap_or("unknown");
-        let total_turns = payload.get("totalTurns").and_then(Value::as_i64).unwrap_or(0);
+        let task = payload
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let total_turns = payload
+            .get("totalTurns")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         let duration = payload.get("duration").and_then(Value::as_i64).unwrap_or(0);
 
         let _ = writeln!(ctx, "## [{icon}] Sub-Agent: `{subagent_id}`\n");
@@ -564,11 +570,12 @@ pub async fn load_session_model(
     session_id: String,
 ) -> Result<Option<String>, RpcError> {
     run_blocking_task("agent.prompt.session_model", move || {
-        let session = session_manager
-            .get_session(&session_id)
-            .map_err(|error| RpcError::Internal {
-                message: error.to_string(),
-            })?;
+        let session =
+            session_manager
+                .get_session(&session_id)
+                .map_err(|error| RpcError::Internal {
+                    message: error.to_string(),
+                })?;
         Ok(session.map(|session| session.latest_model))
     })
     .await
@@ -580,11 +587,12 @@ pub async fn load_session_update_data(
     session_id: String,
 ) -> Result<Option<SessionUpdateData>, RpcError> {
     run_blocking_task("agent.prompt.session_update", move || {
-        let session = session_manager
-            .get_session(&session_id)
-            .map_err(|error| RpcError::Internal {
-                message: error.to_string(),
-            })?;
+        let session =
+            session_manager
+                .get_session(&session_id)
+                .map_err(|error| RpcError::Internal {
+                    message: error.to_string(),
+                })?;
         let Some(session) = session else {
             return Ok(None);
         };

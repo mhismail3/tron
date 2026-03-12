@@ -151,9 +151,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "parentSessionId": parent_session_id,
             })),
         )),
-        TronEvent::MemoryUpdating { .. } => {
-            Some(session_scoped(event, "agent.memory_updating", Some(json!({}))))
-        }
+        TronEvent::MemoryUpdating { .. } => Some(session_scoped(
+            event,
+            "agent.memory_updating",
+            Some(json!({})),
+        )),
         TronEvent::MemoryUpdated {
             title,
             entry_type,
@@ -274,7 +276,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             set_opt(&mut data, "resultSummary", result_summary);
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "model", model);
-            Some(session_scoped(event, "agent.subagent_completed", Some(data)))
+            Some(session_scoped(
+                event,
+                "agent.subagent_completed",
+                Some(data),
+            ))
         }
         TronEvent::SubagentFailed {
             subagent_session_id,

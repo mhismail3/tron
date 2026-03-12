@@ -164,7 +164,9 @@ fn build_summarizer(
                 .to_string(),
             model: None,
         };
-        Box::new(tron_runtime::context::llm_summarizer::LlmSummarizer::new(spawner))
+        Box::new(tron_runtime::context::llm_summarizer::LlmSummarizer::new(
+            spawner,
+        ))
     } else {
         Box::new(KeywordSummarizer::new())
     }
@@ -530,14 +532,14 @@ impl MethodHandler for ConfirmCompactionHandler {
 
         // Emit CompactionStart so iOS shows the spinner pill
         let tokens_before = cm.get_current_tokens();
-        let _ =
-            ctx.orchestrator
-                .broadcast()
-                .emit(tron_core::events::TronEvent::CompactionStart {
-                    base: tron_core::events::BaseEvent::now(&session_id),
-                    reason: tron_core::events::CompactionReason::Manual,
-                    tokens_before,
-                });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::CompactionStart {
+                base: tron_core::events::BaseEvent::now(&session_id),
+                reason: tron_core::events::CompactionReason::Manual,
+                tokens_before,
+            });
 
         let result = cm
             .execute_compaction(summarizer.as_ref(), edited_summary.as_deref())
@@ -665,14 +667,14 @@ impl MethodHandler for CompactHandler {
 
         // Emit CompactionStart so iOS shows the spinner pill
         let tokens_before = cm.get_current_tokens();
-        let _ =
-            ctx.orchestrator
-                .broadcast()
-                .emit(tron_core::events::TronEvent::CompactionStart {
-                    base: tron_core::events::BaseEvent::now(&session_id),
-                    reason: tron_core::events::CompactionReason::Manual,
-                    tokens_before,
-                });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::CompactionStart {
+                base: tron_core::events::BaseEvent::now(&session_id),
+                reason: tron_core::events::CompactionReason::Manual,
+                tokens_before,
+            });
 
         let result = cm
             .execute_compaction(summarizer.as_ref(), None)

@@ -561,4 +561,51 @@ mod tests {
         assert!(parsed["checks"].is_array());
         assert!(parsed["uptimeSecs"].is_number());
     }
+
+    #[tokio::test]
+    async fn deep_health_endpoint_surfaces_failed_deploy_state() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("deploy")).unwrap();
+        crate::deploy::write_sentinel(
+            &dir.path().join("deploy"),
+            &crate::deploy::RestartSentinel {
+                action: "deploy".into(),
+                timestamp: "2026-03-12T10:00:00.000Z".into(),
+                commit: "abc123".into(),
+                previous_commit: "def456".into(),
+                status: "failed".into(),
+                completed_at: None,
+                initiated_by: Some("api".into()),
+                self_test: None,
+            },
+        )
+        .unwrap();
+
+        let server =
+            make_server().with_deploy_paths(dir.path().join("tron"), dir.path().join("deploy"));
+        let app = server.router();
+
+        let req = Request::builder()
+            .uri("/health/deep")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 10_000)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["status"], "unhealthy");
+
+        let deploy_check = parsed["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["name"] == "deploy")
+            .unwrap();
+        assert_eq!(deploy_check["status"], "fail");
+        assert_eq!(deploy_check["detail"]["sentinelStatus"], "failed");
+    }
 }

@@ -308,6 +308,30 @@ impl SessionRepo {
         Ok(changed > 0)
     }
 
+    /// Update session source (e.g. `"cron"` or `"chat"`).
+    pub fn update_source(conn: &Connection, session_id: &str, source: &str) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE sessions SET source = ?1 WHERE id = ?2",
+            params![source, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Update subagent spawn metadata for an existing session.
+    pub fn update_spawn_info(
+        conn: &Connection,
+        session_id: &str,
+        spawning_session_id: &str,
+        spawn_type: &str,
+        spawn_task: &str,
+    ) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE sessions SET spawning_session_id = ?1, spawn_type = ?2, spawn_task = ?3 WHERE id = ?4",
+            params![spawning_session_id, spawn_type, spawn_task, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Increment denormalized counters atomically.
     pub fn increment_counters(
         conn: &Connection,
@@ -729,6 +753,34 @@ mod tests {
         SessionRepo::update_title(&conn, &sess.id, None).unwrap();
         let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
         assert!(found.title.is_none());
+    }
+
+    #[test]
+    fn update_source() {
+        let (conn, ws_id) = setup();
+        let sess = create_default_session(&conn, &ws_id);
+
+        SessionRepo::update_source(&conn, &sess.id, "cron").unwrap();
+        let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert_eq!(found.source.as_deref(), Some("cron"));
+    }
+
+    #[test]
+    fn update_spawn_info() {
+        let (conn, ws_id) = setup();
+        let parent = create_default_session(&conn, &ws_id);
+        let child = create_default_session(&conn, &ws_id);
+
+        SessionRepo::update_spawn_info(&conn, &child.id, &parent.id, "query", "summarize history")
+            .unwrap();
+
+        let found = SessionRepo::get_by_id(&conn, &child.id).unwrap().unwrap();
+        assert_eq!(
+            found.spawning_session_id.as_deref(),
+            Some(parent.id.as_str())
+        );
+        assert_eq!(found.spawn_type.as_deref(), Some("query"));
+        assert_eq!(found.spawn_task.as_deref(), Some("summarize history"));
     }
 
     #[test]
