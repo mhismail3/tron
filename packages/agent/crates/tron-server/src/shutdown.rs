@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use metrics::{counter, gauge, histogram};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio::task::{AbortHandle, JoinHandle};
@@ -49,6 +50,7 @@ impl TaskRegistry {
         let removed = self.abort_handles.lock().remove(&task_id).is_some();
         if removed {
             let remaining = self.task_count.fetch_sub(1, Ordering::SeqCst) - 1;
+            gauge!("shutdown_tracked_tasks").set(remaining as f64);
             if remaining == 0 {
                 self.drained.notify_waiters();
             }
@@ -57,6 +59,7 @@ impl TaskRegistry {
 
     fn abort_all(&self) {
         let handles: Vec<_> = self.abort_handles.lock().values().cloned().collect();
+        counter!("shutdown_tasks_aborted_total").increment(handles.len() as u64);
         for handle in handles {
             handle.abort();
         }
@@ -90,13 +93,16 @@ impl ShutdownCoordinator {
     /// the task is aborted immediately instead of being retained.
     pub fn register_task(&self, handle: JoinHandle<()>) {
         if self.registry.is_closed() {
+            counter!("shutdown_tasks_rejected_total").increment(1);
             handle.abort();
             return;
         }
 
         let task_id = self.registry.next_task_id.fetch_add(1, Ordering::Relaxed);
         let abort_handle = handle.abort_handle();
-        let _ = self.registry.task_count.fetch_add(1, Ordering::SeqCst);
+        let count = self.registry.task_count.fetch_add(1, Ordering::SeqCst) + 1;
+        gauge!("shutdown_tracked_tasks").set(count as f64);
+        counter!("shutdown_tasks_registered_total").increment(1);
         let _ = self
             .registry
             .abort_handles
@@ -144,6 +150,7 @@ impl ShutdownCoordinator {
     /// 3. Abort any remaining tasks after timeout
     pub async fn graceful_shutdown(&self, handles: Vec<JoinHandle<()>>, timeout: Option<Duration>) {
         let timeout = timeout.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
+        let start = std::time::Instant::now();
 
         for handle in handles {
             self.register_task(handle);
@@ -161,8 +168,13 @@ impl ShutdownCoordinator {
             .await
             .is_ok()
         {
+            histogram!("shutdown_drain_seconds", "outcome" => "completed")
+                .record(start.elapsed().as_secs_f64());
             info!("all shutdown tasks completed");
         } else {
+            counter!("shutdown_timeouts_total").increment(1);
+            histogram!("shutdown_drain_seconds", "outcome" => "timed_out")
+                .record(start.elapsed().as_secs_f64());
             warn!(
                 timeout_secs = timeout.as_secs(),
                 "shutdown timed out, aborting remaining tasks"
@@ -363,6 +375,24 @@ mod tests {
         coord.register_task(tokio::spawn(async {}));
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(coord.tracked_task_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn register_task_updates_tracked_count_while_running() {
+        let coord = ShutdownCoordinator::new();
+        let notify = Arc::new(Notify::new());
+        let notify_for_task = notify.clone();
+
+        coord.register_task(tokio::spawn(async move {
+            notify_for_task.notified().await;
+        }));
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(coord.tracked_task_count(), 1);
+
+        notify.notify_waiters();
+        tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(coord.tracked_task_count(), 0);
     }
 

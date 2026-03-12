@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use metrics::{counter, histogram};
 use parking_lot::RwLock;
 use tokio::sync::{Notify, mpsc};
 
@@ -254,6 +255,8 @@ impl ClientConnection {
             .drop_window
             .lock()
             .record_drop(Instant::now(), self.limits, total_drops);
+        counter!("ws_connection_overloads_total").increment(1);
+        histogram!("ws_connection_overload_pending_bytes").record(self.pending_bytes() as f64);
         tracing::warn!(
             connection_id = %self.id,
             recent_drops = health.recent_drops,
@@ -289,6 +292,7 @@ impl ClientConnection {
     /// Request that the session close this connection.
     pub fn request_close(&self) {
         if !self.close_requested.swap(true, Ordering::SeqCst) {
+            counter!("ws_connection_close_requests_total").increment(1);
             self.close_notify.notify_waiters();
         }
     }

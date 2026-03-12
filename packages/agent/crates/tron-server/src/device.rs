@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use metrics::{counter, gauge, histogram};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -57,16 +58,23 @@ impl DeviceRequestBroker {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, DeviceRequestError> {
+        let start = std::time::Instant::now();
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
 
-        let _ = self.pending.lock().insert(
-            request_id.clone(),
-            PendingRequest {
-                session_id: session_id.to_string(),
-                tx,
-            },
-        );
+        let pending_count = {
+            let mut pending = self.pending.lock();
+            let _ = pending.insert(
+                request_id.clone(),
+                PendingRequest {
+                    session_id: session_id.to_string(),
+                    tx,
+                },
+            );
+            pending.len()
+        };
+        gauge!("device_requests_pending").set(pending_count as f64);
+        counter!("device_requests_started_total").increment(1);
 
         let event = RpcEvent {
             event_type: "device.request".into(),
@@ -87,19 +95,33 @@ impl DeviceRequestBroker {
         let shutdown = self.shutdown.clone();
         tokio::select! {
             result = tokio::time::timeout(timeout, rx) => match result {
-                Ok(Ok(value)) => Ok(value),
+                Ok(Ok(value)) => {
+                    counter!("device_requests_completed_total", "outcome" => "success").increment(1);
+                    histogram!("device_request_duration_seconds", "outcome" => "success")
+                        .record(start.elapsed().as_secs_f64());
+                    Ok(value)
+                }
                 Ok(Err(_)) => {
-                    let _ = self.pending.lock().remove(&request_id);
+                    let _ = self.remove_pending(&request_id);
+                    counter!("device_requests_completed_total", "outcome" => "cancelled").increment(1);
+                    histogram!("device_request_duration_seconds", "outcome" => "cancelled")
+                        .record(start.elapsed().as_secs_f64());
                     Err(DeviceRequestError::Cancelled)
                 }
                 Err(_) => {
-                    let _ = self.pending.lock().remove(&request_id);
+                    let _ = self.remove_pending(&request_id);
+                    counter!("device_requests_completed_total", "outcome" => "timeout").increment(1);
+                    histogram!("device_request_duration_seconds", "outcome" => "timeout")
+                        .record(start.elapsed().as_secs_f64());
                     Err(DeviceRequestError::Timeout)
                 }
             },
             () = shutdown.cancelled() => {
-                let _ = self.pending.lock().remove(&request_id);
+                let _ = self.remove_pending(&request_id);
                 // Sender was dropped (broker shutting down or request cancelled)
+                counter!("device_requests_completed_total", "outcome" => "cancelled").increment(1);
+                histogram!("device_request_duration_seconds", "outcome" => "cancelled")
+                    .record(start.elapsed().as_secs_f64());
                 Err(DeviceRequestError::Cancelled)
             }
         }
@@ -108,35 +130,67 @@ impl DeviceRequestBroker {
     /// Resolve a pending request with the given result. Returns `true` if a
     /// matching request was found and resolved.
     pub fn resolve(&self, request_id: &str, result: Value) -> bool {
-        if let Some(pending) = self.pending.lock().remove(request_id) {
+        if let Some(pending) = self.remove_pending(request_id) {
+            counter!("device_request_resolve_total", "outcome" => "resolved").increment(1);
             pending.tx.send(result).is_ok()
         } else {
+            counter!("device_request_resolve_total", "outcome" => "missing").increment(1);
             false
         }
     }
 
     /// Cancel all pending requests for a given session.
     pub fn cancel_session_pending(&self, session_id: &str) {
-        let mut pending = self.pending.lock();
-        pending.retain(|_, request| request.session_id != session_id);
+        let pending_count = {
+            let mut pending = self.pending.lock();
+            let before = pending.len();
+            pending.retain(|_, request| request.session_id != session_id);
+            let removed = before.saturating_sub(pending.len());
+            if removed > 0 {
+                counter!("device_requests_cancelled_total", "scope" => "session")
+                    .increment(removed as u64);
+            }
+            pending.len()
+        };
+        gauge!("device_requests_pending").set(pending_count as f64);
     }
 
     /// Cancel all pending requests. Dropping senders causes receivers
     /// to get `DeviceRequestError::Cancelled`.
     pub fn cancel_all_pending(&self) {
-        let mut pending = self.pending.lock();
-        if !pending.is_empty() {
-            tracing::debug!(
-                count = pending.len(),
-                "cancelling all pending device requests"
-            );
-            pending.clear();
+        let cleared = {
+            let mut pending = self.pending.lock();
+            let cleared = pending.len();
+            if cleared > 0 {
+                tracing::debug!(
+                    count = pending.len(),
+                    "cancelling all pending device requests"
+                );
+                pending.clear();
+            }
+            cleared
+        };
+        gauge!("device_requests_pending").set(0.0);
+        if cleared > 0 {
+            tracing::debug!(count = cleared, "cancelled all pending device requests");
+            counter!("device_requests_cancelled_total", "scope" => "all").increment(cleared as u64);
         }
     }
 
     /// Number of pending (unresolved) requests.
     pub fn pending_count(&self) -> usize {
         self.pending.lock().len()
+    }
+
+    fn remove_pending(&self, request_id: &str) -> Option<PendingRequest> {
+        let (removed, remaining) = {
+            let mut pending = self.pending.lock();
+            let removed = pending.remove(request_id);
+            let remaining = pending.len();
+            (removed, remaining)
+        };
+        gauge!("device_requests_pending").set(remaining as f64);
+        removed
     }
 }
 

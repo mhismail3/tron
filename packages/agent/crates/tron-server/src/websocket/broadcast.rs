@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::rpc::types::RpcEvent;
-use metrics::counter;
+use metrics::{counter, histogram};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
@@ -73,6 +73,7 @@ impl BroadcastManager {
                 return;
             }
         };
+        histogram!("ws_broadcast_payload_bytes").record(json.len() as f64);
         let mut to_remove = Vec::new();
         {
             let conns = self.connections.read().await;
@@ -83,12 +84,14 @@ impl BroadcastManager {
                     match conn.send(Arc::clone(&json)) {
                         SendOutcome::Enqueued => {}
                         SendOutcome::Closed => {
+                            counter!("ws_broadcast_closed_connections_total").increment(1);
                             debug!(conn_id = %conn.id, label, "removing closed connection");
                             to_remove.push(conn.id.clone());
                         }
                         SendOutcome::Overloaded(health) => {
                             counter!("ws_broadcast_drops_total").increment(1);
                             if health.should_disconnect {
+                                counter!("ws_broadcast_disconnects_total").increment(1);
                                 conn.request_close();
                                 debug!(
                                     conn_id = %conn.id,
@@ -111,6 +114,7 @@ impl BroadcastManager {
                     }
                 }
             }
+            histogram!("ws_broadcast_recipients").record(f64::from(recipients));
             debug!(
                 event_type = event.event_type,
                 label, recipients, "broadcast event"

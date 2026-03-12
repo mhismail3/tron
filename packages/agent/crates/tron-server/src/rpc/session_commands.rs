@@ -1,5 +1,8 @@
 //! Shared command-side services for session RPC handlers.
 
+use std::time::Instant;
+
+use metrics::{counter, histogram};
 use serde_json::{Value, json};
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_runtime::agent::event_emitter::EventEmitter;
@@ -322,19 +325,32 @@ fn spawn_optimistic_context_preload(ctx: &RpcContext, session_id: &str, working_
     let session_id_for_task = session_id.to_owned();
     let working_dir_for_task = working_dir.to_owned();
     let handle = tokio::spawn(async move {
+        let start = Instant::now();
         let result = run_blocking_task("session.optimistic_context_preload", move || {
-            emit_optimistic_context_events(
+            let summary = emit_optimistic_context_events(
                 &event_store,
                 context_artifacts.as_ref(),
                 &broadcast,
                 &session_id_for_task,
                 &working_dir_for_task,
             );
-            Ok::<_, RpcError>(())
+            Ok::<_, RpcError>(summary)
         })
         .await;
-        if let Err(error) = result {
-            tracing::warn!(error = %error, "optimistic context preload task failed");
+        match result {
+            Ok(summary) => {
+                histogram!("session_context_warmup_seconds").record(start.elapsed().as_secs_f64());
+                if summary.loaded_rules {
+                    counter!("session_context_warmups_total", "kind" => "rules").increment(1);
+                }
+                if summary.loaded_memory {
+                    counter!("session_context_warmups_total", "kind" => "memory").increment(1);
+                }
+            }
+            Err(error) => {
+                counter!("session_context_warmup_failures_total").increment(1);
+                tracing::warn!(error = %error, "optimistic context preload task failed");
+            }
         }
     });
     if let Some(coord) = shutdown_coordinator {
@@ -349,9 +365,10 @@ fn emit_optimistic_context_events(
     broadcast: &std::sync::Arc<EventEmitter>,
     session_id: &str,
     working_dir: &str,
-) {
+) -> OptimisticContextSummary {
     let settings = tron_settings::get_settings();
     let artifacts = context_artifacts.load(event_store.as_ref(), working_dir, &settings, false);
+    let mut summary = OptimisticContextSummary::default();
 
     let files_json: Vec<serde_json::Value> = artifacts
         .session
@@ -375,6 +392,7 @@ fn emit_optimistic_context_events(
         .collect();
 
     if !files_json.is_empty() {
+        summary.loaded_rules = true;
         #[allow(clippy::cast_possible_truncation)]
         let total = files_json.len() as u32;
         let merged_tokens = artifacts.session.rules.merged_tokens_estimate();
@@ -397,6 +415,7 @@ fn emit_optimistic_context_events(
     }
 
     if let Some(memory) = artifacts.session.memory {
+        summary.loaded_memory = true;
         #[allow(clippy::cast_possible_truncation)]
         let count = memory.raw_event_count as u32;
 
@@ -415,4 +434,12 @@ fn emit_optimistic_context_events(
             count,
         });
     }
+
+    summary
+}
+
+#[derive(Default)]
+struct OptimisticContextSummary {
+    loaded_rules: bool,
+    loaded_memory: bool,
 }
