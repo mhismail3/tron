@@ -847,6 +847,42 @@ async fn read_until_event_type(ws: &mut WsStream, event_type: &str) -> Option<Va
     None
 }
 
+async fn wait_for_detailed_snapshot_rules(
+    ws: &mut WsStream,
+    session_id: &str,
+    starting_id: u64,
+) -> Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut request_id = starting_id;
+
+    loop {
+        let resp = rpc_call(
+            ws,
+            request_id,
+            "context.getDetailedSnapshot",
+            Some(json!({"sessionId": session_id})),
+        )
+        .await;
+        assert_eq!(
+            resp["success"], true,
+            "context.getDetailedSnapshot failed: {resp}"
+        );
+
+        let result = resp["result"].clone();
+        if result["rules"].is_object() {
+            return result;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for rules in detailed snapshot, last result: {result}"
+        );
+
+        request_id += 1;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tokio::test]
 async fn e2e_bridge_delivers_to_bound_client() {
     let (url, server) = boot_server().await;
@@ -2771,14 +2807,7 @@ async fn e2e_detailed_snapshot_has_rules_when_present() {
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_owned();
 
-    let resp = rpc_call(
-        &mut ws,
-        2,
-        "context.getDetailedSnapshot",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
-    let result = &resp["result"];
+    let result = wait_for_detailed_snapshot_rules(&mut ws, &sid, 2).await;
 
     // Rules should be structured: { files, totalFiles, tokens }
     let rules = &result["rules"];

@@ -14,7 +14,6 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, info, info_span};
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_events::{EventStore, EventType};
 use tron_llm::provider::ProviderFactory;
@@ -25,10 +24,11 @@ use tron_tools::traits::{
 };
 
 use crate::agent::event_emitter::EventEmitter;
-use crate::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-use crate::orchestrator::agent_runner;
 use crate::orchestrator::session_manager::SessionManager;
-use crate::types::{AgentConfig as AgentCfg, ReasoningLevel, RunContext};
+use crate::types::ReasoningLevel;
+
+mod execution;
+mod tracking;
 
 // =============================================================================
 // SpawnType — taxonomy for tracked subagents
@@ -179,28 +179,6 @@ impl SubagentManager {
         let _ = self.tool_factory.set(factory);
     }
 
-    /// Count active subagents of a given type.
-    pub fn active_count_by_type(&self, spawn_type: &SpawnType) -> usize {
-        self.subagents
-            .iter()
-            .filter(|entry| {
-                entry.value().spawn_type == *spawn_type && entry.value().result.lock().is_none()
-            })
-            .count()
-    }
-
-    /// List active subsessions as `(session_id, task)` pairs.
-    pub fn list_active_subsessions(&self) -> Vec<(String, String)> {
-        self.subagents
-            .iter()
-            .filter(|entry| {
-                entry.value().spawn_type == SpawnType::Subsession
-                    && entry.value().result.lock().is_none()
-            })
-            .map(|entry| (entry.key().clone(), entry.value().task.clone()))
-            .collect()
-    }
-
     /// Spawn a system subsession with full configurability.
     ///
     /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
@@ -233,21 +211,12 @@ impl SubagentManager {
                 message: format!("Failed to create subsession: {e}"),
             })?;
 
-        // 2. Register tracking
-        let cancel = CancellationToken::new();
-        let tracker = Arc::new(TrackedSubagent {
-            parent_session_id: config.parent_session_id.clone(),
-            task: task.clone(),
-            spawn_type: SpawnType::Subsession,
-            started_at: Instant::now(),
-            done: Notify::new(),
-            result: Mutex::new(None),
-            cancel: cancel.clone(),
-        });
-
-        let _ = self
-            .subagents
-            .insert(child_session_id.clone(), tracker.clone());
+        let (tracker, cancel) = self.register_subagent(
+            child_session_id.clone(),
+            config.parent_session_id.clone(),
+            task.clone(),
+            SpawnType::Subsession,
+        );
 
         // 3. Emit SubagentSpawned on broadcast
         let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
@@ -277,225 +246,38 @@ impl SubagentManager {
             ToolRegistry::new()
         };
 
-        // 5. Spawn execution task
-        let session_mgr = self.session_manager.clone();
-        let event_store = self.event_store.clone();
-        let broadcast = self.broadcast.clone();
-        let provider_factory = self.provider_factory.clone();
-        let hooks = self.hooks.clone();
-        let child_sid = child_session_id.clone();
-        let max_turns = config.max_turns;
-        let model_owned = model.to_owned();
-        let system_prompt = config.system_prompt.clone();
-        let working_directory = config.working_directory.clone();
-        let subagent_max_depth = config.max_depth;
-        let reasoning_level = config.reasoning_level;
-        let parent_session_id = config.parent_session_id.clone();
-        let tracker_clone = tracker.clone();
-        let wt_coordinator = self.worktree_coordinator.get().cloned();
-        let child_subagent_manager = self.arc_self();
+        execution::spawn_subsession_task(execution::SubsessionTaskLaunch {
+            session_manager: self.session_manager.clone(),
+            event_store: self.event_store.clone(),
+            broadcast: self.broadcast.clone(),
+            provider_factory: self.provider_factory.clone(),
+            hooks: self.hooks.clone(),
+            worktree_coordinator: self.worktree_coordinator.get().cloned(),
+            child_subagent_manager: self.arc_self(),
+            child_session_id: child_session_id.clone(),
+            parent_session_id: config.parent_session_id.clone(),
+            task,
+            model: model.to_owned(),
+            system_prompt: config.system_prompt.clone(),
+            working_directory: config.working_directory.clone(),
+            max_turns: config.max_turns,
+            subagent_max_depth: config.max_depth,
+            reasoning_level: config.reasoning_level,
+            tracker: tracker.clone(),
+            cancel,
+            tools,
+        });
 
-        let subsession_span = info_span!(
-            "subsession",
-            session_id = %child_session_id,
-            parent_session_id = %parent_session_id,
-            spawn_type = "subsession",
-        );
-        drop(tokio::spawn(async move {
-            // Acquire worktree isolation for this subagent
-            let working_directory = if let Some(ref coord) = wt_coordinator {
-                match coord
-                    .maybe_acquire(&child_sid, std::path::Path::new(&working_directory))
-                    .await
-                {
-                    Ok(tron_worktree::AcquireResult::Acquired(info)) => {
-                        info.worktree_path.to_string_lossy().to_string()
-                    }
-                    Ok(tron_worktree::AcquireResult::Passthrough) => working_directory,
-                    Err(e) => {
-                        tracing::warn!(
-                            session_id = %child_sid,
-                            error = %e,
-                            "subsession worktree acquisition failed, using original directory"
-                        );
-                        working_directory
-                    }
-                }
-            } else {
-                working_directory
-            };
-
-            let provider = match provider_factory.create_for_model(&model_owned).await {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(model = %model_owned, error = %e, "subsession provider creation failed");
-                    *tracker_clone.result.lock() = Some(SubagentResult {
-                        session_id: child_sid.clone(),
-                        output: format!("Provider creation failed: {e}"),
-                        token_usage: None,
-                        duration_ms: elapsed_ms(&tracker_clone.started_at),
-                        status: "failed".into(),
-                    });
-                    tracker_clone.done.notify_waiters();
-                    return;
-                }
-            };
-
-            let child_broadcast = Arc::new(EventEmitter::new());
-
-            let agent_config = AgentCfg {
-                model: model_owned.clone(),
-                system_prompt: Some(system_prompt),
-                max_turns,
-                enable_thinking: true,
-                working_directory: Some(working_directory),
-                ..AgentCfg::default()
-            };
-
-            let mut agent = AgentFactory::create_agent(
-                agent_config,
-                child_sid.clone(),
-                CreateAgentOpts {
-                    provider,
-                    tools,
-                    guardrails: None,
-                    hooks: hooks.clone(),
-                    is_unattended: true,
-                    denied_tools: vec![],
-                    subagent_depth: 0,
-                    subagent_max_depth,
-                    rules_content: None,
-                    initial_messages: vec![],
-                    memory_content: None,
-                    rules_index: None,
-                    pre_activated_rules: vec![],
-                    subagent_manager: child_subagent_manager,
-                },
-            );
-
-            agent.set_abort_token(cancel);
-
-            // Use the session's persister (created by SessionManager in create_session_for_subagent)
-            let active = session_mgr
-                .resume_session(&child_sid)
-                .expect("just-created subsession must be in active_sessions");
-            let persister = active.context.persister.clone();
-            agent.set_persister(Some(persister));
-
-            // Persist message.user — matching regular session flow
-            let _ = event_store.append(&tron_events::AppendOptions {
-                session_id: &child_sid,
-                event_type: EventType::MessageUser,
-                payload: json!({"content": task}),
-                parent_id: None,
-            });
-
-            // Run the agent
-            let result = agent_runner::run_agent(
-                &mut agent,
-                &task,
-                RunContext {
-                    reasoning_level,
-                    ..Default::default()
-                },
-                &hooks,
-                &child_broadcast,
-            )
-            .await;
-
-            let duration_ms = elapsed_ms(&tracker_clone.started_at);
-
-            // Extract output from agent's last assistant message
-            let output = {
-                let messages = agent.context_manager().get_messages();
-                messages
-                    .iter()
-                    .rev()
-                    .find_map(|m| {
-                        if let tron_core::messages::Message::Assistant { content, .. } = m {
-                            let text: String = content
-                                .iter()
-                                .filter_map(|c| c.as_text())
-                                .collect::<Vec<_>>()
-                                .join("");
-                            if text.is_empty() { None } else { Some(text) }
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default()
-            };
-
-            let token_usage = serde_json::to_value(&result.total_token_usage).ok();
-
-            if result.error.is_some() {
-                let error = result.error.unwrap_or_else(|| "Unknown error".into());
-                let _ = broadcast.emit(TronEvent::SubagentFailed {
-                    base: BaseEvent::now(&parent_session_id),
-                    subagent_session_id: child_sid.clone(),
-                    error: error.clone(),
-                    duration: duration_ms,
-                });
-
-                *tracker_clone.result.lock() = Some(SubagentResult {
-                    session_id: child_sid.clone(),
-                    output: error,
-                    token_usage,
-                    duration_ms,
-                    status: "failed".into(),
-                });
-            } else {
-                let _ = broadcast.emit(TronEvent::SubagentCompleted {
-                    base: BaseEvent::now(&parent_session_id),
-                    subagent_session_id: child_sid.clone(),
-                    total_turns: result.turns_executed,
-                    duration: duration_ms,
-                    full_output: Some(output.clone()),
-                    result_summary: Some(truncate(&output, 200).to_owned()),
-                    token_usage: token_usage.clone(),
-                    model: Some(model_owned.clone()),
-                });
-
-                *tracker_clone.result.lock() = Some(SubagentResult {
-                    session_id: child_sid.clone(),
-                    output,
-                    token_usage,
-                    duration_ms,
-                    status: "completed".into(),
-                });
-            }
-
-            tracker_clone.done.notify_waiters();
-
-            let _ = session_mgr.end_session(&child_sid).await;
-
-            info!(
-                child_session = child_sid,
-                turns = result.turns_executed,
-                duration_ms,
-                "subsession execution finished"
-            );
-        }.instrument(subsession_span)));
-
-        // 6. If blocking, wait for completion
         if config.blocking {
-            let timeout = std::time::Duration::from_millis(config.timeout_ms);
-            let wait_result = tokio::time::timeout(timeout, tracker.done.notified()).await;
-
-            if wait_result.is_err() {
-                tracker.cancel.cancel();
-                return Err(ToolError::Timeout {
-                    timeout_ms: config.timeout_ms,
-                });
-            }
-
-            let result = tracker.result.lock().clone();
-            if let Some(r) = result {
+            if let Some(result) = self
+                .wait_for_tracker_result(&tracker, config.timeout_ms)
+                .await?
+            {
                 Ok(SubsessionOutput {
                     session_id: child_session_id,
-                    output: r.output,
-                    token_usage: r.token_usage,
-                    duration_ms: r.duration_ms,
+                    output: result.output,
+                    token_usage: result.token_usage,
+                    duration_ms: result.duration_ms,
                 })
             } else {
                 Ok(SubsessionOutput {
@@ -574,21 +356,12 @@ impl SubagentSpawner for SubagentManager {
                 message: format!("Failed to create subagent session: {e}"),
             })?;
 
-        // 2. Register tracking
-        let cancel = CancellationToken::new();
-        let tracker = Arc::new(TrackedSubagent {
-            parent_session_id: parent_sid.clone(),
-            task: task.clone(),
-            spawn_type: SpawnType::ToolAgent,
-            started_at: Instant::now(),
-            done: Notify::new(),
-            result: Mutex::new(None),
-            cancel: cancel.clone(),
-        });
-
-        let _ = self
-            .subagents
-            .insert(child_session_id.clone(), tracker.clone());
+        let (tracker, cancel) = self.register_subagent(
+            child_session_id.clone(),
+            parent_sid.clone(),
+            task.clone(),
+            SpawnType::ToolAgent,
+        );
 
         // 3. Emit SubagentSpawned on broadcast (routed to parent session for iOS)
         let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
@@ -622,430 +395,39 @@ impl SubagentSpawner for SubagentManager {
             });
         }
 
-        // 4. Spawn execution task
-        let session_mgr = self.session_manager.clone();
-        let event_store = self.event_store.clone();
-        let broadcast = self.broadcast.clone();
-        let provider_factory = self.provider_factory.clone();
-        let tools = tool_factory();
-        let guardrails = self.guardrails.clone();
-        let hooks = self.hooks.clone();
-        let child_sid = child_session_id.clone();
-        let max_turns = config.max_turns;
-        let model_owned = model.to_owned();
-        let system_prompt = config.system_prompt.clone();
-        let working_directory = config.working_directory.clone();
-        let subagent_max_depth = config.max_depth;
-        let subagent_depth = config.current_depth;
-        let blocking = config.blocking;
-        let tracker_clone = tracker.clone();
-        let wt_coordinator = self.worktree_coordinator.get().cloned();
-        let child_subagent_manager = self.arc_self();
+        execution::spawn_tool_agent_task(execution::ToolAgentTaskLaunch {
+            session_manager: self.session_manager.clone(),
+            event_store: self.event_store.clone(),
+            broadcast: self.broadcast.clone(),
+            provider_factory: self.provider_factory.clone(),
+            guardrails: self.guardrails.clone(),
+            hooks: self.hooks.clone(),
+            worktree_coordinator: self.worktree_coordinator.get().cloned(),
+            child_subagent_manager: self.arc_self(),
+            child_session_id: child_session_id.clone(),
+            parent_session_id: parent_sid.clone(),
+            task: task.clone(),
+            model: model.to_owned(),
+            system_prompt: config.system_prompt.clone(),
+            working_directory: config.working_directory.clone(),
+            max_turns: config.max_turns,
+            subagent_depth: config.current_depth,
+            subagent_max_depth: config.max_depth,
+            blocking: config.blocking,
+            tracker: tracker.clone(),
+            cancel,
+            tools: tool_factory(),
+        });
 
-        let subagent_span = info_span!(
-            "subagent",
-            session_id = %child_session_id,
-            parent_session_id = %parent_sid,
-            depth = subagent_depth,
-            spawn_type = "tool_agent",
-        );
-        drop(tokio::spawn(async move {
-            // Acquire worktree isolation for this subagent
-            let working_directory = if let Some(ref coord) = wt_coordinator {
-                match coord
-                    .maybe_acquire(&child_sid, std::path::Path::new(&working_directory))
-                    .await
-                {
-                    Ok(tron_worktree::AcquireResult::Acquired(info)) => {
-                        info.worktree_path.to_string_lossy().to_string()
-                    }
-                    Ok(tron_worktree::AcquireResult::Passthrough) => working_directory,
-                    Err(e) => {
-                        tracing::warn!(
-                            session_id = %child_sid,
-                            error = %e,
-                            "subagent worktree acquisition failed, using original directory"
-                        );
-                        working_directory
-                    }
-                }
-            } else {
-                working_directory
-            };
-
-            let provider = match provider_factory.create_for_model(&model_owned).await {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(model = %model_owned, error = %e, "subagent provider creation failed");
-                    *tracker_clone.result.lock() = Some(SubagentResult {
-                        session_id: child_sid.clone(),
-                        output: format!("Provider creation failed: {e}"),
-                        token_usage: None,
-                        duration_ms: elapsed_ms(&tracker_clone.started_at),
-                        status: "failed".into(),
-                    });
-                    tracker_clone.done.notify_waiters();
-                    return;
-                }
-            };
-
-            let child_broadcast = Arc::new(EventEmitter::new());
-
-            // Build agent
-            let agent_config = AgentCfg {
-                model: model_owned.clone(),
-                system_prompt,
-                max_turns,
-                enable_thinking: true,
-                working_directory: Some(working_directory),
-                ..AgentCfg::default()
-            };
-
-            let mut agent = AgentFactory::create_agent(
-                agent_config,
-                child_sid.clone(),
-                CreateAgentOpts {
-                    provider,
-                    tools,
-                    guardrails,
-                    hooks: hooks.clone(),
-                    is_unattended: true,
-                    denied_tools: vec![],
-                    subagent_depth,
-                    subagent_max_depth,
-                    rules_content: None,
-                    initial_messages: vec![],
-                    memory_content: None,
-                    rules_index: None,
-                    pre_activated_rules: vec![],
-                    subagent_manager: child_subagent_manager,
-                },
-            );
-
-            agent.set_abort_token(cancel);
-
-            // Use the session's persister (created by SessionManager in create_session_for_subagent)
-            let active = session_mgr
-                .resume_session(&child_sid)
-                .expect("just-created subagent session must be in active_sessions");
-            let persister = active.context.persister.clone();
-            agent.set_persister(Some(persister));
-
-            // Persist message.user — matching regular session flow
-            let _ = event_store.append(&tron_events::AppendOptions {
-                session_id: &child_sid,
-                event_type: EventType::MessageUser,
-                payload: json!({"content": task}),
-                parent_id: None,
-            });
-
-            // Subscribe to child events for forwarding to parent broadcast.
-            // Child event persistence is handled by the agent's EventPersister (via turn_runner).
-            let mut child_rx = child_broadcast.subscribe();
-            let forward_broadcast = broadcast.clone();
-            let forward_child_sid = child_sid.clone();
-            let forward_parent_sid = parent_sid.clone();
-            let forward_cancel = CancellationToken::new();
-            let forward_cancel_clone = forward_cancel.clone();
-
-            let forward_handle = tokio::spawn(async move {
-                let mut current_turn: u32 = 0;
-                loop {
-                    tokio::select! {
-                        event = child_rx.recv() => {
-                            match event {
-                                Ok(ref e) => {
-                                    // Track current turn
-                                    if let TronEvent::TurnStart { turn, .. } = e {
-                                        current_turn = *turn;
-                                    }
-                                    // Forward selected events as status updates
-                                    let activity = match e {
-                                        TronEvent::TurnStart { turn, .. } => {
-                                            Some(format!("Turn {turn} started"))
-                                        }
-                                        TronEvent::ToolExecutionStart { tool_name, .. } => {
-                                            Some(format!("Executing {tool_name}"))
-                                        }
-                                        TronEvent::ToolExecutionEnd { tool_name, duration, .. } => {
-                                            Some(format!("{tool_name} completed ({duration}ms)"))
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(activity_text) = activity {
-                                        let _ = forward_broadcast.emit(TronEvent::SubagentStatusUpdate {
-                                            base: BaseEvent::now(&forward_parent_sid),
-                                            subagent_session_id: forward_child_sid.clone(),
-                                            status: "running".into(),
-                                            current_turn,
-                                            activity: Some(activity_text),
-                                        });
-                                    }
-
-                                    // Forward streaming events as SubagentEvent (iOS detail sheet)
-                                    let forwarded_event = match e {
-                                        TronEvent::MessageUpdate { content, .. } => Some(json!({
-                                            "type": "text_delta",
-                                            "data": { "delta": content },
-                                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                                        })),
-                                        TronEvent::ToolExecutionStart { tool_call_id, tool_name, arguments, .. } => Some(json!({
-                                            "type": "tool_start",
-                                            "data": {
-                                                "toolCallId": tool_call_id,
-                                                "toolName": tool_name,
-                                                "arguments": arguments,
-                                            },
-                                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                                        })),
-                                        TronEvent::ToolExecutionEnd { tool_call_id, tool_name, is_error, duration, result, .. } => {
-                                            let result_text = result.as_ref().map(|r| {
-                                                match &r.content {
-                                                    tron_core::tools::ToolResultBody::Text(s) => s.clone(),
-                                                    tron_core::tools::ToolResultBody::Blocks(blocks) => {
-                                                        blocks.iter().filter_map(|b| {
-                                                            if let tron_core::content::ToolResultContent::Text { text } = b {
-                                                                Some(text.as_str())
-                                                            } else {
-                                                                None
-                                                            }
-                                                        }).collect::<Vec<_>>().join("")
-                                                    }
-                                                }
-                                            });
-                                            Some(json!({
-                                                "type": "tool_end",
-                                                "data": {
-                                                    "toolCallId": tool_call_id,
-                                                    "toolName": tool_name,
-                                                    "success": !is_error.unwrap_or(false),
-                                                    "result": result_text,
-                                                    "duration": duration,
-                                                },
-                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                            }))
-                                        },
-                                        TronEvent::TurnStart { turn, .. } => Some(json!({
-                                            "type": "turn_start",
-                                            "data": { "turn": turn },
-                                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                                        })),
-                                        TronEvent::TurnEnd { turn, .. } => Some(json!({
-                                            "type": "turn_end",
-                                            "data": { "turn": turn },
-                                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                                        })),
-                                        _ => None,
-                                    };
-                                    if let Some(event_data) = forwarded_event {
-                                        let _ = forward_broadcast.emit(TronEvent::SubagentEvent {
-                                            base: BaseEvent::now(&forward_parent_sid),
-                                            subagent_session_id: forward_child_sid.clone(),
-                                            event: event_data,
-                                        });
-                                    }
-
-                                    // Child event persistence is handled by the agent's
-                                    // own EventPersister (via turn_runner) — not here.
-                                }
-                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                    metrics::counter!("broadcast_lagged_events_total", "source" => "subagent_forward").increment(n);
-                                }
-                            }
-                        }
-                        () = forward_cancel_clone.cancelled() => {
-                            // Drain remaining
-                            while let Ok(ref _event) = child_rx.try_recv() {}
-                            break;
-                        }
-                    }
-                }
-            });
-
-            // Run the agent
-            let result = agent_runner::run_agent(
-                &mut agent,
-                &task,
-                RunContext::default(),
-                &hooks,
-                &child_broadcast,
-            )
-            .await;
-
-            // Stop forwarding
-            forward_cancel.cancel();
-            let _ = forward_handle.await;
-
-            let duration_ms = elapsed_ms(&tracker_clone.started_at);
-
-            // Extract output from agent's last assistant message
-            let output = {
-                let messages = agent.context_manager().get_messages();
-                messages
-                    .iter()
-                    .rev()
-                    .find_map(|m| {
-                        if let tron_core::messages::Message::Assistant { content, .. } = m {
-                            let text: String = content
-                                .iter()
-                                .filter_map(|c| c.as_text())
-                                .collect::<Vec<_>>()
-                                .join("");
-                            if text.is_empty() { None } else { Some(text) }
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default()
-            };
-
-            let token_usage = serde_json::to_value(&result.total_token_usage).ok();
-
-            let success = result.error.is_none();
-            let result_output;
-
-            if success {
-                // Emit SubagentCompleted (routed to parent session)
-                let _ = broadcast.emit(TronEvent::SubagentCompleted {
-                    base: BaseEvent::now(&tracker_clone.parent_session_id),
-                    subagent_session_id: child_sid.clone(),
-                    total_turns: result.turns_executed,
-                    duration: duration_ms,
-                    full_output: Some(output.clone()),
-                    result_summary: Some(truncate(&output, 200).to_owned()),
-                    token_usage: token_usage.clone(),
-                    model: Some(model_owned.clone()),
-                });
-
-                // Persist subagent.completed to parent session
-                if !tracker_clone.parent_session_id.is_empty() {
-                    let _ = event_store.append(&tron_events::AppendOptions {
-                        session_id: &tracker_clone.parent_session_id,
-                        event_type: EventType::SubagentCompleted,
-                        payload: json!({
-                            "subagentSessionId": child_sid,
-                            "totalTurns": result.turns_executed,
-                            "duration": duration_ms,
-                            "fullOutput": truncate(&output, 4000),
-                            "resultSummary": truncate(&output, 200),
-                            "model": model_owned,
-                        }),
-                        parent_id: None,
-                    });
-                }
-
-                result_output = output.clone();
-                *tracker_clone.result.lock() = Some(SubagentResult {
-                    session_id: child_sid.clone(),
-                    output,
-                    token_usage: token_usage.clone(),
-                    duration_ms,
-                    status: "completed".into(),
-                });
-            } else {
-                let error = result.error.unwrap_or_else(|| "Unknown error".into());
-                // Emit SubagentFailed (routed to parent session)
-                let _ = broadcast.emit(TronEvent::SubagentFailed {
-                    base: BaseEvent::now(&tracker_clone.parent_session_id),
-                    subagent_session_id: child_sid.clone(),
-                    error: error.clone(),
-                    duration: duration_ms,
-                });
-
-                // Persist subagent.failed to parent session
-                if !tracker_clone.parent_session_id.is_empty() {
-                    let _ = event_store.append(&tron_events::AppendOptions {
-                        session_id: &tracker_clone.parent_session_id,
-                        event_type: EventType::SubagentFailed,
-                        payload: json!({
-                            "subagentSessionId": child_sid,
-                            "error": error,
-                            "duration": duration_ms,
-                        }),
-                        parent_id: None,
-                    });
-                }
-
-                result_output = error.clone();
-                *tracker_clone.result.lock() = Some(SubagentResult {
-                    session_id: child_sid.clone(),
-                    output: error,
-                    token_usage: token_usage.clone(),
-                    duration_ms,
-                    status: "failed".into(),
-                });
-            }
-
-            // Persist notification.subagent_result to parent session's event store
-            // Only for non-blocking subagents (blocking results go directly to tool output)
-            if !blocking && !tracker_clone.parent_session_id.is_empty() {
-                let payload = json!({
-                    "parentSessionId": tracker_clone.parent_session_id,
-                    "subagentSessionId": child_sid,
-                    "task": tracker_clone.task,
-                    "resultSummary": truncate(&result_output, 200),
-                    "success": success,
-                    "totalTurns": i64::from(result.turns_executed),
-                    "duration": duration_ms,
-                    "tokenUsage": token_usage.clone().unwrap_or(json!({})),
-                    "completedAt": chrono::Utc::now().to_rfc3339(),
-                    "output": truncate(&result_output, 4000),
-                });
-                let _ = event_store.append(&tron_events::AppendOptions {
-                    session_id: &tracker_clone.parent_session_id,
-                    event_type: EventType::NotificationSubagentResult,
-                    payload,
-                    parent_id: None,
-                });
-
-                // Broadcast SubagentResultAvailable for live WebSocket clients
-                let _ = broadcast.emit(TronEvent::SubagentResultAvailable {
-                    base: BaseEvent::now(&tracker_clone.parent_session_id),
-                    parent_session_id: tracker_clone.parent_session_id.clone(),
-                    subagent_session_id: child_sid.clone(),
-                    task: tracker_clone.task.clone(),
-                    result_summary: truncate(&result_output, 200).to_owned(),
-                    success,
-                    total_turns: result.turns_executed,
-                    duration: duration_ms,
-                    token_usage,
-                    error: if success { None } else { Some(result_output.clone()) },
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                });
-            }
-
-            tracker_clone.done.notify_waiters();
-
-            // End the child session
-            let _ = session_mgr.end_session(&child_sid).await;
-
-            info!(
-                child_session = child_sid,
-                turns = result.turns_executed,
-                duration_ms,
-                "subagent execution finished"
-            );
-        }.instrument(subagent_span)));
-
-        // 5. If blocking, wait for completion
         if config.blocking {
-            let timeout = std::time::Duration::from_millis(config.timeout_ms);
-            let wait_result = tokio::time::timeout(timeout, tracker.done.notified()).await;
-
-            if wait_result.is_err() {
-                tracker.cancel.cancel();
-                return Err(ToolError::Timeout {
-                    timeout_ms: config.timeout_ms,
-                });
-            }
-
-            let result = tracker.result.lock().clone();
-            if let Some(r) = result {
+            if let Some(result) = self
+                .wait_for_tracker_result(&tracker, config.timeout_ms)
+                .await?
+            {
                 Ok(SubagentHandle {
                     session_id: child_session_id,
-                    output: Some(r.output),
-                    token_usage: r.token_usage,
+                    output: Some(result.output),
+                    token_usage: result.token_usage,
                 })
             } else {
                 Ok(SubagentHandle {
@@ -1069,112 +451,8 @@ impl SubagentSpawner for SubagentManager {
         mode: WaitMode,
         timeout_ms: u64,
     ) -> Result<Vec<SubagentResult>, ToolError> {
-        if session_ids.is_empty() {
-            return Err(ToolError::Validation {
-                message: "No session IDs provided".into(),
-            });
-        }
-
-        let timeout = std::time::Duration::from_millis(timeout_ms);
-        let deadline = Instant::now() + timeout;
-
-        match mode {
-            WaitMode::All => {
-                let mut results = Vec::with_capacity(session_ids.len());
-                for sid in session_ids {
-                    let tracker = self
-                        .subagents
-                        .get(sid)
-                        .ok_or_else(|| ToolError::Validation {
-                            message: format!("Unknown subagent session: {sid}"),
-                        })?;
-
-                    // Check if already done
-                    {
-                        let result = tracker.result.lock().clone();
-                        if let Some(r) = result {
-                            results.push(r);
-                            continue;
-                        }
-                    }
-
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        return Err(ToolError::Timeout { timeout_ms });
-                    }
-
-                    let wait = tokio::time::timeout(remaining, tracker.done.notified()).await;
-                    if wait.is_err() {
-                        return Err(ToolError::Timeout { timeout_ms });
-                    }
-
-                    let result = tracker
-                        .result
-                        .lock()
-                        .clone()
-                        .unwrap_or_else(|| SubagentResult {
-                            session_id: sid.clone(),
-                            output: String::new(),
-                            token_usage: None,
-                            duration_ms: 0,
-                            status: "unknown".into(),
-                        });
-                    results.push(result);
-                }
-                Ok(results)
-            }
-            WaitMode::Any => {
-                // Build futures for all trackers
-                let trackers: Vec<_> = session_ids
-                    .iter()
-                    .map(|sid| self.subagents.get(sid).map(|t| (sid.clone(), t.clone())))
-                    .collect::<Option<Vec<_>>>()
-                    .ok_or_else(|| ToolError::Validation {
-                        message: "One or more unknown subagent sessions".into(),
-                    })?;
-
-                // Check if any already done
-                for (_sid, tracker) in &trackers {
-                    let result = tracker.result.lock().clone();
-                    if let Some(r) = result {
-                        return Ok(vec![r]);
-                    }
-                }
-
-                // Race all notified futures
-                let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(1);
-                for (sid, tracker) in trackers {
-                    let tx = result_tx.clone();
-                    let tracker = tracker.clone();
-                    let sid = sid.clone();
-                    drop(tokio::spawn(async move {
-                        tracker.done.notified().await;
-                        let result =
-                            tracker
-                                .result
-                                .lock()
-                                .clone()
-                                .unwrap_or_else(|| SubagentResult {
-                                    session_id: sid,
-                                    output: String::new(),
-                                    token_usage: None,
-                                    duration_ms: 0,
-                                    status: "unknown".into(),
-                                });
-                        let _ = tx.send(result).await;
-                    }));
-                }
-                drop(result_tx);
-
-                match tokio::time::timeout(timeout, result_rx.recv()).await {
-                    Ok(Some(result)) => Ok(vec![result]),
-                    Ok(None) => Err(ToolError::Internal {
-                        message: "All wait tasks completed without result".into(),
-                    }),
-                    Err(_) => Err(ToolError::Timeout { timeout_ms }),
-                }
-            }
-        }
+        self.wait_for_agents_impl(session_ids, mode, timeout_ms)
+            .await
     }
 }
 
@@ -1253,6 +531,16 @@ mod tests {
         ) -> Result<StreamEventStream, ProviderError> {
             Err(ProviderError::Auth {
                 message: "expired".into(),
+            })
+        }
+    }
+
+    struct ProviderCreationErrorFactory;
+    #[async_trait]
+    impl ProviderFactory for ProviderCreationErrorFactory {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+            Err(ProviderError::Other {
+                message: "provider failed".into(),
             })
         }
     }
@@ -1692,6 +980,64 @@ mod tests {
         let result = manager.spawn_subsession(config).await.unwrap();
         // Should still complete (blocking) — output may contain error info
         assert!(!result.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_provider_creation_failure_ends_child_session() {
+        let (session_mgr, store, broadcast) = make_manager_and_store();
+        let manager = Arc::new(SubagentManager::new(
+            session_mgr.clone(),
+            store,
+            broadcast,
+            Arc::new(ProviderCreationErrorFactory),
+            None,
+            None,
+        ));
+        manager.set_self_ref();
+        manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+        let handle = manager.spawn(make_config("task")).await.unwrap();
+
+        let results = manager
+            .wait_for_agents(
+                std::slice::from_ref(&handle.session_id),
+                WaitMode::All,
+                10_000,
+            )
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "failed");
+        assert!(
+            !session_mgr.is_active(&handle.session_id),
+            "provider creation failure should not leave child session active"
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_provider_creation_failure_ends_child_session() {
+        let (session_mgr, store, broadcast) = make_manager_and_store();
+        let manager = Arc::new(SubagentManager::new(
+            session_mgr.clone(),
+            store,
+            broadcast,
+            Arc::new(ProviderCreationErrorFactory),
+            None,
+            None,
+        ));
+        manager.set_self_ref();
+        manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+        let result = manager
+            .spawn_subsession(make_subsession_config("task", "parent-001"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.output, "Provider creation failed: provider failed");
+        assert!(
+            !session_mgr.is_active(&result.session_id),
+            "provider creation failure should not leave subsession active"
+        );
     }
 
     // ── notification.subagent_result persistence tests ──
