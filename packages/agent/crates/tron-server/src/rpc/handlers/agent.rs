@@ -256,7 +256,9 @@ mod tests {
             }
         })
         .await
-        .unwrap_or_else(|_| panic!("timed out waiting for run completion for session {session_id}"));
+        .unwrap_or_else(|_| {
+            panic!("timed out waiting for run completion for session {session_id}")
+        });
     }
 
     fn retryable_event_read_error(error: &tron_events::EventStoreError) -> bool {

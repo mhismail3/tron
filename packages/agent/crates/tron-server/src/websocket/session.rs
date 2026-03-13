@@ -273,11 +273,7 @@ mod tests {
 
     async fn boot_session_server_with_limits(
         limits: ConnectionLimits,
-    ) -> (
-        String,
-        Arc<BroadcastManager>,
-        tokio::task::JoinHandle<()>,
-    ) {
+    ) -> (String, Arc<BroadcastManager>, tokio::task::JoinHandle<()>) {
         let mut registry = MethodRegistry::new();
         handlers::register_all(&mut registry);
         let registry = Arc::new(registry);
