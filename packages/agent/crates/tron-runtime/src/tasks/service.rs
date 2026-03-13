@@ -10,12 +10,6 @@
 //! - **Status reopening**: Moving from terminal → non-terminal clears `completed_at`.
 //! - **Circular dependency detection**: Only for `Blocks` relationships (BFS).
 
-use rusqlite::Connection;
-use tracing::warn;
-
-use serde_json::{Value, json};
-use tron_events::sqlite::contention::{self, RetryError};
-
 use super::errors::TaskError;
 use super::repository::TaskRepository;
 use super::types::{
@@ -26,820 +20,19 @@ use super::types::{
     TaskUpdateParams, TaskWithDetails,
 };
 
-/// Resolved batch operation target — eliminates unwraps via type-safe branching.
-enum ResolvedTarget<'a> {
-    Ids(&'a [String]),
-    Filter(TaskFilter),
-}
+mod area_ops;
+mod batch_ops;
+mod project_ops;
+mod task_ops;
+mod transaction;
 
-enum ImmediateTxnError {
-    Begin(rusqlite::Error),
-    Task(TaskError),
-}
-
-impl ImmediateTxnError {
-    fn into_task_error(self, operation: &'static str, attempts: u32) -> TaskError {
-        match self {
-            Self::Begin(error) => {
-                if contention::is_rusqlite_busy(&error) {
-                    TaskError::Busy {
-                        operation,
-                        attempts,
-                    }
-                } else {
-                    TaskError::Database(error)
-                }
-            }
-            Self::Task(error) => match error {
-                TaskError::Database(database_error)
-                    if contention::is_rusqlite_busy(&database_error) =>
-                {
-                    TaskError::Busy {
-                        operation,
-                        attempts,
-                    }
-                }
-                other => other,
-            },
-        }
-    }
-
-    fn is_busy(&self) -> bool {
-        match self {
-            Self::Begin(error) | Self::Task(TaskError::Database(error)) => {
-                contention::is_rusqlite_busy(error)
-            }
-            Self::Task(TaskError::Busy { .. }) => true,
-            Self::Task(_) => false,
-        }
-    }
-}
+#[cfg(test)]
+use rusqlite::Connection;
+#[cfg(test)]
+use tron_events::sqlite::contention;
 
 /// Task service with business logic and validation.
 pub struct TaskService;
-
-impl TaskService {
-    /// Run a closure inside a `BEGIN IMMEDIATE` transaction with retry on
-    /// `SQLITE_BUSY`. Unlike `BEGIN DEFERRED`, `IMMEDIATE` acquires the write
-    /// lock upfront so contention is detected at `BEGIN` rather than mid-txn.
-    fn with_immediate_txn<T>(
-        conn: &Connection,
-        f: impl FnMut(&Connection) -> Result<T, TaskError>,
-    ) -> Result<T, TaskError> {
-        Self::with_immediate_txn_policy(conn, contention::BusyRetryPolicy::sqlite_write(), f)
-    }
-
-    fn with_immediate_txn_policy<T>(
-        conn: &Connection,
-        policy: contention::BusyRetryPolicy,
-        mut f: impl FnMut(&Connection) -> Result<T, TaskError>,
-    ) -> Result<T, TaskError> {
-        const OPERATION: &str = "task batch transaction";
-
-        match contention::retry_on_busy(
-            OPERATION,
-            policy,
-            || {
-                conn.execute_batch("BEGIN IMMEDIATE")
-                    .map_err(ImmediateTxnError::Begin)?;
-
-                match f(conn) {
-                    Ok(value) => {
-                        if let Err(error) = conn.execute_batch("COMMIT") {
-                            let _ = conn.execute_batch("ROLLBACK");
-                            return Err(ImmediateTxnError::Begin(error));
-                        }
-                        Ok(value)
-                    }
-                    Err(error) => {
-                        let _ = conn.execute_batch("ROLLBACK");
-                        Err(ImmediateTxnError::Task(error))
-                    }
-                }
-            },
-            ImmediateTxnError::is_busy,
-        ) {
-            Ok(value) => Ok(value),
-            Err(RetryError::Inner(error)) => Err(error.into_task_error(OPERATION, 0)),
-            Err(RetryError::BusyTimeout(timeout)) => Err(timeout
-                .last_error
-                .into_task_error(OPERATION, timeout.attempts)),
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Task operations
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create a task with hierarchy validation and auto-timestamps.
-    pub fn create_task(conn: &Connection, params: &TaskCreateParams) -> Result<Task, TaskError> {
-        // Validate 2-level hierarchy
-        if let Some(ref parent_id) = params.parent_task_id
-            && let Some(parent) = TaskRepository::get_task(conn, parent_id)?
-            && parent.parent_task_id.is_some()
-        {
-            return Err(TaskError::Hierarchy(
-                "Cannot create subtask of a subtask (max 2-level hierarchy)".to_string(),
-            ));
-        }
-
-        let task = TaskRepository::create_task(conn, params)?;
-
-        // Log creation activity
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: task.id.clone(),
-                session_id: params.created_by_session_id.clone(),
-                event_id: None,
-                action: ActivityAction::Created,
-                old_value: None,
-                new_value: None,
-                detail: Some(format!("Task created: {}", task.title)),
-                minutes_logged: None,
-            },
-        )?;
-
-        Ok(task)
-    }
-
-    /// Get a task with full details (subtasks, dependencies, activity).
-    pub fn get_task(conn: &Connection, id: &str) -> Result<TaskWithDetails, TaskError> {
-        let task =
-            TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))?;
-
-        let subtasks = TaskRepository::get_subtasks(conn, id)?;
-        let blocked_by = TaskRepository::get_blocked_by(conn, id)?;
-        let blocks = TaskRepository::get_blocks(conn, id)?;
-        let recent_activity = TaskRepository::get_activity(conn, id, 20)?;
-
-        Ok(TaskWithDetails {
-            task,
-            subtasks,
-            blocked_by,
-            blocks,
-            recent_activity,
-        })
-    }
-
-    /// Update a task with auto-transitions and activity logging.
-    pub fn update_task(
-        conn: &Connection,
-        id: &str,
-        updates: &TaskUpdateParams,
-        session_id: Option<&str>,
-    ) -> Result<Task, TaskError> {
-        let current =
-            TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))?;
-
-        // Build augmented updates with auto-transitions
-        let mut augmented = updates.clone();
-
-        if let Some(new_status) = updates.status {
-            let old_status = current.status;
-
-            // Auto-set started_at when transitioning to InProgress
-            if new_status == TaskStatus::InProgress && old_status != TaskStatus::InProgress {
-                // started_at is handled at SQL level via explicit update
-            }
-
-            // Auto-set completed_at for terminal states
-            if new_status.is_terminal() && !old_status.is_terminal() {
-                // We'll handle this via a separate SQL update after the main one
-            }
-
-            // Clear completed_at when reopening
-            if !new_status.is_terminal() && old_status.is_terminal() {
-                // Clear completed_at
-            }
-
-            // Log status change
-            TaskRepository::log_activity(
-                conn,
-                &LogActivityParams {
-                    task_id: id.to_string(),
-                    session_id: session_id.map(String::from),
-                    event_id: None,
-                    action: ActivityAction::StatusChanged,
-                    old_value: Some(old_status.as_sql().to_string()),
-                    new_value: Some(new_status.as_sql().to_string()),
-                    detail: None,
-                    minutes_logged: None,
-                },
-            )?;
-        }
-
-        // Log note addition
-        if updates.add_note.is_some() {
-            TaskRepository::log_activity(
-                conn,
-                &LogActivityParams {
-                    task_id: id.to_string(),
-                    session_id: session_id.map(String::from),
-                    event_id: None,
-                    action: ActivityAction::NoteAdded,
-                    old_value: None,
-                    new_value: updates.add_note.clone(),
-                    detail: None,
-                    minutes_logged: None,
-                },
-            )?;
-        }
-
-        // Set last_session_id if provided
-        if let Some(sid) = session_id {
-            augmented.last_session_id = Some(sid.to_string());
-        }
-
-        let _updated = TaskRepository::update_task(conn, id, &augmented)?
-            .ok_or_else(|| TaskError::task_not_found(id))?;
-
-        // Handle auto-timestamp updates that require separate SQL
-        if let Some(new_status) = updates.status {
-            if new_status == TaskStatus::InProgress && current.started_at.is_none() {
-                let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                let _ = conn.execute(
-                    "UPDATE tasks SET started_at = ?1 WHERE id = ?2 AND started_at IS NULL",
-                    rusqlite::params![now, id],
-                )?;
-            }
-            if new_status.is_terminal() && !current.status.is_terminal() {
-                let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                let _ = conn.execute(
-                    "UPDATE tasks SET completed_at = ?1 WHERE id = ?2",
-                    rusqlite::params![now, id],
-                )?;
-            }
-            if !new_status.is_terminal() && current.status.is_terminal() {
-                let _ = conn.execute(
-                    "UPDATE tasks SET completed_at = NULL WHERE id = ?1",
-                    rusqlite::params![id],
-                )?;
-            }
-        }
-
-        // Re-read to pick up auto-timestamp changes
-        TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))
-    }
-
-    /// Delete a task with activity logging.
-    pub fn delete_task(
-        conn: &Connection,
-        id: &str,
-        session_id: Option<&str>,
-    ) -> Result<bool, TaskError> {
-        // Verify exists
-        let task = TaskRepository::get_task(conn, id)?;
-        if task.is_none() {
-            return Ok(false);
-        }
-
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::Deleted,
-                old_value: None,
-                new_value: None,
-                detail: None,
-                minutes_logged: None,
-            },
-        )?;
-
-        TaskRepository::delete_task(conn, id)
-    }
-
-    /// Log time on a task.
-    pub fn log_time(
-        conn: &Connection,
-        id: &str,
-        minutes: i32,
-        session_id: Option<&str>,
-    ) -> Result<(), TaskError> {
-        TaskRepository::increment_actual_minutes(conn, id, minutes)?;
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::TimeLogged,
-                old_value: None,
-                new_value: None,
-                detail: Some(format!("Logged {minutes} minutes")),
-                minutes_logged: Some(minutes),
-            },
-        )?;
-        Ok(())
-    }
-
-    /// List tasks with filtering and pagination.
-    pub fn list_tasks(
-        conn: &Connection,
-        filter: &TaskFilter,
-        limit: u32,
-        offset: u32,
-    ) -> Result<TaskListResult, TaskError> {
-        TaskRepository::list_tasks(conn, filter, limit, offset)
-    }
-
-    /// Search tasks by title/description.
-    pub fn search_tasks(
-        conn: &Connection,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<Task>, TaskError> {
-        TaskRepository::search_tasks(conn, query, limit)
-    }
-
-    /// Get activity log entries for a task.
-    pub fn get_task_activity(
-        conn: &Connection,
-        task_id: &str,
-        limit: u32,
-    ) -> Result<Vec<TaskActivity>, TaskError> {
-        TaskRepository::get_activity(conn, task_id, limit)
-    }
-
-    /// Add a dependency with circular detection for `Blocks` relationships.
-    #[allow(clippy::similar_names)]
-    pub fn add_dependency(
-        conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
-        relationship: DependencyRelationship,
-        session_id: Option<&str>,
-    ) -> Result<(), TaskError> {
-        // Only check cycles for 'blocks' relationships
-        if relationship == DependencyRelationship::Blocks
-            && TaskRepository::has_circular_dependency(conn, blocker_id, blocked_id)?
-        {
-            return Err(TaskError::CircularDependency {
-                blocker_id: blocker_id.to_string(),
-                blocked_id: blocked_id.to_string(),
-            });
-        }
-
-        TaskRepository::add_dependency(conn, blocker_id, blocked_id, relationship)?;
-
-        // Log activity on both tasks
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: blocker_id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::DependencyAdded,
-                old_value: None,
-                new_value: Some(blocked_id.to_string()),
-                detail: Some(format!("Now blocks {blocked_id}")),
-                minutes_logged: None,
-            },
-        )?;
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: blocked_id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::DependencyAdded,
-                old_value: None,
-                new_value: Some(blocker_id.to_string()),
-                detail: Some(format!("Blocked by {blocker_id}")),
-                minutes_logged: None,
-            },
-        )?;
-
-        Ok(())
-    }
-
-    /// Remove a dependency with activity logging.
-    #[allow(clippy::similar_names)]
-    pub fn remove_dependency(
-        conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
-        session_id: Option<&str>,
-    ) -> Result<bool, TaskError> {
-        let removed = TaskRepository::remove_dependency(conn, blocker_id, blocked_id)?;
-        if removed
-            && let Err(e) = TaskRepository::log_activity(
-                conn,
-                &LogActivityParams {
-                    task_id: blocker_id.to_string(),
-                    session_id: session_id.map(String::from),
-                    event_id: None,
-                    action: ActivityAction::DependencyRemoved,
-                    old_value: Some(blocked_id.to_string()),
-                    new_value: None,
-                    detail: Some(format!("No longer blocks {blocked_id}")),
-                    minutes_logged: None,
-                },
-            )
-        {
-            warn!(error = %e, "Failed to log dependency removal activity");
-        }
-        Ok(removed)
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Batch operations
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Batch delete tasks by IDs or filter. Transactional with activity logging.
-    pub fn batch_delete_tasks(
-        conn: &Connection,
-        target: &BatchTarget,
-        dry_run: bool,
-        session_id: Option<&str>,
-    ) -> Result<BatchResult, TaskError> {
-        if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
-            return Ok(BatchResult {
-                affected: 0,
-                dry_run,
-            });
-        }
-        let resolved = Self::resolve_batch_target(target)?;
-
-        if dry_run {
-            let count = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
-                ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
-            };
-            return Ok(BatchResult {
-                affected: count,
-                dry_run: true,
-            });
-        }
-
-        Self::with_immediate_txn(conn, |tx| {
-            // Pre-fetch for activity logging
-            let tasks = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::get_tasks_by_ids(tx, ids)?,
-                ResolvedTarget::Filter(f) => TaskRepository::get_tasks_by_filter(tx, f)?,
-            };
-
-            // Log activity BEFORE deleting — delete cascades task_activity rows,
-            // so inserting after would violate the FK constraint.
-            for task in &tasks {
-                TaskRepository::log_activity(
-                    tx,
-                    &LogActivityParams {
-                        task_id: task.id.clone(),
-                        session_id: session_id.map(String::from),
-                        event_id: None,
-                        action: ActivityAction::Deleted,
-                        old_value: Some(task.title.clone()),
-                        new_value: None,
-                        detail: None,
-                        minutes_logged: None,
-                    },
-                )?;
-            }
-
-            let affected = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::delete_tasks_by_ids(tx, ids)?,
-                ResolvedTarget::Filter(f) => TaskRepository::delete_tasks_by_filter(tx, f)?,
-            };
-
-            Ok(BatchResult {
-                affected,
-                dry_run: false,
-            })
-        })
-    }
-
-    /// Batch update tasks by IDs or filter. Transactional with activity logging.
-    pub fn batch_update_tasks(
-        conn: &Connection,
-        target: &BatchTarget,
-        updates: &TaskUpdateParams,
-        dry_run: bool,
-        session_id: Option<&str>,
-    ) -> Result<BatchResult, TaskError> {
-        if target.ids.as_ref().is_some_and(std::vec::Vec::is_empty) {
-            return Ok(BatchResult {
-                affected: 0,
-                dry_run,
-            });
-        }
-        let resolved = Self::resolve_batch_target(target)?;
-
-        if dry_run {
-            let count = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::count_tasks_by_ids(conn, ids)?,
-                ResolvedTarget::Filter(f) => TaskRepository::count_tasks_by_filter(conn, f)?,
-            };
-            return Ok(BatchResult {
-                affected: count,
-                dry_run: true,
-            });
-        }
-
-        Self::with_immediate_txn(conn, |tx| {
-            let tasks_before = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::get_tasks_by_ids(tx, ids)?,
-                ResolvedTarget::Filter(f) => TaskRepository::get_tasks_by_filter(tx, f)?,
-            };
-
-            let affected = match &resolved {
-                ResolvedTarget::Ids(ids) => TaskRepository::update_tasks_by_ids(tx, ids, updates)?,
-                ResolvedTarget::Filter(f) => {
-                    TaskRepository::update_tasks_by_filter(tx, f, updates)?
-                }
-            };
-
-            for task in &tasks_before {
-                let action = if updates.status.is_some() {
-                    ActivityAction::StatusChanged
-                } else {
-                    ActivityAction::Updated
-                };
-                TaskRepository::log_activity(
-                    tx,
-                    &LogActivityParams {
-                        task_id: task.id.clone(),
-                        session_id: session_id.map(String::from),
-                        event_id: None,
-                        action,
-                        old_value: updates.status.map(|_| task.status.as_sql().to_string()),
-                        new_value: updates.status.map(|s| s.as_sql().to_string()),
-                        detail: None,
-                        minutes_logged: None,
-                    },
-                )?;
-            }
-
-            Ok(BatchResult {
-                affected,
-                dry_run: false,
-            })
-        })
-    }
-
-    /// Resolve a `BatchTarget` into a type-safe `ResolvedTarget`, validating
-    /// that either IDs or a filter is present.
-    fn resolve_batch_target(target: &BatchTarget) -> Result<ResolvedTarget<'_>, TaskError> {
-        if let Some(ids) = &target.ids {
-            return Ok(ResolvedTarget::Ids(ids));
-        }
-        if let Some(filter) = &target.filter {
-            let mut f = filter.clone();
-            f.include_completed = true;
-            f.include_deferred = true;
-            f.include_backlog = true;
-            return Ok(ResolvedTarget::Filter(f));
-        }
-        Err(TaskError::Validation("ids or filter required".into()))
-    }
-
-    /// Batch create tasks atomically. Returns JSON with affected count and created IDs.
-    pub fn batch_create_tasks(
-        conn: &Connection,
-        items: &[TaskCreateParams],
-        session_id: Option<&str>,
-    ) -> Result<Value, TaskError> {
-        if items.is_empty() {
-            return Ok(json!({ "affected": 0, "dryRun": false, "ids": [] }));
-        }
-
-        for (i, item) in items.iter().enumerate() {
-            if item.title.trim().is_empty() {
-                return Err(TaskError::Validation(format!(
-                    "item[{i}]: title is required"
-                )));
-            }
-        }
-
-        Self::with_immediate_txn(conn, |tx| {
-            let mut created_ids = Vec::with_capacity(items.len());
-
-            for item in items {
-                let task = TaskRepository::create_task(tx, item)?;
-                TaskRepository::log_activity(
-                    tx,
-                    &LogActivityParams {
-                        task_id: task.id.clone(),
-                        session_id: session_id.map(String::from),
-                        event_id: None,
-                        action: ActivityAction::Created,
-                        old_value: None,
-                        new_value: Some(task.title.clone()),
-                        detail: None,
-                        minutes_logged: None,
-                    },
-                )?;
-                created_ids.push(task.id);
-            }
-
-            Ok(json!({
-                "affected": created_ids.len(),
-                "dryRun": false,
-                "ids": created_ids,
-            }))
-        })
-    }
-
-    /// Batch delete projects by IDs.
-    pub fn batch_delete_projects(
-        conn: &Connection,
-        ids: &[String],
-        dry_run: bool,
-    ) -> Result<BatchResult, TaskError> {
-        if ids.is_empty() {
-            return Ok(BatchResult {
-                affected: 0,
-                dry_run,
-            });
-        }
-        if dry_run {
-            let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!("SELECT COUNT(*) FROM projects WHERE id IN ({placeholders})");
-            let params: Vec<&dyn rusqlite::types::ToSql> = ids
-                .iter()
-                .map(|id| id as &dyn rusqlite::types::ToSql)
-                .collect();
-            let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-            return Ok(BatchResult {
-                affected: count,
-                dry_run: true,
-            });
-        }
-        let affected = TaskRepository::delete_projects_by_ids(conn, ids)?;
-        Ok(BatchResult {
-            affected,
-            dry_run: false,
-        })
-    }
-
-    /// Batch delete areas by IDs.
-    pub fn batch_delete_areas(
-        conn: &Connection,
-        ids: &[String],
-        dry_run: bool,
-    ) -> Result<BatchResult, TaskError> {
-        if ids.is_empty() {
-            return Ok(BatchResult {
-                affected: 0,
-                dry_run,
-            });
-        }
-        if dry_run {
-            let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!("SELECT COUNT(*) FROM areas WHERE id IN ({placeholders})");
-            let params: Vec<&dyn rusqlite::types::ToSql> = ids
-                .iter()
-                .map(|id| id as &dyn rusqlite::types::ToSql)
-                .collect();
-            let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-            return Ok(BatchResult {
-                affected: count,
-                dry_run: true,
-            });
-        }
-        let affected = TaskRepository::delete_areas_by_ids(conn, ids)?;
-        Ok(BatchResult {
-            affected,
-            dry_run: false,
-        })
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Project operations
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create a project.
-    pub fn create_project(
-        conn: &Connection,
-        params: &ProjectCreateParams,
-    ) -> Result<Project, TaskError> {
-        if params.title.trim().is_empty() {
-            return Err(TaskError::Validation(
-                "Project title is required".to_string(),
-            ));
-        }
-        TaskRepository::create_project(conn, params)
-    }
-
-    /// Update a project with auto-timestamps.
-    pub fn update_project(
-        conn: &Connection,
-        id: &str,
-        updates: &ProjectUpdateParams,
-    ) -> Result<Project, TaskError> {
-        let current = TaskRepository::get_project(conn, id)?
-            .ok_or_else(|| TaskError::project_not_found(id))?;
-
-        let _result = TaskRepository::update_project(conn, id, updates)?
-            .ok_or_else(|| TaskError::project_not_found(id))?;
-
-        // Auto-set completed_at when status changes to completed
-        if let Some(new_status) = updates.status {
-            if new_status == ProjectStatus::Completed && current.status != ProjectStatus::Completed
-            {
-                let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                let _ = conn.execute(
-                    "UPDATE projects SET completed_at = ?1 WHERE id = ?2",
-                    rusqlite::params![now, id],
-                )?;
-            }
-            if new_status != ProjectStatus::Completed && current.status == ProjectStatus::Completed
-            {
-                let _ = conn.execute(
-                    "UPDATE projects SET completed_at = NULL WHERE id = ?1",
-                    rusqlite::params![id],
-                )?;
-            }
-        }
-
-        TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
-    }
-
-    /// Get a project by ID.
-    pub fn get_project(conn: &Connection, id: &str) -> Result<Project, TaskError> {
-        TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
-    }
-
-    /// Get a project with its tasks.
-    pub fn get_project_details(
-        conn: &Connection,
-        id: &str,
-        limit: u32,
-        offset: u32,
-    ) -> Result<ProjectWithTasks, TaskError> {
-        let project = Self::get_project(conn, id)?;
-        let tasks = Self::list_tasks(
-            conn,
-            &TaskFilter {
-                project_id: Some(id.to_string()),
-                ..Default::default()
-            },
-            limit,
-            offset,
-        )?
-        .tasks;
-
-        Ok(ProjectWithTasks { project, tasks })
-    }
-
-    /// Delete a project.
-    pub fn delete_project(conn: &Connection, id: &str) -> Result<bool, TaskError> {
-        TaskRepository::delete_project(conn, id)
-    }
-
-    /// List projects with progress counts.
-    pub fn list_projects(
-        conn: &Connection,
-        filter: &ProjectFilter,
-        limit: u32,
-        offset: u32,
-    ) -> Result<ProjectListResult, TaskError> {
-        TaskRepository::list_projects(conn, filter, limit, offset)
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Area operations
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create an area.
-    pub fn create_area(conn: &Connection, params: &AreaCreateParams) -> Result<Area, TaskError> {
-        if params.title.trim().is_empty() {
-            return Err(TaskError::Validation("Area title is required".to_string()));
-        }
-        TaskRepository::create_area(conn, params)
-    }
-
-    /// Get an area by ID.
-    pub fn get_area(conn: &Connection, id: &str) -> Result<Area, TaskError> {
-        TaskRepository::get_area(conn, id)?.ok_or_else(|| TaskError::area_not_found(id))
-    }
-
-    /// Update an area.
-    pub fn update_area(
-        conn: &Connection,
-        id: &str,
-        updates: &AreaUpdateParams,
-    ) -> Result<Area, TaskError> {
-        TaskRepository::update_area(conn, id, updates)?.ok_or_else(|| TaskError::area_not_found(id))
-    }
-
-    /// Delete an area.
-    pub fn delete_area(conn: &Connection, id: &str) -> Result<bool, TaskError> {
-        TaskRepository::delete_area(conn, id)
-    }
-
-    /// List areas with counts.
-    pub fn list_areas(
-        conn: &Connection,
-        filter: &AreaFilter,
-        limit: u32,
-        offset: u32,
-    ) -> Result<AreaListResult, TaskError> {
-        TaskRepository::list_areas(conn, filter, limit, offset)
-    }
-}
 
 #[cfg(test)]
 #[allow(unused_results)]
@@ -1809,6 +1002,98 @@ mod tests {
         // Not actually updated
         let task = TaskRepository::get_task(&conn, &t.id).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_batch_update_tasks_sets_completed_at() {
+        let conn = setup_db();
+        let first = TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "A".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let second = TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "B".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &BatchTarget {
+                ids: Some(vec![first.id.clone(), second.id.clone()]),
+                filter: None,
+            },
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+            false,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.affected, 2);
+
+        let first = TaskRepository::get_task(&conn, &first.id).unwrap().unwrap();
+        let second = TaskRepository::get_task(&conn, &second.id)
+            .unwrap()
+            .unwrap();
+        assert!(first.completed_at.is_some());
+        assert!(second.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_batch_update_tasks_reopen_clears_completed_at() {
+        let conn = setup_db();
+        let first = TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "A".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let second = TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "B".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &BatchTarget {
+                ids: Some(vec![first.id.clone(), second.id.clone()]),
+                filter: None,
+            },
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Pending),
+                ..Default::default()
+            },
+            false,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.affected, 2);
+
+        let first = TaskRepository::get_task(&conn, &first.id).unwrap().unwrap();
+        let second = TaskRepository::get_task(&conn, &second.id)
+            .unwrap()
+            .unwrap();
+        assert!(first.completed_at.is_none());
+        assert!(second.completed_at.is_none());
     }
 
     #[test]
