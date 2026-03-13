@@ -52,6 +52,7 @@ impl EventStore {
     #[allow(clippy::unused_self)]
     pub(super) fn retry_on_sqlite_busy<T>(&self, mut f: impl FnMut() -> Result<T>) -> Result<T> {
         match contention::retry_on_busy(
+            "event store write",
             contention::BusyRetryPolicy::sqlite_write(),
             &mut f,
             Self::is_sqlite_busy_or_locked,

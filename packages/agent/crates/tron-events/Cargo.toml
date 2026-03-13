@@ -33,6 +33,7 @@ sha2.workspace = true
 regex.workspace = true
 tokio.workspace = true
 rand.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

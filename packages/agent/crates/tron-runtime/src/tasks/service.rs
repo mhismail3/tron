@@ -84,12 +84,21 @@ impl TaskService {
     /// lock upfront so contention is detected at `BEGIN` rather than mid-txn.
     fn with_immediate_txn<T>(
         conn: &Connection,
+        f: impl FnMut(&Connection) -> Result<T, TaskError>,
+    ) -> Result<T, TaskError> {
+        Self::with_immediate_txn_policy(conn, contention::BusyRetryPolicy::sqlite_write(), f)
+    }
+
+    fn with_immediate_txn_policy<T>(
+        conn: &Connection,
+        policy: contention::BusyRetryPolicy,
         mut f: impl FnMut(&Connection) -> Result<T, TaskError>,
     ) -> Result<T, TaskError> {
         const OPERATION: &str = "task batch transaction";
 
         match contention::retry_on_busy(
-            contention::BusyRetryPolicy::sqlite_write(),
+            OPERATION,
+            policy,
             || {
                 conn.execute_batch("BEGIN IMMEDIATE")
                     .map_err(ImmediateTxnError::Begin)?;
@@ -838,6 +847,7 @@ mod tests {
     use super::*;
     use crate::tasks::migrations::run_migrations;
     use crate::tasks::types::*;
+    use std::time::Duration;
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -1991,5 +2001,45 @@ mod tests {
         let conn = setup_db();
         let deleted = TaskService::delete_task(&conn, "task-missing", None).unwrap();
         assert!(!deleted);
+    }
+
+    #[test]
+    fn test_with_immediate_txn_returns_busy_when_write_locked() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tasks.db");
+
+        let conn1 = Connection::open(&db_path).unwrap();
+        conn1.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_migrations(&conn1).unwrap();
+
+        let conn2 = Connection::open(&db_path).unwrap();
+        conn2.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_migrations(&conn2).unwrap();
+
+        conn1.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let result = TaskService::with_immediate_txn_policy(
+            &conn2,
+            contention::BusyRetryPolicy {
+                deadline: Duration::ZERO,
+                backoff_step: Duration::ZERO,
+                max_backoff: Duration::ZERO,
+                jitter_percent: 0,
+            },
+            |_tx| Ok(()),
+        );
+
+        conn1.execute_batch("ROLLBACK").unwrap();
+
+        match result {
+            Err(TaskError::Busy {
+                operation,
+                attempts,
+            }) => {
+                assert_eq!(operation, "task batch transaction");
+                assert_eq!(attempts, 1);
+            }
+            other => panic!("expected busy error, got {other:?}"),
+        }
     }
 }

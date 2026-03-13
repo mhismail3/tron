@@ -3739,6 +3739,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "insta",
+ "metrics",
  "mockall",
  "proptest",
  "r2d2",

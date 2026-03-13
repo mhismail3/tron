@@ -6,6 +6,8 @@
 
 use std::time::{Duration, Instant};
 
+use metrics::{counter, histogram};
+
 /// Keep `SQLite`'s built-in `busy_timeout` short so contention is surfaced
 /// back to the shared retry loop quickly. Longer engine-level waits block a
 /// thread inside `SQLite` and undermine the application-level deadline.
@@ -94,6 +96,7 @@ pub enum RetryError<E> {
 
 /// Retry an operation while it returns retryable busy/locked errors.
 pub fn retry_on_busy<T, E, F, IsBusy>(
+    operation_name: &'static str,
     policy: BusyRetryPolicy,
     mut operation: F,
     is_busy: IsBusy,
@@ -107,10 +110,21 @@ where
 
     loop {
         match operation() {
-            Ok(value) => return Ok(value),
+            Ok(value) => {
+                record_retry_outcome(operation_name, attempts, started_at.elapsed(), "success");
+                return Ok(value);
+            }
             Err(error) if is_busy(&error) => {
                 attempts = attempts.saturating_add(1);
+                counter!("sqlite_busy_retries_total", "operation" => operation_name.to_owned())
+                    .increment(1);
                 if started_at.elapsed() >= policy.deadline {
+                    counter!(
+                        "sqlite_busy_timeouts_total",
+                        "operation" => operation_name.to_owned()
+                    )
+                    .increment(1);
+                    record_retry_outcome(operation_name, attempts, started_at.elapsed(), "timeout");
                     return Err(RetryError::BusyTimeout(BusyTimeout {
                         attempts,
                         last_error: error,
@@ -119,9 +133,32 @@ where
 
                 std::thread::sleep(policy.jittered_delay(attempts));
             }
-            Err(error) => return Err(RetryError::Inner(error)),
+            Err(error) => {
+                record_retry_outcome(operation_name, attempts, started_at.elapsed(), "error");
+                return Err(RetryError::Inner(error));
+            }
         }
     }
+}
+
+fn record_retry_outcome(
+    operation_name: &'static str,
+    attempts: u32,
+    duration: Duration,
+    outcome: &'static str,
+) {
+    histogram!(
+        "sqlite_busy_attempts",
+        "operation" => operation_name.to_owned(),
+        "outcome" => outcome.to_owned()
+    )
+    .record(f64::from(attempts));
+    histogram!(
+        "sqlite_busy_duration_seconds",
+        "operation" => operation_name.to_owned(),
+        "outcome" => outcome.to_owned()
+    )
+    .record(duration.as_secs_f64());
 }
 
 /// Whether a `rusqlite` error is `BUSY` or `LOCKED`.
@@ -163,6 +200,7 @@ mod tests {
         };
 
         let result = retry_on_busy(
+            "test_retry_success",
             policy,
             || {
                 attempts += 1;
@@ -193,6 +231,7 @@ mod tests {
         };
 
         let result = retry_on_busy(
+            "test_retry_error",
             policy,
             || {
                 Err::<(), _>(MockError {
@@ -219,6 +258,7 @@ mod tests {
         };
 
         let result = retry_on_busy(
+            "test_retry_timeout",
             policy,
             || {
                 Err::<(), _>(MockError {

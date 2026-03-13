@@ -95,16 +95,44 @@ where
     F: FnOnce() -> Result<T, RpcError> + Send + 'static,
 {
     let start = Instant::now();
-    let result = tokio::task::spawn_blocking(f).await.map_err(|error| {
-        counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
-        RpcError::Internal {
-            message: format!("Blocking task '{task_name}' failed: {error}"),
-        }
-    })?;
+    counter!("rpc_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
 
-    histogram!("rpc_blocking_task_duration_seconds", "task" => task_name.to_owned())
-        .record(start.elapsed().as_secs_f64());
-    result
+    match tokio::task::spawn_blocking(f).await {
+        Ok(Ok(value)) => {
+            record_blocking_outcome(task_name, start.elapsed(), "success");
+            Ok(value)
+        }
+        Ok(Err(error)) => {
+            record_blocking_outcome(task_name, start.elapsed(), "error");
+            Err(error)
+        }
+        Err(error) => {
+            counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
+            record_blocking_outcome(task_name, start.elapsed(), "panic");
+            Err(RpcError::Internal {
+                message: format!("Blocking task '{task_name}' failed: {error}"),
+            })
+        }
+    }
+}
+
+fn record_blocking_outcome(
+    task_name: &'static str,
+    duration: std::time::Duration,
+    outcome: &'static str,
+) {
+    counter!(
+        "rpc_blocking_tasks_completed_total",
+        "task" => task_name.to_owned(),
+        "outcome" => outcome.to_owned()
+    )
+    .increment(1);
+    histogram!(
+        "rpc_blocking_task_duration_seconds",
+        "task" => task_name.to_owned(),
+        "outcome" => outcome.to_owned()
+    )
+    .record(duration.as_secs_f64());
 }
 
 #[cfg(test)]
@@ -215,6 +243,37 @@ mod tests {
             .run_blocking("test.run_blocking", || Ok::<_, RpcError>(41))
             .await;
         assert_eq!(value.unwrap(), 41);
+    }
+
+    #[tokio::test]
+    async fn run_blocking_propagates_closure_error() {
+        let ctx = make_test_context();
+        let err = ctx
+            .run_blocking("test.run_blocking_error", || {
+                Err::<(), _>(RpcError::InvalidParams {
+                    message: "bad input".into(),
+                })
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert_eq!(err.to_string(), "bad input");
+    }
+
+    #[tokio::test]
+    async fn run_blocking_maps_panics_to_internal_error() {
+        let ctx = make_test_context();
+        let err = ctx
+            .run_blocking("test.run_blocking_panic", || -> Result<(), RpcError> {
+                panic!("boom");
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INTERNAL_ERROR");
+        assert!(
+            err.to_string().contains("test.run_blocking_panic"),
+            "panic error should include task name: {err}"
+        );
     }
 
     #[test]
