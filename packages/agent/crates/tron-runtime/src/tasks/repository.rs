@@ -4,1510 +4,260 @@
 //! that translate between Rust types and SQL. Uses `uuid::Uuid::now_v7()` for
 //! time-ordered ID generation with entity-specific prefixes.
 
-use std::collections::VecDeque;
+mod activity;
+mod areas;
+mod batch;
+mod common;
+mod dependencies;
+mod projects;
+mod summary;
+mod tasks;
 
-use rusqlite::{Connection, OptionalExtension, params};
-use uuid::Uuid;
+use rusqlite::Connection;
 
 use super::errors::TaskError;
 use super::types::{
-    ActiveTaskSummary, ActivityAction, Area, AreaCreateParams, AreaFilter, AreaListResult,
-    AreaStatus, AreaUpdateParams, AreaWithCounts, DependencyRelationship, LogActivityParams,
-    Project, ProjectCreateParams, ProjectFilter, ProjectListResult, ProjectProgressEntry,
-    ProjectStatus, ProjectUpdateParams, ProjectWithProgress, Task, TaskActivity, TaskCreateParams,
-    TaskDependency, TaskFilter, TaskListResult, TaskPriority, TaskSource, TaskStatus,
-    TaskUpdateParams,
+    ActiveTaskSummary, Area, AreaCreateParams, AreaFilter, AreaListResult, AreaUpdateParams,
+    DependencyRelationship, LogActivityParams, Project, ProjectCreateParams, ProjectFilter,
+    ProjectListResult, ProjectProgressEntry, ProjectUpdateParams, Task, TaskActivity,
+    TaskCreateParams, TaskDependency, TaskFilter, TaskListResult, TaskUpdateParams,
 };
-
-/// Generate a prefixed UUID v7 ID.
-fn generate_id(prefix: &str) -> String {
-    format!("{prefix}-{}", Uuid::now_v7())
-}
-
-/// Get current UTC timestamp as ISO 8601 string.
-fn now_iso() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
-/// Parse a JSON array string into a `Vec<String>`.
-fn parse_tags(json: &str) -> Vec<String> {
-    serde_json::from_str(json).unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "corrupt tags JSON in task DB");
-        Vec::new()
-    })
-}
-
-/// Serialize tags to a JSON array string.
-fn tags_to_json(tags: &[String]) -> String {
-    serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string())
-}
-
-/// Parse optional JSON metadata.
-fn parse_metadata(json: Option<String>) -> Option<serde_json::Value> {
-    json.and_then(|s| {
-        serde_json::from_str(&s).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "corrupt metadata JSON in task DB");
-            None
-        })
-    })
-}
-
-/// Build SQL SET clause fragments from scalar `TaskUpdateParams` fields.
-///
-/// Returns `(set_clauses, param_values)`. Does NOT include tag/note updates
-/// (those require DB reads) or the trailing `updated_at` / `id` params.
-fn build_update_sets(
-    updates: &TaskUpdateParams,
-) -> (Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let mut sets: Vec<String> = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-    if let Some(ref title) = updates.title {
-        sets.push("title = ?".to_string());
-        values.push(Box::new(title.clone()));
-    }
-    if let Some(ref desc) = updates.description {
-        sets.push("description = ?".to_string());
-        values.push(Box::new(desc.clone()));
-    }
-    if let Some(ref af) = updates.active_form {
-        sets.push("active_form = ?".to_string());
-        values.push(Box::new(af.clone()));
-    }
-    if let Some(status) = updates.status {
-        sets.push("status = ?".to_string());
-        values.push(Box::new(status.as_sql().to_string()));
-    }
-    if let Some(priority) = updates.priority {
-        sets.push("priority = ?".to_string());
-        values.push(Box::new(priority.as_sql().to_string()));
-    }
-
-    // Normalize empty strings to NULL for FK columns
-    let normalize = |s: &str| -> Option<String> {
-        if s.is_empty() {
-            None
-        } else {
-            Some(s.to_owned())
-        }
-    };
-
-    if let Some(ref pid) = updates.project_id {
-        sets.push("project_id = ?".to_string());
-        values.push(Box::new(normalize(pid)));
-    }
-    if let Some(ref ptid) = updates.parent_task_id {
-        sets.push("parent_task_id = ?".to_string());
-        values.push(Box::new(normalize(ptid)));
-    }
-    if let Some(ref aid) = updates.area_id {
-        sets.push("area_id = ?".to_string());
-        values.push(Box::new(normalize(aid)));
-    }
-    if let Some(ref dd) = updates.due_date {
-        sets.push("due_date = ?".to_string());
-        values.push(Box::new(dd.clone()));
-    }
-    if let Some(ref du) = updates.deferred_until {
-        sets.push("deferred_until = ?".to_string());
-        values.push(Box::new(du.clone()));
-    }
-    if let Some(em) = updates.estimated_minutes {
-        sets.push("estimated_minutes = ?".to_string());
-        values.push(Box::new(em));
-    }
-    if let Some(ref sid) = updates.last_session_id {
-        sets.push("last_session_id = ?".to_string());
-        values.push(Box::new(sid.clone()));
-        sets.push("last_session_at = ?".to_string());
-        values.push(Box::new(now_iso()));
-    }
-    if let Some(ref meta) = updates.metadata {
-        sets.push("metadata = ?".to_string());
-        values.push(Box::new(
-            serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
-        ));
-    }
-
-    (sets, values)
-}
-
-/// Build a WHERE clause from a `TaskFilter`.
-///
-/// Returns `(where_clause, param_values)` where `where_clause` is either empty
-/// or starts with `"WHERE "`. The caller is responsible for converting the
-/// `Box<dyn ToSql>` values into `&dyn ToSql` refs for query execution.
-fn build_task_where_clause(filter: &TaskFilter) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let mut conditions: Vec<String> = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-    if let Some(status) = filter.status {
-        conditions.push("status = ?".to_string());
-        values.push(Box::new(status.as_sql().to_string()));
-    }
-    if let Some(priority) = filter.priority {
-        conditions.push("priority = ?".to_string());
-        values.push(Box::new(priority.as_sql().to_string()));
-    }
-    if let Some(ref pid) = filter.project_id {
-        conditions.push("project_id = ?".to_string());
-        values.push(Box::new(pid.clone()));
-    }
-    if let Some(ref wid) = filter.workspace_id {
-        conditions.push("workspace_id = ?".to_string());
-        values.push(Box::new(wid.clone()));
-    }
-    if let Some(ref aid) = filter.area_id {
-        conditions.push("area_id = ?".to_string());
-        values.push(Box::new(aid.clone()));
-    }
-    if let Some(ref ptid) = filter.parent_task_id {
-        conditions.push("parent_task_id = ?".to_string());
-        values.push(Box::new(ptid.clone()));
-    }
-    if let Some(ref due) = filter.due_before {
-        conditions.push("due_date IS NOT NULL AND due_date <= ?".to_string());
-        values.push(Box::new(due.clone()));
-    }
-
-    // Default exclusions
-    if !filter.include_completed {
-        conditions.push("status NOT IN ('completed', 'cancelled')".to_string());
-    }
-    if !filter.include_deferred {
-        conditions
-            .push("(deferred_until IS NULL OR deferred_until <= datetime('now'))".to_string());
-    }
-    if !filter.include_backlog {
-        conditions.push("status != 'backlog'".to_string());
-    }
-
-    // Tag filtering
-    if let Some(ref tags) = filter.tags {
-        for tag in tags {
-            conditions.push(
-                "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)".to_string(),
-            );
-            values.push(Box::new(tag.clone()));
-        }
-    }
-
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", conditions.join(" AND "))
-    };
-
-    (where_clause, values)
-}
-
-/// Build a simple SET clause from `TaskUpdateParams` for batch operations.
-///
-/// Only supports flat field updates (no tag manipulation or note appending,
-/// which require per-task DB reads). Always appends `updated_at = ?`.
-fn build_simple_set_clause(
-    updates: &TaskUpdateParams,
-) -> Result<(Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>), TaskError> {
-    let mut sets: Vec<String> = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-    if let Some(ref title) = updates.title {
-        sets.push("title = ?".to_string());
-        values.push(Box::new(title.clone()));
-    }
-    if let Some(ref desc) = updates.description {
-        sets.push("description = ?".to_string());
-        values.push(Box::new(desc.clone()));
-    }
-    if let Some(status) = updates.status {
-        sets.push("status = ?".to_string());
-        values.push(Box::new(status.as_sql().to_string()));
-
-        // Auto-set started_at when transitioning to InProgress
-        if status == TaskStatus::InProgress {
-            sets.push("started_at = COALESCE(started_at, ?)".to_string());
-            values.push(Box::new(now_iso()));
-        }
-
-        // Auto-set completed_at for terminal states
-        if status.is_terminal() {
-            sets.push("completed_at = COALESCE(completed_at, ?)".to_string());
-            values.push(Box::new(now_iso()));
-        }
-
-        // Clear completed_at when reopening (non-terminal)
-        if !status.is_terminal() {
-            sets.push("completed_at = NULL".to_string());
-        }
-    }
-    if let Some(priority) = updates.priority {
-        sets.push("priority = ?".to_string());
-        values.push(Box::new(priority.as_sql().to_string()));
-    }
-    if let Some(ref pid) = updates.project_id {
-        sets.push("project_id = ?".to_string());
-        let normalized: Option<String> = if pid.is_empty() {
-            None
-        } else {
-            Some(pid.clone())
-        };
-        values.push(Box::new(normalized));
-    }
-    if let Some(ref aid) = updates.area_id {
-        sets.push("area_id = ?".to_string());
-        let normalized: Option<String> = if aid.is_empty() {
-            None
-        } else {
-            Some(aid.clone())
-        };
-        values.push(Box::new(normalized));
-    }
-
-    if sets.is_empty() {
-        return Err(TaskError::Validation("no fields to update".to_string()));
-    }
-
-    sets.push("updated_at = ?".to_string());
-    values.push(Box::new(now_iso()));
-
-    Ok((sets, values))
-}
 
 /// Task repository for SQL CRUD operations.
 pub struct TaskRepository;
 
 impl TaskRepository {
-    // ─────────────────────────────────────────────────────────────────────
-    // Task CRUD
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create a new task.
     pub fn create_task(conn: &Connection, params: &TaskCreateParams) -> Result<Task, TaskError> {
-        let id = generate_id("task");
-        let now = now_iso();
-        let status = params.status.unwrap_or(TaskStatus::Pending);
-        let priority = params.priority.unwrap_or(TaskPriority::Medium);
-        let source = params.source.unwrap_or(TaskSource::Agent);
-        let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params.metadata.as_ref().map_or_else(
-            || "{}".to_string(),
-            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
-        );
-
-        let started_at = if status == TaskStatus::InProgress {
-            Some(now.clone())
-        } else {
-            None
-        };
-
-        // Normalize empty strings to None for FK columns — some providers
-        // (e.g. OpenAI) send "" instead of null for optional ID fields.
-        let project_id = params.project_id.as_deref().filter(|s| !s.is_empty());
-        let parent_task_id = params.parent_task_id.as_deref().filter(|s| !s.is_empty());
-        let area_id = params.area_id.as_deref().filter(|s| !s.is_empty());
-
-        let _ = conn.execute(
-            "INSERT INTO tasks (id, project_id, parent_task_id, workspace_id, area_id,
-             title, description, active_form, status, priority, source, tags,
-             due_date, deferred_until, started_at, estimated_minutes,
-             created_by_session_id, last_session_id, last_session_at,
-             created_at, updated_at, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?17, ?18, ?18, ?18, ?19)",
-            params![
-                id,
-                project_id,
-                parent_task_id,
-                params.workspace_id,
-                area_id,
-                params.title,
-                params.description,
-                params.active_form,
-                status.as_sql(),
-                priority.as_sql(),
-                source.as_sql(),
-                tags_json,
-                params.due_date,
-                params.deferred_until,
-                started_at,
-                params.estimated_minutes,
-                params.created_by_session_id,
-                now,
-                metadata_json,
-            ],
-        )?;
-
-        Self::get_task(conn, &id)?.ok_or_else(|| TaskError::task_not_found(&id))
+        tasks::create_task(conn, params)
     }
 
-    /// Get a task by ID.
     pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, TaskError> {
-        let task = conn
-            .query_row("SELECT * FROM tasks WHERE id = ?1", params![id], |row| {
-                Ok(task_from_row(row))
-            })
-            .optional()?;
-        Ok(task)
+        tasks::get_task(conn, id)
     }
 
-    /// Update a task. Returns the updated task, or `None` if not found.
     pub fn update_task(
         conn: &Connection,
         id: &str,
         updates: &TaskUpdateParams,
     ) -> Result<Option<Task>, TaskError> {
-        let (mut sets, mut values) = build_update_sets(updates);
-
-        // Handle tags: add_tags and remove_tags (requires DB read)
-        if updates.add_tags.is_some() || updates.remove_tags.is_some() {
-            let current: Option<String> = conn
-                .query_row("SELECT tags FROM tasks WHERE id = ?1", params![id], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-
-            if let Some(current_json) = current {
-                let mut tags = parse_tags(&current_json);
-                if let Some(ref add) = updates.add_tags {
-                    for t in add {
-                        if !tags.contains(t) {
-                            tags.push(t.clone());
-                        }
-                    }
-                }
-                if let Some(ref remove) = updates.remove_tags {
-                    tags.retain(|t| !remove.contains(t));
-                }
-                sets.push("tags = ?".to_string());
-                values.push(Box::new(tags_to_json(&tags)));
-            }
-        }
-
-        // Handle note appending (requires DB read)
-        if let Some(ref note) = updates.add_note {
-            let current_notes: Option<String> = conn
-                .query_row(
-                    "SELECT notes FROM tasks WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-
-            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let timestamped = format!("[{today}] {note}");
-            let new_notes = match current_notes {
-                Some(existing) if !existing.is_empty() => format!("{existing}\n{timestamped}"),
-                _ => timestamped,
-            };
-            sets.push("notes = ?".to_string());
-            values.push(Box::new(new_notes));
-        }
-
-        if sets.is_empty() {
-            return Self::get_task(conn, id);
-        }
-
-        sets.push("updated_at = ?".to_string());
-        values.push(Box::new(now_iso()));
-        values.push(Box::new(id.to_string()));
-
-        let sql = format!("UPDATE tasks SET {} WHERE id = ?", sets.join(", "));
-
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params_refs.as_slice())?;
-
-        if changed == 0 {
-            return Ok(None);
-        }
-
-        Self::get_task(conn, id)
+        tasks::update_task(conn, id, updates)
     }
 
-    /// Delete a task by ID. Returns true if a row was deleted.
     pub fn delete_task(conn: &Connection, id: &str) -> Result<bool, TaskError> {
-        let changed = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
-        Ok(changed > 0)
+        tasks::delete_task(conn, id)
     }
 
-    /// Increment actual minutes on a task.
     pub fn increment_actual_minutes(
         conn: &Connection,
         id: &str,
         minutes: i32,
     ) -> Result<(), TaskError> {
-        let _ = conn.execute(
-            "UPDATE tasks SET actual_minutes = actual_minutes + ?1, updated_at = ?2 WHERE id = ?3",
-            params![minutes, now_iso(), id],
-        )?;
-        Ok(())
+        tasks::increment_actual_minutes(conn, id, minutes)
     }
 
-    /// List tasks with filtering and pagination.
     pub fn list_tasks(
         conn: &Connection,
         filter: &TaskFilter,
         limit: u32,
         offset: u32,
     ) -> Result<TaskListResult, TaskError> {
-        let (where_clause, values) = build_task_where_clause(filter);
-
-        // Count query
-        let count_sql = format!("SELECT COUNT(*) FROM tasks {where_clause}");
-        let count_params: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let total: u32 = conn.query_row(&count_sql, count_params.as_slice(), |row| row.get(0))?;
-
-        // Data query with ordering
-        let data_sql = format!(
-            "SELECT * FROM tasks {where_clause} \
-             ORDER BY \
-               CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 \
-               WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, \
-               updated_at DESC \
-             LIMIT ? OFFSET ?",
-        );
-
-        let mut data_values = values;
-        data_values.push(Box::new(limit));
-        data_values.push(Box::new(offset));
-        let data_params: Vec<&dyn rusqlite::types::ToSql> =
-            data_values.iter().map(AsRef::as_ref).collect();
-
-        let mut stmt = conn.prepare(&data_sql)?;
-        let tasks = stmt
-            .query_map(data_params.as_slice(), |row| Ok(task_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-
-        Ok(TaskListResult { tasks, total })
+        tasks::list_tasks(conn, filter, limit, offset)
     }
 
-    /// Get subtasks of a parent task.
     pub fn get_subtasks(conn: &Connection, parent_task_id: &str) -> Result<Vec<Task>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM tasks WHERE parent_task_id = ?1 ORDER BY sort_order, created_at",
-        )?;
-        let tasks = stmt
-            .query_map(params![parent_task_id], |row| Ok(task_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(tasks)
+        tasks::get_subtasks(conn, parent_task_id)
     }
 
-    /// Search tasks using FTS5.
     pub fn search_tasks(
         conn: &Connection,
         query: &str,
         limit: u32,
     ) -> Result<Vec<Task>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT t.* FROM tasks t \
-             JOIN tasks_fts f ON f.task_id = t.id \
-             WHERE tasks_fts MATCH ?1 \
-             ORDER BY rank LIMIT ?2",
-        )?;
-        let tasks = stmt
-            .query_map(params![query, limit], |row| Ok(task_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(tasks)
+        tasks::search_tasks(conn, query, limit)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Project CRUD
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create a new project.
     pub fn create_project(
         conn: &Connection,
         params: &ProjectCreateParams,
     ) -> Result<Project, TaskError> {
-        let id = generate_id("proj");
-        let now = now_iso();
-        let status = params.status.unwrap_or(ProjectStatus::Active);
-        let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params.metadata.as_ref().map_or_else(
-            || "{}".to_string(),
-            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
-        );
-
-        let _ = conn.execute(
-            "INSERT INTO projects (id, workspace_id, area_id, title, description, status,
-             tags, created_at, updated_at, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
-            params![
-                id,
-                params.workspace_id,
-                params.area_id,
-                params.title,
-                params.description,
-                status.as_sql(),
-                tags_json,
-                now,
-                metadata_json,
-            ],
-        )?;
-
-        Self::get_project(conn, &id)?.ok_or_else(|| TaskError::project_not_found(&id))
+        projects::create_project(conn, params)
     }
 
-    /// Get a project by ID.
     pub fn get_project(conn: &Connection, id: &str) -> Result<Option<Project>, TaskError> {
-        let project = conn
-            .query_row("SELECT * FROM projects WHERE id = ?1", params![id], |row| {
-                Ok(project_from_row(row))
-            })
-            .optional()?;
-        Ok(project)
+        projects::get_project(conn, id)
     }
 
-    /// Update a project. Returns the updated project, or `None` if not found.
     pub fn update_project(
         conn: &Connection,
         id: &str,
         updates: &ProjectUpdateParams,
     ) -> Result<Option<Project>, TaskError> {
-        let mut sets: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(ref title) = updates.title {
-            sets.push("title = ?".to_string());
-            values.push(Box::new(title.clone()));
-        }
-        if let Some(ref desc) = updates.description {
-            sets.push("description = ?".to_string());
-            values.push(Box::new(desc.clone()));
-        }
-        if let Some(status) = updates.status {
-            sets.push("status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(ref aid) = updates.area_id {
-            sets.push("area_id = ?".to_string());
-            values.push(Box::new(aid.clone()));
-        }
-        if let Some(ref meta) = updates.metadata {
-            sets.push("metadata = ?".to_string());
-            values.push(Box::new(
-                serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
-            ));
-        }
-
-        // Handle tags
-        if updates.add_tags.is_some() || updates.remove_tags.is_some() {
-            let current: Option<String> = conn
-                .query_row(
-                    "SELECT tags FROM projects WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-
-            if let Some(current_json) = current {
-                let mut tags = parse_tags(&current_json);
-                if let Some(ref add) = updates.add_tags {
-                    for t in add {
-                        if !tags.contains(t) {
-                            tags.push(t.clone());
-                        }
-                    }
-                }
-                if let Some(ref remove) = updates.remove_tags {
-                    tags.retain(|t| !remove.contains(t));
-                }
-                sets.push("tags = ?".to_string());
-                values.push(Box::new(tags_to_json(&tags)));
-            }
-        }
-
-        if sets.is_empty() {
-            return Self::get_project(conn, id);
-        }
-
-        sets.push("updated_at = ?".to_string());
-        values.push(Box::new(now_iso()));
-        values.push(Box::new(id.to_string()));
-
-        let sql = format!("UPDATE projects SET {} WHERE id = ?", sets.join(", "));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params_refs.as_slice())?;
-
-        if changed == 0 {
-            return Ok(None);
-        }
-
-        Self::get_project(conn, id)
+        projects::update_project(conn, id, updates)
     }
 
-    /// Delete a project. Returns true if a row was deleted.
     pub fn delete_project(conn: &Connection, id: &str) -> Result<bool, TaskError> {
-        // Tasks get project_id set to NULL via ON DELETE SET NULL
-        let changed = conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
-        Ok(changed > 0)
+        projects::delete_project(conn, id)
     }
 
-    /// List projects with progress counts.
     pub fn list_projects(
         conn: &Connection,
         filter: &ProjectFilter,
         limit: u32,
         offset: u32,
     ) -> Result<ProjectListResult, TaskError> {
-        let mut conditions: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(status) = filter.status {
-            conditions.push("p.status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(ref wid) = filter.workspace_id {
-            conditions.push("p.workspace_id = ?".to_string());
-            values.push(Box::new(wid.clone()));
-        }
-        if let Some(ref aid) = filter.area_id {
-            conditions.push("p.area_id = ?".to_string());
-            values.push(Box::new(aid.clone()));
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
-
-        // Count
-        let count_sql = format!("SELECT COUNT(*) FROM projects p {where_clause}");
-        let count_params: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let total: u32 = conn.query_row(&count_sql, count_params.as_slice(), |row| row.get(0))?;
-
-        // Data with aggregated counts
-        let data_sql = format!(
-            "SELECT p.*, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) as task_count, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id \
-                AND t.status IN ('completed', 'cancelled')) as completed_task_count \
-             FROM projects p {where_clause} \
-             ORDER BY p.status, p.updated_at DESC \
-             LIMIT ? OFFSET ?"
-        );
-
-        let mut data_values = values;
-        data_values.push(Box::new(limit));
-        data_values.push(Box::new(offset));
-        let data_params: Vec<&dyn rusqlite::types::ToSql> =
-            data_values.iter().map(AsRef::as_ref).collect();
-
-        let mut stmt = conn.prepare(&data_sql)?;
-        let projects = stmt
-            .query_map(data_params.as_slice(), |row| {
-                Ok(ProjectWithProgress {
-                    project: project_from_row(row),
-                    task_count: row.get("task_count")?,
-                    completed_task_count: row.get("completed_task_count")?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect();
-
-        Ok(ProjectListResult { projects, total })
+        projects::list_projects(conn, filter, limit, offset)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Area CRUD
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Create a new area.
     pub fn create_area(conn: &Connection, params: &AreaCreateParams) -> Result<Area, TaskError> {
-        let id = generate_id("area");
-        let now = now_iso();
-        let status = params.status.unwrap_or(AreaStatus::Active);
-        let workspace_id = params.workspace_id.as_deref().unwrap_or("default");
-        let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params.metadata.as_ref().map_or_else(
-            || "{}".to_string(),
-            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
-        );
-
-        let _ = conn.execute(
-            "INSERT INTO areas (id, workspace_id, title, description, status,
-             tags, sort_order, created_at, updated_at, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
-            params![
-                id,
-                workspace_id,
-                params.title,
-                params.description,
-                status.as_sql(),
-                tags_json,
-                params.sort_order.unwrap_or(0.0),
-                now,
-                metadata_json,
-            ],
-        )?;
-
-        Self::get_area(conn, &id)?.ok_or_else(|| TaskError::area_not_found(&id))
+        areas::create_area(conn, params)
     }
 
-    /// Get an area by ID.
     pub fn get_area(conn: &Connection, id: &str) -> Result<Option<Area>, TaskError> {
-        let area = conn
-            .query_row("SELECT * FROM areas WHERE id = ?1", params![id], |row| {
-                Ok(area_from_row(row))
-            })
-            .optional()?;
-        Ok(area)
+        areas::get_area(conn, id)
     }
 
-    /// Update an area. Returns the updated area, or `None` if not found.
     pub fn update_area(
         conn: &Connection,
         id: &str,
         updates: &AreaUpdateParams,
     ) -> Result<Option<Area>, TaskError> {
-        let mut sets: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(ref title) = updates.title {
-            sets.push("title = ?".to_string());
-            values.push(Box::new(title.clone()));
-        }
-        if let Some(ref desc) = updates.description {
-            sets.push("description = ?".to_string());
-            values.push(Box::new(desc.clone()));
-        }
-        if let Some(status) = updates.status {
-            sets.push("status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(order) = updates.sort_order {
-            sets.push("sort_order = ?".to_string());
-            values.push(Box::new(order));
-        }
-
-        // Handle tags
-        if updates.add_tags.is_some() || updates.remove_tags.is_some() {
-            let current: Option<String> = conn
-                .query_row("SELECT tags FROM areas WHERE id = ?1", params![id], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-
-            if let Some(current_json) = current {
-                let mut tags = parse_tags(&current_json);
-                if let Some(ref add) = updates.add_tags {
-                    for t in add {
-                        if !tags.contains(t) {
-                            tags.push(t.clone());
-                        }
-                    }
-                }
-                if let Some(ref remove) = updates.remove_tags {
-                    tags.retain(|t| !remove.contains(t));
-                }
-                sets.push("tags = ?".to_string());
-                values.push(Box::new(tags_to_json(&tags)));
-            }
-        }
-
-        if let Some(ref meta) = updates.metadata {
-            sets.push("metadata = ?".to_string());
-            values.push(Box::new(
-                serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
-            ));
-        }
-
-        if sets.is_empty() {
-            return Self::get_area(conn, id);
-        }
-
-        sets.push("updated_at = ?".to_string());
-        values.push(Box::new(now_iso()));
-        values.push(Box::new(id.to_string()));
-
-        let sql = format!("UPDATE areas SET {} WHERE id = ?", sets.join(", "));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params_refs.as_slice())?;
-
-        if changed == 0 {
-            return Ok(None);
-        }
-
-        Self::get_area(conn, id)
+        areas::update_area(conn, id, updates)
     }
 
-    /// Delete an area. Returns true if a row was deleted.
     pub fn delete_area(conn: &Connection, id: &str) -> Result<bool, TaskError> {
-        // Cascade: projects/tasks with this area_id get SET NULL
-        let _ = conn.execute(
-            "UPDATE projects SET area_id = NULL WHERE area_id = ?1",
-            params![id],
-        )?;
-        let _ = conn.execute(
-            "UPDATE tasks SET area_id = NULL WHERE area_id = ?1",
-            params![id],
-        )?;
-        let changed = conn.execute("DELETE FROM areas WHERE id = ?1", params![id])?;
-        Ok(changed > 0)
+        areas::delete_area(conn, id)
     }
 
-    /// List areas with counts.
     pub fn list_areas(
         conn: &Connection,
         filter: &AreaFilter,
         limit: u32,
         offset: u32,
     ) -> Result<AreaListResult, TaskError> {
-        let mut conditions: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(status) = filter.status {
-            conditions.push("a.status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(ref wid) = filter.workspace_id {
-            conditions.push("a.workspace_id = ?".to_string());
-            values.push(Box::new(wid.clone()));
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
-
-        let count_sql = format!("SELECT COUNT(*) FROM areas a {where_clause}");
-        let count_params: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(AsRef::as_ref).collect();
-        let total: u32 = conn.query_row(&count_sql, count_params.as_slice(), |row| row.get(0))?;
-
-        let data_sql = format!(
-            "SELECT a.*, \
-               (SELECT COUNT(*) FROM projects p WHERE p.area_id = a.id) as project_count, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id) as task_count, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id \
-                AND t.status NOT IN ('completed', 'cancelled')) as active_task_count \
-             FROM areas a {where_clause} \
-             ORDER BY a.sort_order, a.updated_at DESC \
-             LIMIT ? OFFSET ?"
-        );
-
-        let mut data_values = values;
-        data_values.push(Box::new(limit));
-        data_values.push(Box::new(offset));
-        let data_params: Vec<&dyn rusqlite::types::ToSql> =
-            data_values.iter().map(AsRef::as_ref).collect();
-
-        let mut stmt = conn.prepare(&data_sql)?;
-        let areas = stmt
-            .query_map(data_params.as_slice(), |row| {
-                Ok(AreaWithCounts {
-                    area: area_from_row(row),
-                    project_count: row.get("project_count")?,
-                    task_count: row.get("task_count")?,
-                    active_task_count: row.get("active_task_count")?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect();
-
-        Ok(AreaListResult { areas, total })
+        areas::list_areas(conn, filter, limit, offset)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Dependencies
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Add a dependency between two tasks.
-    #[allow(clippy::similar_names)]
     pub fn add_dependency(
         conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
+        blocking_task_id: &str,
+        waiting_task_id: &str,
         relationship: DependencyRelationship,
     ) -> Result<(), TaskError> {
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO task_dependencies \
-             (blocker_task_id, blocked_task_id, relationship) \
-             VALUES (?1, ?2, ?3)",
-            params![blocker_id, blocked_id, relationship.as_sql()],
-        )?;
-        Ok(())
+        dependencies::add_dependency(conn, blocking_task_id, waiting_task_id, relationship)
     }
 
-    /// Remove a dependency. Returns true if a row was deleted.
-    #[allow(clippy::similar_names)]
     pub fn remove_dependency(
         conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
+        blocking_task_id: &str,
+        waiting_task_id: &str,
     ) -> Result<bool, TaskError> {
-        let changed = conn.execute(
-            "DELETE FROM task_dependencies \
-             WHERE blocker_task_id = ?1 AND blocked_task_id = ?2",
-            params![blocker_id, blocked_id],
-        )?;
-        Ok(changed > 0)
+        dependencies::remove_dependency(conn, blocking_task_id, waiting_task_id)
     }
 
-    /// Get dependencies where this task is blocked BY others.
     pub fn get_blocked_by(
         conn: &Connection,
         task_id: &str,
     ) -> Result<Vec<TaskDependency>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT blocker_task_id, blocked_task_id, relationship, created_at \
-             FROM task_dependencies WHERE blocked_task_id = ?1",
-        )?;
-        let deps = stmt
-            .query_map(params![task_id], |row| {
-                Ok(TaskDependency {
-                    blocker_task_id: row.get(0)?,
-                    blocked_task_id: row.get(1)?,
-                    relationship: DependencyRelationship::from_sql(&row.get::<_, String>(2)?),
-                    created_at: row.get(3)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(deps)
+        dependencies::get_blocked_by(conn, task_id)
     }
 
-    /// Get tasks that this task blocks.
     pub fn get_blocks(conn: &Connection, task_id: &str) -> Result<Vec<TaskDependency>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT blocker_task_id, blocked_task_id, relationship, created_at \
-             FROM task_dependencies WHERE blocker_task_id = ?1",
-        )?;
-        let deps = stmt
-            .query_map(params![task_id], |row| {
-                Ok(TaskDependency {
-                    blocker_task_id: row.get(0)?,
-                    blocked_task_id: row.get(1)?,
-                    relationship: DependencyRelationship::from_sql(&row.get::<_, String>(2)?),
-                    created_at: row.get(3)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(deps)
+        dependencies::get_blocks(conn, task_id)
     }
 
-    /// Check if adding a dependency would create a circular reference.
-    ///
-    /// Uses BFS starting from `blocked_id`, following `blocks` edges.
-    /// If we can reach `blocker_id`, then adding the edge would create a cycle.
-    #[allow(clippy::similar_names)]
     pub fn has_circular_dependency(
         conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
+        upstream_task_id: &str,
+        downstream_task_id: &str,
     ) -> Result<bool, TaskError> {
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(blocked_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            if current == blocker_id {
-                return Ok(true);
-            }
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-
-            // Follow "blocks" edges outward from current
-            let mut stmt = conn.prepare(
-                "SELECT blocked_task_id FROM task_dependencies \
-                 WHERE blocker_task_id = ?1 AND relationship = 'blocks'",
-            )?;
-            let children: Vec<String> = stmt
-                .query_map(params![current], |row| row.get(0))?
-                .filter_map(Result::ok)
-                .collect();
-            queue.extend(children);
-        }
-
-        Ok(false)
+        dependencies::has_circular_dependency(conn, upstream_task_id, downstream_task_id)
     }
 
-    /// Count tasks that are blocked (have unresolved `blocks` dependencies).
     pub fn get_blocked_task_count(
         conn: &Connection,
         workspace_id: Option<&str>,
     ) -> Result<u32, TaskError> {
-        let count = if let Some(wid) = workspace_id {
-            conn.query_row(
-                "SELECT COUNT(DISTINCT td.blocked_task_id) \
-                 FROM task_dependencies td \
-                 JOIN tasks t ON t.id = td.blocked_task_id \
-                 WHERE td.relationship = 'blocks' \
-                 AND t.status NOT IN ('completed', 'cancelled') \
-                 AND t.workspace_id = ?1",
-                params![wid],
-                |row| row.get(0),
-            )?
-        } else {
-            conn.query_row(
-                "SELECT COUNT(DISTINCT td.blocked_task_id) \
-                 FROM task_dependencies td \
-                 JOIN tasks t ON t.id = td.blocked_task_id \
-                 WHERE td.relationship = 'blocks' \
-                 AND t.status NOT IN ('completed', 'cancelled')",
-                [],
-                |row| row.get(0),
-            )?
-        };
-        Ok(count)
+        dependencies::get_blocked_task_count(conn, workspace_id)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Activity
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Log an activity entry for a task.
     pub fn log_activity(conn: &Connection, params: &LogActivityParams) -> Result<(), TaskError> {
-        let _ = conn.execute(
-            "INSERT INTO task_activity \
-             (task_id, session_id, event_id, action, old_value, new_value, detail, \
-              minutes_logged, timestamp) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![
-                params.task_id,
-                params.session_id,
-                params.event_id,
-                params.action.as_sql(),
-                params.old_value,
-                params.new_value,
-                params.detail,
-                params.minutes_logged,
-                now_iso(),
-            ],
-        )?;
-        Ok(())
+        activity::log_activity(conn, params)
     }
 
-    /// Get activity log for a task.
     pub fn get_activity(
         conn: &Connection,
         task_id: &str,
         limit: u32,
     ) -> Result<Vec<TaskActivity>, TaskError> {
-        let mut stmt = conn.prepare(
-            "SELECT id, task_id, session_id, event_id, action, old_value, new_value, \
-             detail, minutes_logged, timestamp \
-             FROM task_activity WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2",
-        )?;
-        let activities = stmt
-            .query_map(params![task_id, limit], |row| {
-                Ok(TaskActivity {
-                    id: row.get(0)?,
-                    task_id: row.get(1)?,
-                    session_id: row.get(2)?,
-                    event_id: row.get(3)?,
-                    action: ActivityAction::from_sql(&row.get::<_, String>(4)?),
-                    old_value: row.get(5)?,
-                    new_value: row.get(6)?,
-                    detail: row.get(7)?,
-                    minutes_logged: row.get(8)?,
-                    timestamp: row.get(9)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(activities)
+        activity::get_activity(conn, task_id, limit)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Batch operations
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Delete tasks matching any of the given IDs. Returns count deleted.
     pub fn delete_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("DELETE FROM tasks WHERE id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::delete_tasks_by_ids(conn, ids)
     }
 
-    /// Delete tasks matching a filter. Returns count deleted.
     pub fn delete_tasks_by_filter(
         conn: &Connection,
         filter: &TaskFilter,
     ) -> Result<u32, TaskError> {
-        let (where_clause, values) = build_task_where_clause(filter);
-        let sql = format!("DELETE FROM tasks {where_clause}");
-        let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::delete_tasks_by_filter(conn, filter)
     }
 
-    /// Count tasks matching IDs (for dry-run).
     pub fn count_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("SELECT COUNT(*) FROM tasks WHERE id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-        Ok(count)
+        batch::count_tasks_by_ids(conn, ids)
     }
 
-    /// Count tasks matching a filter (for dry-run).
     pub fn count_tasks_by_filter(conn: &Connection, filter: &TaskFilter) -> Result<u32, TaskError> {
-        let (where_clause, values) = build_task_where_clause(filter);
-        let sql = format!("SELECT COUNT(*) FROM tasks {where_clause}");
-        let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
-        let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
-        Ok(count)
+        batch::count_tasks_by_filter(conn, filter)
     }
 
-    /// Fetch tasks by IDs (for pre-delete/update activity logging).
     pub fn get_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<Task>, TaskError> {
-        if ids.is_empty() {
-            return Ok(vec![]);
-        }
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("SELECT * FROM tasks WHERE id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let mut stmt = conn.prepare(&sql)?;
-        let tasks = stmt
-            .query_map(params.as_slice(), |row| Ok(task_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(tasks)
+        batch::get_tasks_by_ids(conn, ids)
     }
 
-    /// Fetch tasks by filter (for pre-delete/update activity logging).
     pub fn get_tasks_by_filter(
         conn: &Connection,
         filter: &TaskFilter,
     ) -> Result<Vec<Task>, TaskError> {
-        let (where_clause, values) = build_task_where_clause(filter);
-        let sql = format!("SELECT * FROM tasks {where_clause}");
-        let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
-        let mut stmt = conn.prepare(&sql)?;
-        let tasks = stmt
-            .query_map(params.as_slice(), |row| Ok(task_from_row(row)))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(tasks)
+        batch::get_tasks_by_filter(conn, filter)
     }
 
-    /// Bulk update tasks by IDs. Only supports simple field updates.
     pub fn update_tasks_by_ids(
         conn: &Connection,
         ids: &[String],
         updates: &TaskUpdateParams,
     ) -> Result<u32, TaskError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let (sets, mut values) = build_simple_set_clause(updates)?;
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        for id in ids {
-            values.push(Box::new(id.clone()));
-        }
-        let sql = format!(
-            "UPDATE tasks SET {} WHERE id IN ({placeholders})",
-            sets.join(", ")
-        );
-        let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::update_tasks_by_ids(conn, ids, updates)
     }
 
-    /// Bulk update tasks by filter.
     pub fn update_tasks_by_filter(
         conn: &Connection,
         filter: &TaskFilter,
         updates: &TaskUpdateParams,
     ) -> Result<u32, TaskError> {
-        let (sets, mut set_values) = build_simple_set_clause(updates)?;
-        let (where_clause, where_values) = build_task_where_clause(filter);
-        for v in where_values {
-            set_values.push(v);
-        }
-        let sql = format!("UPDATE tasks SET {} {}", sets.join(", "), where_clause);
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            set_values.iter().map(AsRef::as_ref).collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::update_tasks_by_filter(conn, filter, updates)
     }
 
-    /// Delete projects matching any of the given IDs. Returns count deleted.
     pub fn delete_projects_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("DELETE FROM projects WHERE id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::delete_projects_by_ids(conn, ids)
     }
 
-    /// Delete areas matching any of the given IDs. Returns count deleted.
     pub fn delete_areas_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        // Cascade: orphan tasks/projects before deleting
-        for id in ids {
-            let _ = conn.execute(
-                "UPDATE projects SET area_id = NULL WHERE area_id = ?1",
-                params![id],
-            )?;
-            let _ = conn.execute(
-                "UPDATE tasks SET area_id = NULL WHERE area_id = ?1",
-                params![id],
-            )?;
-        }
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("DELETE FROM areas WHERE id IN ({placeholders})");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let changed = conn.execute(&sql, params.as_slice())?;
-        Ok(changed as u32)
+        batch::delete_areas_by_ids(conn, ids)
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Context summaries
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// Get a summary of active tasks for LLM context injection.
     pub fn get_active_task_summary(
         conn: &Connection,
         workspace_id: Option<&str>,
     ) -> Result<ActiveTaskSummary, TaskError> {
-        let ws_condition = workspace_id.map_or("", |_| " AND workspace_id = ?1");
-
-        // In-progress tasks
-        let ip_sql = format!(
-            "SELECT * FROM tasks WHERE status = 'in_progress'{ws_condition} \
-             ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 \
-             WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, updated_at DESC"
-        );
-        let in_progress = if let Some(wid) = workspace_id {
-            let mut stmt = conn.prepare(&ip_sql)?;
-            stmt.query_map(params![wid], |row| Ok(task_from_row(row)))?
-                .filter_map(Result::ok)
-                .collect()
-        } else {
-            let mut stmt = conn.prepare(&ip_sql)?;
-            stmt.query_map([], |row| Ok(task_from_row(row)))?
-                .filter_map(Result::ok)
-                .collect()
-        };
-
-        // Pending count
-        let pending_sql =
-            format!("SELECT COUNT(*) FROM tasks WHERE status = 'pending'{ws_condition}");
-        let pending_count: u32 = if let Some(wid) = workspace_id {
-            conn.query_row(&pending_sql, params![wid], |row| row.get(0))?
-        } else {
-            conn.query_row(&pending_sql, [], |row| row.get(0))?
-        };
-
-        // Overdue count
-        let overdue_sql = format!(
-            "SELECT COUNT(*) FROM tasks WHERE due_date IS NOT NULL \
-             AND due_date < datetime('now') \
-             AND status NOT IN ('completed', 'cancelled'){ws_condition}"
-        );
-        let overdue_count: u32 = if let Some(wid) = workspace_id {
-            conn.query_row(&overdue_sql, params![wid], |row| row.get(0))?
-        } else {
-            conn.query_row(&overdue_sql, [], |row| row.get(0))?
-        };
-
-        // Deferred count
-        let deferred_sql = format!(
-            "SELECT COUNT(*) FROM tasks WHERE deferred_until IS NOT NULL \
-             AND deferred_until > datetime('now') \
-             AND status NOT IN ('completed', 'cancelled'){ws_condition}"
-        );
-        let deferred_count: u32 = if let Some(wid) = workspace_id {
-            conn.query_row(&deferred_sql, params![wid], |row| row.get(0))?
-        } else {
-            conn.query_row(&deferred_sql, [], |row| row.get(0))?
-        };
-
-        Ok(ActiveTaskSummary {
-            in_progress,
-            pending_count,
-            overdue_count,
-            deferred_count,
-        })
+        summary::get_active_task_summary(conn, workspace_id)
     }
 
-    /// Get project progress for LLM context.
     pub fn get_active_project_progress(
         conn: &Connection,
         workspace_id: Option<&str>,
     ) -> Result<Vec<ProjectProgressEntry>, TaskError> {
-        let ws_condition = workspace_id.map_or("", |_| " AND p.workspace_id = ?1");
-        let sql = format!(
-            "SELECT p.title, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id \
-                AND t.status IN ('completed', 'cancelled')) as completed, \
-               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) as total \
-             FROM projects p \
-             WHERE p.status = 'active'{ws_condition} \
-             ORDER BY p.updated_at DESC"
-        );
-
-        let entries = if let Some(wid) = workspace_id {
-            let mut stmt = conn.prepare(&sql)?;
-            stmt.query_map(params![wid], |row| {
-                Ok(ProjectProgressEntry {
-                    title: row.get(0)?,
-                    completed: row.get(1)?,
-                    total: row.get(2)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect()
-        } else {
-            let mut stmt = conn.prepare(&sql)?;
-            stmt.query_map([], |row| {
-                Ok(ProjectProgressEntry {
-                    title: row.get(0)?,
-                    completed: row.get(1)?,
-                    total: row.get(2)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .collect()
-        };
-
-        Ok(entries)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Row converters
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn task_from_row(row: &rusqlite::Row<'_>) -> Task {
-    let status_str: String = row.get_unwrap("status");
-    let priority_str: String = row.get_unwrap("priority");
-    let source_str: String = row.get_unwrap("source");
-    let tags_json: String = row.get_unwrap("tags");
-    let metadata_json: Option<String> = row.get_unwrap("metadata");
-
-    Task {
-        id: row.get_unwrap("id"),
-        project_id: row.get_unwrap("project_id"),
-        parent_task_id: row.get_unwrap("parent_task_id"),
-        workspace_id: row.get_unwrap("workspace_id"),
-        area_id: row.get_unwrap("area_id"),
-        title: row.get_unwrap("title"),
-        description: row.get_unwrap("description"),
-        active_form: row.get_unwrap("active_form"),
-        notes: row.get_unwrap("notes"),
-        status: match status_str.as_str() {
-            "backlog" => TaskStatus::Backlog,
-            "in_progress" => TaskStatus::InProgress,
-            "completed" => TaskStatus::Completed,
-            "cancelled" => TaskStatus::Cancelled,
-            _ => TaskStatus::Pending,
-        },
-        priority: match priority_str.as_str() {
-            "low" => TaskPriority::Low,
-            "high" => TaskPriority::High,
-            "critical" => TaskPriority::Critical,
-            _ => TaskPriority::Medium,
-        },
-        source: match source_str.as_str() {
-            "user" => TaskSource::User,
-            "skill" => TaskSource::Skill,
-            "system" => TaskSource::System,
-            _ => TaskSource::Agent,
-        },
-        tags: parse_tags(&tags_json),
-        due_date: row.get_unwrap("due_date"),
-        deferred_until: row.get_unwrap("deferred_until"),
-        started_at: row.get_unwrap("started_at"),
-        completed_at: row.get_unwrap("completed_at"),
-        created_at: row.get_unwrap("created_at"),
-        updated_at: row.get_unwrap("updated_at"),
-        estimated_minutes: row.get_unwrap("estimated_minutes"),
-        actual_minutes: row.get_unwrap("actual_minutes"),
-        created_by_session_id: row.get_unwrap("created_by_session_id"),
-        last_session_id: row.get_unwrap("last_session_id"),
-        last_session_at: row.get_unwrap("last_session_at"),
-        sort_order: row.get_unwrap("sort_order"),
-        metadata: parse_metadata(metadata_json),
-    }
-}
-
-fn project_from_row(row: &rusqlite::Row<'_>) -> Project {
-    let status_str: String = row.get_unwrap("status");
-    let tags_json: String = row.get_unwrap("tags");
-    let metadata_json: Option<String> = row.get_unwrap("metadata");
-
-    Project {
-        id: row.get_unwrap("id"),
-        workspace_id: row.get_unwrap("workspace_id"),
-        area_id: row.get_unwrap("area_id"),
-        title: row.get_unwrap("title"),
-        description: row.get_unwrap("description"),
-        status: match status_str.as_str() {
-            "paused" => ProjectStatus::Paused,
-            "completed" => ProjectStatus::Completed,
-            "archived" => ProjectStatus::Archived,
-            _ => ProjectStatus::Active,
-        },
-        tags: parse_tags(&tags_json),
-        created_at: row.get_unwrap("created_at"),
-        updated_at: row.get_unwrap("updated_at"),
-        completed_at: row.get_unwrap("completed_at"),
-        metadata: parse_metadata(metadata_json),
-    }
-}
-
-fn area_from_row(row: &rusqlite::Row<'_>) -> Area {
-    let status_str: String = row.get_unwrap("status");
-    let tags_json: String = row.get_unwrap("tags");
-    let metadata_json: Option<String> = row.get_unwrap("metadata");
-
-    Area {
-        id: row.get_unwrap("id"),
-        workspace_id: row.get_unwrap("workspace_id"),
-        title: row.get_unwrap("title"),
-        description: row.get_unwrap("description"),
-        status: match status_str.as_str() {
-            "archived" => AreaStatus::Archived,
-            _ => AreaStatus::Active,
-        },
-        tags: parse_tags(&tags_json),
-        sort_order: row.get_unwrap("sort_order"),
-        created_at: row.get_unwrap("created_at"),
-        updated_at: row.get_unwrap("updated_at"),
-        metadata: parse_metadata(metadata_json),
+        summary::get_active_project_progress(conn, workspace_id)
     }
 }
 
@@ -2510,6 +1260,57 @@ mod tests {
         assert_eq!(progress[0].total, 2);
     }
 
+    #[test]
+    fn test_active_project_progress_filters_workspace() {
+        let conn = setup_db();
+        let ws_one_project = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "Workspace One".to_string(),
+                workspace_id: Some("ws-1".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let ws_two_project = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "Workspace Two".to_string(),
+                workspace_id: Some("ws-2".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "WS1 Done".to_string(),
+                project_id: Some(ws_one_project.id),
+                workspace_id: Some("ws-1".to_string()),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "WS2 Pending".to_string(),
+                project_id: Some(ws_two_project.id),
+                workspace_id: Some("ws-2".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let progress = TaskRepository::get_active_project_progress(&conn, Some("ws-1")).unwrap();
+        assert_eq!(progress.len(), 1);
+        assert_eq!(progress[0].title, "Workspace One");
+        assert_eq!(progress[0].completed, 1);
+        assert_eq!(progress[0].total, 1);
+    }
+
     // --- FK empty string normalization ---
 
     #[test]
@@ -3039,6 +1840,57 @@ mod tests {
             TaskRepository::delete_areas_by_ids(&conn, &[a1.id.clone(), a2.id.clone()]).unwrap();
         assert_eq!(deleted, 2);
         assert!(TaskRepository::get_area(&conn, &a1.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_delete_areas_by_ids_orphans_related_records() {
+        let conn = setup_db();
+        let area = TaskRepository::create_area(
+            &conn,
+            &AreaCreateParams {
+                title: "Area".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let project = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "Project".into(),
+                area_id: Some(area.id.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let task = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Task".into(),
+                area_id: Some(area.id.clone()),
+                project_id: Some(project.id.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let deleted =
+            TaskRepository::delete_areas_by_ids(&conn, std::slice::from_ref(&area.id)).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(TaskRepository::get_area(&conn, &area.id).unwrap().is_none());
+        assert!(
+            TaskRepository::get_project(&conn, &project.id)
+                .unwrap()
+                .unwrap()
+                .area_id
+                .is_none()
+        );
+        assert!(
+            TaskRepository::get_task(&conn, &task.id)
+                .unwrap()
+                .unwrap()
+                .area_id
+                .is_none()
+        );
     }
 
     #[test]
