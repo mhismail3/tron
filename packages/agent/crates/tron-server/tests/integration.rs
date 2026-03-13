@@ -2,12 +2,14 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt, stream};
 use parking_lot::RwLock;
 use serde_json::{Value, json};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -246,6 +248,58 @@ impl Provider for SlowProvider {
     }
 }
 
+struct PanicThenTextProvider {
+    has_panicked: AtomicBool,
+    text: String,
+}
+
+impl PanicThenTextProvider {
+    fn new(text: &str) -> Self {
+        Self {
+            has_panicked: AtomicBool::new(false),
+            text: text.to_owned(),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for PanicThenTextProvider {
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
+    }
+
+    fn model(&self) -> &'static str {
+        "mock"
+    }
+
+    async fn stream(
+        &self,
+        _c: &tron_core::messages::Context,
+        _o: &ProviderStreamOptions,
+    ) -> Result<StreamEventStream, ProviderError> {
+        assert!(
+            self.has_panicked.swap(true, Ordering::SeqCst),
+            "provider panicked"
+        );
+
+        let text = self.text.clone();
+        let events = vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: text.clone(),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text(&text)],
+                    token_usage: Some(TokenUsage::default()),
+                },
+                stop_reason: "end_turn".into(),
+            }),
+        ];
+        Ok(Box::pin(stream::iter(events)))
+    }
+}
+
 /// Factory that always returns the same provider instance.
 struct FixedProviderFactory(Arc<dyn Provider>);
 #[async_trait]
@@ -257,6 +311,13 @@ impl ProviderFactory for FixedProviderFactory {
 
 /// Boot a test server with an injected LLM provider.
 async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<TronServer>) {
+    let (ws_url, server, _handles) = boot_server_with_provider_and_handles(provider).await;
+    (ws_url, server)
+}
+
+async fn boot_server_with_provider_and_handles(
+    provider: Arc<dyn Provider>,
+) -> (String, Arc<TronServer>, Vec<JoinHandle<()>>) {
     let pool = tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
@@ -320,12 +381,12 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
-    drop(tokio::spawn(bridge.run()));
+    let bridge_handle = tokio::spawn(bridge.run());
 
-    let (addr, _handle) = server.listen().await.unwrap();
+    let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
 
-    (ws_url, server)
+    (ws_url, server, vec![bridge_handle, server_handle])
 }
 
 /// Connect and skip the initial system.connected message.
@@ -2251,6 +2312,34 @@ async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
     panic!("session {sid} still busy after 2s");
 }
 
+async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if server.rpc_context().orchestrator.has_active_run(sid) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("session should become active");
+}
+
+async fn wait_until_run_cleared(server: &Arc<TronServer>, sid: &str) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !server.rpc_context().orchestrator.has_active_run(sid)
+                && !server.rpc_context().orchestrator.is_session_busy(sid)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("session run should be cleaned up");
+}
+
 #[tokio::test]
 async fn e2e_prompt_text_response() {
     let provider = Arc::new(TextOnlyProvider::new("Hello from the agent!"));
@@ -2273,6 +2362,64 @@ async fn e2e_prompt_text_response() {
     // Wait for agent.ready (the final event in the lifecycle)
     let ready = read_until_event_type(&mut ws, "agent.ready").await;
     assert!(ready.is_some(), "should receive agent.ready event");
+
+    server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
+    let provider = Arc::new(PanicThenTextProvider::new("recovered"));
+    let (url, server) = boot_server_with_provider(provider).await;
+    let mut ws = connect(&url).await;
+    let _ = read_json(&mut ws).await;
+
+    let sid = create_and_bind_session(&mut ws, 1).await;
+
+    let resp = rpc_call(
+        &mut ws,
+        2,
+        "agent.prompt",
+        Some(json!({"sessionId": sid, "prompt": "panic once"})),
+    )
+    .await;
+    assert_eq!(resp["success"], true);
+    assert_eq!(resp["result"]["acknowledged"], true);
+
+    wait_until_run_cleared(&server, &sid).await;
+
+    let state = rpc_call(
+        &mut ws,
+        3,
+        "agent.getState",
+        Some(json!({"sessionId": sid})),
+    )
+    .await;
+    assert_eq!(state["success"], true);
+    assert_eq!(state["result"]["isRunning"], false);
+
+    let sessions = rpc_call(&mut ws, 4, "session.list", None).await;
+    assert_eq!(sessions["success"], true);
+    assert!(
+        sessions["result"]["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["sessionId"] == sid),
+        "session should still be queryable after provider panic"
+    );
+
+    let retry = rpc_call(
+        &mut ws,
+        5,
+        "agent.prompt",
+        Some(json!({"sessionId": sid, "prompt": "recover"})),
+    )
+    .await;
+    assert_eq!(retry["success"], true);
+    assert_eq!(retry["result"]["acknowledged"], true);
+
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "recovery prompt should complete");
 
     server.shutdown().shutdown();
 }
@@ -2448,6 +2595,47 @@ async fn e2e_prompt_reject_concurrent() {
     assert_eq!(resp2["error"]["code"], "SESSION_BUSY");
 
     server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn e2e_graceful_shutdown_cleans_up_active_prompt_run() {
+    let provider = Arc::new(SlowProvider);
+    let (url, server, handles) = boot_server_with_provider_and_handles(provider).await;
+    let mut ws = connect(&url).await;
+    let _ = read_json(&mut ws).await;
+
+    let sid = create_and_bind_session(&mut ws, 1).await;
+
+    let resp = rpc_call(
+        &mut ws,
+        2,
+        "agent.prompt",
+        Some(json!({"sessionId": sid, "prompt": "slow"})),
+    )
+    .await;
+    assert_eq!(resp["success"], true);
+
+    wait_until_active_run(&server, &sid).await;
+
+    server
+        .shutdown()
+        .graceful_shutdown(handles, Some(Duration::from_secs(5)))
+        .await;
+
+    assert!(server.shutdown().is_shutting_down());
+    assert!(!server.rpc_context().orchestrator.has_active_run(&sid));
+    assert!(!server.rpc_context().orchestrator.is_session_busy(&sid));
+    assert_eq!(server.shutdown().tracked_task_count(), 0);
+
+    let close_result = timeout(Duration::from_secs(2), async {
+        while let Some(msg) = ws.next().await {
+            if msg.is_err() || matches!(msg, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    })
+    .await;
+    let _ = close_result;
 }
 
 #[tokio::test]

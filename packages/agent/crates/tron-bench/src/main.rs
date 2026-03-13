@@ -4,6 +4,8 @@
 //! - prompt text only
 //! - prompt with tools
 //! - concurrent sessions
+//! - session creation
+//! - WebSocket session fanout
 
 #![deny(unsafe_code)]
 
@@ -18,6 +20,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sysinfo::{ProcessesToUpdate, System};
 use tron_events::{AppendOptions, ConnectionConfig, EventStore, EventType};
+use tron_runtime::orchestrator::session_manager::SessionManager;
+use tron_server::rpc::types::RpcEvent;
+use tron_server::websocket::broadcast::BroadcastManager;
+use tron_server::websocket::connection::ClientConnection;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -25,7 +31,8 @@ use tron_events::{AppendOptions, ConnectionConfig, EventStore, EventType};
     about = "Benchmark runner for agent server hot paths"
 )]
 struct Args {
-    /// Scenario to run: `prompt_text_only`, `prompt_with_tools`, `concurrent_sessions`, `all`.
+    /// Scenario to run: `prompt_text_only`, `prompt_with_tools`,
+    /// `concurrent_sessions`, `session_create`, `ws_session_fanout`, `all`.
     #[arg(long, default_value = "all")]
     scenario: String,
 
@@ -83,6 +90,8 @@ fn main() -> Result<()> {
             "prompt_text_only" => run_prompt_text_only(args.iterations)?,
             "prompt_with_tools" => run_prompt_with_tools(args.iterations)?,
             "concurrent_sessions" => run_concurrent_sessions(args.iterations, args.concurrency)?,
+            "session_create" => run_session_create(args.iterations)?,
+            "ws_session_fanout" => run_ws_session_fanout(args.iterations, args.concurrency)?,
             _ => unreachable!("validated scenario name"),
         };
         results.push(result);
@@ -97,9 +106,11 @@ fn main() -> Result<()> {
         let baseline = load_report(baseline_path)?;
         let gate = evaluate_gates(&baseline, &report);
         println!(
-            "Benchmark gate summary: p95>=30% improved in {}/3, memory>=30% reduced in {}/3, worst p95 regression {:.2}%",
+            "Benchmark gate summary: p95>=30% improved in {}/{}, memory>=30% reduced in {}/{}, worst p95 regression {:.2}%",
             gate.p95_improved_scenarios,
+            gate.comparable_scenarios,
             gate.memory_improved_scenarios,
+            gate.comparable_scenarios,
             gate.worst_p95_regression_pct
         );
         if args.enforce_gates && !gate.passed {
@@ -132,6 +143,7 @@ fn main() -> Result<()> {
 
 #[derive(Debug, Default)]
 struct GateEvaluation {
+    comparable_scenarios: usize,
     p95_improved_scenarios: usize,
     memory_improved_scenarios: usize,
     worst_p95_regression_pct: f64,
@@ -144,8 +156,14 @@ fn scenario_names(name: &str) -> Result<Vec<String>> {
             "prompt_text_only".to_string(),
             "prompt_with_tools".to_string(),
             "concurrent_sessions".to_string(),
+            "session_create".to_string(),
+            "ws_session_fanout".to_string(),
         ]),
-        "prompt_text_only" | "prompt_with_tools" | "concurrent_sessions" => {
+        "prompt_text_only"
+        | "prompt_with_tools"
+        | "concurrent_sessions"
+        | "session_create"
+        | "ws_session_fanout" => {
             Ok(vec![name.to_string()])
         }
         other => anyhow::bail!("unknown scenario: {other}"),
@@ -371,6 +389,91 @@ fn run_concurrent_sessions(iterations: usize, concurrency: usize) -> Result<Scen
     })
 }
 
+fn run_session_create(iterations: usize) -> Result<ScenarioResult> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime for session_create benchmark")?;
+
+    runtime.block_on(async move {
+        let (store, _tmp) = setup_store()?;
+        let manager = SessionManager::new(store);
+        let peak_memory = AtomicU64::new(current_process_memory_bytes());
+        let mut latencies = Vec::with_capacity(iterations);
+
+        for i in 0..iterations {
+            let working_dir = format!("/tmp/bench-session-create-{i}");
+            let start = Instant::now();
+            let session_id =
+                manager.create_session("claude-sonnet-4-20250514", &working_dir, Some("bench"))?;
+            latencies.push(start.elapsed().as_secs_f64() * 1000.0);
+            sample_peak_memory(&peak_memory);
+            manager.delete_session(&session_id)?;
+        }
+
+        Ok(ScenarioResult {
+            name: "session_create".to_string(),
+            iterations,
+            latency_ms: summarize_latencies(&latencies),
+            peak_memory_bytes: peak_memory.load(Ordering::Relaxed),
+        })
+    })
+}
+
+fn run_ws_session_fanout(iterations: usize, concurrency: usize) -> Result<ScenarioResult> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime for ws fanout benchmark")?;
+
+    runtime.block_on(async move {
+        let broadcast = Arc::new(BroadcastManager::new());
+        let mut receivers = Vec::with_capacity(concurrency);
+        for index in 0..concurrency {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let connection = Arc::new(ClientConnection::new(format!("bench-{index}"), tx));
+            connection.bind_session("fanout");
+            broadcast.add(connection).await;
+            receivers.push(rx);
+        }
+
+        let peak_memory = AtomicU64::new(current_process_memory_bytes());
+        let mut latencies = Vec::with_capacity(iterations);
+        for turn in 0..iterations {
+            let event = RpcEvent {
+                event_type: "bench.fanout".into(),
+                session_id: Some("fanout".into()),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                data: Some(json!({
+                    "turn": turn,
+                    "payload": "ok",
+                })),
+                run_id: None,
+            };
+
+            let start = Instant::now();
+            broadcast.broadcast_to_session("fanout", &event).await;
+            for rx in &mut receivers {
+                let message = rx
+                    .recv()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("fanout receiver unexpectedly closed"))?;
+                drop(message);
+                while rx.try_recv().is_ok() {}
+            }
+            latencies.push(start.elapsed().as_secs_f64() * 1000.0);
+            sample_peak_memory(&peak_memory);
+        }
+
+        Ok(ScenarioResult {
+            name: "ws_session_fanout".to_string(),
+            iterations,
+            latency_ms: summarize_latencies(&latencies),
+            peak_memory_bytes: peak_memory.load(Ordering::Relaxed),
+        })
+    })
+}
+
 fn summarize_latencies(latencies_ms: &[f64]) -> LatencyStats {
     if latencies_ms.is_empty() {
         return LatencyStats {
@@ -452,6 +555,7 @@ fn evaluate_gates(baseline: &Report, current: &Report) -> GateEvaluation {
         let Some(base_scenario) = baseline_by_name.get(current_scenario.name.as_str()) else {
             continue;
         };
+        evaluation.comparable_scenarios += 1;
 
         let p95_improvement_pct = improvement_pct(
             base_scenario.latency_ms.p95,
@@ -501,4 +605,69 @@ fn regression_pct(baseline: f64, current: f64) -> f64 {
         return 0.0;
     }
     ((current - baseline) / baseline).max(0.0) * 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scenario_names_all_includes_new_scenarios() {
+        let names = scenario_names("all").unwrap();
+        assert!(names.contains(&"session_create".to_string()));
+        assert!(names.contains(&"ws_session_fanout".to_string()));
+    }
+
+    #[test]
+    fn evaluate_gates_counts_only_comparable_scenarios() {
+        let baseline = Report {
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            scenarios: vec![ScenarioResult {
+                name: "prompt_text_only".into(),
+                iterations: 1,
+                latency_ms: LatencyStats {
+                    p50: 10.0,
+                    p95: 10.0,
+                    mean: 10.0,
+                    min: 10.0,
+                    max: 10.0,
+                },
+                peak_memory_bytes: 100,
+            }],
+        };
+        let current = Report {
+            generated_at: "2026-01-02T00:00:00Z".into(),
+            scenarios: vec![
+                ScenarioResult {
+                    name: "prompt_text_only".into(),
+                    iterations: 1,
+                    latency_ms: LatencyStats {
+                        p50: 5.0,
+                        p95: 5.0,
+                        mean: 5.0,
+                        min: 5.0,
+                        max: 5.0,
+                    },
+                    peak_memory_bytes: 50,
+                },
+                ScenarioResult {
+                    name: "ws_session_fanout".into(),
+                    iterations: 1,
+                    latency_ms: LatencyStats {
+                        p50: 1.0,
+                        p95: 1.0,
+                        mean: 1.0,
+                        min: 1.0,
+                        max: 1.0,
+                    },
+                    peak_memory_bytes: 10,
+                },
+            ],
+        };
+
+        let evaluation = evaluate_gates(&baseline, &current);
+        assert_eq!(evaluation.comparable_scenarios, 1);
+        assert_eq!(evaluation.p95_improved_scenarios, 1);
+        assert_eq!(evaluation.memory_improved_scenarios, 1);
+    }
 }

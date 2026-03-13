@@ -112,6 +112,7 @@ struct PromptRunPlan {
     skill_registry: Arc<RwLock<SkillRegistry>>,
     subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
+    shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<tron_worktree::WorktreeCoordinator>>,
     browser_service: Option<Arc<tron_tools::cdp::service::BrowserService>>,
     server_origin: String,
@@ -120,6 +121,69 @@ struct PromptRunPlan {
     working_dir: String,
     is_chat: bool,
     request: PromptRequest,
+}
+
+struct PromptRunCleanup {
+    session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    session_id: String,
+    started_run: Option<StartedRun>,
+}
+
+impl PromptRunCleanup {
+    fn new(
+        started_run: StartedRun,
+        session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+        session_id: String,
+    ) -> Self {
+        Self {
+            session_manager,
+            session_id,
+            started_run: Some(started_run),
+        }
+    }
+
+    fn cancel_token(&self) -> tokio_util::sync::CancellationToken {
+        self.started_run
+            .as_ref()
+            .expect("started run must exist while prompt is active")
+            .cancel_token()
+    }
+
+    fn release(&mut self) {
+        self.session_manager.invalidate_session(&self.session_id);
+        let _ = self.started_run.take();
+    }
+}
+
+impl Drop for PromptRunCleanup {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+struct ShutdownCancelForwarder(Option<tokio::task::JoinHandle<()>>);
+
+impl ShutdownCancelForwarder {
+    fn new(
+        shutdown_token: Option<tokio_util::sync::CancellationToken>,
+        run_cancel: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        let handle = shutdown_token.map(|shutdown_token| {
+            tokio::spawn(async move {
+                shutdown_token.cancelled().await;
+                run_cancel.cancel();
+            })
+        });
+        Self(handle)
+    }
+}
+
+impl Drop for ShutdownCancelForwarder {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
+    }
 }
 
 pub fn spawn_prompt_run(
@@ -145,6 +209,7 @@ pub fn spawn_prompt_run(
         skill_registry: ctx.skill_registry.clone(),
         subagent_manager: ctx.subagent_manager.clone(),
         shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+        shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
         browser_service: ctx.browser_service.clone(),
         server_origin: ctx.origin.clone(),
@@ -180,6 +245,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         skill_registry,
         subagent_manager,
         shutdown_coordinator,
+        shutdown_token,
         worktree_coordinator,
         browser_service,
         server_origin,
@@ -203,8 +269,10 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         device_context,
     } = request;
 
-    let started_run_guard = started_run;
-    let cancel_token = started_run_guard.cancel_token();
+    let mut run_cleanup =
+        PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
+    let cancel_token = run_cleanup.cancel_token();
+    let _shutdown_forwarder = ShutdownCancelForwarder::new(shutdown_token, cancel_token.clone());
     let settings = tron_settings::get_settings();
 
     let (state, persister) = match resume_prompt_session(
@@ -554,8 +622,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         });
     }
 
-    session_manager.invalidate_session(&session_id);
-    drop(started_run_guard);
+    run_cleanup.release();
 
     let session_model = match load_session_model(session_manager.clone(), session_id.clone()).await
     {

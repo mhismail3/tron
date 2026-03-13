@@ -51,6 +51,22 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
 
+    struct SettingsTestGuard {
+        _guard: tokio::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for SettingsTestGuard {
+        fn drop(&mut self) {
+            tron_settings::init_settings(tron_settings::TronSettings::default());
+        }
+    }
+
+    async fn settings_test_guard() -> SettingsTestGuard {
+        let guard = settings_reload_lock().lock().await;
+        tron_settings::init_settings(tron_settings::TronSettings::default());
+        SettingsTestGuard { _guard: guard }
+    }
+
     fn make_ctx_with_temp_settings() -> (crate::rpc::context::RpcContext, tempfile::TempDir) {
         let mut ctx = make_test_context();
         let dir = tempfile::tempdir().unwrap();
@@ -60,6 +76,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_defaults() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.is_object());
@@ -68,6 +85,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_has_no_models_key() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         // ModelSettings removed — default_model lives in server, subagent_model in agent
@@ -78,6 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_has_server() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["server"].is_object());
@@ -85,6 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_wire_format() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.get("version").is_some());
@@ -94,6 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_default_model_in_server_section() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["server"]["defaultModel"], "claude-sonnet-4-6");
@@ -101,6 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_max_concurrent_sessions_in_server_section() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["server"]["maxConcurrentSessions"].is_number());
@@ -108,6 +130,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_compaction_in_context_section() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["context"]["compactor"].is_object());
@@ -116,6 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_memory_in_context_section() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["context"]["memory"].is_object());
@@ -125,6 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_settings_returns_tools() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["tools"].is_object());
@@ -132,6 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_returns_success() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = UpdateSettingsHandler
             .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
@@ -142,6 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_writes_to_disk() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         assert!(!ctx.settings_path.exists());
 
@@ -155,6 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_merges_deep() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         let _ = UpdateSettingsHandler
@@ -178,6 +206,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_preserves_unmodified() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         let _ = UpdateSettingsHandler
@@ -198,6 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_missing_settings_param() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let err = UpdateSettingsHandler
             .handle(Some(json!({})), &ctx)
@@ -208,6 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_creates_file_if_missing() {
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let nested_path = PathBuf::from(ctx.settings_path.parent().unwrap())
             .join("subdir")
@@ -224,7 +255,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_reloads_cached_singleton() {
-        let _guard = settings_reload_lock().lock().await;
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         // Prime the cache with defaults pointing at temp path
@@ -265,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_reloads_ledger_toggle() {
-        let _guard = settings_reload_lock().lock().await;
+        let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         // Prime the cache

@@ -14,6 +14,9 @@ serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tron-events.workspace = true
+tron-runtime = { path = "../tron-runtime" }
+tron-server = { path = "../tron-server" }
+tokio.workspace = true
 sysinfo = "0.33"
 
 [lints]

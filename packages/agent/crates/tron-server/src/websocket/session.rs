@@ -14,7 +14,7 @@ use metrics::{counter, gauge, histogram};
 use tracing::{debug, instrument, warn};
 
 use super::broadcast::BroadcastManager;
-use super::connection::ClientConnection;
+use super::connection::{ClientConnection, ConnectionLimits};
 use super::handler::handle_message;
 
 /// How long to wait for the outbound forwarder to drain after disconnect.
@@ -38,6 +38,29 @@ pub async fn run_ws_session(
     ping_interval: Duration,
     pong_timeout: Duration,
 ) {
+    run_ws_session_with_limits(
+        ws,
+        client_id,
+        registry,
+        ctx,
+        broadcast,
+        ping_interval,
+        pong_timeout,
+        ConnectionLimits::default(),
+    )
+    .await;
+}
+
+pub(crate) async fn run_ws_session_with_limits(
+    ws: WebSocket,
+    client_id: String,
+    registry: Arc<MethodRegistry>,
+    ctx: Arc<RpcContext>,
+    broadcast: Arc<BroadcastManager>,
+    ping_interval: Duration,
+    pong_timeout: Duration,
+    connection_limits: ConnectionLimits,
+) {
     if pong_timeout <= ping_interval {
         warn!(
             ?ping_interval,
@@ -49,7 +72,11 @@ pub async fn run_ws_session(
 
     // Create the client connection and send channel
     let (send_tx, mut send_rx) = mpsc::unbounded_channel();
-    let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
+    let connection = Arc::new(ClientConnection::new_with_limits(
+        client_id.clone(),
+        send_tx,
+        connection_limits,
+    ));
 
     let connection_start = std::time::Instant::now();
     debug!(client_id, "client connected");
@@ -227,11 +254,91 @@ pub async fn run_ws_session(
 
 #[cfg(test)]
 mod tests {
-    // WsSession tests require actual WebSocket connections which are
-    // covered by integration tests in tests/integration.rs.
-    // Unit tests here validate the helper logic.
-
+    use std::sync::Arc;
     use std::time::Duration;
+
+    use super::{ConnectionLimits, run_ws_session_with_limits};
+    use axum::Router;
+    use axum::extract::ws::WebSocketUpgrade;
+    use axum::routing::get;
+    use futures::{SinkExt, StreamExt};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+
+    use crate::rpc::handlers;
+    use crate::rpc::handlers::test_helpers::make_test_context;
+    use crate::rpc::registry::MethodRegistry;
+    use crate::websocket::broadcast::BroadcastManager;
+
+    async fn boot_session_server_with_limits(
+        limits: ConnectionLimits,
+    ) -> (
+        String,
+        Arc<BroadcastManager>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let mut registry = MethodRegistry::new();
+        handlers::register_all(&mut registry);
+        let registry = Arc::new(registry);
+        let ctx = Arc::new(make_test_context());
+        let broadcast = Arc::new(BroadcastManager::new());
+        let ping_interval = Duration::from_secs(60);
+        let pong_timeout = Duration::from_secs(120);
+
+        let app = Router::new().route(
+            "/ws",
+            get({
+                let registry = Arc::clone(&registry);
+                let ctx = Arc::clone(&ctx);
+                let broadcast = Arc::clone(&broadcast);
+                move |ws: WebSocketUpgrade| {
+                    let registry = Arc::clone(&registry);
+                    let ctx = Arc::clone(&ctx);
+                    let broadcast = Arc::clone(&broadcast);
+                    async move {
+                        ws.on_upgrade(move |socket| {
+                            run_ws_session_with_limits(
+                                socket,
+                                uuid::Uuid::now_v7().to_string(),
+                                registry,
+                                ctx,
+                                broadcast,
+                                ping_interval,
+                                pong_timeout,
+                                limits,
+                            )
+                        })
+                    }
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        (format!("ws://{addr}/ws"), broadcast, handle)
+    }
+
+    async fn read_json(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> serde_json::Value {
+        loop {
+            let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+                .await
+                .expect("timeout waiting for websocket message")
+                .expect("websocket closed unexpectedly")
+                .expect("websocket read error");
+            if let Message::Text(text) = msg {
+                return serde_json::from_str(&text).unwrap();
+            }
+        }
+    }
 
     #[test]
     fn session_uses_config_heartbeat_values() {
@@ -267,5 +374,58 @@ mod tests {
         });
         assert_eq!(msg["type"], "connection.established");
         assert_ne!(msg["type"], "system.connected");
+    }
+
+    #[tokio::test]
+    async fn overloaded_response_closes_connection_and_cleans_up() {
+        let (url, broadcast, handle) = boot_session_server_with_limits(ConnectionLimits {
+            max_pending_bytes: 1,
+            drop_window: Duration::from_secs(60),
+            max_recent_drops: 1,
+        })
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        let established = read_json(&mut ws).await;
+        assert_eq!(established["type"], "connection.established");
+        assert_eq!(broadcast.connection_count(), 1);
+
+        ws.send(Message::Text(
+            serde_json::json!({"id": "r1", "method": "system.ping"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let closed = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let next = ws.next().await;
+                if next.is_none()
+                    || matches!(next, Some(Ok(Message::Close(_))))
+                    || matches!(next, Some(Err(_)))
+                {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "overloaded connection should terminate promptly"
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if broadcast.connection_count() == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("connection should be removed from broadcast manager");
+
+        handle.abort();
     }
 }

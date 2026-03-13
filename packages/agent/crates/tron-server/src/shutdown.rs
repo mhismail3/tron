@@ -14,6 +14,7 @@ use tracing::{info, warn};
 
 /// Default timeout for graceful shutdown before force-exiting.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+const ABORT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 struct TaskRegistry {
     closed: AtomicBool,
@@ -180,6 +181,16 @@ impl ShutdownCoordinator {
                 "shutdown timed out, aborting remaining tasks"
             );
             self.registry.abort_all();
+            if tokio::time::timeout(ABORT_DRAIN_TIMEOUT, self.registry.wait_for_empty())
+                .await
+                .is_err()
+            {
+                warn!(
+                    timeout_ms = ABORT_DRAIN_TIMEOUT.as_millis(),
+                    remaining = self.tracked_task_count(),
+                    "aborted tasks did not drain within the post-abort window"
+                );
+            }
         }
     }
 }
@@ -312,6 +323,7 @@ mod tests {
             !completed.load(Ordering::SeqCst),
             "task should have been aborted, not completed"
         );
+        assert_eq!(coord.tracked_task_count(), 0);
     }
 
     #[tokio::test]

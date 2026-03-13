@@ -140,10 +140,12 @@ mod tests {
     use futures::stream;
     use serde_json::json;
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio_util::sync::CancellationToken;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
+    use tron_events::sqlite::row_types::EventRow;
     use tron_llm::models::types::Provider as ProviderKind;
     use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::registry::ToolRegistry;
@@ -242,6 +244,74 @@ mod tests {
             hooks: None,
         });
         ctx
+    }
+
+    async fn wait_for_run_completion(ctx: &RpcContext, session_id: &str) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if !ctx.orchestrator.has_active_run(session_id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for run completion for session {session_id}"));
+    }
+
+    fn retryable_event_read_error(error: &tron_events::EventStoreError) -> bool {
+        matches!(error, tron_events::EventStoreError::Busy { .. })
+            || matches!(
+                error,
+                tron_events::EventStoreError::Sqlite(sqlite_error)
+                    if tron_events::sqlite::contention::is_rusqlite_busy(sqlite_error)
+            )
+    }
+
+    async fn read_events_by_type(
+        ctx: &RpcContext,
+        session_id: &str,
+        event_types: &[&str],
+    ) -> Vec<EventRow> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ctx.event_store.get_events_by_type(session_id, event_types, None) {
+                    Ok(events) => break events,
+                    Err(error) if retryable_event_read_error(&error) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => {
+                        panic!(
+                            "unexpected error reading events {event_types:?} in session {session_id}: {error:?}"
+                        );
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!("timed out reading events {event_types:?} in session {session_id}")
+        })
+    }
+
+    async fn wait_for_events_by_type(
+        ctx: &RpcContext,
+        session_id: &str,
+        event_types: &[&str],
+    ) -> Vec<EventRow> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let events = read_events_by_type(ctx, session_id, event_types).await;
+                if !events.is_empty() {
+                    break events;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!("timed out waiting for events {event_types:?} in session {session_id}")
+        })
     }
 
     /// A mock provider that yields partial text then sleeps, allowing cancellation.
@@ -881,7 +951,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -906,7 +976,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -965,7 +1035,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -990,7 +1060,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1015,7 +1085,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1036,7 +1106,7 @@ mod tests {
         assert_eq!(result["acknowledged"], true);
 
         // Wait for background task to complete
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         // Run should be completed (not busy anymore)
         assert!(!ctx.orchestrator.has_active_run(&sid));
@@ -1072,7 +1142,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1117,7 +1187,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         // Even on error, orchestrator should be freed
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
@@ -1160,7 +1230,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1207,7 +1277,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         let mut found_error = false;
         while let Ok(event) = rx.try_recv() {
@@ -1275,7 +1345,7 @@ mod tests {
 
         // With retry enabled (default: 1 retry, 1000ms base delay), the error
         // propagates after retry exhaustion. Wait long enough for that.
-        tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         let mut found_error = false;
         while let Ok(event) = rx.try_recv() {
@@ -1310,7 +1380,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         while let Ok(event) = rx.try_recv() {
             assert!(
@@ -1335,7 +1405,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         // Collect events
         let mut event_types = vec![];
@@ -1406,7 +1476,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
         let mut event_types = vec![];
         while let Ok(event) = rx.try_recv() {
@@ -1443,7 +1513,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
 
         // Second prompt should work after first completes
@@ -1497,7 +1567,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1517,7 +1587,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1553,7 +1623,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1574,7 +1644,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1592,7 +1662,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1632,7 +1702,7 @@ mod tests {
             .unwrap();
         assert_eq!(prompt["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert_eq!(
             ctx.context_artifacts.rules_index_builds(),
             builds_before_prompt,
@@ -1676,7 +1746,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1697,7 +1767,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1719,7 +1789,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1747,7 +1817,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1774,7 +1844,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1805,7 +1875,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1833,7 +1903,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1862,7 +1932,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1888,7 +1958,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -1913,7 +1983,7 @@ mod tests {
             .unwrap();
         assert_eq!(result["acknowledged"], true);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
     }
 
@@ -2065,12 +2135,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["message.assistant"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["message.assistant"]).await;
         assert!(
             !events.is_empty(),
             "expected at least one message.assistant event"
@@ -2108,12 +2173,7 @@ mod tests {
             .unwrap();
 
         // Wait for the background task to finish
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["notification.interrupted"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["notification.interrupted"]).await;
         assert_eq!(
             events.len(),
             1,
@@ -2151,12 +2211,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["message.assistant"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["message.assistant"]).await;
         assert_eq!(events.len(), 1, "expected one message.assistant event");
 
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
@@ -2179,12 +2234,9 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        wait_for_run_completion(&ctx, &sid).await;
 
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["notification.interrupted"], None)
-            .unwrap();
+        let events = read_events_by_type(&ctx, &sid, &["notification.interrupted"]).await;
         assert_eq!(
             events.len(),
             0,
@@ -2474,12 +2526,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["message.user"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["message.user"]).await;
         assert!(!events.is_empty(), "expected message.user event");
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["content"], "hello");
@@ -2509,12 +2556,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["message.user"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["message.user"]).await;
         assert!(!events.is_empty(), "expected message.user event");
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         let content = payload["content"]
@@ -2547,12 +2589,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        let events = ctx
-            .event_store
-            .get_events_by_type(&sid, &["message.user"], None)
-            .unwrap();
+        let events = wait_for_events_by_type(&ctx, &sid, &["message.user"]).await;
         assert!(!events.is_empty(), "expected message.user event");
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["content"], "use this skill"); // text-only

@@ -3656,7 +3656,10 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tempfile",
+ "tokio",
  "tron-events",
+ "tron-runtime",
+ "tron-server",
 ]
 
 [[package]]
