@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn context_window_anthropic() {
-        assert_eq!(model_context_window(CLAUDE_OPUS_4_6), 200_000);
+        assert_eq!(model_context_window(CLAUDE_OPUS_4_6), 1_000_000);
     }
 
     #[test]

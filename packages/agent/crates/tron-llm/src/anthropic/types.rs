@@ -194,7 +194,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             name: "Claude Opus 4.6",
             short_name: "Opus 4.6",
             family: "Claude 4.6",
-            context_window: 200_000,
+            context_window: 1_000_000,
             max_output: 128_000,
             supports_thinking: true,
             supports_thinking_beta_headers: false,
@@ -218,7 +218,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             name: "Claude Sonnet 4.6",
             short_name: "Sonnet 4.6",
             family: "Claude 4.6",
-            context_window: 200_000,
+            context_window: 1_000_000,
             max_output: 64_000,
             supports_thinking: true,
             supports_thinking_beta_headers: false,
@@ -769,7 +769,7 @@ mod tests {
     fn get_claude_model_opus_46() {
         let info = get_claude_model("claude-opus-4-6").unwrap();
         assert_eq!(info.name, "Claude Opus 4.6");
-        assert_eq!(info.context_window, 200_000);
+        assert_eq!(info.context_window, 1_000_000);
         assert_eq!(info.max_output, 128_000);
         assert!(info.supports_thinking);
         assert!(!info.supports_thinking_beta_headers);
@@ -784,7 +784,7 @@ mod tests {
     fn get_claude_model_sonnet_46() {
         let info = get_claude_model("claude-sonnet-4-6").unwrap();
         assert_eq!(info.name, "Claude Sonnet 4.6");
-        assert_eq!(info.context_window, 200_000);
+        assert_eq!(info.context_window, 1_000_000);
         assert_eq!(info.max_output, 64_000);
         assert!(info.supports_thinking);
         assert!(!info.supports_thinking_beta_headers);

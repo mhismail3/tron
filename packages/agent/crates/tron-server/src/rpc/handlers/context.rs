@@ -523,7 +523,7 @@ mod tests {
             payload: json!({
                 "content": [{"type": "text", "text": "response"}],
                 "turn": 1,
-                "tokenUsage": {"inputTokens": 175_000, "outputTokens": 5_000}
+                "tokenUsage": {"inputTokens": 875_000, "outputTokens": 5_000}
             }),
             parent_id: None,
         });
@@ -534,7 +534,7 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        // last_turn_input_tokens = 175k, context_limit = 200k → ratio 0.875 >= 0.85 threshold
+        // last_turn_input_tokens = 875k, context_limit = 1M → ratio 0.875 >= 0.85 threshold
         assert_eq!(result["shouldCompact"], true);
     }
 
@@ -561,7 +561,7 @@ mod tests {
             payload: json!({
                 "content": [{"type": "text", "text": "r"}],
                 "turn": 1,
-                "tokenUsage": {"inputTokens": 180_000, "outputTokens": 10_000}
+                "tokenUsage": {"inputTokens": 900_000, "outputTokens": 50_000}
             }),
             parent_id: None,
         });
@@ -572,7 +572,7 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        // 190k / 200k = 0.95 which is >= critical (0.85)
+        // 950k / 1M = 0.95 which is >= critical (0.85)
         assert_eq!(result["canAcceptTurn"], false);
     }
 
