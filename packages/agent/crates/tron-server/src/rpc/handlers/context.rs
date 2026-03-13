@@ -1,176 +1,16 @@
 //! Context handlers: getSnapshot, getDetailedSnapshot, shouldCompact,
 //! previewCompaction, confirmCompaction, canAcceptTurn, clear, compact.
 
-use std::path::Path;
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use parking_lot::RwLock;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::instrument;
 
-use tron_runtime::context::context_manager::ContextManager;
-use tron_runtime::context::summarizer::{KeywordSummarizer, Summarizer};
-use tron_runtime::context::types::{CompactionConfig, ContextManagerConfig};
-use tron_skills::registry::SkillRegistry;
-
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::{self, RpcError};
+use crate::rpc::context_commands::ContextCommandService;
+use crate::rpc::context_queries::ContextQueryService;
+use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
-use crate::rpc::session_context::{
-    RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
-};
-
-// =============================================================================
-// Shared helper
-// =============================================================================
-
-/// Build a temporary `ContextManager` for a session by reconstructing state
-/// from events and loading rules/memory from disk.
-struct PreparedSessionContext {
-    session: tron_events::sqlite::row_types::SessionRow,
-    artifacts: SessionContextArtifacts,
-    context_manager: ContextManager,
-}
-
-fn build_context_manager_for_session(
-    session_id: &str,
-    ctx: &RpcContext,
-) -> Result<PreparedSessionContext, RpcError> {
-    // 1. Get session metadata
-    let session = ctx
-        .session_manager
-        .get_session(session_id)
-        .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| RpcError::NotFound {
-            code: errors::SESSION_NOT_FOUND.into(),
-            message: format!("Session '{session_id}' not found"),
-        })?;
-
-    // 2. Reconstruct state (messages, model, token usage)
-    let state = match ctx.session_manager.resume_session(session_id) {
-        Ok(active) => active.state.clone(),
-        Err(_) => tron_runtime::ReconstructedState {
-            model: session.latest_model.clone(),
-            working_directory: Some(session.working_directory.clone()),
-            ..Default::default()
-        },
-    };
-
-    let settings = tron_settings::get_settings();
-    let is_chat = session.source.as_deref() == Some("chat");
-    let artifacts = ctx
-        .context_artifacts
-        .load(
-            ctx.event_store.as_ref(),
-            &session.working_directory,
-            &settings,
-            is_chat,
-        )
-        .session;
-
-    // 6. Get tool definitions
-    let tools = ctx
-        .agent_deps
-        .as_ref()
-        .map(|d| (d.tool_factory)().definitions())
-        .unwrap_or_default();
-
-    // 4. Build ContextManager
-    let context_limit = tron_llm::model_context_window(&state.model);
-    let compactor_settings = &settings.context.compactor;
-    let mut cm = ContextManager::new(ContextManagerConfig {
-        model: state.model.clone(),
-        system_prompt: None,
-        working_directory: state.working_directory.clone(),
-        tools,
-        rules_content: artifacts.rules.merged_content.clone(),
-        compaction: CompactionConfig {
-            threshold: compactor_settings.compaction_threshold,
-            preserve_ratio: compactor_settings.preserve_ratio,
-            context_limit,
-        },
-    });
-
-    // 5. Restore messages and memory
-    if !state.messages.is_empty() {
-        cm.set_messages(state.messages.clone());
-    }
-    if let Some(memory) = artifacts.memory.as_ref() {
-        cm.set_memory_content(Some(memory.content.clone()));
-    }
-
-    // 6. Set API tokens if available (ground truth from last turn's context window)
-    // Use last_turn_input_tokens from session row (NOT accumulated totals)
-    let last_turn = session.last_turn_input_tokens;
-    if last_turn > 0 {
-        #[allow(clippy::cast_sign_loss)]
-        cm.set_api_context_tokens(last_turn as u64);
-    }
-
-    Ok(PreparedSessionContext {
-        session,
-        artifacts,
-        context_manager: cm,
-    })
-}
-
-// =============================================================================
-// Skill context helper
-// =============================================================================
-
-/// Build skill context from active skill names using the shared registry.
-///
-/// Returns `None` when no matching skills are found or the result is empty.
-fn build_active_skill_context(
-    skill_names: &[String],
-    skill_registry: &Arc<RwLock<SkillRegistry>>,
-) -> Option<String> {
-    if skill_names.is_empty() {
-        return None;
-    }
-    let registry = skill_registry.read();
-    let name_refs: Vec<&str> = skill_names.iter().map(String::as_str).collect();
-    let (found, _) = registry.get_many(&name_refs);
-    if found.is_empty() {
-        return None;
-    }
-    let ctx = tron_skills::injector::build_skill_context(&found);
-    if ctx.is_empty() { None } else { Some(ctx) }
-}
-
-// =============================================================================
-// Summarizer helper — builds LLM or keyword summarizer from RpcContext
-// =============================================================================
-
-/// Build the best available summarizer for compaction.
-///
-/// Uses `LlmSummarizer` (via `SubagentManager`) when available for high-quality
-/// narrative summaries; falls back to `KeywordSummarizer` otherwise.
-fn build_summarizer(
-    ctx: &RpcContext,
-    session_id: &str,
-    working_directory: &str,
-) -> Box<dyn Summarizer> {
-    if let Some(ref manager) = ctx.subagent_manager {
-        let spawner = tron_runtime::agent::compaction_handler::SubagentManagerSpawner {
-            manager: manager.clone(),
-            parent_session_id: session_id.to_owned(),
-            working_directory: working_directory.to_owned(),
-            system_prompt: tron_runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
-                .to_string(),
-            model: None,
-        };
-        Box::new(tron_runtime::context::llm_summarizer::LlmSummarizer::new(
-            spawner,
-        ))
-    } else {
-        Box::new(KeywordSummarizer::new())
-    }
-}
 
 // =============================================================================
 // Handlers
@@ -184,20 +24,7 @@ impl MethodHandler for GetSnapshotHandler {
     #[instrument(skip(self, ctx), fields(method = "context.getSnapshot", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let prepared = build_context_manager_for_session(&session_id, ctx)?;
-        let snapshot = prepared.context_manager.get_snapshot();
-        Ok(json!({
-            "currentTokens": snapshot.current_tokens,
-            "contextLimit": snapshot.context_limit,
-            "usagePercent": snapshot.usage_percent,
-            "thresholdLevel": snapshot.threshold_level,
-            "breakdown": {
-                "systemPrompt": snapshot.breakdown.system_prompt,
-                "tools": snapshot.breakdown.tools,
-                "rules": snapshot.breakdown.rules,
-                "messages": snapshot.breakdown.messages
-            }
-        }))
+        ContextQueryService::get_snapshot(ctx, session_id).await
     }
 }
 
@@ -212,258 +39,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
     )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        let prepared = build_context_manager_for_session(&session_id, ctx)?;
-        let session = prepared.session;
-        let artifacts = prepared.artifacts;
-        let cm = prepared.context_manager;
-        let detailed = cm.get_detailed_snapshot();
-
-        // Build messages array matching DetailedMessageInfo wire format
-        let messages: Vec<Value> = detailed
-            .messages
-            .iter()
-            .map(|m| {
-                let mut msg = json!({
-                    "index": m.index,
-                    "role": m.role,
-                    "tokens": m.tokens,
-                    "summary": m.summary,
-                    "content": m.content,
-                });
-                if let Some(ref tc) = m.tool_calls {
-                    msg["toolCalls"] = json!(
-                        tc.iter()
-                            .map(|t| json!({
-                                "id": t.id,
-                                "name": t.name,
-                                "tokens": t.tokens,
-                                "arguments": t.arguments,
-                            }))
-                            .collect::<Vec<_>>()
-                    );
-                }
-                if let Some(ref id) = m.tool_call_id {
-                    msg["toolCallId"] = json!(id);
-                }
-                if let Some(err) = m.is_error {
-                    msg["isError"] = json!(err);
-                }
-                if let Some(ref eid) = m.event_id {
-                    msg["eventId"] = json!(eid);
-                }
-                msg
-            })
-            .collect();
-
-        // Build addedSkills matching AddedSkillInfo wire format:
-        // { name, source, addedVia, eventId, tokens }
-        // Skills are event-sourced: skill.added / skill.removed events in this session.
-        let added_skills: Vec<Value> = {
-            let added_events = ctx
-                .event_store
-                .get_events_by_type(&session_id, &["skill.added"], None)
-                .unwrap_or_default();
-            let removed_events = ctx
-                .event_store
-                .get_events_by_type(&session_id, &["skill.removed"], None)
-                .unwrap_or_default();
-
-            // Collect removed skill names
-            let removed_names: std::collections::HashSet<String> = removed_events
-                .iter()
-                .filter_map(|e| {
-                    serde_json::from_str::<Value>(&e.payload)
-                        .ok()
-                        .and_then(|p| p.get("skillName").and_then(Value::as_str).map(String::from))
-                })
-                .collect();
-
-            added_events
-                .iter()
-                .filter_map(|e| {
-                    let payload: Value = serde_json::from_str(&e.payload).ok()?;
-                    let name = payload.get("skillName")?.as_str()?;
-                    // Skip if this skill was later removed
-                    if removed_names.contains(name) {
-                        return None;
-                    }
-                    let source = payload
-                        .get("source")
-                        .and_then(Value::as_str)
-                        .unwrap_or("global");
-                    let added_via = payload
-                        .get("addedVia")
-                        .and_then(Value::as_str)
-                        .unwrap_or("mention");
-                    let tokens = payload.get("tokens").and_then(Value::as_u64);
-
-                    let mut skill = json!({
-                        "name": name,
-                        "source": source,
-                        "addedVia": added_via,
-                        "eventId": e.id,
-                    });
-                    if let Some(t) = tokens {
-                        skill["tokens"] = json!(t);
-                    }
-                    Some(skill)
-                })
-                .collect()
-        };
-
-        // Build composed system prompt using the SAME composition path as the LLM.
-        // This is the single source of truth — compose_context_parts() is the sole
-        // authority on what goes into the system prompt.
-        let composed_system_prompt = {
-            let active_skill_names: Vec<String> = added_skills
-                .iter()
-                .filter_map(|s| s.get("name").and_then(Value::as_str).map(String::from))
-                .collect();
-            let skill_context =
-                build_active_skill_context(&active_skill_names, &ctx.skill_registry);
-
-            let mut composed_context = cm.build_base_context();
-            composed_context.server_origin.clone_from(&session.origin);
-            composed_context.skill_context = skill_context;
-            // subagent_results_context and task_context are per-turn volatile — None in static view
-
-            let composed_parts = tron_llm::compose_context_parts(&composed_context);
-            composed_parts.join("\n\n")
-        };
-
-        // Build rules matching LoadedRules wire format: { files, totalFiles, tokens }
-        let rules_info: Option<Value> = {
-            let wd_path = Path::new(&session.working_directory);
-            let mut files: Vec<Value> = artifacts
-                .rules
-                .files
-                .iter()
-                .map(|file| {
-                    let relative_path = if file.level == RuleFileLevel::Global {
-                        format!("~/{}", file.relative_path)
-                    } else {
-                        file.relative_path.clone()
-                    };
-                    let depth = if file.level == RuleFileLevel::Global {
-                        -1_i64
-                    } else {
-                        #[allow(clippy::cast_possible_wrap)]
-                        {
-                            file.depth as i64
-                        }
-                    };
-                    json!({
-                        "path": file.path.to_string_lossy(),
-                        "relativePath": relative_path,
-                        "level": file.level.as_str(),
-                        "depth": depth,
-                    })
-                })
-                .collect();
-
-            // Include dynamically activated rules from rules.activated events,
-            // resetting on compact boundaries.
-            let dynamic_paths = collect_dynamic_rule_paths(ctx.event_store.as_ref(), &session_id);
-            let mut existing_paths: std::collections::HashSet<String> = files
-                .iter()
-                .filter_map(|f| {
-                    f.get("relativePath")
-                        .and_then(Value::as_str)
-                        .map(String::from)
-                })
-                .collect();
-            for rel_path in dynamic_paths {
-                if existing_paths.insert(rel_path.clone()) {
-                    let abs = wd_path.join(&rel_path);
-                    files.push(json!({
-                        "path": abs.to_string_lossy(),
-                        "relativePath": rel_path,
-                        "level": "directory",
-                        "depth": rel_path.matches('/').count(),
-                    }));
-                }
-            }
-
-            let total_files = files.len();
-            if total_files > 0 {
-                Some(json!({
-                    "files": files,
-                    "totalFiles": total_files,
-                    "tokens": detailed.snapshot.breakdown.rules,
-                }))
-            } else {
-                None
-            }
-        };
-
-        // Build memory matching LoadedMemory wire format: { count, tokens, entries }
-        let memory_info: Option<Value> = artifacts.memory.as_ref().and_then(|memory| {
-            if memory.entries.is_empty() {
-                return None;
-            }
-            let entries: Vec<Value> = memory
-                .entries
-                .iter()
-                .map(|entry| {
-                    json!({
-                        "title": entry.title,
-                        "content": entry.summary,
-                    })
-                })
-                .collect();
-            Some(json!({
-                "count": entries.len(),
-                "tokens": memory.content_tokens_estimate(),
-                "entries": entries,
-            }))
-        });
-
-        // Build sessionMemories matching LoadedMemory wire format
-        let session_memories: Option<Value> = {
-            let mems = cm.get_session_memories();
-            if mems.is_empty() {
-                None
-            } else {
-                let entries: Vec<Value> = mems
-                    .iter()
-                    .map(|m| json!({ "title": m.title, "content": m.content }))
-                    .collect();
-                let total_tokens: u64 = mems.iter().map(|m| m.tokens).sum();
-                Some(json!({
-                    "count": mems.len(),
-                    "tokens": total_tokens,
-                    "entries": entries,
-                }))
-            }
-        };
-
-        Ok(json!({
-            "currentTokens": detailed.snapshot.current_tokens,
-            "contextLimit": detailed.snapshot.context_limit,
-            "usagePercent": detailed.snapshot.usage_percent,
-            "thresholdLevel": detailed.snapshot.threshold_level,
-            "breakdown": {
-                "systemPrompt": detailed.snapshot.breakdown.system_prompt,
-                "tools": detailed.snapshot.breakdown.tools,
-                "rules": detailed.snapshot.breakdown.rules,
-                "messages": detailed.snapshot.breakdown.messages
-            },
-            "messages": messages,
-            "systemPromptContent": detailed.system_prompt_content,
-            "toolClarificationContent": detailed.tool_clarification_content,
-            "toolsContent": detailed.tools_content,
-            "addedSkills": added_skills,
-            "rules": rules_info,
-            "memory": memory_info,
-            "sessionMemories": session_memories,
-            "taskContext": null,
-            "composedSystemPrompt": composed_system_prompt,
-            "environment": {
-                "workingDirectory": session.working_directory,
-                "serverOrigin": session.origin,
-            },
-        }))
+        ContextQueryService::get_detailed_snapshot(ctx, session_id).await
     }
 }
 
@@ -475,8 +51,7 @@ impl MethodHandler for ShouldCompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.shouldCompact", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
-        Ok(json!({ "shouldCompact": cm.should_compact() }))
+        ContextQueryService::should_compact(ctx, session_id).await
     }
 }
 
@@ -491,25 +66,7 @@ impl MethodHandler for PreviewCompactionHandler {
     )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let prepared = build_context_manager_for_session(&session_id, ctx)?;
-        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
-        let preview = prepared
-            .context_manager
-            .preview_compaction(summarizer.as_ref())
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Compaction preview failed: {e}"),
-            })?;
-
-        Ok(json!({
-            "tokensBefore": preview.tokens_before,
-            "tokensAfter": preview.tokens_after,
-            "compressionRatio": preview.compression_ratio,
-            "preservedMessages": preview.preserved_messages,
-            "summarizedMessages": preview.summarized_messages,
-            "summary": preview.summary,
-            "extractedData": preview.extracted_data,
-        }))
+        ContextQueryService::preview_compaction(ctx, session_id).await
     }
 }
 
@@ -525,70 +82,7 @@ impl MethodHandler for ConfirmCompactionHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let edited_summary = opt_string(params.as_ref(), "editedSummary");
-
-        let prepared = build_context_manager_for_session(&session_id, ctx)?;
-        let mut cm = prepared.context_manager;
-        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
-
-        // Emit CompactionStart so iOS shows the spinner pill
-        let tokens_before = cm.get_current_tokens();
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(tron_core::events::TronEvent::CompactionStart {
-                base: tron_core::events::BaseEvent::now(&session_id),
-                reason: tron_core::events::CompactionReason::Manual,
-                tokens_before,
-            });
-
-        let result = cm
-            .execute_compaction(summarizer.as_ref(), edited_summary.as_deref())
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Compaction failed: {e}"),
-            })?;
-
-        // Persist compact.boundary so clients can reconstruct the pill on resume
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &session_id,
-            event_type: tron_events::EventType::CompactBoundary,
-            payload: json!({
-                "originalTokens": result.tokens_before,
-                "compactedTokens": result.tokens_after,
-                "compressionRatio": result.compression_ratio,
-                "reason": "Manual",
-                "summary": result.summary,
-                "estimatedContextTokens": result.tokens_after,
-            }),
-            parent_id: None,
-        });
-
-        // Broadcast compaction complete event (replaces spinner with final pill)
-        let _ =
-            ctx.orchestrator
-                .broadcast()
-                .emit(tron_core::events::TronEvent::CompactionComplete {
-                    base: tron_core::events::BaseEvent::now(&session_id),
-                    success: result.success,
-                    tokens_before: result.tokens_before,
-                    tokens_after: result.tokens_after,
-                    compression_ratio: result.compression_ratio,
-                    reason: Some(tron_core::events::CompactionReason::Manual),
-                    summary: Some(result.summary.clone()),
-                    estimated_context_tokens: Some(result.tokens_after),
-                });
-
-        // Invalidate cached session
-        ctx.session_manager.invalidate_session(&session_id);
-
-        Ok(json!({
-            "confirmed": true,
-            "success": result.success,
-            "tokensBefore": result.tokens_before,
-            "tokensAfter": result.tokens_after,
-            "compressionRatio": result.compression_ratio,
-            "summary": result.summary,
-        }))
+        ContextCommandService::confirm_compaction(ctx, session_id, edited_summary).await
     }
 }
 
@@ -600,9 +94,7 @@ impl MethodHandler for CanAcceptTurnHandler {
     #[instrument(skip(self, ctx), fields(method = "context.canAcceptTurn", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
-        let v = cm.can_accept_turn();
-        Ok(json!({ "canAcceptTurn": v.can_proceed }))
+        ContextQueryService::can_accept_turn(ctx, session_id).await
     }
 }
 
@@ -614,42 +106,7 @@ impl MethodHandler for ClearHandler {
     #[instrument(skip(self, ctx), fields(method = "context.clear", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Get tokens before clearing (best effort)
-        let tokens_before = build_context_manager_for_session(&session_id, ctx)
-            .map(|prepared| prepared.context_manager.get_snapshot().current_tokens)
-            .unwrap_or(0);
-
-        // Persist context cleared event
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &session_id,
-            event_type: tron_events::EventType::ContextCleared,
-            payload: json!({
-                "tokensBefore": tokens_before,
-                "tokensAfter": 0,
-            }),
-            parent_id: None,
-        });
-
-        // Invalidate cached session
-        ctx.session_manager.invalidate_session(&session_id);
-
-        // Broadcast event
-        #[allow(clippy::cast_possible_wrap)]
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(tron_core::events::TronEvent::ContextCleared {
-                base: tron_core::events::BaseEvent::now(&session_id),
-                tokens_before: tokens_before as i64,
-                tokens_after: 0,
-            });
-
-        Ok(json!({
-            "success": true,
-            "tokensBefore": tokens_before,
-            "tokensAfter": 0
-        }))
+        ContextCommandService::clear(ctx, session_id).await
     }
 }
 
@@ -661,76 +118,21 @@ impl MethodHandler for CompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.compact", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let prepared = build_context_manager_for_session(&session_id, ctx)?;
-        let mut cm = prepared.context_manager;
-        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
-
-        // Emit CompactionStart so iOS shows the spinner pill
-        let tokens_before = cm.get_current_tokens();
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(tron_core::events::TronEvent::CompactionStart {
-                base: tron_core::events::BaseEvent::now(&session_id),
-                reason: tron_core::events::CompactionReason::Manual,
-                tokens_before,
-            });
-
-        let result = cm
-            .execute_compaction(summarizer.as_ref(), None)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Compaction failed: {e}"),
-            })?;
-
-        // Persist compact.boundary so clients can reconstruct the pill on resume
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &session_id,
-            event_type: tron_events::EventType::CompactBoundary,
-            payload: json!({
-                "originalTokens": result.tokens_before,
-                "compactedTokens": result.tokens_after,
-                "compressionRatio": result.compression_ratio,
-                "reason": "Manual",
-                "summary": result.summary,
-                "estimatedContextTokens": result.tokens_after,
-            }),
-            parent_id: None,
-        });
-
-        // Broadcast compaction complete event (replaces spinner with final pill)
-        let _ =
-            ctx.orchestrator
-                .broadcast()
-                .emit(tron_core::events::TronEvent::CompactionComplete {
-                    base: tron_core::events::BaseEvent::now(&session_id),
-                    success: result.success,
-                    tokens_before: result.tokens_before,
-                    tokens_after: result.tokens_after,
-                    compression_ratio: result.compression_ratio,
-                    reason: Some(tron_core::events::CompactionReason::Manual),
-                    summary: Some(result.summary.clone()),
-                    estimated_context_tokens: Some(result.tokens_after),
-                });
-
-        // Invalidate cached session
-        ctx.session_manager.invalidate_session(&session_id);
-
-        Ok(json!({
-            "success": result.success,
-            "tokensBefore": result.tokens_before,
-            "tokensAfter": result.tokens_after,
-            "compressionRatio": result.compression_ratio,
-            "summary": result.summary,
-        }))
+        ContextCommandService::compact(ctx, session_id).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc::context_service::{
+        build_active_skill_context, build_context_manager_for_session, tool_definitions,
+    };
     use crate::rpc::handlers::test_helpers::make_test_context;
+    use parking_lot::RwLock;
     use serde_json::json;
+    use std::sync::Arc;
+    use tron_skills::registry::SkillRegistry;
 
     // Helper: create a context with a real session
     fn ctx_with_session() -> (RpcContext, String) {
@@ -997,6 +399,45 @@ mod tests {
             result["breakdown"]["rules"].as_u64().unwrap() > 0,
             "rules tokens should be > 0"
         );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_dedupes_dynamic_rule_already_loaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(claude_dir.join("AGENTS.md"), "# Test Rules\nBe helpful.").unwrap();
+
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None)
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::RulesActivated,
+            payload: json!({
+                "rules": [{
+                    "relativePath": ".claude/AGENTS.md",
+                    "scopeDir": ".claude",
+                }],
+                "totalActivated": 1,
+            }),
+            parent_id: None,
+        });
+
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let files = result["rules"]["files"].as_array().unwrap();
+        let matching = files
+            .iter()
+            .filter(|file| file["relativePath"] == ".claude/AGENTS.md")
+            .count();
+        assert_eq!(matching, 1, "expected dynamic rule path to be deduped");
     }
 
     #[tokio::test]
@@ -1526,7 +967,14 @@ mod tests {
             .unwrap();
 
         // Manually build the same Context and compose — should match
-        let prepared = build_context_manager_for_session(&sid, &ctx).unwrap();
+        let prepared = build_context_manager_for_session(
+            &sid,
+            ctx.session_manager.as_ref(),
+            ctx.event_store.as_ref(),
+            ctx.context_artifacts.as_ref(),
+            tool_definitions(&ctx),
+        )
+        .unwrap();
         let base = prepared.context_manager.build_base_context();
         let parts = tron_llm::compose_context_parts(&base);
         let expected = parts.join("\n\n");
