@@ -32,7 +32,7 @@ use tron_server::websocket::connection::ClientConnection;
 )]
 struct Args {
     /// Scenario to run: `prompt_text_only`, `prompt_with_tools`,
-    /// `concurrent_sessions`, `session_create`, `ws_session_fanout`, `all`.
+    /// `concurrent_sessions`, `session_create`, `ws_session_fanout`, `gate`, `all`.
     #[arg(long, default_value = "all")]
     scenario: String,
 
@@ -72,7 +72,23 @@ struct Args {
 #[derive(Debug, Serialize, Deserialize)]
 struct Report {
     generated_at: String,
+    environment: ReportEnvironment,
+    config: ReportConfig,
     scenarios: Vec<ScenarioResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ReportEnvironment {
+    os: String,
+    arch: String,
+    cpu_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ReportConfig {
+    requested_scenario: String,
+    iterations: usize,
+    concurrency: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,6 +128,12 @@ fn main() -> Result<()> {
 
     let report = Report {
         generated_at: chrono::Utc::now().to_rfc3339(),
+        environment: current_environment(),
+        config: ReportConfig {
+            requested_scenario: args.scenario.clone(),
+            iterations: args.iterations,
+            concurrency: args.concurrency,
+        },
         scenarios: results,
     };
 
@@ -124,14 +146,18 @@ fn main() -> Result<()> {
         };
         let gate = evaluate_gates(&baseline, &report, thresholds);
         println!(
-            "Benchmark gate summary: comparable {}, missing baseline {}, failed {}, worst p95 regression {:.2}%, worst mean regression {:.2}%, worst peak memory regression {:.2}%",
+            "Benchmark gate summary: comparable {}, incompatible {}, missing baseline {}, failed {}, worst p95 regression {:.2}%, worst mean regression {:.2}%, worst peak memory regression {:.2}%",
             gate.comparable_scenarios,
+            gate.incompatibilities.len(),
             gate.missing_baseline_scenarios.len(),
             gate.failed_scenarios.len(),
             gate.worst_p95_regression_pct,
             gate.worst_mean_regression_pct,
             gate.worst_peak_memory_regression_pct,
         );
+        for incompatibility in &gate.incompatibilities {
+            println!("  incompatible baseline: {incompatibility}");
+        }
         for missing in &gate.missing_baseline_scenarios {
             println!("  missing baseline scenario: {missing}");
         }
@@ -176,6 +202,7 @@ fn main() -> Result<()> {
 #[derive(Debug, Default)]
 struct GateEvaluation {
     comparable_scenarios: usize,
+    incompatibilities: Vec<String>,
     missing_baseline_scenarios: Vec<String>,
     failed_scenarios: Vec<ScenarioRegression>,
     worst_p95_regression_pct: f64,
@@ -209,6 +236,12 @@ fn scenario_names(name: &str) -> Result<Vec<String>> {
             "session_create".to_string(),
             "ws_session_fanout".to_string(),
         ]),
+        "gate" => Ok(vec![
+            "prompt_text_only".to_string(),
+            "prompt_with_tools".to_string(),
+            "session_create".to_string(),
+            "ws_session_fanout".to_string(),
+        ]),
         "prompt_text_only"
         | "prompt_with_tools"
         | "concurrent_sessions"
@@ -225,6 +258,14 @@ fn validate_gate_args(args: &Args) -> Result<()> {
         anyhow::bail!("--enforce-gates requires --baseline");
     }
     Ok(())
+}
+
+fn current_environment() -> ReportEnvironment {
+    ReportEnvironment {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        cpu_count: std::thread::available_parallelism().map_or(1, usize::from),
+    }
 }
 
 fn setup_store() -> Result<(Arc<EventStore>, tempfile::TempDir)> {
@@ -605,7 +646,14 @@ fn evaluate_gates(
     current: &Report,
     thresholds: GateThresholds,
 ) -> GateEvaluation {
-    let mut evaluation = GateEvaluation::default();
+    let mut evaluation = GateEvaluation {
+        incompatibilities: report_incompatibilities(baseline, current),
+        ..GateEvaluation::default()
+    };
+    if !evaluation.incompatibilities.is_empty() {
+        return evaluation;
+    }
+
     let baseline_by_name: std::collections::HashMap<&str, &ScenarioResult> = baseline
         .scenarios
         .iter()
@@ -621,15 +669,15 @@ fn evaluate_gates(
         };
         evaluation.comparable_scenarios += 1;
 
-        let p95_regression_pct = regression_pct(
+        let p95_regression_pct = latency_regression_pct(
             base_scenario.latency_ms.p95,
             current_scenario.latency_ms.p95,
         );
-        let mean_regression_pct = regression_pct(
+        let mean_regression_pct = latency_regression_pct(
             base_scenario.latency_ms.mean,
             current_scenario.latency_ms.mean,
         );
-        let peak_memory_regression_pct = regression_pct(
+        let peak_memory_regression_pct = memory_regression_pct(
             #[allow(clippy::cast_precision_loss)]
             {
                 base_scenario.peak_memory_bytes as f64
@@ -663,16 +711,55 @@ fn evaluate_gates(
     }
 
     evaluation.passed = evaluation.comparable_scenarios > 0
+        && evaluation.incompatibilities.is_empty()
         && evaluation.missing_baseline_scenarios.is_empty()
         && evaluation.failed_scenarios.is_empty();
     evaluation
 }
 
-fn regression_pct(baseline: f64, current: f64) -> f64 {
+fn report_incompatibilities(baseline: &Report, current: &Report) -> Vec<String> {
+    let mut mismatches = Vec::new();
+
+    if baseline.environment != current.environment {
+        mismatches.push(format!(
+            "environment mismatch: baseline {}-{} cpu_count {}, current {}-{} cpu_count {}",
+            baseline.environment.os,
+            baseline.environment.arch,
+            baseline.environment.cpu_count,
+            current.environment.os,
+            current.environment.arch,
+            current.environment.cpu_count,
+        ));
+    }
+
+    if baseline.config != current.config {
+        mismatches.push(format!(
+            "config mismatch: baseline scenario={} iterations={} concurrency={}, current scenario={} iterations={} concurrency={}",
+            baseline.config.requested_scenario,
+            baseline.config.iterations,
+            baseline.config.concurrency,
+            current.config.requested_scenario,
+            current.config.iterations,
+            current.config.concurrency,
+        ));
+    }
+
+    mismatches
+}
+
+fn latency_regression_pct(baseline: f64, current: f64) -> f64 {
+    regression_pct_with_floor(baseline, current, 5.0)
+}
+
+fn memory_regression_pct(baseline: f64, current: f64) -> f64 {
+    regression_pct_with_floor(baseline, current, 0.0)
+}
+
+fn regression_pct_with_floor(baseline: f64, current: f64, floor: f64) -> f64 {
     if baseline <= 0.0 {
         return 0.0;
     }
-    ((current - baseline) / baseline).max(0.0) * 100.0
+    ((current - baseline) / baseline.max(floor)).max(0.0) * 100.0
 }
 
 #[cfg(test)]
@@ -702,6 +789,23 @@ mod tests {
         }
     }
 
+    fn report(scenarios: Vec<ScenarioResult>) -> Report {
+        Report {
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            environment: ReportEnvironment {
+                os: "macos".into(),
+                arch: "aarch64".into(),
+                cpu_count: 12,
+            },
+            config: ReportConfig {
+                requested_scenario: "all".into(),
+                iterations: 20,
+                concurrency: 8,
+            },
+            scenarios,
+        }
+    }
+
     #[test]
     fn scenario_names_all_includes_new_scenarios() {
         let names = scenario_names("all").unwrap();
@@ -710,18 +814,26 @@ mod tests {
     }
 
     #[test]
+    fn scenario_names_gate_uses_stable_regression_subset() {
+        let names = scenario_names("gate").unwrap();
+        assert_eq!(
+            names,
+            vec![
+                "prompt_text_only".to_string(),
+                "prompt_with_tools".to_string(),
+                "session_create".to_string(),
+                "ws_session_fanout".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn evaluate_gates_counts_only_comparable_scenarios() {
-        let baseline = Report {
-            generated_at: "2026-01-01T00:00:00Z".into(),
-            scenarios: vec![scenario("prompt_text_only", 10.0, 10.0, 100)],
-        };
-        let current = Report {
-            generated_at: "2026-01-02T00:00:00Z".into(),
-            scenarios: vec![
-                scenario("prompt_text_only", 5.0, 5.0, 50),
-                scenario("ws_session_fanout", 1.0, 1.0, 10),
-            ],
-        };
+        let baseline = report(vec![scenario("prompt_text_only", 10.0, 10.0, 100)]);
+        let current = report(vec![
+            scenario("prompt_text_only", 5.0, 5.0, 50),
+            scenario("ws_session_fanout", 1.0, 1.0, 10),
+        ]);
 
         let evaluation = evaluate_gates(&baseline, &current, thresholds());
         assert_eq!(evaluation.comparable_scenarios, 1);
@@ -734,14 +846,8 @@ mod tests {
 
     #[test]
     fn evaluate_gates_fails_when_regression_exceeds_threshold() {
-        let baseline = Report {
-            generated_at: "2026-01-01T00:00:00Z".into(),
-            scenarios: vec![scenario("prompt_text_only", 100.0, 100.0, 100)],
-        };
-        let current = Report {
-            generated_at: "2026-01-02T00:00:00Z".into(),
-            scenarios: vec![scenario("prompt_text_only", 106.0, 112.0, 111)],
-        };
+        let baseline = report(vec![scenario("prompt_text_only", 100.0, 100.0, 100)]);
+        let current = report(vec![scenario("prompt_text_only", 106.0, 112.0, 111)]);
 
         let evaluation = evaluate_gates(&baseline, &current, thresholds());
         assert!(!evaluation.passed);
@@ -752,25 +858,55 @@ mod tests {
 
     #[test]
     fn evaluate_gates_passes_when_within_thresholds() {
-        let baseline = Report {
-            generated_at: "2026-01-01T00:00:00Z".into(),
-            scenarios: vec![
-                scenario("prompt_text_only", 100.0, 100.0, 100),
-                scenario("ws_session_fanout", 20.0, 20.0, 200),
-            ],
-        };
-        let current = Report {
-            generated_at: "2026-01-02T00:00:00Z".into(),
-            scenarios: vec![
-                scenario("prompt_text_only", 104.0, 108.0, 109),
-                scenario("ws_session_fanout", 20.5, 21.0, 210),
-            ],
-        };
+        let baseline = report(vec![
+            scenario("prompt_text_only", 100.0, 100.0, 100),
+            scenario("ws_session_fanout", 20.0, 20.0, 200),
+        ]);
+        let current = report(vec![
+            scenario("prompt_text_only", 104.0, 108.0, 109),
+            scenario("ws_session_fanout", 20.5, 21.0, 210),
+        ]);
 
         let evaluation = evaluate_gates(&baseline, &current, thresholds());
         assert!(evaluation.passed);
         assert!(evaluation.failed_scenarios.is_empty());
         assert!(evaluation.missing_baseline_scenarios.is_empty());
+    }
+
+    #[test]
+    fn evaluate_gates_ignores_tiny_latency_percentage_noise() {
+        let baseline = report(vec![scenario("ws_session_fanout", 0.004, 0.003, 100)]);
+        let current = report(vec![scenario("ws_session_fanout", 0.006, 0.004, 100)]);
+
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
+        assert!(evaluation.passed);
+        assert!(evaluation.failed_scenarios.is_empty());
+    }
+
+    #[test]
+    fn evaluate_gates_fails_when_environment_differs() {
+        let baseline = report(vec![scenario("prompt_text_only", 10.0, 10.0, 100)]);
+        let mut current = report(vec![scenario("prompt_text_only", 9.0, 9.0, 95)]);
+        current.environment.cpu_count = 8;
+
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
+        assert!(!evaluation.passed);
+        assert_eq!(evaluation.comparable_scenarios, 0);
+        assert_eq!(evaluation.incompatibilities.len(), 1);
+        assert!(evaluation.incompatibilities[0].contains("environment mismatch"));
+    }
+
+    #[test]
+    fn evaluate_gates_fails_when_config_differs() {
+        let baseline = report(vec![scenario("prompt_text_only", 10.0, 10.0, 100)]);
+        let mut current = report(vec![scenario("prompt_text_only", 9.0, 9.0, 95)]);
+        current.config.iterations = 40;
+
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
+        assert!(!evaluation.passed);
+        assert_eq!(evaluation.comparable_scenarios, 0);
+        assert_eq!(evaluation.incompatibilities.len(), 1);
+        assert!(evaluation.incompatibilities[0].contains("config mismatch"));
     }
 
     #[test]

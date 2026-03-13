@@ -5,8 +5,8 @@
 #
 # Development:
 #   dev             Start dev server (takes over prod port, -b build, -t test)
-#   ci              Run CI checks (fmt, check, clippy, test, doc)
-#   bench           Performance benchmarks (run, compare)
+#   ci              Run CI checks (fmt, check, clippy, test, bench, doc)
+#   bench           Performance benchmarks (run, bless, compare)
 #   setup           First-time project setup
 #
 # Service:
@@ -45,6 +45,11 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Ensure Rust toolchain commands are available even in non-interactive shells.
+if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 # Data directories
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 BIN_DIR="$HOME/.local/bin"
@@ -52,6 +57,12 @@ BIN_DIR="$HOME/.local/bin"
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
+BENCH_BASELINE_DIR="$RUST_WORKSPACE/crates/tron-bench/baselines"
+BENCH_GATE_ITERATIONS=50
+BENCH_GATE_CONCURRENCY=8
+BENCH_GATE_MAX_P95_REGRESSION_PCT=15
+BENCH_GATE_MAX_MEAN_REGRESSION_PCT=35
+BENCH_GATE_MAX_PEAK_MEMORY_REGRESSION_PCT=15
 
 # Installed binary
 INSTALLED_BINARY="$TRON_HOME/tron"
@@ -181,6 +192,60 @@ run_coverage() {
     print_status "Running coverage..."
     (cd "$RUST_WORKSPACE" && cargo tarpaulin --workspace --out Html --output-dir target/coverage) || { print_error "Coverage failed"; return 1; }
     print_success "Coverage report: $RUST_WORKSPACE/target/coverage/tarpaulin-report.html"
+}
+
+bench_baseline_triplet() {
+    local os arch
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m | tr '[:upper:]' '[:lower:]')
+
+    case "$os" in
+        darwin) os="macos" ;;
+    esac
+
+    case "$arch" in
+        arm64) arch="aarch64" ;;
+        x86_64) arch="x86_64" ;;
+    esac
+
+    echo "${os}-${arch}"
+}
+
+default_bench_baseline() {
+    echo "$BENCH_BASELINE_DIR/$(bench_baseline_triplet).json"
+}
+
+run_bench_gate() {
+    local baseline="${1:-$(default_bench_baseline)}"
+
+    if [ ! -f "$baseline" ]; then
+        print_error "Benchmark baseline not found: $baseline"
+        print_status "Create or refresh it with: tron bench bless"
+        return 1
+    fi
+
+    mkdir -p "$SCRIPT_DIR/artifacts/benchmarks"
+    local stamp out_file
+    stamp="$(date +"%Y%m%d-%H%M%S")"
+    out_file="$SCRIPT_DIR/artifacts/benchmarks/compare-${stamp}.json"
+
+    print_status "Running benchmark regression gate against $(basename "$baseline")..."
+    (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+        --scenario gate \
+        --iterations "$BENCH_GATE_ITERATIONS" \
+        --concurrency "$BENCH_GATE_CONCURRENCY" \
+        --baseline "$baseline" \
+        --enforce-gates \
+        --max-p95-regression-pct "$BENCH_GATE_MAX_P95_REGRESSION_PCT" \
+        --max-mean-regression-pct "$BENCH_GATE_MAX_MEAN_REGRESSION_PCT" \
+        --max-peak-memory-regression-pct "$BENCH_GATE_MAX_PEAK_MEMORY_REGRESSION_PCT" \
+        --output "$out_file") || {
+            print_error "Benchmark gate failed"
+            print_status "Comparison report: $out_file"
+            return 1
+        }
+    print_success "Benchmark gate passed"
+    print_status "Comparison report: $out_file"
 }
 
 #=============================================================================
@@ -914,6 +979,13 @@ cmd_deploy() {
         print_warning "Continuing deployment despite test failure..."
     fi
 
+    if $ci_mode; then
+        if ! run_bench_gate; then
+            print_error "Benchmark gate failed — cannot deploy in --ci mode"
+            exit 1
+        fi
+    fi
+
     # Write lock
     echo "$$" > "$DEPLOY_LOCK_FILE"
     trap 'rm -f "$DEPLOY_LOCK_FILE"' EXIT
@@ -1596,6 +1668,7 @@ cmd_ci() {
             check)    steps+=(check); shift ;;
             clippy)   steps+=(clippy); shift ;;
             test)     steps+=(test); shift ;;
+            bench)    steps+=(bench); shift ;;
             doc)      steps+=(doc); shift ;;
             coverage) steps+=(coverage); shift ;;
             -h|--help)
@@ -1609,10 +1682,11 @@ cmd_ci() {
                 echo "  check      Compile check (cargo check --all-targets)"
                 echo "  clippy     Lint with -D warnings"
                 echo "  test       Run all tests"
+                echo "  bench      Run benchmark regression gate"
                 echo "  doc        Build docs with -D warnings"
                 echo "  coverage   Generate coverage report (requires cargo-tarpaulin)"
                 echo ""
-                echo "With no arguments, runs: fmt check clippy test doc"
+                echo "With no arguments, runs: fmt check clippy test bench doc"
                 echo ""
                 return 0
                 ;;
@@ -1622,7 +1696,7 @@ cmd_ci() {
 
     # Default: all steps (except coverage)
     if [ ${#steps[@]} -eq 0 ]; then
-        steps=(fmt check clippy test doc)
+        steps=(fmt check clippy test bench doc)
     fi
 
     print_header "CI Checks"
@@ -1634,6 +1708,7 @@ cmd_ci() {
             check)    print_status "Compile checking..."; (cd "$RUST_WORKSPACE" && cargo check --workspace --all-targets) && print_success "Check passed" || { print_error "Check failed"; failed=true; } ;;
             clippy)   run_clippy || failed=true ;;
             test)     run_tests || failed=true ;;
+            bench)    run_bench_gate || failed=true ;;
             doc)      run_doc_check || failed=true ;;
             coverage) run_coverage || failed=true ;;
         esac
@@ -1678,7 +1753,8 @@ cmd_bench() {
                         echo "  -i, --iterations N   Turns per scenario (default: 100)"
                         echo "  -c, --concurrency N  Parallel sessions (default: 16)"
                         echo "  -s, --scenario NAME  Scenario: prompt_text_only, prompt_with_tools,"
-                        echo "                       concurrent_sessions, all (default: all)"
+                        echo "                       concurrent_sessions, session_create,"
+                        echo "                       ws_session_fanout, gate, all (default: all)"
                         echo "  --save               Save result as a baseline"
                         echo ""
                         return 0
@@ -1708,10 +1784,27 @@ cmd_bench() {
             fi
             ;;
 
+        bless)
+            local baseline
+            baseline="$(default_bench_baseline)"
+            mkdir -p "$(dirname "$baseline")"
+
+            print_header "Refreshing benchmark baseline"
+            print_status "Writing baseline to $baseline"
+            print_status "Using stable gate scenario set (prompt/tool/session_create/ws fanout)"
+            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+                --scenario gate \
+                --iterations "$BENCH_GATE_ITERATIONS" \
+                --concurrency "$BENCH_GATE_CONCURRENCY" \
+                --output "$baseline")
+
+            print_success "Baseline refreshed: $baseline"
+            ;;
+
         compare)
             local baseline=""
-            local iterations=100
-            local concurrency=16
+            local iterations="$BENCH_GATE_ITERATIONS"
+            local concurrency="$BENCH_GATE_CONCURRENCY"
             local enforce=true
             while [[ $# -gt 0 ]]; do
                 case "$1" in
@@ -1726,10 +1819,13 @@ cmd_bench() {
                         echo "Usage: tron bench compare -b <baseline.json> [options]"
                         echo ""
                         echo "Options:"
-                        echo "  -b, --baseline FILE  Baseline JSON to compare against (required)"
-                        echo "  -i, --iterations N   Turns per scenario (default: 100)"
-                        echo "  -c, --concurrency N  Parallel sessions (default: 16)"
+                        echo "  -b, --baseline FILE  Baseline JSON to compare against"
+                        echo "                       (default: $(default_bench_baseline))"
+                        echo "  -i, --iterations N   Turns per scenario (default: $BENCH_GATE_ITERATIONS)"
+                        echo "  -c, --concurrency N  Parallel sessions (default: $BENCH_GATE_CONCURRENCY)"
                         echo "  --no-enforce         Don't fail on gate violations"
+                        echo ""
+                        echo "Uses the stable 'gate' scenario set by default."
                         echo ""
                         return 0
                         ;;
@@ -1738,9 +1834,7 @@ cmd_bench() {
             done
 
             if [[ -z "$baseline" ]]; then
-                print_error "Missing required --baseline argument"
-                echo "Usage: tron bench compare -b <baseline.json>"
-                return 1
+                baseline="$(default_bench_baseline)"
             fi
 
             mkdir -p "$BENCH_DIR"
@@ -1773,6 +1867,7 @@ cmd_bench() {
             echo ""
             echo "Subcommands:"
             echo "  run       Run benchmarks (use --save to store baseline)"
+            echo "  bless     Refresh the checked-in benchmark baseline for this platform"
             echo "  compare   Compare current performance against a baseline"
             echo ""
             echo "Run 'tron bench <subcommand> -h' for subcommand help."
@@ -1792,7 +1887,7 @@ cmd_help() {
     echo -e "${BOLD}Development (workspace only):${NC}"
     echo "  dev             Start server (-b build, -t test, -d background)"
     echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
-    echo "  bench           Performance benchmarks (run, compare)"
+    echo "  bench           Performance benchmarks (run, bless, compare)"
     echo "  setup           First-time project setup"
     echo ""
     echo -e "${BOLD}Deployment (workspace only):${NC}"
