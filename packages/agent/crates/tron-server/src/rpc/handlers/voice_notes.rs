@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
 use tracing::instrument;
+use uuid::Uuid;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
@@ -17,6 +18,14 @@ use crate::rpc::voice_notes_service;
 /// Attempts transcription via the sidecar service inline. Falls back to a stub
 /// if transcription is disabled or fails.
 pub struct SaveHandler;
+
+fn build_voice_note_filename(now: chrono::DateTime<chrono::Utc>) -> String {
+    format!(
+        "{}-{}-voice-note.md",
+        now.format("%Y-%m-%d-%H%M%S-%3f"),
+        Uuid::now_v7()
+    )
+}
 
 #[async_trait]
 impl MethodHandler for SaveHandler {
@@ -34,7 +43,7 @@ impl MethodHandler for SaveHandler {
         .await?;
 
         let now = chrono::Utc::now();
-        let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S-%3f"));
+        let filename = build_voice_note_filename(now);
         let filepath = format!("{dir}/{filename}");
 
         // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")
@@ -130,6 +139,17 @@ mod tests {
             dir.ends_with("Voice Notes"),
             "Expected 'Voice Notes' subdir, got: {dir}"
         );
+    }
+
+    #[test]
+    fn voice_note_filenames_are_unique_with_same_timestamp() {
+        let now = chrono::Utc::now();
+        let first = build_voice_note_filename(now);
+        let second = build_voice_note_filename(now);
+
+        assert_ne!(first, second);
+        assert!(first.ends_with("-voice-note.md"));
+        assert!(second.ends_with("-voice-note.md"));
     }
 
     #[tokio::test]
