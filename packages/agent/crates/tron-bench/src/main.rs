@@ -55,6 +55,18 @@ struct Args {
     /// Enforce acceptance gates against baseline.
     #[arg(long, default_value_t = false)]
     enforce_gates: bool,
+
+    /// Maximum allowed p95 latency regression percentage versus baseline.
+    #[arg(long, default_value_t = 5.0)]
+    max_p95_regression_pct: f64,
+
+    /// Maximum allowed mean latency regression percentage versus baseline.
+    #[arg(long, default_value_t = 10.0)]
+    max_mean_regression_pct: f64,
+
+    /// Maximum allowed peak-memory regression percentage versus baseline.
+    #[arg(long, default_value_t = 10.0)]
+    max_peak_memory_regression_pct: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,6 +94,7 @@ struct LatencyStats {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    validate_gate_args(&args)?;
     let names = scenario_names(&args.scenario)?;
     let mut results = Vec::with_capacity(names.len());
 
@@ -104,19 +117,38 @@ fn main() -> Result<()> {
 
     if let Some(ref baseline_path) = args.baseline {
         let baseline = load_report(baseline_path)?;
-        let gate = evaluate_gates(&baseline, &report);
+        let thresholds = GateThresholds {
+            p95_regression_limit_pct: args.max_p95_regression_pct,
+            mean_regression_limit_pct: args.max_mean_regression_pct,
+            peak_memory_regression_limit_pct: args.max_peak_memory_regression_pct,
+        };
+        let gate = evaluate_gates(&baseline, &report, thresholds);
         println!(
-            "Benchmark gate summary: p95>=30% improved in {}/{}, memory>=30% reduced in {}/{}, worst p95 regression {:.2}%",
-            gate.p95_improved_scenarios,
+            "Benchmark gate summary: comparable {}, missing baseline {}, failed {}, worst p95 regression {:.2}%, worst mean regression {:.2}%, worst peak memory regression {:.2}%",
             gate.comparable_scenarios,
-            gate.memory_improved_scenarios,
-            gate.comparable_scenarios,
-            gate.worst_p95_regression_pct
+            gate.missing_baseline_scenarios.len(),
+            gate.failed_scenarios.len(),
+            gate.worst_p95_regression_pct,
+            gate.worst_mean_regression_pct,
+            gate.worst_peak_memory_regression_pct,
         );
-        if args.enforce_gates && !gate.passed {
-            anyhow::bail!(
-                "benchmark gates failed: requires >=2 scenarios with >=30% p95 improvement, >=2 scenarios with >=30% memory reduction, and no p95 regression >5%"
+        for missing in &gate.missing_baseline_scenarios {
+            println!("  missing baseline scenario: {missing}");
+        }
+        for failure in &gate.failed_scenarios {
+            println!(
+                "  regression {}: p95 +{:.2}% (limit {:.2}%), mean +{:.2}% (limit {:.2}%), peak memory +{:.2}% (limit {:.2}%)",
+                failure.name,
+                failure.p95_regression_pct,
+                thresholds.p95_regression_limit_pct,
+                failure.mean_regression_pct,
+                thresholds.mean_regression_limit_pct,
+                failure.peak_memory_regression_pct,
+                thresholds.peak_memory_regression_limit_pct,
             );
+        }
+        if args.enforce_gates && !gate.passed {
+            anyhow::bail!("benchmark regression gates failed");
         }
     }
 
@@ -144,10 +176,28 @@ fn main() -> Result<()> {
 #[derive(Debug, Default)]
 struct GateEvaluation {
     comparable_scenarios: usize,
-    p95_improved_scenarios: usize,
-    memory_improved_scenarios: usize,
+    missing_baseline_scenarios: Vec<String>,
+    failed_scenarios: Vec<ScenarioRegression>,
     worst_p95_regression_pct: f64,
+    worst_mean_regression_pct: f64,
+    worst_peak_memory_regression_pct: f64,
     passed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_field_names)]
+struct GateThresholds {
+    p95_regression_limit_pct: f64,
+    mean_regression_limit_pct: f64,
+    peak_memory_regression_limit_pct: f64,
+}
+
+#[derive(Debug)]
+struct ScenarioRegression {
+    name: String,
+    p95_regression_pct: f64,
+    mean_regression_pct: f64,
+    peak_memory_regression_pct: f64,
 }
 
 fn scenario_names(name: &str) -> Result<Vec<String>> {
@@ -168,6 +218,13 @@ fn scenario_names(name: &str) -> Result<Vec<String>> {
         }
         other => anyhow::bail!("unknown scenario: {other}"),
     }
+}
+
+fn validate_gate_args(args: &Args) -> Result<()> {
+    if args.enforce_gates && args.baseline.is_none() {
+        anyhow::bail!("--enforce-gates requires --baseline");
+    }
+    Ok(())
 }
 
 fn setup_store() -> Result<(Arc<EventStore>, tempfile::TempDir)> {
@@ -543,7 +600,11 @@ fn load_report(path: &PathBuf) -> Result<Report> {
     Ok(report)
 }
 
-fn evaluate_gates(baseline: &Report, current: &Report) -> GateEvaluation {
+fn evaluate_gates(
+    baseline: &Report,
+    current: &Report,
+    thresholds: GateThresholds,
+) -> GateEvaluation {
     let mut evaluation = GateEvaluation::default();
     let baseline_by_name: std::collections::HashMap<&str, &ScenarioResult> = baseline
         .scenarios
@@ -553,15 +614,22 @@ fn evaluate_gates(baseline: &Report, current: &Report) -> GateEvaluation {
 
     for current_scenario in &current.scenarios {
         let Some(base_scenario) = baseline_by_name.get(current_scenario.name.as_str()) else {
+            evaluation
+                .missing_baseline_scenarios
+                .push(current_scenario.name.clone());
             continue;
         };
         evaluation.comparable_scenarios += 1;
 
-        let p95_improvement_pct = improvement_pct(
+        let p95_regression_pct = regression_pct(
             base_scenario.latency_ms.p95,
             current_scenario.latency_ms.p95,
         );
-        let memory_improvement_pct = improvement_pct(
+        let mean_regression_pct = regression_pct(
+            base_scenario.latency_ms.mean,
+            current_scenario.latency_ms.mean,
+        );
+        let peak_memory_regression_pct = regression_pct(
             #[allow(clippy::cast_precision_loss)]
             {
                 base_scenario.peak_memory_bytes as f64
@@ -571,33 +639,33 @@ fn evaluate_gates(baseline: &Report, current: &Report) -> GateEvaluation {
                 current_scenario.peak_memory_bytes as f64
             },
         );
-        let p95_regression_pct = regression_pct(
-            base_scenario.latency_ms.p95,
-            current_scenario.latency_ms.p95,
-        );
-
-        if p95_improvement_pct >= 30.0 {
-            evaluation.p95_improved_scenarios += 1;
-        }
-        if memory_improvement_pct >= 30.0 {
-            evaluation.memory_improved_scenarios += 1;
-        }
         if p95_regression_pct > evaluation.worst_p95_regression_pct {
             evaluation.worst_p95_regression_pct = p95_regression_pct;
         }
+        if mean_regression_pct > evaluation.worst_mean_regression_pct {
+            evaluation.worst_mean_regression_pct = mean_regression_pct;
+        }
+        if peak_memory_regression_pct > evaluation.worst_peak_memory_regression_pct {
+            evaluation.worst_peak_memory_regression_pct = peak_memory_regression_pct;
+        }
+
+        if p95_regression_pct > thresholds.p95_regression_limit_pct
+            || mean_regression_pct > thresholds.mean_regression_limit_pct
+            || peak_memory_regression_pct > thresholds.peak_memory_regression_limit_pct
+        {
+            evaluation.failed_scenarios.push(ScenarioRegression {
+                name: current_scenario.name.clone(),
+                p95_regression_pct,
+                mean_regression_pct,
+                peak_memory_regression_pct,
+            });
+        }
     }
 
-    evaluation.passed = evaluation.p95_improved_scenarios >= 2
-        && evaluation.memory_improved_scenarios >= 2
-        && evaluation.worst_p95_regression_pct <= 5.0;
+    evaluation.passed = evaluation.comparable_scenarios > 0
+        && evaluation.missing_baseline_scenarios.is_empty()
+        && evaluation.failed_scenarios.is_empty();
     evaluation
-}
-
-fn improvement_pct(baseline: f64, current: f64) -> f64 {
-    if baseline <= 0.0 {
-        return 0.0;
-    }
-    ((baseline - current) / baseline) * 100.0
 }
 
 fn regression_pct(baseline: f64, current: f64) -> f64 {
@@ -611,6 +679,29 @@ fn regression_pct(baseline: f64, current: f64) -> f64 {
 mod tests {
     use super::*;
 
+    fn thresholds() -> GateThresholds {
+        GateThresholds {
+            p95_regression_limit_pct: 5.0,
+            mean_regression_limit_pct: 10.0,
+            peak_memory_regression_limit_pct: 10.0,
+        }
+    }
+
+    fn scenario(name: &str, p95: f64, mean: f64, peak_memory_bytes: u64) -> ScenarioResult {
+        ScenarioResult {
+            name: name.into(),
+            iterations: 1,
+            latency_ms: LatencyStats {
+                p50: p95,
+                p95,
+                mean,
+                min: p95,
+                max: p95,
+            },
+            peak_memory_bytes,
+        }
+    }
+
     #[test]
     fn scenario_names_all_includes_new_scenarios() {
         let names = scenario_names("all").unwrap();
@@ -622,52 +713,81 @@ mod tests {
     fn evaluate_gates_counts_only_comparable_scenarios() {
         let baseline = Report {
             generated_at: "2026-01-01T00:00:00Z".into(),
-            scenarios: vec![ScenarioResult {
-                name: "prompt_text_only".into(),
-                iterations: 1,
-                latency_ms: LatencyStats {
-                    p50: 10.0,
-                    p95: 10.0,
-                    mean: 10.0,
-                    min: 10.0,
-                    max: 10.0,
-                },
-                peak_memory_bytes: 100,
-            }],
+            scenarios: vec![scenario("prompt_text_only", 10.0, 10.0, 100)],
         };
         let current = Report {
             generated_at: "2026-01-02T00:00:00Z".into(),
             scenarios: vec![
-                ScenarioResult {
-                    name: "prompt_text_only".into(),
-                    iterations: 1,
-                    latency_ms: LatencyStats {
-                        p50: 5.0,
-                        p95: 5.0,
-                        mean: 5.0,
-                        min: 5.0,
-                        max: 5.0,
-                    },
-                    peak_memory_bytes: 50,
-                },
-                ScenarioResult {
-                    name: "ws_session_fanout".into(),
-                    iterations: 1,
-                    latency_ms: LatencyStats {
-                        p50: 1.0,
-                        p95: 1.0,
-                        mean: 1.0,
-                        min: 1.0,
-                        max: 1.0,
-                    },
-                    peak_memory_bytes: 10,
-                },
+                scenario("prompt_text_only", 5.0, 5.0, 50),
+                scenario("ws_session_fanout", 1.0, 1.0, 10),
             ],
         };
 
-        let evaluation = evaluate_gates(&baseline, &current);
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
         assert_eq!(evaluation.comparable_scenarios, 1);
-        assert_eq!(evaluation.p95_improved_scenarios, 1);
-        assert_eq!(evaluation.memory_improved_scenarios, 1);
+        assert_eq!(
+            evaluation.missing_baseline_scenarios,
+            vec!["ws_session_fanout".to_string()]
+        );
+        assert!(!evaluation.passed);
+    }
+
+    #[test]
+    fn evaluate_gates_fails_when_regression_exceeds_threshold() {
+        let baseline = Report {
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            scenarios: vec![scenario("prompt_text_only", 100.0, 100.0, 100)],
+        };
+        let current = Report {
+            generated_at: "2026-01-02T00:00:00Z".into(),
+            scenarios: vec![scenario("prompt_text_only", 106.0, 112.0, 111)],
+        };
+
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
+        assert!(!evaluation.passed);
+        assert_eq!(evaluation.failed_scenarios.len(), 1);
+        assert_eq!(evaluation.failed_scenarios[0].name, "prompt_text_only");
+        assert!(evaluation.failed_scenarios[0].p95_regression_pct > 5.0);
+    }
+
+    #[test]
+    fn evaluate_gates_passes_when_within_thresholds() {
+        let baseline = Report {
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            scenarios: vec![
+                scenario("prompt_text_only", 100.0, 100.0, 100),
+                scenario("ws_session_fanout", 20.0, 20.0, 200),
+            ],
+        };
+        let current = Report {
+            generated_at: "2026-01-02T00:00:00Z".into(),
+            scenarios: vec![
+                scenario("prompt_text_only", 104.0, 108.0, 109),
+                scenario("ws_session_fanout", 20.5, 21.0, 210),
+            ],
+        };
+
+        let evaluation = evaluate_gates(&baseline, &current, thresholds());
+        assert!(evaluation.passed);
+        assert!(evaluation.failed_scenarios.is_empty());
+        assert!(evaluation.missing_baseline_scenarios.is_empty());
+    }
+
+    #[test]
+    fn validate_gate_args_requires_baseline_when_enforcing() {
+        let args = Args {
+            scenario: "all".into(),
+            iterations: 1,
+            concurrency: 1,
+            output: None,
+            baseline: None,
+            enforce_gates: true,
+            max_p95_regression_pct: 5.0,
+            max_mean_regression_pct: 10.0,
+            max_peak_memory_regression_pct: 10.0,
+        };
+
+        let error = validate_gate_args(&args).unwrap_err();
+        assert!(error.to_string().contains("--enforce-gates requires --baseline"));
     }
 }
