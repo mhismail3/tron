@@ -6,4 +6,5 @@
 
 #![deny(unsafe_code)]
 
+#[path = "bootstrap/db_path_policy.rs"]
 pub mod db_path_policy;

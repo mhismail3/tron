@@ -15,8 +15,10 @@
 //! Standalone (no tron crate dependencies).
 //! Depended on by: tron-server.
 
+#[path = "runtime/mlx.rs"]
 pub mod mlx;
 pub mod types;
+#[path = "runtime/venv.rs"]
 pub mod venv;
 
 pub use mlx::MlxEngine;

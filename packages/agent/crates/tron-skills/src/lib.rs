@@ -36,12 +36,20 @@
 
 #![deny(unsafe_code)]
 
+#[path = "model/constants.rs"]
 pub mod constants;
+#[path = "model/denials.rs"]
 pub mod denials;
 pub mod errors;
+#[path = "runtime/injector.rs"]
 pub mod injector;
+#[path = "discovery/loader.rs"]
 pub mod loader;
+#[path = "discovery/parser.rs"]
 pub mod parser;
+#[path = "discovery/registry.rs"]
 pub mod registry;
+#[path = "runtime/tracker.rs"]
 pub mod tracker;
+#[path = "model/types.rs"]
 pub mod types;

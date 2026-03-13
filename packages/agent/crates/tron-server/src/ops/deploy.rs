@@ -1,5 +1,6 @@
 //! Server-side deploy: types, sentinel I/O, atomic binary install, Axum handlers.
 
+#[path = "deploy/service.rs"]
 mod service;
 
 use std::io;

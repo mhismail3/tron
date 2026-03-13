@@ -20,10 +20,13 @@
 
 #![deny(unsafe_code)]
 
+#[path = "event/envelope.rs"]
 pub mod envelope;
 pub mod errors;
+#[path = "event/factory.rs"]
 pub mod factory;
 pub mod memory;
+#[path = "event/reconstruct.rs"]
 pub mod reconstruct;
 pub mod sqlite;
 pub mod store;

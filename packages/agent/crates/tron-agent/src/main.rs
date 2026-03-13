@@ -40,6 +40,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[path = "bootstrap/provider_factory.rs"]
 mod provider_factory;
 mod providers;
 

@@ -28,19 +28,28 @@
 
 pub mod anthropic;
 pub mod auth;
+#[path = "shared/context_composition.rs"]
 pub mod context_composition;
+#[path = "shared/error_parsing.rs"]
 pub mod error_parsing;
 pub mod google;
+#[path = "shared/health.rs"]
 pub mod health;
+#[path = "shared/id_remapping.rs"]
 pub mod id_remapping;
 pub mod minimax;
 pub mod models;
 pub mod openai;
+#[path = "shared/provider.rs"]
 pub mod provider;
+#[path = "shared/retry.rs"]
 pub mod retry;
+#[path = "shared/sse.rs"]
 pub mod sse;
+#[path = "shared/stream_pipeline.rs"]
 pub mod stream_pipeline;
 pub mod tokens;
+#[path = "shared/tool_parsing.rs"]
 pub mod tool_parsing;
 
 pub use context_composition::{

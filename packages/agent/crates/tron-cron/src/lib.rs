@@ -17,15 +17,24 @@
 //! injected via the [`executor::AgentTurnExecutor`] trait, implemented
 //! in `tron-agent/main.rs`.
 
+#[path = "runtime/clock.rs"]
 pub mod clock;
+#[path = "domain/config.rs"]
 pub mod config;
+#[path = "execution/delivery.rs"]
 pub mod delivery;
 pub mod errors;
+#[path = "execution/executor.rs"]
 pub mod executor;
+#[path = "runtime/migrations.rs"]
 pub mod migrations;
+#[path = "domain/schedule.rs"]
 pub mod schedule;
+#[path = "runtime/scheduler.rs"]
 pub mod scheduler;
+#[path = "runtime/store.rs"]
 pub mod store;
+#[path = "domain/types.rs"]
 pub mod types;
 
 // Re-exports for convenience

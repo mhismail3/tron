@@ -246,9 +246,7 @@ fn scenario_names(name: &str) -> Result<Vec<String>> {
         | "prompt_with_tools"
         | "concurrent_sessions"
         | "session_create"
-        | "ws_session_fanout" => {
-            Ok(vec![name.to_string()])
-        }
+        | "ws_session_fanout" => Ok(vec![name.to_string()]),
         other => anyhow::bail!("unknown scenario: {other}"),
     }
 }
@@ -924,6 +922,10 @@ mod tests {
         };
 
         let error = validate_gate_args(&args).unwrap_err();
-        assert!(error.to_string().contains("--enforce-gates requires --baseline"));
+        assert!(
+            error
+                .to_string()
+                .contains("--enforce-gates requires --baseline")
+        );
     }
 }

@@ -31,6 +31,7 @@
 #![deny(unsafe_code)]
 
 pub mod errors;
+#[path = "storage/loader.rs"]
 pub mod loader;
 pub mod types;
 

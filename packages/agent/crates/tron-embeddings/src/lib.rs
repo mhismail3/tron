@@ -16,16 +16,23 @@
 #![deny(unsafe_code)]
 
 pub mod config;
+#[path = "pipeline/controller.rs"]
 pub mod controller;
 pub mod errors;
+#[path = "retrieval/hybrid.rs"]
 pub mod hybrid;
+#[path = "retrieval/normalize.rs"]
 pub mod normalize;
 #[cfg(feature = "ort")]
+#[path = "pipeline/ort_service.rs"]
 pub mod ort_service;
 #[cfg(feature = "ort")]
 pub use ort_service::OnnxEmbeddingService;
+#[path = "pipeline/service.rs"]
 pub mod service;
+#[path = "retrieval/text.rs"]
 pub mod text;
+#[path = "retrieval/vector_repo.rs"]
 pub mod vector_repo;
 
 pub use config::EmbeddingConfig;
