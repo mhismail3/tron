@@ -174,36 +174,37 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Result of forking a session.
+    /// Fork a session, optionally from a specific event (defaults to HEAD).
     pub fn fork_session(
         &self,
         session_id: &str,
+        from_event_id: Option<&str>,
         model: Option<&str>,
         title: Option<&str>,
     ) -> Result<ForkSessionResult, RuntimeError> {
-        // Get the session's head event ID for forking
-        let session = self
-            .event_store
-            .get_session(session_id)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
-            .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
-
-        let head_event_id = session
-            .head_event_id
-            .as_deref()
-            .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?;
-
-        let forked_from_event_id = head_event_id.to_owned();
+        let fork_event_id = match from_event_id {
+            Some(id) => id.to_owned(),
+            None => {
+                let session = self
+                    .event_store
+                    .get_session(session_id)
+                    .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+                    .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
+                session
+                    .head_event_id
+                    .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?
+            }
+        };
 
         let result = self
             .event_store
-            .fork(head_event_id, &tron_events::ForkOptions { model, title })
+            .fork(&fork_event_id, &tron_events::ForkOptions { model, title })
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         Ok(ForkSessionResult {
             new_session_id: result.session.id,
             root_event_id: result.fork_event.id,
-            forked_from_event_id,
+            forked_from_event_id: fork_event_id,
         })
     }
 
@@ -468,11 +469,81 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"))
             .unwrap();
 
-        let result = mgr.fork_session(&sid, None, Some("forked")).unwrap();
+        let result = mgr.fork_session(&sid, None, None, Some("forked")).unwrap();
         assert!(!result.new_session_id.is_empty());
         assert_ne!(result.new_session_id, sid);
         assert!(!result.root_event_id.is_empty());
         assert!(!result.forked_from_event_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_specific_event() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Append an event so we have something besides the root to fork from
+        let evt = mgr
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: serde_json::json!({"text": "hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Append another event so HEAD is different from our target
+        let _ = mgr
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageAssistant,
+                payload: serde_json::json!({"text": "world"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = mgr
+            .fork_session(&sid, Some(&evt.id), None, None)
+            .unwrap();
+        assert_eq!(
+            result.forked_from_event_id, evt.id,
+            "should fork from the specified event, not HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_head_when_no_event_id() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Get the HEAD event
+        let session = mgr.event_store.get_session(&sid).unwrap().unwrap();
+        let head_event_id = session.head_event_id.unwrap();
+
+        let result = mgr.fork_session(&sid, None, None, None).unwrap();
+        assert_eq!(
+            result.forked_from_event_id, head_event_id,
+            "fork with no event ID should fork from HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_nonexistent_event_fails() {
+        let mgr = make_manager();
+        let _sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        let result = mgr.fork_session(&_sid, Some("nonexistent-event-id"), None, None);
+        assert!(
+            result.is_err(),
+            "fork from nonexistent event should return error"
+        );
     }
 
     #[tokio::test]

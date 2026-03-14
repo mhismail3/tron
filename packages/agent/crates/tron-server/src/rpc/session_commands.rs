@@ -92,6 +92,7 @@ impl SessionCommandService {
     pub(crate) async fn fork(
         ctx: &RpcContext,
         session_id: String,
+        from_event_id: Option<String>,
         title: Option<String>,
     ) -> Result<Value, RpcError> {
         let session_manager = ctx.session_manager.clone();
@@ -100,7 +101,12 @@ impl SessionCommandService {
         let (new_session_id, forked_from_event_id, root_event_id) = ctx
             .run_blocking("session.fork", move || {
                 let result = session_manager
-                    .fork_session(&session_id_for_fork, None, title_for_fork.as_deref())
+                    .fork_session(
+                        &session_id_for_fork,
+                        from_event_id.as_deref(),
+                        None,
+                        title_for_fork.as_deref(),
+                    )
                     .map_err(|error| RpcError::NotFound {
                         code: errors::SESSION_NOT_FOUND.into(),
                         message: error.to_string(),

@@ -86,8 +86,9 @@ impl MethodHandler for ForkSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.fork", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let from_event_id = opt_string(params.as_ref(), "fromEventId");
         let title = opt_string(params.as_ref(), "title");
-        SessionCommandService::fork(ctx, session_id, title).await
+        SessionCommandService::fork(ctx, session_id, from_event_id, title).await
     }
 }
 
@@ -457,6 +458,72 @@ mod tests {
         );
         assert!(!result["forkedFromEventId"].as_str().unwrap().is_empty());
         assert!(!result["rootEventId"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fork_from_specific_event() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Append two events so we can fork from the first one (not HEAD)
+        let first = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: json!({"text": "first"}),
+                parent_id: None,
+            })
+            .unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageAssistant,
+                payload: json!({"text": "second"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = ForkSessionHandler
+            .handle(
+                Some(json!({"sessionId": sid, "fromEventId": first.id})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["forkedFromEventId"].as_str().unwrap(),
+            first.id,
+            "should fork from the specified event, not HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_without_from_event_id_forks_from_head() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Get the HEAD event ID
+        let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
+        let head_event_id = session.head_event_id.unwrap();
+
+        let result = ForkSessionHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            result["forkedFromEventId"].as_str().unwrap(),
+            head_event_id,
+            "fork without fromEventId should fork from HEAD"
+        );
     }
 
     #[tokio::test]

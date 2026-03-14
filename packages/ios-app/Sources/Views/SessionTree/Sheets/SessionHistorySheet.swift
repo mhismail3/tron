@@ -204,6 +204,8 @@ struct ForkConfirmationSheet: View {
             let newSessionId = try await eventStoreManager.forkSession(sessionId, fromEventId: eventId)
             logger.debug("Fork succeeded: newSessionId=\(newSessionId)", category: .session)
             eventStoreManager.setActiveSession(newSessionId)
+            eventStoreManager.loadSessions()
+            NotificationCenter.default.post(name: .switchToSession, object: newSessionId)
             dismiss()
             onDismissParent()
         } catch {

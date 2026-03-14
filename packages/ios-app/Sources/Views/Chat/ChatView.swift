@@ -743,5 +743,6 @@ extension Notification.Name {
     static let showSettingsAction = Notification.Name("showSettingsAction")
     static let pendingShareContent = Notification.Name("pendingShareContent")
     static let pendingShareMessage = Notification.Name("pendingShareMessage")
+    static let switchToSession = Notification.Name("tron.switchToSession")
     // modelPickerAction is defined in InputBar.swift
 }

@@ -112,6 +112,11 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
                 showSettings = true
             }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
+                if let sessionId = notification.object as? String {
+                    selectedSessionId = sessionId
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
                 handlePendingShare()
             }
