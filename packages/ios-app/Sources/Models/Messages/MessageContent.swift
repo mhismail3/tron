@@ -50,8 +50,8 @@ enum MessageContent: Equatable {
         .systemEvent(.compactionInProgress(reason: reason))
     }
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?) -> MessageContent {
-        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> MessageContent {
+        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
     }
     /// In-chat notification for context clearing
     static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> MessageContent {

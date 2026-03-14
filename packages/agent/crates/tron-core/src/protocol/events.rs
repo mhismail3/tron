@@ -558,6 +558,10 @@ tron_events! {
         summary: Option<String>,
         #[serde(rename = "estimatedContextTokens", skip_serializing_if = "Option::is_none")]
         estimated_context_tokens: Option<u64>,
+        #[serde(rename = "preservedTurns", skip_serializing_if = "Option::is_none")]
+        preserved_turns: Option<usize>,
+        #[serde(rename = "summarizedTurns", skip_serializing_if = "Option::is_none")]
+        summarized_turns: Option<usize>,
     } => "compaction_complete",
 
     // -- Error / Retry --
@@ -1250,6 +1254,8 @@ mod tests {
             reason: Some(CompactionReason::ThresholdExceeded),
             summary: Some("Summarized 50 messages".into()),
             estimated_context_tokens: Some(45_000),
+            preserved_turns: Some(3),
+            summarized_turns: Some(5),
         };
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["tokensBefore"], 100_000);
@@ -1461,6 +1467,8 @@ mod tests {
                 reason: None,
                 summary: None,
                 estimated_context_tokens: None,
+                preserved_turns: None,
+                summarized_turns: None,
             },
             TronEvent::Error {
                 base: base.clone(),

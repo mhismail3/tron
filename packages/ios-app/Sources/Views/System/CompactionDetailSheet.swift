@@ -8,6 +8,8 @@ struct CompactionDetailSheet: View {
     let tokensAfter: Int
     let reason: String
     let summary: String?
+    let preservedTurns: Int?
+    let summarizedTurns: Int?
     @Environment(\.dismiss) private var dismiss
 
     private var tokensSaved: Int { tokensBefore - tokensAfter }
@@ -70,6 +72,14 @@ struct CompactionDetailSheet: View {
                     CompactionStatBadge(label: "Saved", value: TokenFormatter.format(tokensSaved), color: .mint)
                     CompactionStatBadge(label: "Reduction", value: "\(compressionPercent)%", color: .mint)
                     CompactionStatBadge(label: reasonLabel, value: "", color: .mint)
+                }
+
+                // Turn stats (only shown when available)
+                if let preserved = preservedTurns, let summarized = summarizedTurns {
+                    HStack(spacing: 16) {
+                        CompactionStatBadge(label: "Preserved", value: "\(preserved) turns", color: .mint)
+                        CompactionStatBadge(label: "Summarized", value: "\(summarized) turns", color: .mint)
+                    }
                 }
             }
             .padding(14)

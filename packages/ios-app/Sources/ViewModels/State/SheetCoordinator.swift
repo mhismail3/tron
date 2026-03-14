@@ -82,13 +82,17 @@ final class SheetCoordinator {
         tokensBefore: Int,
         tokensAfter: Int,
         reason: String,
-        summary: String?
+        summary: String?,
+        preservedTurns: Int? = nil,
+        summarizedTurns: Int? = nil
     ) {
         present(.compactionDetail(CompactionDetailData(
             tokensBefore: tokensBefore,
             tokensAfter: tokensAfter,
             reason: reason,
-            summary: summary
+            summary: summary,
+            preservedTurns: preservedTurns,
+            summarizedTurns: summarizedTurns
         )))
     }
 

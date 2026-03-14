@@ -121,7 +121,7 @@ impl TronSettings {
 
         let cs = &mut self.context.compactor;
         clamp_ratio(&mut cs.compaction_threshold, "compaction_threshold");
-        clamp_ratio(&mut cs.preserve_ratio, "preserve_ratio");
+        clamp_ratio(&mut cs.max_preserved_ratio, "max_preserved_ratio");
         clamp_option_ratio(&mut cs.trigger_token_threshold, "trigger_token_threshold");
         clamp_option_ratio(&mut cs.alert_zone_threshold, "alert_zone_threshold");
 
@@ -302,11 +302,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_clamps_preserve_ratio() {
+    fn validate_clamps_max_preserved_ratio() {
         let mut s = TronSettings::default();
-        s.context.compactor.preserve_ratio = -0.5;
+        s.context.compactor.max_preserved_ratio = -0.5;
         s.validate();
-        assert!((s.context.compactor.preserve_ratio - 0.0).abs() < f64::EPSILON);
+        assert!((s.context.compactor.max_preserved_ratio - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]

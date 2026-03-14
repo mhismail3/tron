@@ -444,6 +444,8 @@ impl CompactionHandler {
                     reason: Some(reason.clone()),
                     summary: summary_text.clone(),
                     estimated_context_tokens: Some(tokens_after),
+                    preserved_turns: Some(compaction_result.preserved_turns),
+                    summarized_turns: Some(compaction_result.summarized_turns),
                 });
 
                 if compaction_result.success
@@ -458,6 +460,9 @@ impl CompactionHandler {
                         "reason": reason_str,
                         "summary": summary_text,
                         "estimatedContextTokens": tokens_after as i64,
+                        "preservedTurns": compaction_result.preserved_turns,
+                        "summarizedTurns": compaction_result.summarized_turns,
+                        "preservedMessages": compaction_result.preserved_messages,
                     });
                     if let Err(error) = persister
                         .append_background(
@@ -486,6 +491,8 @@ impl CompactionHandler {
                     reason: Some(reason),
                     summary: Some(format!("Compaction failed: {e}")),
                     estimated_context_tokens: Some(tokens_before),
+                    preserved_turns: None,
+                    summarized_turns: None,
                 });
                 counter!("compaction_total", "status" => "failure").increment(1);
                 tracing::warn!(session_id, tokens_before, error = %e, "compaction failed");

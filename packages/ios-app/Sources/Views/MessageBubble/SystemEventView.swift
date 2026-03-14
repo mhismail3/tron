@@ -31,7 +31,7 @@ struct SystemEventView: View {
             tokensAfter: tokensAfter,
             reason: reason,
             onTap: isInProgress ? nil : {
-                onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
+                onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: event.compactionPreservedTurns, summarizedTurns: event.compactionSummarizedTurns))
             }
         )
     }

@@ -480,7 +480,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         max_turns: settings.agent.max_turns,
         compaction: tron_runtime::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
-            preserve_ratio: compactor_settings.preserve_ratio,
+            preserve_recent_turns: compactor_settings.preserve_recent_count,
+            max_preserved_ratio: compactor_settings.max_preserved_ratio,
             context_limit: tron_llm::model_context_window(&model),
         },
         retry: Some(tron_core::retry::RetryConfig {

@@ -57,6 +57,8 @@ struct CompactionResult {
     let reason: String
     let summary: String?
     let estimatedContextTokens: Int?
+    let preservedTurns: Int?
+    let summarizedTurns: Int?
     var tokensSaved: Int { tokensBefore - tokensAfter }
 }
 
@@ -335,7 +337,9 @@ final class ChatEventHandler {
             tokensAfter: result.tokensAfter,
             reason: result.reason,
             summary: result.summary,
-            estimatedContextTokens: result.estimatedContextTokens
+            estimatedContextTokens: result.estimatedContextTokens,
+            preservedTurns: result.preservedTurns,
+            summarizedTurns: result.summarizedTurns
         )
     }
 

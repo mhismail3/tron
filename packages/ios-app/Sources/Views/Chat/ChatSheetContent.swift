@@ -62,7 +62,9 @@ struct ChatSheetContent: View {
                 tokensBefore: data.tokensBefore,
                 tokensAfter: data.tokensAfter,
                 reason: data.reason,
-                summary: data.summary
+                summary: data.summary,
+                preservedTurns: data.preservedTurns,
+                summarizedTurns: data.summarizedTurns
             )
             .adaptivePresentationDetents([.medium, .large])
 

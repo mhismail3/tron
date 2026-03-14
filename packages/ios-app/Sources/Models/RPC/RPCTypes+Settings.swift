@@ -84,27 +84,32 @@ struct ServerSettings: Decodable {
         let alertZoneThreshold: Double
         let defaultTurnFallback: Int
         let alertTurnFallback: Int
+        let maxPreservedRatio: Double
 
         static let defaults = CompactionSettings(
             preserveRecentCount: 5, forceAlways: false,
             triggerTokenThreshold: 0.70, alertZoneThreshold: 0.50,
-            defaultTurnFallback: 8, alertTurnFallback: 5
+            defaultTurnFallback: 8, alertTurnFallback: 5,
+            maxPreservedRatio: 0.20
         )
 
         private enum CodingKeys: String, CodingKey {
             case preserveRecentCount, forceAlways, triggerTokenThreshold
             case alertZoneThreshold, defaultTurnFallback, alertTurnFallback
+            case maxPreservedRatio
         }
 
         init(preserveRecentCount: Int, forceAlways: Bool,
              triggerTokenThreshold: Double, alertZoneThreshold: Double,
-             defaultTurnFallback: Int, alertTurnFallback: Int) {
+             defaultTurnFallback: Int, alertTurnFallback: Int,
+             maxPreservedRatio: Double = 0.20) {
             self.preserveRecentCount = preserveRecentCount
             self.forceAlways = forceAlways
             self.triggerTokenThreshold = triggerTokenThreshold
             self.alertZoneThreshold = alertZoneThreshold
             self.defaultTurnFallback = defaultTurnFallback
             self.alertTurnFallback = alertTurnFallback
+            self.maxPreservedRatio = maxPreservedRatio
         }
 
         init(from decoder: Decoder) throws {
@@ -115,6 +120,7 @@ struct ServerSettings: Decodable {
             alertZoneThreshold = (try? container.decodeIfPresent(Double.self, forKey: .alertZoneThreshold)) ?? 0.50
             defaultTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .defaultTurnFallback)) ?? 8
             alertTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .alertTurnFallback)) ?? 5
+            maxPreservedRatio = (try? container.decodeIfPresent(Double.self, forKey: .maxPreservedRatio)) ?? 0.20
         }
     }
 
@@ -494,6 +500,7 @@ struct ServerSettingsUpdate: Encodable {
             var alertZoneThreshold: Double?
             var defaultTurnFallback: Int?
             var alertTurnFallback: Int?
+            var maxPreservedRatio: Double?
         }
 
         struct MemoryUpdate: Encodable {

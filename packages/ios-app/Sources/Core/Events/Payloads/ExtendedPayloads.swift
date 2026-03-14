@@ -111,6 +111,9 @@ struct CompactBoundaryPayload {
     let reason: String
     let summary: String?
     let estimatedContextTokens: Int?
+    let preservedTurns: Int?
+    let summarizedTurns: Int?
+    let preservedMessages: Int?
 
     init?(from payload: [String: AnyCodable]) {
         // Range fields are optional (not present in auto-compaction events)
@@ -138,6 +141,11 @@ struct CompactBoundaryPayload {
 
         // Estimated total context tokens after compaction (system + tools + rules + messages)
         self.estimatedContextTokens = payload.int("estimatedContextTokens")
+
+        // Turn counts from turn-based compaction
+        self.preservedTurns = payload.int("preservedTurns")
+        self.summarizedTurns = payload.int("summarizedTurns")
+        self.preservedMessages = payload.int("preservedMessages")
     }
 }
 

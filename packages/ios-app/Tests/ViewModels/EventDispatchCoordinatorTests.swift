@@ -249,7 +249,9 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             compressionRatio: 0.6,
             reason: "Context limit approaching",
             summary: "Summarized conversation history",
-            estimatedContextTokens: nil
+            estimatedContextTokens: nil,
+            preservedTurns: nil,
+            summarizedTurns: nil
         )
 
         // When: Dispatching

@@ -4,6 +4,7 @@ struct CompactionSection: View {
     @Binding var triggerTokenThreshold: Double
     @Binding var defaultTurnFallback: Int
     @Binding var preserveRecentCount: Int
+    @Binding var maxPreservedRatio: Double
     @Binding var forceAlwaysCompact: Bool
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
@@ -87,6 +88,37 @@ struct CompactionSection: View {
             }
         } footer: {
             Text("Number of recent turns kept verbatim after compaction. The rest is summarized.")
+                .font(TronTypography.caption2)
+        }
+
+        // Max Preserved Context slider (10%–50%, step 5%)
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Max Preserved Context", systemImage: "chart.pie")
+                        .font(TronTypography.subheadline)
+                    Spacer()
+                    Text("\(Int(maxPreservedRatio * 100))%")
+                        .font(TronTypography.subheadline)
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $maxPreservedRatio,
+                    in: 0.10...0.50,
+                    step: 0.05
+                )
+                .tint(.tronEmerald)
+            }
+            .onChange(of: maxPreservedRatio) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(
+                        maxPreservedRatio: newValue
+                    )))
+                }
+            }
+        } footer: {
+            Text("Maximum % of context window that preserved turns can consume.")
                 .font(TronTypography.caption2)
         }
 

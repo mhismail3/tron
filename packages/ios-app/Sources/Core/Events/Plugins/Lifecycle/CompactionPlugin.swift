@@ -20,6 +20,8 @@ enum CompactionPlugin: DispatchableEventPlugin {
             let reason: String?
             let summary: String?
             let estimatedContextTokens: Int?
+            let preservedTurns: Int?
+            let summarizedTurns: Int?
         }
     }
 
@@ -32,6 +34,8 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let reason: String
         let summary: String?
         let estimatedContextTokens: Int?
+        let preservedTurns: Int?
+        let summarizedTurns: Int?
 
         var tokensSaved: Int { tokensBefore - tokensAfter }
     }
@@ -47,7 +51,9 @@ enum CompactionPlugin: DispatchableEventPlugin {
             compressionRatio: ratio,
             reason: event.data.reason ?? "auto",
             summary: event.data.summary,
-            estimatedContextTokens: event.data.estimatedContextTokens
+            estimatedContextTokens: event.data.estimatedContextTokens,
+            preservedTurns: event.data.preservedTurns,
+            summarizedTurns: event.data.summarizedTurns
         )
     }
 

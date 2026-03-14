@@ -325,6 +325,19 @@ impl Message {
         }
     }
 
+    /// Returns `true` if this is a compaction summary message (not a real user turn).
+    #[must_use]
+    pub fn is_compaction_summary(&self) -> bool {
+        matches!(self, Self::User { content: UserMessageContent::Text(t), .. }
+            if t.starts_with("[Context from earlier in this conversation]"))
+    }
+
+    /// Returns `true` if this is a real user turn (user message, not a compaction summary).
+    #[must_use]
+    pub fn is_real_user_turn(&self) -> bool {
+        self.is_user() && !self.is_compaction_summary()
+    }
+
     /// Create an assistant message from text.
     #[must_use]
     pub fn assistant(text: impl Into<String>) -> Self {
@@ -863,5 +876,63 @@ mod tests {
         assert_eq!(Provider::OpenAi.as_str(), "openai");
         assert_eq!(Provider::OpenAiCodex.as_str(), "openai-codex");
         assert_eq!(Provider::Google.as_str(), "google");
+    }
+
+    // -- is_compaction_summary --
+
+    #[test]
+    fn is_compaction_summary_true() {
+        let msg = Message::user("[Context from earlier in this conversation]\n\nSummary here.");
+        assert!(msg.is_compaction_summary());
+    }
+
+    #[test]
+    fn is_compaction_summary_false_regular_user() {
+        let msg = Message::user("Hello, can you help me?");
+        assert!(!msg.is_compaction_summary());
+    }
+
+    #[test]
+    fn is_compaction_summary_false_assistant() {
+        let msg = Message::assistant("[Context from earlier in this conversation]");
+        assert!(!msg.is_compaction_summary());
+    }
+
+    #[test]
+    fn is_compaction_summary_false_tool_result() {
+        let msg = Message::ToolResult {
+            tool_call_id: "tc-1".into(),
+            content: ToolResultMessageContent::Text(
+                "[Context from earlier in this conversation]".into(),
+            ),
+            is_error: None,
+        };
+        assert!(!msg.is_compaction_summary());
+    }
+
+    #[test]
+    fn is_compaction_summary_false_similar_prefix() {
+        let msg = Message::user("[Context from another source]");
+        assert!(!msg.is_compaction_summary());
+    }
+
+    // -- is_real_user_turn --
+
+    #[test]
+    fn is_real_user_turn_regular() {
+        let msg = Message::user("Help me with this code.");
+        assert!(msg.is_real_user_turn());
+    }
+
+    #[test]
+    fn is_real_user_turn_compaction_summary() {
+        let msg = Message::user("[Context from earlier in this conversation]\n\nSummary.");
+        assert!(!msg.is_real_user_turn());
+    }
+
+    #[test]
+    fn is_real_user_turn_assistant() {
+        let msg = Message::assistant("Sure, I can help.");
+        assert!(!msg.is_real_user_turn());
     }
 }

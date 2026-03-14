@@ -73,8 +73,10 @@ pub struct ContextManagerConfig {
 pub struct CompactionConfig {
     /// Threshold ratio (0–1) to trigger compaction suggestion.
     pub threshold: f64,
-    /// Ratio of messages to preserve during compaction (0.0–1.0).
-    pub preserve_ratio: f64,
+    /// Number of recent user turns to preserve verbatim during compaction.
+    pub preserve_recent_turns: usize,
+    /// Maximum ratio (0.0–1.0) of context limit that preserved turns can consume.
+    pub max_preserved_ratio: f64,
     /// Model context limit in tokens.
     pub context_limit: u64,
 }
@@ -83,7 +85,8 @@ impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
             threshold: 0.70,
-            preserve_ratio: 0.20,
+            preserve_recent_turns: 5,
+            max_preserved_ratio: 0.20,
             context_limit: 200_000,
         }
     }
@@ -272,6 +275,10 @@ pub struct CompactionPreview {
     pub preserved_messages: usize,
     /// Number of messages summarized.
     pub summarized_messages: usize,
+    /// Number of user turns preserved verbatim.
+    pub preserved_turns: usize,
+    /// Number of user turns summarized.
+    pub summarized_turns: usize,
     /// Generated summary text.
     pub summary: String,
     /// Structured data extracted from the conversation.
@@ -291,6 +298,12 @@ pub struct CompactionResult {
     pub tokens_after: u64,
     /// Compression ratio.
     pub compression_ratio: f64,
+    /// Number of user turns preserved verbatim.
+    pub preserved_turns: usize,
+    /// Number of user turns summarized.
+    pub summarized_turns: usize,
+    /// Number of messages preserved.
+    pub preserved_messages: usize,
     /// Generated summary text.
     pub summary: String,
     /// Structured data extracted from the conversation.
@@ -447,7 +460,8 @@ mod tests {
     fn compaction_config_default() {
         let cfg = CompactionConfig::default();
         assert!((cfg.threshold - 0.70).abs() < f64::EPSILON);
-        assert!((cfg.preserve_ratio - 0.20).abs() < f64::EPSILON);
+        assert_eq!(cfg.preserve_recent_turns, 5);
+        assert!((cfg.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -529,12 +543,17 @@ mod tests {
             tokens_before: 50_000,
             tokens_after: 10_000,
             compression_ratio: 0.2,
+            preserved_turns: 2,
+            summarized_turns: 3,
+            preserved_messages: 4,
             summary: "User worked on auth.".into(),
             extracted_data: None,
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["success"], true);
         assert_eq!(json["tokensBefore"], 50_000);
+        assert_eq!(json["preservedTurns"], 2);
+        assert_eq!(json["summarizedTurns"], 3);
     }
 
     #[test]

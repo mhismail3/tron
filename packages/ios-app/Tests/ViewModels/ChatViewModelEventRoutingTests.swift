@@ -120,7 +120,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             compressionRatio: ratio,
             reason: reason,
             summary: summary,
-            estimatedContextTokens: nil
+            estimatedContextTokens: nil,
+            preservedTurns: nil,
+            summarizedTurns: nil
         )
     }
 
@@ -767,7 +769,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         if let lastMessage = viewModel.messages.last,
            case .systemEvent(let event) = lastMessage.content,
-           case .compaction(let before, let after, _, _) = event {
+           case .compaction(let before, let after, _, _, _, _) = event {
             XCTAssertEqual(before, 100000)
             XCTAssertEqual(after, 50000)
         } else {

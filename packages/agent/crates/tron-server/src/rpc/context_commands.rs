@@ -105,6 +105,10 @@ async fn execute_compaction(
             message: format!("Compaction failed: {error}"),
         })?;
 
+    // Total context tokens (system prompt + tools + rules + messages) — for the
+    // progress pill. Distinct from result.tokens_after which is message-only.
+    let total_context_after = context_manager.get_current_tokens();
+
     let event_store = ctx.event_store.clone();
     let session_id_for_boundary = session_id.clone();
     let summary = result.summary.clone();
@@ -119,7 +123,10 @@ async fn execute_compaction(
                     "compressionRatio": result.compression_ratio,
                     "reason": "Manual",
                     "summary": summary,
-                    "estimatedContextTokens": result.tokens_after,
+                    "estimatedContextTokens": total_context_after,
+                    "preservedTurns": result.preserved_turns,
+                    "summarizedTurns": result.summarized_turns,
+                    "preservedMessages": result.preserved_messages,
                 }),
                 parent_id: None,
             });
@@ -138,7 +145,9 @@ async fn execute_compaction(
             compression_ratio: result.compression_ratio,
             reason: Some(tron_core::events::CompactionReason::Manual),
             summary: Some(result.summary.clone()),
-            estimated_context_tokens: Some(result.tokens_after),
+            estimated_context_tokens: Some(total_context_after),
+            preserved_turns: Some(result.preserved_turns),
+            summarized_turns: Some(result.summarized_turns),
         });
 
     ctx.session_manager.invalidate_session(&session_id);

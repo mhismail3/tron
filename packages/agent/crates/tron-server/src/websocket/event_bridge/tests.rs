@@ -834,6 +834,8 @@ fn compaction_maps_to_wire_names() {
         reason: None,
         summary: None,
         estimated_context_tokens: None,
+        preserved_turns: None,
+        summarized_turns: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.compaction");
@@ -1010,6 +1012,8 @@ fn all_event_types_have_wire_mapping() {
             reason: None,
             summary: None,
             estimated_context_tokens: None,
+            preserved_turns: None,
+            summarized_turns: None,
         },
         TronEvent::ThinkingStart { base: base.clone() },
         TronEvent::ThinkingDelta {
@@ -1340,6 +1344,8 @@ fn compaction_complete_wire_format_and_data() {
         reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
         summary: Some("Compacted 3 turns into summary".into()),
         estimated_context_tokens: Some(32_000),
+        preserved_turns: Some(3),
+        summarized_turns: Some(5),
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.compaction");
@@ -1365,6 +1371,8 @@ fn compaction_complete_minimal_fields() {
         reason: None,
         summary: None,
         estimated_context_tokens: None,
+        preserved_turns: None,
+        summarized_turns: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.compaction");
@@ -1426,6 +1434,8 @@ async fn compaction_events_route_through_bridge() {
             reason: None,
             summary: Some("Summary text".into()),
             estimated_context_tokens: None,
+            preserved_turns: None,
+            summarized_turns: None,
         })
         .unwrap();
 

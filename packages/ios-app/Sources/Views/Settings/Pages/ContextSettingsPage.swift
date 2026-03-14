@@ -11,6 +11,7 @@ struct ContextSettingsPage: View {
                     triggerTokenThreshold: Bindable(settingsState).triggerTokenThreshold,
                     defaultTurnFallback: Bindable(settingsState).defaultTurnFallback,
                     preserveRecentCount: Bindable(settingsState).preserveRecentCount,
+                    maxPreservedRatio: Bindable(settingsState).maxPreservedRatio,
                     forceAlwaysCompact: Bindable(settingsState).forceAlwaysCompact,
                     updateServerSetting: updateServerSetting
                 )

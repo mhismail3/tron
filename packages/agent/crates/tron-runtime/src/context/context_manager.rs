@@ -426,7 +426,8 @@ impl ContextManager {
         let deps = ManagerCompactionDeps::from_manager(self);
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
-            self.config.compaction.preserve_ratio,
+            self.config.compaction.preserve_recent_turns,
+            self.config.compaction.max_preserved_ratio,
             deps,
         );
         engine.preview(summarizer).await
@@ -441,7 +442,8 @@ impl ContextManager {
         let deps = ManagerCompactionDeps::from_manager(self);
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
-            self.config.compaction.preserve_ratio,
+            self.config.compaction.preserve_recent_turns,
+            self.config.compaction.max_preserved_ratio,
             deps,
         );
         let result = engine.execute(summarizer, edited_summary).await?;
@@ -702,7 +704,8 @@ mod tests {
             rules_content: None,
             compaction: CompactionConfig {
                 threshold: 0.70,
-                preserve_ratio: 0.20,
+                preserve_recent_turns: 5,
+                max_preserved_ratio: 0.20,
                 context_limit: 100_000,
             },
         }
@@ -1197,9 +1200,10 @@ mod tests {
     // -- compaction config --
 
     #[test]
-    fn compaction_config_default_ratio() {
+    fn compaction_config_default_turns() {
         let config = CompactionConfig::default();
-        assert!((config.preserve_ratio - 0.20).abs() < f64::EPSILON);
+        assert_eq!(config.preserve_recent_turns, 5);
+        assert!((config.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
     }
 
     // -- model switching --

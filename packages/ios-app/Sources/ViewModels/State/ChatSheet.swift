@@ -6,6 +6,17 @@ struct CompactionDetailData: Equatable {
     let tokensAfter: Int
     let reason: String
     let summary: String?
+    let preservedTurns: Int?
+    let summarizedTurns: Int?
+
+    init(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) {
+        self.tokensBefore = tokensBefore
+        self.tokensAfter = tokensAfter
+        self.reason = reason
+        self.summary = summary
+        self.preservedTurns = preservedTurns
+        self.summarizedTurns = summarizedTurns
+    }
 }
 
 /// Data for memory detail sheet

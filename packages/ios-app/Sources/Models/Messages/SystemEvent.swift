@@ -18,7 +18,7 @@ enum SystemEvent: Equatable, Hashable {
     /// Context compaction started (in-progress spinner)
     case compactionInProgress(reason: String)
     /// Context was compacted to save tokens
-    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)
+    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     /// Context was cleared
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// A message was deleted from context
@@ -59,7 +59,7 @@ enum SystemEvent: Equatable, Hashable {
             return "No speech detected"
         case .compactionInProgress:
             return "Compacting context..."
-        case .compaction(let before, let after, _, _):
+        case .compaction(let before, let after, _, _, _, _):
             let saved = before - after
             return "Context compacted: \(TokenFormatter.format(saved)) tokens saved"
         case .contextCleared(let before, let after):
@@ -110,13 +110,13 @@ enum SystemEvent: Equatable, Hashable {
 
     /// Tokens before compaction (0 for in-progress)
     var compactionTokensBefore: Int {
-        if case .compaction(let before, _, _, _) = self { return before }
+        if case .compaction(let before, _, _, _, _, _) = self { return before }
         return 0
     }
 
     /// Tokens after compaction (0 for in-progress)
     var compactionTokensAfter: Int {
-        if case .compaction(_, let after, _, _) = self { return after }
+        if case .compaction(_, let after, _, _, _, _) = self { return after }
         return 0
     }
 
@@ -124,14 +124,26 @@ enum SystemEvent: Equatable, Hashable {
     var compactionReason: String {
         switch self {
         case .compactionInProgress(let reason): return reason
-        case .compaction(_, _, let reason, _): return reason
+        case .compaction(_, _, let reason, _, _, _): return reason
         default: return ""
         }
     }
 
     /// Compaction summary (nil for in-progress)
     var compactionSummary: String? {
-        if case .compaction(_, _, _, let summary) = self { return summary }
+        if case .compaction(_, _, _, let summary, _, _) = self { return summary }
+        return nil
+    }
+
+    /// Number of turns preserved during compaction
+    var compactionPreservedTurns: Int? {
+        if case .compaction(_, _, _, _, let preserved, _) = self { return preserved }
+        return nil
+    }
+
+    /// Number of turns summarized during compaction
+    var compactionSummarizedTurns: Int? {
+        if case .compaction(_, _, _, _, _, let summarized) = self { return summarized }
         return nil
     }
 

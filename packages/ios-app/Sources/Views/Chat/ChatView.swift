@@ -430,12 +430,14 @@ struct ChatView: View {
                                         viewModel.openAskUserQuestionSheet(for: data)
                                     case .thinking(let content):
                                         sheetCoordinator.showThinkingDetail(content)
-                                    case .compaction(let tokensBefore, let tokensAfter, let reason, let summary):
+                                    case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
                                         sheetCoordinator.showCompactionDetail(
                                             tokensBefore: tokensBefore,
                                             tokensAfter: tokensAfter,
                                             reason: reason,
-                                            summary: summary
+                                            summary: summary,
+                                            preservedTurns: preservedTurns,
+                                            summarizedTurns: summarizedTurns
                                         )
                                     case .subagent(let data):
                                         viewModel.subagentState.showDetails(with: data)

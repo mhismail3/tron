@@ -70,8 +70,8 @@ extension ChatMessage {
     }
 
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil) -> ChatMessage {
-        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
     }
 
     /// In-chat notification for context clearing

@@ -54,7 +54,9 @@ enum SystemEventHandlers {
                 tokensBefore: parsed.originalTokens,
                 tokensAfter: parsed.compactedTokens,
                 reason: parsed.reason,
-                summary: parsed.summary
+                summary: parsed.summary,
+                preservedTurns: parsed.preservedTurns,
+                summarizedTurns: parsed.summarizedTurns
             ),
             timestamp: timestamp
         )

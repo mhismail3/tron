@@ -56,6 +56,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             reason,
             summary,
             estimated_context_tokens,
+            preserved_turns,
+            summarized_turns,
             ..
         } => {
             let mut data = json!({
@@ -73,6 +75,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "estimatedContextTokens",
                 estimated_context_tokens,
             );
+            set_opt(&mut data, "preservedTurns", preserved_turns);
+            set_opt(&mut data, "summarizedTurns", summarized_turns);
             Some(session_scoped(event, "agent.compaction", Some(data)))
         }
         TronEvent::ContextWarning {
