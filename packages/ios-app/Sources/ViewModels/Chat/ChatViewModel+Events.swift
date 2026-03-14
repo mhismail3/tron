@@ -264,7 +264,9 @@ extension ChatViewModel {
                     tokensBefore: result.tokensBefore,
                     tokensAfter: result.tokensAfter,
                     reason: result.reason,
-                    summary: result.summary
+                    summary: result.summary,
+                    preservedTurns: result.preservedTurns,
+                    summarizedTurns: result.summarizedTurns
                 )
             }
             compactionInProgressMessageId = nil
@@ -274,7 +276,9 @@ extension ChatViewModel {
                 tokensBefore: result.tokensBefore,
                 tokensAfter: result.tokensAfter,
                 reason: result.reason,
-                summary: result.summary
+                summary: result.summary,
+                preservedTurns: result.preservedTurns,
+                summarizedTurns: result.summarizedTurns
             )
             appendToMessages(compactionMessage)
         }
