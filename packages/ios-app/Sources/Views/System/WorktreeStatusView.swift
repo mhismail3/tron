@@ -140,8 +140,11 @@ struct WorktreeBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(TronTypography.caption2)
+            Image("IconGit")
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 10, height: 10)
 
             Text(worktree.shortBranch)
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))

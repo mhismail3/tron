@@ -33,13 +33,19 @@ extension ChatView {
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             VStack(spacing: 2) {
-                Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
-                if eventStoreManager.activeSession?.isFork == true {
-                    Text("forked")
-                        .font(TronTypography.pillValue)
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                HStack(spacing: 6) {
+                    if eventStoreManager.activeSession?.isFork == true {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(.tronEmerald)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.tronEmerald.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                    Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
                 if let worktree = viewModel.worktreeState.worktree {
                     WorktreeBadge(worktree: worktree)

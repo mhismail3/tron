@@ -14,12 +14,17 @@ struct WorktreeInfo: Decodable, Equatable {
     let commitCount: Int?
     let isMerged: Bool?
 
-    /// Short branch name (removes 'session/' prefix if present)
+    /// Short branch name (removes 'session/' prefix, truncates session IDs)
     var shortBranch: String {
-        if branch.hasPrefix("session/") {
-            return String(branch.dropFirst(8))
+        var name = branch
+        if name.hasPrefix("session/") {
+            name = String(name.dropFirst(8))
         }
-        return branch
+        if name.hasPrefix("sess_") {
+            let hexPart = name.dropFirst(5)
+            return String(hexPart.prefix(8))
+        }
+        return name
     }
 }
 
