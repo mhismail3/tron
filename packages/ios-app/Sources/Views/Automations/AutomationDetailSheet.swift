@@ -117,6 +117,7 @@ struct AutomationDetailSheet: View {
                     infoRow("Status", value: "Currently running", icon: "play.circle.fill", color: .tronCoral)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(Color.tronCoral.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 12))
