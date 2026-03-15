@@ -1,7 +1,4 @@
-//! `TaskManager` tool — task/project/area management.
-//!
-//! Routes management actions to the [`TaskManagerDelegate`] trait. Supports
-//! 18 actions across tasks, projects, and areas.
+//! `TaskManager` tool — persistent task tracker.
 
 use std::sync::Arc;
 
@@ -19,25 +16,14 @@ const VALID_ACTIONS: &[&str] = &[
     "update",
     "get",
     "list",
-    "search",
-    "log_time",
+    "done",
     "delete",
-    "create_project",
-    "update_project",
-    "get_project",
-    "list_projects",
-    "delete_project",
-    "create_area",
-    "update_area",
-    "get_area",
-    "delete_area",
-    "list_areas",
-    "batch_delete",
-    "batch_update",
+    "add_note",
+    "search",
     "batch_create",
 ];
 
-/// The `TaskManager` tool manages tasks, projects, and areas.
+/// The `TaskManager` tool manages persistent tasks.
 pub struct TaskManagerTool {
     delegate: Arc<dyn TaskManagerDelegate>,
 }
@@ -62,40 +48,20 @@ impl TronTool for TaskManagerTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "TaskManager",
-            "Persistent task, project, and area manager (PARA model). Tasks survive across sessions.\n\n\
-## PARA Model\n\
-- **Projects**: Time-bound scoped efforts with tasks\n\
-- **Areas**: Ongoing responsibilities the agent maintains awareness of (e.g., \"Security\", \"Code Quality\")\n\
-- **Tasks**: Individual work items, optionally linked to a project and/or area\n\n\
-## Actions\n\n\
-### Tasks\n\
-- **create**: Create a task. Required: title. Optional: description, status, priority, projectId, areaId\n\
-- **update**: Update a task. Required: taskId. Optional: status, title, description, priority, projectId, areaId\n\
-- **get**: Get task details. Required: taskId\n\
-- **list**: List tasks. Optional: filter by status/priority/projectId/areaId, limit, offset\n\
+            "Persistent task tracker. Use for non-trivial, multi-step work.\n\n\
+## Actions\n\
+- **create**: Create a task. Required: title. Optional: description, status, parentTaskId\n\
+- **update**: Update a task. Required: taskId. Optional: status, title, description\n\
+- **get**: Get task details with subtasks and activity. Required: taskId\n\
+- **list**: List tasks. Optional: status filter, limit, offset\n\
+- **done**: Mark task completed. Required: taskId\n\
+- **delete**: Delete a task. Required: taskId\n\
+- **add_note**: Append a timestamped note. Required: taskId, note\n\
 - **search**: Full-text search. Required: query. Optional: limit\n\
-- **log_time**: Log time spent. Required: taskId, minutes\n\
-- **delete**: Delete a task. Required: taskId\n\n\
-### Projects\n\
-- **create_project**: Required: projectTitle. Optional: projectDescription, areaId\n\
-- **update_project**: Required: projectId. Optional: projectTitle, projectDescription, projectStatus, areaId\n\
-- **get_project**: Get project details with tasks. Required: projectId\n\
-- **delete_project**: Delete project (orphans tasks). Required: projectId\n\
-- **list_projects**: List projects. Optional: filter by status/areaId\n\n\
-### Areas\n\
-- **create_area**: Required: areaTitle. Optional: areaDescription\n\
-- **update_area**: Required: areaId. Optional: areaTitle, areaDescription, areaStatus\n\
-- **get_area** / **delete_area** / **list_areas**\n\n\
-### Batch Operations\n\
-- **batch_delete**: Delete multiple entities. Provide `ids` (array) OR `filter` (object with status/priority/projectId/areaId). Optional: `dryRun` to preview count\n\
-- **batch_update**: Update multiple entities with same changes. Provide `ids` OR `filter` + update fields (status, priority, title, etc). Optional: `dryRun`\n\
-- **batch_create**: Create multiple tasks atomically. Required: `items` (array of {title, ...})\n\n\
+- **batch_create**: Create multiple tasks atomically. Required: items (array of {title, ...})\n\n\
 ## Status Model\n\
-backlog → pending → in_progress → completed/cancelled\n\n\
-## Key Behaviors\n\
-- status→in_progress auto-sets startedAt; status→completed auto-sets completedAt\n\
-- notes append with timestamps (never replace)\n\
-- Dependencies: addBlocks/addBlockedBy create blocking relationships; circular deps rejected",
+pending → in_progress → completed/cancelled/stale\n\n\
+Stale tasks are from previous sessions — resume (set in_progress) or close them (done/cancelled).",
         )
         .required_property("action", json!({
             "type": "string",
@@ -106,33 +72,11 @@ backlog → pending → in_progress → completed/cancelled\n\n\
         .property("title", json!({"type": "string"}))
         .property("description", json!({"type": "string"}))
         .property("status", json!({"type": "string"}))
-        .property("priority", json!({"type": "string"}))
-        .property("projectId", json!({"type": "string"}))
-        .property("areaId", json!({"type": "string"}))
-        .property("projectTitle", json!({"type": "string"}))
-        .property("areaTitle", json!({"type": "string"}))
+        .property("parentTaskId", json!({"type": "string"}))
+        .property("note", json!({"type": "string"}))
         .property("query", json!({"type": "string"}))
         .property("limit", json!({"type": "number"}))
         .property("offset", json!({"type": "number"}))
-        .property("ids", json!({
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Entity IDs for batch operations"
-        }))
-        .property("filter", json!({
-            "type": "object",
-            "description": "Filter for batch ops (same as list: status, priority, projectId, areaId)",
-            "properties": {
-                "status": {"type": "string"},
-                "priority": {"type": "string"},
-                "projectId": {"type": "string"},
-                "areaId": {"type": "string"}
-            }
-        }))
-        .property("dryRun", json!({
-            "type": "boolean",
-            "description": "Preview affected count without executing"
-        }))
         .property("items", json!({
             "type": "array",
             "items": {
@@ -141,9 +85,7 @@ backlog → pending → in_progress → completed/cancelled\n\n\
                     "title": {"type": "string"},
                     "description": {"type": "string"},
                     "status": {"type": "string"},
-                    "priority": {"type": "string"},
-                    "projectId": {"type": "string"},
-                    "areaId": {"type": "string"}
+                    "parentTaskId": {"type": "string"}
                 }
             },
             "description": "Array of tasks to create (batch_create only)"
@@ -223,26 +165,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_action() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool
-            .execute(json!({"action": "update", "taskId": "t1"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn list_action() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool
-            .execute(json!({"action": "list"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
     async fn all_actions_dispatch() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
         for action in VALID_ACTIONS {
@@ -273,29 +195,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project() {
+    async fn removed_actions_rejected() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool
-            .execute(
-                json!({"action": "create_project", "projectTitle": "P1"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn create_area() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool
-            .execute(
-                json!({"action": "create_area", "areaTitle": "A1"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
+        for action in ["create_project", "log_time", "batch_delete", "list_areas"] {
+            let r = tool
+                .execute(json!({"action": action}), &make_ctx())
+                .await
+                .unwrap();
+            assert_eq!(r.is_error, Some(true), "Action {action} should be invalid");
+        }
     }
 
     #[tokio::test]

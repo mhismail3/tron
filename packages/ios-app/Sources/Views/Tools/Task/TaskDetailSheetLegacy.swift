@@ -32,14 +32,9 @@ struct TaskDetailSheetLegacy: View {
                                 Text(task.status == .inProgress ? (task.activeForm ?? task.title) : task.title)
                                     .font(.body)
                                     .foregroundStyle(task.status == .completed ? .gray : .tronTextPrimary)
-                                HStack {
-                                    Text(task.source.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.gray)
-                                    Text(task.status.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.gray)
-                                }
+                                Text(task.status.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.gray)
                             }
                             .listRowBackground(Color.gray.opacity(0.2))
                         }

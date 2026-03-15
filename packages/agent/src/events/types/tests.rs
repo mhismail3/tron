@@ -529,27 +529,6 @@ mod session_event_tests {
             ),
             (EventType::TaskDeleted, json!({"taskId": "t", "title": "t"})),
             (
-                EventType::ProjectCreated,
-                json!({"projectId": "p", "title": "t", "status": "active", "areaId": null}),
-            ),
-            (
-                EventType::ProjectUpdated,
-                json!({"projectId": "p", "title": "t", "status": "active"}),
-            ),
-            (
-                EventType::ProjectDeleted,
-                json!({"projectId": "p", "title": "t"}),
-            ),
-            (
-                EventType::AreaCreated,
-                json!({"areaId": "a", "title": "t", "status": "active"}),
-            ),
-            (
-                EventType::AreaUpdated,
-                json!({"areaId": "a", "title": "t", "status": "active", "changedFields": []}),
-            ),
-            (EventType::AreaDeleted, json!({"areaId": "a", "title": "t"})),
-            (
                 EventType::TurnFailed,
                 json!({"turn": 1, "error": "e", "recoverable": false}),
             ),
@@ -576,7 +555,7 @@ mod session_event_tests {
             (EventType::MemoryLoaded, json!({})),
         ];
 
-        assert_eq!(cases.len(), 60, "must cover all 60 event types");
+        assert_eq!(cases.len(), 54, "must cover all 54 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());

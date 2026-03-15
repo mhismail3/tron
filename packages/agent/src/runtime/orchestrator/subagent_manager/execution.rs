@@ -149,6 +149,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: params.child_subagent_manager,
+            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
         },
     );
 
@@ -305,6 +306,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: params.child_subagent_manager,
+            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
         },
     );
 

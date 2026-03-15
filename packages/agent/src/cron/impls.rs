@@ -193,6 +193,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 rules_index: None,
                 pre_activated_rules: vec![],
                 subagent_manager: self.subagent_manager.clone(),
+                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
             },
         );
 

@@ -146,7 +146,7 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("filesystem.createDir", filesystem::CreateDirHandler);
     registry.register("file.read", filesystem::ReadFileHandler);
 
-    // Tasks (plural to match TypeScript wire format)
+    // Tasks
     registry.register("tasks.create", task::CreateTaskHandler);
     registry.register("tasks.get", task::GetTaskHandler);
     registry.register("tasks.update", task::UpdateTaskHandler);
@@ -154,24 +154,9 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("tasks.delete", task::DeleteTaskHandler);
     registry.register("tasks.search", task::SearchTasksHandler);
     registry.register("tasks.getActivity", task::GetTaskActivityHandler);
-    registry.register("tasks.batchDelete", task::BatchDeleteTasksHandler);
-    registry.register("tasks.batchUpdate", task::BatchUpdateTasksHandler);
+    registry.register("tasks.done", task::DoneTaskHandler);
+    registry.register("tasks.addNote", task::AddNoteHandler);
     registry.register("tasks.batchCreate", task::BatchCreateTasksHandler);
-
-    // Projects (plural to match TypeScript wire format)
-    registry.register("projects.create", task::CreateProjectHandler);
-    registry.register("projects.list", task::ListProjectsHandler);
-    registry.register("projects.get", task::GetProjectHandler);
-    registry.register("projects.update", task::UpdateProjectHandler);
-    registry.register("projects.delete", task::DeleteProjectHandler);
-    registry.register("projects.getDetails", task::GetProjectDetailsHandler);
-
-    // Areas (plural to match TypeScript wire format)
-    registry.register("areas.create", task::CreateAreaHandler);
-    registry.register("areas.list", task::ListAreasHandler);
-    registry.register("areas.get", task::GetAreaHandler);
-    registry.register("areas.update", task::UpdateAreaHandler);
-    registry.register("areas.delete", task::DeleteAreaHandler);
 
     // Tree
     registry.register("tree.getVisualization", tree::GetVisualizationHandler);
@@ -532,8 +517,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            122,
-            "expected 122 methods, got {}",
+            111,
+            "expected 111 methods, got {}",
             reg.methods().len()
         );
     }

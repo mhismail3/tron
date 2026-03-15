@@ -602,31 +602,6 @@ extension ChatViewModel {
         taskState.removeTask(id: result.taskId)
     }
 
-    func handleProjectCreated(_ result: ProjectCreatedPlugin.Result) {
-        logger.debug("Project created: \(result.projectId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleProjectDeleted(_ result: ProjectDeletedPlugin.Result) {
-        logger.debug("Project deleted: \(result.projectId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleAreaCreated(_ result: AreaCreatedPlugin.Result) {
-        logger.debug("Area created: \(result.areaId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleAreaUpdated(_ result: AreaUpdatedPlugin.Result) {
-        logger.debug("Area updated: \(result.areaId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleAreaDeleted(_ result: AreaDeletedPlugin.Result) {
-        logger.debug("Area deleted: \(result.areaId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
     /// Debounced refreshTasks — cancel-and-replace to coalesce rapid task/project/area events.
     private func debouncedRefreshTasks() {
         refreshTasksDebounceTask?.cancel()

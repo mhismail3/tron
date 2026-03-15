@@ -67,28 +67,6 @@ pub enum BroadcastEventType {
     #[serde(rename = "task.deleted")]
     TaskDeleted,
 
-    // ── Project ──────────────────────────────────────────────────────
-    /// A project was created.
-    #[serde(rename = "project.created")]
-    ProjectCreated,
-    /// A project was updated.
-    #[serde(rename = "project.updated")]
-    ProjectUpdated,
-    /// A project was deleted.
-    #[serde(rename = "project.deleted")]
-    ProjectDeleted,
-
-    // ── Area ─────────────────────────────────────────────────────────
-    /// An area was created.
-    #[serde(rename = "area.created")]
-    AreaCreated,
-    /// An area was updated.
-    #[serde(rename = "area.updated")]
-    AreaUpdated,
-    /// An area was deleted.
-    #[serde(rename = "area.deleted")]
-    AreaDeleted,
-
     // ── Browser ──────────────────────────────────────────────────────
     /// A browser frame (screenshot) is available.
     #[serde(rename = "browser.frame")]
@@ -120,12 +98,6 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
     BroadcastEventType::TaskCreated,
     BroadcastEventType::TaskUpdated,
     BroadcastEventType::TaskDeleted,
-    BroadcastEventType::ProjectCreated,
-    BroadcastEventType::ProjectUpdated,
-    BroadcastEventType::ProjectDeleted,
-    BroadcastEventType::AreaCreated,
-    BroadcastEventType::AreaUpdated,
-    BroadcastEventType::AreaDeleted,
     BroadcastEventType::BrowserFrame,
     BroadcastEventType::BrowserClosed,
     BroadcastEventType::EventNew,
@@ -193,7 +165,7 @@ mod tests {
 
     #[test]
     fn all_broadcast_types_count() {
-        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 24);
+        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 18);
     }
 
     #[test]
@@ -235,12 +207,6 @@ mod tests {
             (BroadcastEventType::TaskCreated, "task.created"),
             (BroadcastEventType::TaskUpdated, "task.updated"),
             (BroadcastEventType::TaskDeleted, "task.deleted"),
-            (BroadcastEventType::ProjectCreated, "project.created"),
-            (BroadcastEventType::ProjectUpdated, "project.updated"),
-            (BroadcastEventType::ProjectDeleted, "project.deleted"),
-            (BroadcastEventType::AreaCreated, "area.created"),
-            (BroadcastEventType::AreaUpdated, "area.updated"),
-            (BroadcastEventType::AreaDeleted, "area.deleted"),
             (BroadcastEventType::BrowserFrame, "browser.frame"),
             (BroadcastEventType::BrowserClosed, "browser.closed"),
             (BroadcastEventType::EventNew, "event.new"),

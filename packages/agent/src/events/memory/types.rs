@@ -24,8 +24,8 @@ impl Default for CompactionTriggerConfig {
         Self {
             trigger_token_threshold: 0.70,
             alert_zone_threshold: 0.50,
-            default_turn_fallback: 8,
-            alert_turn_fallback: 5,
+            default_turn_fallback: 25,
+            alert_turn_fallback: 15,
         }
     }
 }
@@ -183,8 +183,8 @@ mod tests {
         let tc = CompactionTriggerConfig::from(&cs);
         assert!((tc.trigger_token_threshold - 0.70).abs() < f64::EPSILON);
         assert!((tc.alert_zone_threshold - 0.50).abs() < f64::EPSILON);
-        assert_eq!(tc.default_turn_fallback, 8);
-        assert_eq!(tc.alert_turn_fallback, 5);
+        assert_eq!(tc.default_turn_fallback, 25);
+        assert_eq!(tc.alert_turn_fallback, 15);
     }
 
     #[test]
@@ -227,8 +227,8 @@ mod tests {
         let config = CompactionTriggerConfig::default();
         assert!((config.trigger_token_threshold - 0.70).abs() < f64::EPSILON);
         assert!((config.alert_zone_threshold - 0.50).abs() < f64::EPSILON);
-        assert_eq!(config.default_turn_fallback, 8);
-        assert_eq!(config.alert_turn_fallback, 5);
+        assert_eq!(config.default_turn_fallback, 25);
+        assert_eq!(config.alert_turn_fallback, 15);
     }
 
     #[test]

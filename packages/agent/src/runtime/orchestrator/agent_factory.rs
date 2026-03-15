@@ -48,6 +48,8 @@ pub struct CreateAgentOpts {
     /// Optional subagent manager for LLM-backed compaction summarization.
     pub subagent_manager:
         Option<std::sync::Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    /// Compaction trigger configuration (from settings).
+    pub compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -133,6 +135,7 @@ impl AgentFactory {
                 hooks: opts.hooks,
                 context_manager,
                 subagent_manager: opts.subagent_manager,
+                compaction_trigger_config: opts.compaction_trigger_config,
             },
             session_id,
         )
@@ -164,6 +167,7 @@ mod tests {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: None,
+            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
         }
     }
 

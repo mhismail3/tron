@@ -42,8 +42,8 @@ final class TaskState {
         tasks.filter { $0.status == .pending }
     }
 
-    var backlogTasks: [RpcTask] {
-        tasks.filter { $0.status == .backlog }
+    var staleTasks: [RpcTask] {
+        tasks.filter { $0.status == .stale }
     }
 
     var completedTasks: [RpcTask] {

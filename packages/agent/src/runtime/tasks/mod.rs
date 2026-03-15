@@ -1,4 +1,4 @@
-//! Task, project, and area CRUD with `SQLite` persistence.
+//! Task CRUD with `SQLite` persistence.
 
 pub mod context;
 pub mod delegate;

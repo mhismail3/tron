@@ -547,66 +547,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.handleTaskCreatedCalled)
     }
 
-    func testDispatch_projectCreated_callsHandleProjectCreated() {
-        let result = ProjectCreatedPlugin.Result(projectId: "p1", title: "Test", status: "active", areaId: nil)
-
-        coordinator.dispatch(
-            type: ProjectCreatedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        XCTAssertTrue(mockContext.handleProjectCreatedCalled)
-    }
-
-    func testDispatch_projectDeleted_callsHandleProjectDeleted() {
-        let result = ProjectDeletedPlugin.Result(projectId: "p1", title: "Test")
-
-        coordinator.dispatch(
-            type: ProjectDeletedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        XCTAssertTrue(mockContext.handleProjectDeletedCalled)
-    }
-
-    func testDispatch_areaCreated_callsHandleAreaCreated() {
-        let result = AreaCreatedPlugin.Result(areaId: "a1", title: "Security", status: "active")
-
-        coordinator.dispatch(
-            type: AreaCreatedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        XCTAssertTrue(mockContext.handleAreaCreatedCalled)
-    }
-
-    func testDispatch_areaUpdated_callsHandleAreaUpdated() {
-        let result = AreaUpdatedPlugin.Result(areaId: "a1", title: "Security", status: "archived", changedFields: ["status"])
-
-        coordinator.dispatch(
-            type: AreaUpdatedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        XCTAssertTrue(mockContext.handleAreaUpdatedCalled)
-    }
-
-    func testDispatch_areaDeleted_callsHandleAreaDeleted() {
-        let result = AreaDeletedPlugin.Result(areaId: "a1", title: "Security")
-
-        coordinator.dispatch(
-            type: AreaDeletedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        XCTAssertTrue(mockContext.handleAreaDeletedCalled)
-    }
-
     // MARK: - Edge Case Tests
 
     func testDispatch_transformFailure_logsWarning() {
@@ -711,11 +651,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleTaskCreatedCalled = false
     var handleTaskUpdatedCalled = false
     var handleTaskDeletedCalled = false
-    var handleProjectCreatedCalled = false
-    var handleProjectDeletedCalled = false
-    var handleAreaCreatedCalled = false
-    var handleAreaUpdatedCalled = false
-    var handleAreaDeletedCalled = false
 
     // MARK: - Logging
     var logWarningCalled = false
@@ -870,26 +805,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
         handleTaskDeletedCalled = true
-    }
-
-    func handleProjectCreated(_ result: ProjectCreatedPlugin.Result) {
-        handleProjectCreatedCalled = true
-    }
-
-    func handleProjectDeleted(_ result: ProjectDeletedPlugin.Result) {
-        handleProjectDeletedCalled = true
-    }
-
-    func handleAreaCreated(_ result: AreaCreatedPlugin.Result) {
-        handleAreaCreatedCalled = true
-    }
-
-    func handleAreaUpdated(_ result: AreaUpdatedPlugin.Result) {
-        handleAreaUpdatedCalled = true
-    }
-
-    func handleAreaDeleted(_ result: AreaDeletedPlugin.Result) {
-        handleAreaDeletedCalled = true
     }
 
     // MARK: - Server

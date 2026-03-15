@@ -277,25 +277,25 @@ mod tests {
     #[test]
     fn test_turn_fallback_normal_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        // 8 turns at ratio 0.3 (normal zone, default fallback = 8)
-        for _ in 0..7 {
+        // 25 turns at ratio 0.3 (normal zone, default fallback = 25)
+        for _ in 0..24 {
             let result = trigger.should_compact(&default_input(0.3));
             assert!(!result.compact);
         }
         let result = trigger.should_compact(&default_input(0.3));
         assert!(result.compact);
         assert!(result.reason.contains("turn count fallback"));
-        assert!(result.reason.contains("8 turns"));
+        assert!(result.reason.contains("25 turns"));
     }
 
     #[test]
     fn test_turn_fallback_normal_not_yet() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..6 {
+        for _ in 0..23 {
             let _ = trigger.should_compact(&default_input(0.3));
         }
         let result = trigger.should_compact(&default_input(0.3));
-        assert!(!result.compact); // Only 7 turns, need 8
+        assert!(!result.compact); // Only 24 turns, need 25
     }
 
     // --- Turn fallback: alert zone ---
@@ -303,24 +303,24 @@ mod tests {
     #[test]
     fn test_turn_fallback_alert_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        // 5 turns at ratio 0.55 (alert zone, alert fallback = 5)
-        for _ in 0..4 {
+        // 15 turns at ratio 0.55 (alert zone, alert fallback = 15)
+        for _ in 0..14 {
             let result = trigger.should_compact(&default_input(0.55));
             assert!(!result.compact);
         }
         let result = trigger.should_compact(&default_input(0.55));
         assert!(result.compact);
-        assert!(result.reason.contains("5 turns"));
+        assert!(result.reason.contains("15 turns"));
     }
 
     #[test]
     fn test_turn_fallback_alert_not_yet() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..3 {
+        for _ in 0..13 {
             let _ = trigger.should_compact(&default_input(0.55));
         }
         let result = trigger.should_compact(&default_input(0.55));
-        assert!(!result.compact); // Only 4 turns, need 5
+        assert!(!result.compact); // Only 14 turns, need 15
     }
 
     // --- No signals ---

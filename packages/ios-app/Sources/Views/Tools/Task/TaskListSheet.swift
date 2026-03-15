@@ -121,8 +121,8 @@ struct TaskListSheet: View {
             if !taskState.pendingTasks.isEmpty {
                 taskGroup(title: "Pending", icon: "circle", iconColor: .tronSlate, tasks: taskState.pendingTasks)
             }
-            if !taskState.backlogTasks.isEmpty {
-                taskGroup(title: "Backlog", icon: "tray", iconColor: .tronSlate, tasks: taskState.backlogTasks)
+            if !taskState.staleTasks.isEmpty {
+                taskGroup(title: "Stale", icon: "exclamationmark.circle", iconColor: .tronAmber, tasks: taskState.staleTasks)
             }
             if !taskState.completedTasks.isEmpty {
                 taskGroup(title: "Completed", icon: "checkmark.circle.fill", iconColor: .tronTextMuted, tasks: taskState.completedTasks)
@@ -169,10 +169,10 @@ struct TaskListSheet: View {
                     .strikethrough(task.status == .completed, color: .tronTextMuted)
                     .lineLimit(2)
 
-                if task.priority == .high || task.priority == .critical {
-                    Text(task.priority.displayName)
+                if task.status == .stale {
+                    Text("stale")
                         .font(TronTypography.mono(size: 10, weight: .medium))
-                        .foregroundStyle(task.priority == .critical ? .tronError : .orange)
+                        .foregroundStyle(.tronAmber)
                 }
             }
 

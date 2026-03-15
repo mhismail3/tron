@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// Rich entity snapshot card that renders a historical EntityDetail as structured metadata.
-/// Used in TaskDetailSheet for create/update/get/delete/log_time actions.
 @available(iOS 26.0, *)
 struct EntitySnapshotCard: View {
     let entity: EntityDetail
@@ -15,8 +14,6 @@ struct EntitySnapshotCard: View {
             if let desc = entity.description { descriptionSection(desc) }
             metadataSection
             if !entity.subtasks.isEmpty { listSection("Subtasks", items: entity.subtasks) }
-            if !entity.tasks.isEmpty { listSection("Tasks", items: entity.tasks) }
-            if !entity.blockedBy.isEmpty || !entity.blocks.isEmpty { dependenciesSection }
             if let notes = entity.notes { notesSection(notes) }
             if !entity.activity.isEmpty { activitySection }
             timestampsSection
@@ -37,40 +34,17 @@ struct EntitySnapshotCard: View {
     @ViewBuilder
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Entity type label
-            Text(entity.entityType.rawValue.uppercased())
+            Text("TASK")
                 .font(TronTypography.mono(size: 10, weight: .semibold))
                 .foregroundStyle(accentColor.opacity(0.7))
 
-            // Title
             Text(entity.title)
                 .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
                 .textSelection(.enabled)
 
-            // Status + Priority badges
             HStack(spacing: 8) {
                 statusBadge(entity.status)
-
-                if let priority = entity.priority, priority != "medium" {
-                    priorityBadge(priority)
-                }
-
-                // Progress for projects
-                if let completed = entity.completedTaskCount, let total = entity.taskCount {
-                    progressBadge(completed: completed, total: total)
-                }
-
-                // Counts for areas
-                if entity.entityType == .area {
-                    if let pc = entity.projectCount {
-                        countBadge(count: pc, label: "project")
-                    }
-                    if let tc = entity.taskCount, let ac = entity.activeTaskCount {
-                        countBadge(count: tc, label: "task", detail: "\(ac) active")
-                    }
-                }
-
                 Spacer()
             }
         }
@@ -94,7 +68,7 @@ struct EntitySnapshotCard: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(items, id: \.label) { item in
-                    metadataRow(icon: item.icon, label: item.label, value: item.value, valueColor: item.color)
+                    metadataRow(icon: item.icon, label: item.label, value: item.value)
                 }
             }
         }
@@ -104,46 +78,23 @@ struct EntitySnapshotCard: View {
         let icon: String
         let label: String
         let value: String
-        let color: Color?
     }
 
     private var metadataItems: [MetadataItem] {
         var items: [MetadataItem] = []
 
-        if let proj = entity.projectName {
-            items.append(MetadataItem(icon: "folder", label: "Project", value: proj, color: nil))
-        }
-        if let area = entity.areaName {
-            items.append(MetadataItem(icon: "square.grid.2x2", label: "Area", value: area, color: nil))
-        }
-        if let due = entity.dueDate {
-            items.append(MetadataItem(icon: "calendar", label: "Due", value: due, color: .tronWarning))
-        }
-        if let deferred = entity.deferredUntil {
-            items.append(MetadataItem(icon: "clock.arrow.2.circlepath", label: "Deferred", value: deferred, color: nil))
-        }
-        if let est = entity.estimatedMinutes {
-            let actual = entity.actualMinutes ?? 0
-            items.append(MetadataItem(icon: "clock", label: "Time", value: "\(actual)/\(est)min", color: nil))
-        }
-        if !entity.tags.isEmpty {
-            items.append(MetadataItem(icon: "tag", label: "Tags", value: entity.tags.joined(separator: ", "), color: nil))
-        }
-        if let source = entity.source {
-            items.append(MetadataItem(icon: "person", label: "Source", value: source, color: nil))
-        }
         if let parent = entity.parentId {
-            items.append(MetadataItem(icon: "arrow.turn.up.left", label: "Parent", value: parent, color: nil))
+            items.append(MetadataItem(icon: "arrow.turn.up.left", label: "Parent", value: parent))
         }
         if let form = entity.activeForm {
-            items.append(MetadataItem(icon: "text.cursor", label: "Active form", value: form, color: nil))
+            items.append(MetadataItem(icon: "text.cursor", label: "Active form", value: form))
         }
 
         return items
     }
 
     @ViewBuilder
-    private func metadataRow(icon: String, label: String, value: String, valueColor: Color?) -> some View {
+    private func metadataRow(icon: String, label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody2))
@@ -157,12 +108,12 @@ struct EntitySnapshotCard: View {
 
             Text(value)
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                .foregroundStyle(valueColor ?? .tronTextSecondary)
+                .foregroundStyle(.tronTextSecondary)
                 .textSelection(.enabled)
         }
     }
 
-    // MARK: - List Sections (Subtasks / Tasks)
+    // MARK: - List Sections (Subtasks)
 
     @ViewBuilder
     private func listSection(_ title: String, items: [EntityDetail.ListItem]) -> some View {
@@ -183,19 +134,11 @@ struct EntitySnapshotCard: View {
             statusDot(for: item.mark)
 
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(item.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                        .foregroundStyle(item.mark == "x" ? .tronTextMuted : .tronTextPrimary)
-                        .strikethrough(item.mark == "x", color: .tronTextMuted)
-                        .lineLimit(2)
-
-                    if let extra = item.extra {
-                        Text(extra)
-                            .font(TronTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(TaskFormatting.priorityColor(extra))
-                    }
-                }
+                Text(item.title)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                    .foregroundStyle(item.mark == "x" ? .tronTextMuted : .tronTextPrimary)
+                    .strikethrough(item.mark == "x", color: .tronTextMuted)
+                    .lineLimit(2)
 
                 Text(item.id)
                     .font(TronTypography.mono(size: 10, weight: .regular))
@@ -205,41 +148,6 @@ struct EntitySnapshotCard: View {
             Spacer()
         }
         .padding(.leading, 4)
-    }
-
-    // MARK: - Dependencies
-
-    @ViewBuilder
-    private var dependenciesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !entity.blockedBy.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronWarning)
-                    Text("Blocked by:")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                    Text(entity.blockedBy.joined(separator: ", "))
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                        .foregroundStyle(.tronWarning)
-                }
-            }
-
-            if !entity.blocks.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.open")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                    Text("Blocks:")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                    Text(entity.blocks.joined(separator: ", "))
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                        .foregroundStyle(.tronTextSecondary)
-                }
-            }
-        }
     }
 
     // MARK: - Notes
@@ -278,7 +186,6 @@ struct EntitySnapshotCard: View {
     @ViewBuilder
     private func activityRow(_ item: EntityDetail.ActivityItem, isLast: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            // Timeline track: dot + connector line
             VStack(spacing: 0) {
                 Circle()
                     .fill(activityColor(for: item.action))
@@ -294,7 +201,6 @@ struct EntitySnapshotCard: View {
             }
             .frame(width: 6)
 
-            // Content
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(item.action.replacingOccurrences(of: "_", with: " "))
@@ -322,10 +228,8 @@ struct EntitySnapshotCard: View {
     private func activityColor(for action: String) -> Color {
         switch action {
         case "status_changed": return .tronTeal
-        case "time_logged": return .tronAmber
         case "note_added": return .tronSlate
         case "created": return .tronSuccess
-        case "priority_changed": return .orange
         default: return .tronSlate
         }
     }
@@ -393,77 +297,12 @@ struct EntitySnapshotCard: View {
     }
 
     @ViewBuilder
-    private func priorityBadge(_ priority: String) -> some View {
-        let color = TaskFormatting.priorityColor(priority)
-        Text(priority)
-            .font(TronTypography.mono(size: 11, weight: .medium))
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(color.opacity(0.2)),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    )
-            }
-    }
-
-    @ViewBuilder
-    private func progressBadge(completed: Int, total: Int) -> some View {
-        HStack(spacing: 4) {
-            Text("\(completed)/\(total)")
-                .font(TronTypography.mono(size: 11, weight: .semibold))
-            Text("tasks")
-                .font(TronTypography.mono(size: 11, weight: .regular))
-        }
-        .foregroundStyle(accentColor)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(accentColor.opacity(0.2)),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-        }
-    }
-
-    @ViewBuilder
-    private func countBadge(count: Int, label: String, detail: String? = nil) -> some View {
-        HStack(spacing: 3) {
-            Text("\(count)")
-                .font(TronTypography.mono(size: 11, weight: .semibold))
-            Text(count == 1 ? label : label + "s")
-                .font(TronTypography.mono(size: 11, weight: .regular))
-            if let detail {
-                Text("(\(detail))")
-                    .font(TronTypography.mono(size: 10, weight: .regular))
-                    .foregroundStyle(.tronTextMuted)
-            }
-        }
-        .foregroundStyle(accentColor)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(accentColor.opacity(0.2)),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-        }
-    }
-
-    @ViewBuilder
     private func statusDot(for mark: String) -> some View {
         let color: Color = switch mark {
         case "x": .tronSuccess
         case ">": .tronTeal
-        case "b": .tronSlate
         case "-": .tronError
+        case "?": .tronAmber
         default: .tronSlate.opacity(0.5)
         }
 
@@ -472,5 +311,4 @@ struct EntitySnapshotCard: View {
             .frame(width: 6, height: 6)
             .padding(.top, 5)
     }
-
 }

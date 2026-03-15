@@ -52,6 +52,7 @@ pub struct SessionManager {
     plan_mode: DashMap<String, bool>,
     origin: Option<String>,
     worktree_coordinator: std::sync::OnceLock<Arc<crate::worktree::WorktreeCoordinator>>,
+    task_pool: std::sync::OnceLock<crate::events::ConnectionPool>,
 }
 
 impl SessionManager {
@@ -63,7 +64,15 @@ impl SessionManager {
             plan_mode: DashMap::new(),
             origin: None,
             worktree_coordinator: std::sync::OnceLock::new(),
+            task_pool: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Set the task pool for stale-marking on session end.
+    ///
+    /// Uses `OnceLock` so this can be called after the manager is `Arc`-wrapped.
+    pub fn set_task_pool(&self, pool: crate::events::ConnectionPool) {
+        let _ = self.task_pool.set(pool);
     }
 
     /// Set the server origin (e.g. "localhost:9847") for all sessions created by this manager.
@@ -78,6 +87,33 @@ impl SessionManager {
     /// Uses `OnceLock` so this can be called after the manager is `Arc`-wrapped.
     pub fn set_worktree_coordinator(&self, coordinator: Arc<crate::worktree::WorktreeCoordinator>) {
         let _ = self.worktree_coordinator.set(coordinator);
+    }
+
+    /// Mark in-progress tasks as stale for a session.
+    /// Fails silently — task staling should never block session teardown.
+    fn mark_tasks_stale(&self, session_id: &str) {
+        if let Some(pool) = self.task_pool.get() {
+            match pool.get() {
+                Ok(conn) => {
+                    if let Err(e) =
+                        crate::runtime::tasks::TaskService::mark_session_tasks_stale(&conn, session_id)
+                    {
+                        tracing::warn!(
+                            session_id,
+                            error = %e,
+                            "failed to mark stale tasks on session end"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        session_id,
+                        error = %e,
+                        "failed to get task connection for stale marking"
+                    );
+                }
+            }
+        }
     }
 
     /// Create a new session.
@@ -157,6 +193,10 @@ impl SessionManager {
         if let Some((_, active)) = self.active_sessions.remove(session_id) {
             active.context.persister.flush().await?;
         }
+
+        // Mark in-progress tasks as stale for this session
+        self.mark_tasks_stale(session_id);
+
         // Persist session.end event before marking the session as ended
         let _ = self
             .event_store
@@ -210,6 +250,7 @@ impl SessionManager {
     /// Archive a session.
     pub fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.active_sessions.remove(session_id);
+        self.mark_tasks_stale(session_id);
         let _ = self
             .event_store
             .end_session(session_id)

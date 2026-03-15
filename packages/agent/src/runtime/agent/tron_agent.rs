@@ -55,6 +55,8 @@ pub struct AgentDeps {
     pub context_manager: ContextManager,
     /// Optional subagent manager for LLM-backed compaction summarization.
     pub subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    /// Compaction trigger configuration (from settings).
+    pub compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -81,8 +83,11 @@ impl TronAgent {
     /// Create a new agent from bundled dependencies.
     pub fn new(config: AgentConfig, deps: AgentDeps, session_id: String) -> Self {
         let compaction = match deps.subagent_manager {
-            Some(ref mgr) => CompactionHandler::with_subagent_manager(mgr.clone()),
-            None => CompactionHandler::new(),
+            Some(ref mgr) => CompactionHandler::with_subagent_manager(
+                mgr.clone(),
+                deps.compaction_trigger_config,
+            ),
+            None => CompactionHandler::new(deps.compaction_trigger_config),
         };
         Self {
             config,
@@ -561,6 +566,7 @@ mod tests {
             hooks: None,
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
+            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
         }
     }
 
@@ -944,6 +950,7 @@ mod tests {
                 hooks: None,
                 context_manager: test_context_manager("mock-model"),
                 subagent_manager: None,
+                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
             },
             sid.clone(),
         );
@@ -1311,6 +1318,7 @@ mod tests {
             hooks: None,
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
+            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
         };
         for tool in tools {
             deps.registry.register(tool);

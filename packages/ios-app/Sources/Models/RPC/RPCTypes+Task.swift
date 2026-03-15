@@ -10,86 +10,41 @@ struct RpcTask: Decodable, Identifiable, Hashable {
     let activeForm: String?
     let notes: String?
     let status: TaskStatus
-    let priority: TaskPriority
-    let source: TaskSource
-    let tags: [String]
-    let projectId: String?
     let parentTaskId: String?
-    let areaId: String?
-    let workspaceId: String?
-    let dueDate: String?
-    let deferredUntil: String?
     let startedAt: String?
     let completedAt: String?
     let createdAt: String
     let updatedAt: String
-    let estimatedMinutes: Int?
-    let actualMinutes: Int?
     let createdBySessionId: String?
     let lastSessionId: String?
     let lastSessionAt: String?
-    let sortOrder: Int?
     let metadata: [String: AnyCodable]?
 
     /// Status of a task
     enum TaskStatus: String, Decodable, CaseIterable {
-        case backlog
         case pending
         case inProgress = "in_progress"
         case completed
         case cancelled
+        case stale
 
         var displayName: String {
             switch self {
-            case .backlog: return "Backlog"
             case .pending: return "Pending"
             case .inProgress: return "In Progress"
             case .completed: return "Completed"
             case .cancelled: return "Cancelled"
+            case .stale: return "Stale"
             }
         }
 
         var icon: String {
             switch self {
-            case .backlog: return "tray"
             case .pending: return "circle"
             case .inProgress: return "circle.fill"
             case .completed: return "checkmark.circle.fill"
             case .cancelled: return "xmark.circle.fill"
-            }
-        }
-    }
-
-    /// Priority of a task
-    enum TaskPriority: String, Decodable {
-        case low
-        case medium
-        case high
-        case critical
-
-        var displayName: String {
-            switch self {
-            case .low: return "Low"
-            case .medium: return "Medium"
-            case .high: return "High"
-            case .critical: return "Critical"
-            }
-        }
-    }
-
-    /// Source of a task
-    enum TaskSource: String, Decodable {
-        case agent
-        case user
-        case skill
-        case system
-
-        var displayName: String {
-            switch self {
-            case .agent: return "Agent"
-            case .user: return "User"
-            case .skill: return "Skill"
-            case .system: return "System"
+            case .stale: return "exclamationmark.circle"
             }
         }
     }
@@ -114,7 +69,6 @@ struct RpcTask: Decodable, Identifiable, Hashable {
         lhs.id == rhs.id &&
         lhs.title == rhs.title &&
         lhs.status == rhs.status &&
-        lhs.priority == rhs.priority &&
         lhs.updatedAt == rhs.updatedAt
     }
 }
@@ -141,51 +95,6 @@ struct TaskListResult: Decodable {
 /// Parameters for tasks.get
 struct TaskGetParams: Encodable {
     let taskId: String
-}
-
-// MARK: - Area Types
-
-/// Area of responsibility (PARA model — ongoing concerns)
-struct RpcArea: Decodable, Identifiable {
-    let id: String
-    let title: String
-    let description: String?
-    let status: AreaStatus
-    let tags: [String]
-    let projectCount: Int?
-    let taskCount: Int?
-    let activeTaskCount: Int?
-    let createdAt: String
-    let updatedAt: String
-
-    enum AreaStatus: String, Decodable {
-        case active
-        case archived
-
-        var displayName: String {
-            switch self {
-            case .active: return "Active"
-            case .archived: return "Archived"
-            }
-        }
-    }
-}
-
-/// Parameters for areas.list
-struct AreaListParams: Encodable {
-    let status: String?
-    let limit: Int?
-
-    init(status: String? = nil, limit: Int? = nil) {
-        self.status = status
-        self.limit = limit
-    }
-}
-
-/// Result of areas.list
-struct AreaListResult: Decodable {
-    let areas: [RpcArea]
-    let total: Int
 }
 
 // MARK: - Short Relative Time Formatting

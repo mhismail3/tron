@@ -105,18 +105,6 @@ define_events! {
         TaskUpdated => "task.updated" => payloads::task::TaskUpdatedPayload,
         /// Task deleted.
         TaskDeleted => "task.deleted" => payloads::task::TaskDeletedPayload,
-        /// Project created.
-        ProjectCreated => "project.created" => payloads::task::ProjectCreatedPayload,
-        /// Project updated.
-        ProjectUpdated => "project.updated" => payloads::task::ProjectUpdatedPayload,
-        /// Project deleted.
-        ProjectDeleted => "project.deleted" => payloads::task::ProjectDeletedPayload,
-        /// Area created.
-        AreaCreated => "area.created" => payloads::task::AreaCreatedPayload,
-        /// Area updated.
-        AreaUpdated => "area.updated" => payloads::task::AreaUpdatedPayload,
-        /// Area deleted.
-        AreaDeleted => "area.deleted" => payloads::task::AreaDeletedPayload,
         /// Turn failed.
         TurnFailed => "turn.failed" => payloads::turn::TurnFailedPayload,
         /// Hook triggered.
@@ -157,8 +145,8 @@ define_events! {
         is_rules_type => [RulesLoaded, RulesIndexed, RulesActivated],
         /// Whether this is a memory event (`memory.*`).
         is_memory_type => [MemoryLedger, MemoryLoaded],
-        /// Whether this is a task/project/area CRUD event.
-        is_task_crud_type => [TaskCreated, TaskUpdated, TaskDeleted, ProjectCreated, ProjectUpdated, ProjectDeleted, AreaCreated, AreaUpdated, AreaDeleted],
+        /// Whether this is a task CRUD event.
+        is_task_crud_type => [TaskCreated, TaskUpdated, TaskDeleted],
         /// Whether this is a file event (`file.*`).
         is_file_type => [FileRead, FileWrite, FileEdit],
     }
@@ -168,7 +156,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 60] = [
+    const EXPECTED: [(EventType, &str); 54] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -225,12 +213,6 @@ mod tests {
         (EventType::TaskCreated, "task.created"),
         (EventType::TaskUpdated, "task.updated"),
         (EventType::TaskDeleted, "task.deleted"),
-        (EventType::ProjectCreated, "project.created"),
-        (EventType::ProjectUpdated, "project.updated"),
-        (EventType::ProjectDeleted, "project.deleted"),
-        (EventType::AreaCreated, "area.created"),
-        (EventType::AreaUpdated, "area.updated"),
-        (EventType::AreaDeleted, "area.deleted"),
         (EventType::TurnFailed, "turn.failed"),
         (EventType::HookTriggered, "hook.triggered"),
         (EventType::HookCompleted, "hook.completed"),
@@ -244,8 +226,8 @@ mod tests {
     ];
 
     #[test]
-    fn all_event_types_constant_has_60_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 60);
+    fn all_event_types_constant_has_54_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 54);
     }
 
     #[test]

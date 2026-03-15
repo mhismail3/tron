@@ -1,8 +1,7 @@
 //! Task context builder for LLM system prompt injection.
 //!
-//! Generates a concise summary of active tasks, projects, and areas that
-//! gets injected into the system prompt. Returns `None` if there are no
-//! open tasks (no point consuming tokens for empty context).
+//! Generates a concise summary of active tasks that gets injected into the
+//! system prompt. Returns `None` if there are no open tasks.
 
 use std::fmt::Write;
 
@@ -10,124 +9,62 @@ use rusqlite::Connection;
 
 use super::errors::TaskError;
 use super::repository::TaskRepository;
-use super::types::{AreaFilter, AreaStatus, TaskPriority};
 
 /// Build a summary of active tasks for LLM context injection.
 ///
-/// Returns `None` if there are no active tasks, projects, or areas.
+/// Returns `None` if there are no active tasks.
 ///
 /// # Output format
 ///
 /// ```text
-/// Active: 2 in progress, 5 pending, 1 blocked
+/// Tasks: 2 in progress, 5 pending, 1 stale
 /// In Progress:
-///   - [task-abc] Fix authentication bug (P:high, 30/60min, due:2026-02-15)
+///   - [task-abc] Fix authentication bug
 ///   - [task-xyz] Add dark mode support
-/// Projects: Dashboard v2 (3/8), Mobile App (12/15)
-/// Areas:
-///   - Engineering — Core product development (8 active tasks, 3 projects)
-/// 2 tasks overdue | 3 tasks deferred
+/// Stale (from previous sessions — resume or close):
+///   - [task-def] Refactor logging
 /// ```
-pub fn build_task_context(
-    conn: &Connection,
-    workspace_id: Option<&str>,
-) -> Result<Option<String>, TaskError> {
-    let summary = TaskRepository::get_active_task_summary(conn, workspace_id)?;
-    let blocked_count = TaskRepository::get_blocked_task_count(conn, workspace_id)?;
-    let project_progress = TaskRepository::get_active_project_progress(conn, workspace_id)?;
-    let areas = TaskRepository::list_areas(
-        conn,
-        &AreaFilter {
-            status: Some(AreaStatus::Active),
-            workspace_id: workspace_id.map(String::from),
-        },
-        50,
-        0,
-    )?;
+pub fn build_task_context(conn: &Connection) -> Result<Option<String>, TaskError> {
+    let summary = TaskRepository::get_active_task_summary(conn)?;
 
     // Nothing to report
     if summary.in_progress.is_empty()
         && summary.pending_count == 0
-        && blocked_count == 0
-        && project_progress.is_empty()
-        && areas.areas.is_empty()
+        && summary.stale_count == 0
     {
         return Ok(None);
     }
 
     let mut output = String::new();
 
-    // Active counts line
+    // Summary line
     let _ = write!(
         output,
-        "Active: {} in progress, {} pending, {} blocked",
+        "Tasks: {} in progress, {} pending",
         summary.in_progress.len(),
         summary.pending_count,
-        blocked_count,
     );
+    if summary.stale_count > 0 {
+        let _ = write!(output, ", {} stale", summary.stale_count);
+    }
 
     // In-progress tasks
     if !summary.in_progress.is_empty() {
         let _ = write!(output, "\nIn Progress:");
         for task in &summary.in_progress {
             let _ = write!(output, "\n  - [{}] {}", task.id, task.title);
-            let mut annotations: Vec<String> = Vec::new();
-            if task.priority != TaskPriority::Medium {
-                annotations.push(format!("P:{}", task.priority));
-            }
-            if task.estimated_minutes.is_some() || task.actual_minutes > 0 {
-                let actual = task.actual_minutes;
-                if let Some(est) = task.estimated_minutes {
-                    annotations.push(format!("{actual}/{est}min"));
-                } else {
-                    annotations.push(format!("{actual}min"));
-                }
-            }
-            if let Some(ref due) = task.due_date {
-                annotations.push(format!("due:{due}"));
-            }
-            if !annotations.is_empty() {
-                let _ = write!(output, " ({})", annotations.join(", "));
-            }
         }
     }
 
-    // Projects
-    if !project_progress.is_empty() {
-        let _ = write!(output, "\nProjects: ");
-        let project_strs: Vec<String> = project_progress
-            .iter()
-            .map(|p| format!("{} ({}/{})", p.title, p.completed, p.total))
-            .collect();
-        let _ = write!(output, "{}", project_strs.join(", "));
-    }
-
-    // Areas
-    if !areas.areas.is_empty() {
-        let _ = write!(output, "\nAreas:");
-        for area_with_counts in &areas.areas {
-            let _ = write!(output, "\n  - {}", area_with_counts.area.title);
-            if let Some(ref desc) = area_with_counts.area.description {
-                let _ = write!(output, " — {desc}");
-            }
-            let _ = write!(
-                output,
-                " ({} active tasks, {} projects)",
-                area_with_counts.active_task_count, area_with_counts.project_count
-            );
+    // Stale tasks
+    if !summary.stale_tasks.is_empty() {
+        let _ = write!(
+            output,
+            "\nStale (from previous sessions — resume or close):"
+        );
+        for task in &summary.stale_tasks {
+            let _ = write!(output, "\n  - [{}] {}", task.id, task.title);
         }
-    }
-
-    // Warnings
-    let mut warnings: Vec<String> = Vec::new();
-    if summary.overdue_count > 0 {
-        warnings.push(format!("{} tasks overdue", summary.overdue_count));
-    }
-    if summary.deferred_count > 0 {
-        warnings.push(format!("{} tasks deferred", summary.deferred_count));
-    }
-    if !warnings.is_empty() {
-        let _ = write!(output, "\n{}", warnings.join(" | "));
     }
 
     Ok(Some(output))
@@ -150,7 +87,7 @@ mod tests {
     #[test]
     fn test_empty_returns_none() {
         let conn = setup_db();
-        let result = build_task_context(&conn, None).unwrap();
+        let result = build_task_context(&conn).unwrap();
         assert!(result.is_none());
     }
 
@@ -162,24 +99,41 @@ mod tests {
             &TaskCreateParams {
                 title: "Fix bug".to_string(),
                 status: Some(TaskStatus::InProgress),
-                priority: Some(TaskPriority::High),
                 ..Default::default()
             },
         )
         .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
+        let result = build_task_context(&conn).unwrap().unwrap();
         assert!(result.contains("1 in progress"));
         assert!(result.contains("Fix bug"));
-        assert!(result.contains("P:high"));
     }
 
     #[test]
-    fn test_with_projects() {
+    fn test_stale_tasks_shown() {
         let conn = setup_db();
-        let project = TaskRepository::create_project(
+        TaskRepository::create_task(
             &conn,
-            &ProjectCreateParams {
-                title: "Dashboard v2".to_string(),
+            &TaskCreateParams {
+                title: "Stale task".to_string(),
+                status: Some(TaskStatus::Stale),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = build_task_context(&conn).unwrap().unwrap();
+        assert!(result.contains("1 stale"));
+        assert!(result.contains("Stale task"));
+        assert!(result.contains("resume or close"));
+    }
+
+    #[test]
+    fn test_mixed_statuses() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "In progress".to_string(),
+                status: Some(TaskStatus::InProgress),
                 ..Default::default()
             },
         )
@@ -187,125 +141,68 @@ mod tests {
         TaskRepository::create_task(
             &conn,
             &TaskCreateParams {
-                title: "Task 1".to_string(),
-                project_id: Some(project.id.clone()),
+                title: "Pending task".to_string(),
+                status: Some(TaskStatus::Pending),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Stale task".to_string(),
+                status: Some(TaskStatus::Stale),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = build_task_context(&conn).unwrap().unwrap();
+        assert!(result.contains("1 in progress"));
+        assert!(result.contains("1 pending"));
+        assert!(result.contains("1 stale"));
+    }
+
+    #[test]
+    fn test_completed_not_shown() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Done task".to_string(),
                 status: Some(TaskStatus::Completed),
                 ..Default::default()
             },
         )
         .unwrap();
-        TaskRepository::create_task(
-            &conn,
-            &TaskCreateParams {
-                title: "Task 2".to_string(),
-                project_id: Some(project.id),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(result.contains("Dashboard v2 (1/2)"));
+        let result = build_task_context(&conn).unwrap();
+        assert!(result.is_none());
     }
 
     #[test]
-    fn test_with_areas() {
+    fn test_subtasks_not_separate() {
         let conn = setup_db();
-        let area = TaskRepository::create_area(
-            &conn,
-            &AreaCreateParams {
-                title: "Engineering".to_string(),
-                description: Some("Core product development".to_string()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        TaskRepository::create_task(
+        let parent = TaskRepository::create_task(
             &conn,
             &TaskCreateParams {
-                title: "Active task".to_string(),
-                area_id: Some(area.id),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(result.contains("Engineering"));
-        assert!(result.contains("Core product development"));
-    }
-
-    #[test]
-    fn test_time_tracking_display() {
-        let conn = setup_db();
-        TaskRepository::create_task(
-            &conn,
-            &TaskCreateParams {
-                title: "Time tracked".to_string(),
+                title: "Parent".to_string(),
                 status: Some(TaskStatus::InProgress),
-                estimated_minutes: Some(60),
                 ..Default::default()
             },
         )
         .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(result.contains("0/60min"));
-    }
-
-    #[test]
-    fn test_due_date_display() {
-        let conn = setup_db();
         TaskRepository::create_task(
             &conn,
             &TaskCreateParams {
-                title: "Due soon".to_string(),
+                title: "Subtask".to_string(),
                 status: Some(TaskStatus::InProgress),
-                due_date: Some("2026-02-15".to_string()),
+                parent_task_id: Some(parent.id.clone()),
                 ..Default::default()
             },
         )
         .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(result.contains("due:2026-02-15"));
-    }
-
-    #[test]
-    fn test_medium_priority_not_shown() {
-        let conn = setup_db();
-        TaskRepository::create_task(
-            &conn,
-            &TaskCreateParams {
-                title: "Normal task".to_string(),
-                status: Some(TaskStatus::InProgress),
-                priority: Some(TaskPriority::Medium),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(!result.contains("P:medium"));
-    }
-
-    #[test]
-    fn test_blocked_count() {
-        let conn = setup_db();
-        let t1 = TaskRepository::create_task(
-            &conn,
-            &TaskCreateParams {
-                title: "Blocker".to_string(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let t2 = TaskRepository::create_task(
-            &conn,
-            &TaskCreateParams {
-                title: "Blocked".to_string(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        TaskRepository::add_dependency(&conn, &t1.id, &t2.id, DependencyRelationship::Blocks)
-            .unwrap();
-        let result = build_task_context(&conn, None).unwrap().unwrap();
-        assert!(result.contains("1 blocked"));
+        let result = build_task_context(&conn).unwrap().unwrap();
+        // Both show up because they're both in_progress — but that's fine,
+        // the context just lists all in_progress tasks
+        assert!(result.contains("2 in progress"));
     }
 }

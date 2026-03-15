@@ -1,11 +1,9 @@
 //! SQL DDL for the task management tables.
 //!
-//! Creates the `projects`, `tasks`, `task_dependencies`, `task_activity`,
-//! `areas`, and FTS virtual tables. Mirrors migrations v007 and v008 from
-//! the TypeScript codebase.
-//!
-//! These tables share the same database as `events` — the runtime
-//! calls [`run_migrations`] after the event store migrations complete.
+//! Creates the `tasks`, `task_activity`, and FTS virtual tables.
+//! Fresh installs get the simplified v2 schema directly.
+//! Existing v1 databases (with projects/areas/dependencies) are
+//! migrated by [`run_migration_v2`].
 
 use rusqlite::Connection;
 
@@ -13,99 +11,225 @@ use super::errors::TaskError;
 
 /// Run all task-related migrations.
 ///
-/// Idempotent — safe to call multiple times (uses `IF NOT EXISTS`).
+/// Idempotent — safe to call multiple times.
 pub fn run_migrations(conn: &Connection) -> Result<(), TaskError> {
-    conn.execute_batch(TASKS_SCHEMA)?;
+    // Check if we have v1 tables by looking for the projects table
+    let has_v1_tables = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+
+    let has_tasks_table = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+
+    if has_v1_tables {
+        // Existing v1 database — run v2 migration
+        run_migration_v2(conn)?;
+    } else if !has_tasks_table {
+        // Fresh install — create simplified schema directly
+        conn.execute_batch(TASKS_SCHEMA_V2)?;
+    }
+    // else: already at v2, nothing to do — verify by checking for stale support
+    else {
+        ensure_stale_support(conn)?;
+    }
+
     Ok(())
 }
 
-/// Combined DDL for all task management tables.
-const TASKS_SCHEMA: &str = r"
--- Projects table
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT,
-    area_id TEXT,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'paused', 'completed', 'archived')),
-    tags TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at TEXT,
-    metadata TEXT DEFAULT '{}'
-);
+/// Ensure the tasks table supports the 'stale' status.
+/// Needed when v2 schema exists but may not have been fully applied.
+fn ensure_stale_support(conn: &Connection) -> Result<(), TaskError> {
+    // Try inserting and immediately deleting a stale row to verify CHECK allows it
+    let stale_ok = conn
+        .execute(
+            "INSERT INTO tasks (id, title, status) VALUES ('__stale_check__', '__check__', 'stale')",
+            [],
+        )
+        .is_ok();
+    if stale_ok {
+        let _ = conn.execute("DELETE FROM tasks WHERE id = '__stale_check__'", []);
+    } else {
+        // CHECK constraint doesn't allow 'stale' — need table rebuild
+        rebuild_tasks_table(conn)?;
+    }
+    Ok(())
+}
 
-CREATE INDEX IF NOT EXISTS idx_projects_workspace_status
-    ON projects(workspace_id, status);
-CREATE INDEX IF NOT EXISTS idx_projects_status_updated
-    ON projects(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_projects_area
-    ON projects(area_id);
+/// Migrate from v1 (projects/areas/dependencies) to v2 (simplified tasks only).
+fn run_migration_v2(conn: &Connection) -> Result<(), TaskError> {
+    // Disable FK checks during migration to avoid issues with
+    // dropping referenced tables (old tasks FK → areas/projects)
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
 
--- Tasks table
+    conn.execute_batch(
+        "
+        -- Drop removed tables
+        DROP TABLE IF EXISTS task_dependencies;
+        DROP TABLE IF EXISTS projects;
+        DROP TABLE IF EXISTS areas;
+        DROP TABLE IF EXISTS areas_fts;
+        ",
+    )?;
+
+    // Rebuild tasks table to drop columns and update CHECK constraint
+    rebuild_tasks_table(conn)?;
+
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+    Ok(())
+}
+
+/// Rebuild the tasks table with simplified columns and updated CHECK constraint.
+fn rebuild_tasks_table(conn: &Connection) -> Result<(), TaskError> {
+    // Check if old columns exist to decide what to migrate
+    let has_old_columns = conn
+        .prepare("SELECT project_id FROM tasks LIMIT 0")
+        .is_ok();
+
+    conn.execute_batch("DROP TRIGGER IF EXISTS tasks_fts_insert;")?;
+    conn.execute_batch("DROP TRIGGER IF EXISTS tasks_fts_update;")?;
+    conn.execute_batch("DROP TRIGGER IF EXISTS tasks_fts_delete;")?;
+
+    if has_old_columns {
+        conn.execute_batch(
+            "
+            CREATE TABLE tasks_v2 (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                active_form TEXT,
+                notes TEXT,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','in_progress','completed','cancelled','stale')),
+                parent_task_id TEXT REFERENCES tasks_v2(id) ON DELETE CASCADE,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_by_session_id TEXT,
+                last_session_id TEXT,
+                last_session_at TEXT,
+                metadata TEXT
+            );
+
+            INSERT INTO tasks_v2 (id, title, description, active_form, notes, status,
+                parent_task_id, started_at, completed_at,
+                created_at, updated_at,
+                created_by_session_id, last_session_id, last_session_at, metadata)
+            SELECT id, title, description, active_form, notes,
+                CASE WHEN status = 'backlog' THEN 'pending' ELSE status END,
+                parent_task_id, started_at, completed_at,
+                created_at, updated_at,
+                created_by_session_id, last_session_id, last_session_at, metadata
+            FROM tasks;
+
+            DROP TABLE tasks;
+            ALTER TABLE tasks_v2 RENAME TO tasks;
+            ",
+        )?;
+    } else {
+        // Already has simplified columns but needs CHECK update
+        conn.execute_batch(
+            "
+            CREATE TABLE tasks_v2 (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                active_form TEXT,
+                notes TEXT,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','in_progress','completed','cancelled','stale')),
+                parent_task_id TEXT REFERENCES tasks_v2(id) ON DELETE CASCADE,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_by_session_id TEXT,
+                last_session_id TEXT,
+                last_session_at TEXT,
+                metadata TEXT
+            );
+
+            INSERT INTO tasks_v2 (id, title, description, active_form, notes, status,
+                parent_task_id, started_at, completed_at,
+                created_at, updated_at,
+                created_by_session_id, last_session_id, last_session_at, metadata)
+            SELECT id, title, description, active_form, notes, status,
+                parent_task_id, started_at, completed_at,
+                created_at, updated_at,
+                created_by_session_id, last_session_id, last_session_at, metadata
+            FROM tasks;
+
+            DROP TABLE tasks;
+            ALTER TABLE tasks_v2 RENAME TO tasks;
+            ",
+        )?;
+    }
+
+    // Recreate indexes
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(created_by_session_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_last_session ON tasks(last_session_id);
+        ",
+    )?;
+
+    // Rebuild FTS
+    conn.execute_batch(
+        "
+        DROP TABLE IF EXISTS tasks_fts;
+        CREATE VIRTUAL TABLE tasks_fts USING fts5(
+            task_id,
+            title,
+            description,
+            notes,
+            tokenize='porter unicode61'
+        );
+
+        -- Reindex existing data
+        INSERT INTO tasks_fts(task_id, title, description, notes)
+        SELECT id, title, COALESCE(description, ''), COALESCE(notes, '')
+        FROM tasks;
+        ",
+    )?;
+
+    // Recreate FTS triggers
+    conn.execute_batch(FTS_TRIGGERS)?;
+
+    Ok(())
+}
+
+/// Fresh v2 schema for new installs.
+const TASKS_SCHEMA_V2: &str = "
+-- Tasks table (simplified v2)
 CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
-    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
-    parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
-    workspace_id TEXT,
-    area_id TEXT,
+    id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
     active_form TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('backlog', 'pending', 'in_progress', 'completed', 'cancelled')),
-    priority TEXT NOT NULL DEFAULT 'medium'
-        CHECK(priority IN ('low', 'medium', 'high', 'critical')),
-    source TEXT NOT NULL DEFAULT 'agent'
-        CHECK(source IN ('agent', 'user', 'skill', 'system')),
-    tags TEXT NOT NULL DEFAULT '[]',
-    due_date TEXT,
-    deferred_until TEXT,
+        CHECK(status IN ('pending','in_progress','completed','cancelled','stale')),
+    parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     started_at TEXT,
     completed_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    estimated_minutes INTEGER,
-    actual_minutes INTEGER NOT NULL DEFAULT 0,
     created_by_session_id TEXT,
     last_session_id TEXT,
     last_session_at TEXT,
-    sort_order INTEGER NOT NULL DEFAULT 0,
     metadata TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_project_status_sort
-    ON tasks(project_id, status, sort_order);
-CREATE INDEX IF NOT EXISTS idx_tasks_parent_sort
-    ON tasks(parent_task_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_tasks_workspace_status
-    ON tasks(workspace_id, status);
-CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
-    ON tasks(status, priority);
-CREATE INDEX IF NOT EXISTS idx_tasks_due_date
-    ON tasks(due_date) WHERE due_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tasks_deferred
-    ON tasks(deferred_until) WHERE deferred_until IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tasks_session
-    ON tasks(created_by_session_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_last_session
-    ON tasks(last_session_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_area
-    ON tasks(area_id);
-
--- Task dependencies
-CREATE TABLE IF NOT EXISTS task_dependencies (
-    blocker_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    blocked_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    relationship TEXT NOT NULL DEFAULT 'blocks'
-        CHECK(relationship IN ('blocks', 'related')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (blocker_task_id, blocked_task_id),
-    CHECK(blocker_task_id != blocked_task_id)
-);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(created_by_session_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_last_session ON tasks(last_session_id);
 
 -- Task activity (audit trail)
 CREATE TABLE IF NOT EXISTS task_activity (
@@ -114,13 +238,10 @@ CREATE TABLE IF NOT EXISTS task_activity (
     session_id TEXT,
     event_id TEXT,
     action TEXT NOT NULL
-        CHECK(action IN ('created', 'status_changed', 'updated', 'note_added',
-                         'time_logged', 'dependency_added', 'dependency_removed',
-                         'moved', 'deleted')),
+        CHECK(action IN ('created', 'status_changed', 'updated', 'note_added', 'deleted')),
     old_value TEXT,
     new_value TEXT,
     detail TEXT,
-    minutes_logged INTEGER,
     timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -133,76 +254,50 @@ CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
     title,
     description,
     notes,
-    tags,
     tokenize='porter unicode61'
 );
 
 -- FTS sync triggers
 CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks
 BEGIN
-    INSERT INTO tasks_fts(task_id, title, description, notes, tags)
+    INSERT INTO tasks_fts(task_id, title, description, notes)
     VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''),
-            COALESCE(NEW.notes, ''), NEW.tags);
+            COALESCE(NEW.notes, ''));
 END;
 
 CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks
 BEGIN
     DELETE FROM tasks_fts WHERE task_id = OLD.id;
-    INSERT INTO tasks_fts(task_id, title, description, notes, tags)
+    INSERT INTO tasks_fts(task_id, title, description, notes)
     VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''),
-            COALESCE(NEW.notes, ''), NEW.tags);
+            COALESCE(NEW.notes, ''));
 END;
 
 CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks
 BEGIN
     DELETE FROM tasks_fts WHERE task_id = OLD.id;
 END;
+";
 
--- Areas table
-CREATE TABLE IF NOT EXISTS areas (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL DEFAULT 'default',
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'archived')),
-    tags TEXT NOT NULL DEFAULT '[]',
-    sort_order REAL NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    metadata TEXT DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_areas_workspace
-    ON areas(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_areas_status
-    ON areas(status);
-
--- Full-text search for areas
-CREATE VIRTUAL TABLE IF NOT EXISTS areas_fts USING fts5(
-    area_id,
-    title,
-    description,
-    tags,
-    tokenize='porter unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS areas_fts_insert AFTER INSERT ON areas
+const FTS_TRIGGERS: &str = "
+CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks
 BEGIN
-    INSERT INTO areas_fts(area_id, title, description, tags)
-    VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), NEW.tags);
+    INSERT INTO tasks_fts(task_id, title, description, notes)
+    VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''),
+            COALESCE(NEW.notes, ''));
 END;
 
-CREATE TRIGGER IF NOT EXISTS areas_fts_update AFTER UPDATE ON areas
+CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks
 BEGIN
-    DELETE FROM areas_fts WHERE area_id = OLD.id;
-    INSERT INTO areas_fts(area_id, title, description, tags)
-    VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), NEW.tags);
+    DELETE FROM tasks_fts WHERE task_id = OLD.id;
+    INSERT INTO tasks_fts(task_id, title, description, notes)
+    VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''),
+            COALESCE(NEW.notes, ''));
 END;
 
-CREATE TRIGGER IF NOT EXISTS areas_fts_delete AFTER DELETE ON areas
+CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks
 BEGIN
-    DELETE FROM areas_fts WHERE area_id = OLD.id;
+    DELETE FROM tasks_fts WHERE task_id = OLD.id;
 END;
 ";
 
@@ -219,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_create_all_tables() {
+    fn test_migrations_create_tables() {
         let conn = setup_db();
         let tables: Vec<String> = conn
             .prepare(
@@ -232,11 +327,12 @@ mod tests {
             .filter_map(Result::ok)
             .collect();
 
-        assert!(tables.contains(&"projects".to_string()));
         assert!(tables.contains(&"tasks".to_string()));
-        assert!(tables.contains(&"task_dependencies".to_string()));
         assert!(tables.contains(&"task_activity".to_string()));
-        assert!(tables.contains(&"areas".to_string()));
+        // v1 tables should NOT exist
+        assert!(!tables.contains(&"projects".to_string()));
+        assert!(!tables.contains(&"areas".to_string()));
+        assert!(!tables.contains(&"task_dependencies".to_string()));
     }
 
     #[test]
@@ -254,7 +350,8 @@ mod tests {
             .collect();
 
         assert!(tables.iter().any(|t| t.contains("tasks_fts")));
-        assert!(tables.iter().any(|t| t.contains("areas_fts")));
+        // areas_fts should NOT exist
+        assert!(!tables.iter().any(|t| t.contains("areas_fts")));
     }
 
     #[test]
@@ -265,35 +362,217 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_indexes_exist() {
+    fn test_stale_status_accepted() {
         let conn = setup_db();
-        let indexes: Vec<String> = conn
-            .prepare(
-                "SELECT name FROM sqlite_master WHERE type='index' \
-                 AND name LIKE 'idx_%' ORDER BY name",
-            )
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect();
-
-        assert!(indexes.contains(&"idx_tasks_workspace_status".to_string()));
-        assert!(indexes.contains(&"idx_tasks_status_priority".to_string()));
-        assert!(indexes.contains(&"idx_projects_workspace_status".to_string()));
-        assert!(indexes.contains(&"idx_areas_workspace".to_string()));
+        conn.execute(
+            "INSERT INTO tasks (id, title, status) VALUES ('t1', 'Test', 'stale')",
+            [],
+        )
+        .unwrap();
+        let status: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "stale");
     }
 
     #[test]
-    fn test_self_dependency_blocked() {
+    fn test_fts_triggers_work() {
         let conn = setup_db();
-        conn.execute("INSERT INTO tasks (id, title) VALUES ('t1', 'Task 1')", [])
-            .unwrap();
-
-        let result = conn.execute(
-            "INSERT INTO task_dependencies (blocker_task_id, blocked_task_id) VALUES ('t1', 't1')",
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('t1', 'authentication bug fix')",
             [],
-        );
-        assert!(result.is_err());
+        )
+        .unwrap();
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks_fts WHERE tasks_fts MATCH 'authentication'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
+
+    #[test]
+    fn test_v2_migration_from_v1_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        // Create v1 schema manually
+        conn.execute_batch(V1_SCHEMA).unwrap();
+
+        // Insert some v1 data
+        conn.execute(
+            "INSERT INTO projects (id, title) VALUES ('proj-1', 'Project 1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, project_id, status, priority, source, tags) \
+             VALUES ('t1', 'Task 1', 'proj-1', 'backlog', 'high', 'agent', '[]')",
+            [],
+        )
+        .unwrap();
+
+        // Run v2 migration
+        run_migrations(&conn).unwrap();
+
+        // Projects table should be gone
+        let has_projects = conn
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'")
+            .and_then(|mut stmt| stmt.exists([]))
+            .unwrap_or(false);
+        assert!(!has_projects);
+
+        // Task should survive with backlog mapped to pending
+        let status: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "pending");
+
+        // Stale should work
+        conn.execute(
+            "INSERT INTO tasks (id, title, status) VALUES ('t2', 'Test', 'stale')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_v2_migration_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        // Create v1 schema
+        conn.execute_batch(V1_SCHEMA).unwrap();
+
+        // Run migration twice
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_parent_task_self_reference_survives() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('parent', 'Parent')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, parent_task_id) VALUES ('child', 'Child', 'parent')",
+            [],
+        )
+        .unwrap();
+        let parent: String = conn
+            .query_row(
+                "SELECT parent_task_id FROM tasks WHERE id = 'child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent, "parent");
+    }
+
+    // V1 schema for testing migration path
+    const V1_SCHEMA: &str = "
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT,
+            area_id TEXT,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'paused', 'completed', 'archived')),
+            tags TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            metadata TEXT DEFAULT '{}'
+        );
+
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+            workspace_id TEXT,
+            area_id TEXT,
+            title TEXT NOT NULL,
+            description TEXT,
+            active_form TEXT,
+            notes TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('backlog', 'pending', 'in_progress', 'completed', 'cancelled')),
+            priority TEXT NOT NULL DEFAULT 'medium'
+                CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+            source TEXT NOT NULL DEFAULT 'agent'
+                CHECK(source IN ('agent', 'user', 'skill', 'system')),
+            tags TEXT NOT NULL DEFAULT '[]',
+            due_date TEXT,
+            deferred_until TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            estimated_minutes INTEGER,
+            actual_minutes INTEGER NOT NULL DEFAULT 0,
+            created_by_session_id TEXT,
+            last_session_id TEXT,
+            last_session_at TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT
+        );
+
+        CREATE TABLE task_dependencies (
+            blocker_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            blocked_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            relationship TEXT NOT NULL DEFAULT 'blocks',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (blocker_task_id, blocked_task_id)
+        );
+
+        CREATE TABLE task_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            session_id TEXT,
+            event_id TEXT,
+            action TEXT NOT NULL
+                CHECK(action IN ('created', 'status_changed', 'updated', 'note_added',
+                                 'time_logged', 'dependency_added', 'dependency_removed',
+                                 'moved', 'deleted')),
+            old_value TEXT,
+            new_value TEXT,
+            detail TEXT,
+            minutes_logged INTEGER,
+            timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE areas (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'archived')),
+            tags TEXT NOT NULL DEFAULT '[]',
+            sort_order REAL NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            metadata TEXT DEFAULT '{}'
+        );
+
+        CREATE VIRTUAL TABLE tasks_fts USING fts5(
+            task_id, title, description, notes, tags,
+            tokenize='porter unicode61'
+        );
+
+        CREATE VIRTUAL TABLE areas_fts USING fts5(
+            area_id, title, description, tags,
+            tokenize='porter unicode61'
+        );
+    ";
 }

@@ -166,25 +166,28 @@ impl Drop for CompactionGuard<'_> {
 
 impl CompactionHandler {
     /// Create a handler without LLM support (keyword summarizer only).
-    pub fn new() -> Self {
+    pub fn new(trigger_config: CompactionTriggerConfig) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: None,
             persister: None,
-            trigger: Mutex::new(CompactionTrigger::new(CompactionTriggerConfig::default())),
+            trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
             pending_bash_commands: Mutex::new(Vec::new()),
         }
     }
 
     /// Create a handler with a `SubagentManager` for subsession-backed summaries.
-    pub fn with_subagent_manager(manager: Arc<SubagentManager>) -> Self {
+    pub fn with_subagent_manager(
+        manager: Arc<SubagentManager>,
+        trigger_config: CompactionTriggerConfig,
+    ) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: Some(manager),
             persister: None,
-            trigger: Mutex::new(CompactionTrigger::new(CompactionTriggerConfig::default())),
+            trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
             pending_bash_commands: Mutex::new(Vec::new()),
         }
     }
@@ -504,7 +507,7 @@ impl CompactionHandler {
 
 impl Default for CompactionHandler {
     fn default() -> Self {
-        Self::new()
+        Self::new(CompactionTriggerConfig::default())
     }
 }
 
@@ -514,7 +517,7 @@ mod tests {
 
     #[test]
     fn initial_state() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         assert!(!handler.is_compacting());
         assert!(handler.subagent_manager.is_none());
     }
@@ -543,7 +546,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_returns_immediately_when_idle() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         handler
             .wait_for_compaction(std::time::Duration::from_millis(10))
             .await;
@@ -595,7 +598,7 @@ mod tests {
 
     #[test]
     fn concurrent_compaction_rejected() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         handler.is_compacting.store(true, Ordering::SeqCst);
         let cas =
             handler
@@ -606,7 +609,7 @@ mod tests {
 
     #[test]
     fn is_compacting_true_during_execution() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         assert!(!handler.is_compacting());
         handler.is_compacting.store(true, Ordering::SeqCst);
         assert!(handler.is_compacting());
@@ -616,7 +619,7 @@ mod tests {
 
     #[test]
     fn record_bash_command_accumulates() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         handler.record_bash_command("git status");
         handler.record_bash_command("cargo build");
         handler.record_bash_command("git push origin main");
@@ -626,7 +629,7 @@ mod tests {
 
     #[test]
     fn turns_since_compaction_starts_at_zero() {
-        let handler = CompactionHandler::new();
+        let handler = CompactionHandler::default();
         assert_eq!(handler.turns_since_compaction(), 0);
     }
 }

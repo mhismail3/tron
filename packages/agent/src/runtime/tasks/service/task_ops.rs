@@ -1,15 +1,20 @@
 use rusqlite::Connection;
+use serde_json::{Value, json};
 use tracing::warn;
 
 use super::{
-    ActivityAction, DependencyRelationship, LogActivityParams, Task, TaskActivity,
-    TaskCreateParams, TaskError, TaskFilter, TaskListResult, TaskRepository, TaskService,
-    TaskStatus, TaskUpdateParams, TaskWithDetails,
+    ActivityAction, LogActivityParams, Task, TaskActivity, TaskCreateParams, TaskError,
+    TaskFilter, TaskListResult, TaskRepository, TaskService, TaskStatus, TaskUpdateParams,
+    TaskWithDetails,
 };
 
 impl TaskService {
     /// Create a task with hierarchy validation and auto-timestamps.
     pub fn create_task(conn: &Connection, params: &TaskCreateParams) -> Result<Task, TaskError> {
+        if params.title.trim().is_empty() {
+            return Err(TaskError::Validation("title is required".to_string()));
+        }
+
         if let Some(ref parent_id) = params.parent_task_id
             && let Some(parent) = TaskRepository::get_task(conn, parent_id)?
             && parent.parent_task_id.is_some()
@@ -31,28 +36,23 @@ impl TaskService {
                 old_value: None,
                 new_value: None,
                 detail: Some(format!("Task created: {}", task.title)),
-                minutes_logged: None,
             },
         )?;
 
         Ok(task)
     }
 
-    /// Get a task with full details (subtasks, dependencies, activity).
+    /// Get a task with full details (subtasks, activity).
     pub fn get_task(conn: &Connection, id: &str) -> Result<TaskWithDetails, TaskError> {
         let task =
             TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))?;
 
         let subtasks = TaskRepository::get_subtasks(conn, id)?;
-        let blocked_by = TaskRepository::get_blocked_by(conn, id)?;
-        let blocks = TaskRepository::get_blocks(conn, id)?;
         let recent_activity = TaskRepository::get_activity(conn, id, 20)?;
 
         Ok(TaskWithDetails {
             task,
             subtasks,
-            blocked_by,
-            blocks,
             recent_activity,
         })
     }
@@ -72,19 +72,21 @@ impl TaskService {
         if let Some(new_status) = updates.status {
             let old_status = current.status;
 
-            TaskRepository::log_activity(
-                conn,
-                &LogActivityParams {
-                    task_id: id.to_string(),
-                    session_id: session_id.map(String::from),
-                    event_id: None,
-                    action: ActivityAction::StatusChanged,
-                    old_value: Some(old_status.as_sql().to_string()),
-                    new_value: Some(new_status.as_sql().to_string()),
-                    detail: None,
-                    minutes_logged: None,
-                },
-            )?;
+            // Skip no-op status changes
+            if new_status != old_status {
+                TaskRepository::log_activity(
+                    conn,
+                    &LogActivityParams {
+                        task_id: id.to_string(),
+                        session_id: session_id.map(String::from),
+                        event_id: None,
+                        action: ActivityAction::StatusChanged,
+                        old_value: Some(old_status.as_sql().to_string()),
+                        new_value: Some(new_status.as_sql().to_string()),
+                        detail: None,
+                    },
+                )?;
+            }
         }
 
         if updates.add_note.is_some() {
@@ -98,7 +100,6 @@ impl TaskService {
                     old_value: None,
                     new_value: updates.add_note.clone(),
                     detail: None,
-                    minutes_logged: None,
                 },
             )?;
         }
@@ -131,6 +132,14 @@ impl TaskService {
                     rusqlite::params![id],
                 )?;
             }
+            // Stale -> InProgress: clear completed_at, set started_at
+            if new_status == TaskStatus::InProgress && current.status == TaskStatus::Stale {
+                let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                let _ = conn.execute(
+                    "UPDATE tasks SET completed_at = NULL, started_at = COALESCE(started_at, ?1) WHERE id = ?2",
+                    rusqlite::params![now, id],
+                )?;
+            }
         }
 
         TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))
@@ -157,35 +166,10 @@ impl TaskService {
                 old_value: None,
                 new_value: None,
                 detail: None,
-                minutes_logged: None,
             },
         )?;
 
         TaskRepository::delete_task(conn, id)
-    }
-
-    /// Log time on a task.
-    pub fn log_time(
-        conn: &Connection,
-        id: &str,
-        minutes: i32,
-        session_id: Option<&str>,
-    ) -> Result<(), TaskError> {
-        TaskRepository::increment_actual_minutes(conn, id, minutes)?;
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::TimeLogged,
-                old_value: None,
-                new_value: None,
-                detail: Some(format!("Logged {minutes} minutes")),
-                minutes_logged: Some(minutes),
-            },
-        )?;
-        Ok(())
     }
 
     /// List tasks with filtering and pagination.
@@ -216,82 +200,74 @@ impl TaskService {
         TaskRepository::get_activity(conn, task_id, limit)
     }
 
-    /// Add a dependency with circular detection for `Blocks` relationships.
-    #[allow(clippy::similar_names)]
-    pub fn add_dependency(
+    /// Mark all in-progress tasks for a session as stale.
+    pub fn mark_session_tasks_stale(
         conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
-        relationship: DependencyRelationship,
-        session_id: Option<&str>,
-    ) -> Result<(), TaskError> {
-        if relationship == DependencyRelationship::Blocks
-            && TaskRepository::has_circular_dependency(conn, blocker_id, blocked_id)?
-        {
-            return Err(TaskError::CircularDependency {
-                blocker_id: blocker_id.to_string(),
-                blocked_id: blocked_id.to_string(),
-            });
-        }
+        session_id: &str,
+    ) -> Result<usize, TaskError> {
+        // Get tasks that will be marked stale for activity logging
+        let filter = TaskFilter {
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        };
+        let in_progress = TaskRepository::list_tasks(conn, &filter, 1000, 0)?;
+        let affected_tasks: Vec<_> = in_progress
+            .tasks
+            .iter()
+            .filter(|t| t.last_session_id.as_deref() == Some(session_id))
+            .collect();
 
-        TaskRepository::add_dependency(conn, blocker_id, blocked_id, relationship)?;
+        let count = TaskRepository::mark_stale_tasks(conn, session_id)?;
 
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: blocker_id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::DependencyAdded,
-                old_value: None,
-                new_value: Some(blocked_id.to_string()),
-                detail: Some(format!("Now blocks {blocked_id}")),
-                minutes_logged: None,
-            },
-        )?;
-        TaskRepository::log_activity(
-            conn,
-            &LogActivityParams {
-                task_id: blocked_id.to_string(),
-                session_id: session_id.map(String::from),
-                event_id: None,
-                action: ActivityAction::DependencyAdded,
-                old_value: None,
-                new_value: Some(blocker_id.to_string()),
-                detail: Some(format!("Blocked by {blocker_id}")),
-                minutes_logged: None,
-            },
-        )?;
-
-        Ok(())
-    }
-
-    /// Remove a dependency with activity logging.
-    #[allow(clippy::similar_names)]
-    pub fn remove_dependency(
-        conn: &Connection,
-        blocker_id: &str,
-        blocked_id: &str,
-        session_id: Option<&str>,
-    ) -> Result<bool, TaskError> {
-        let removed = TaskRepository::remove_dependency(conn, blocker_id, blocked_id)?;
-        if removed
-            && let Err(error) = TaskRepository::log_activity(
+        // Log activity for each affected task
+        for task in &affected_tasks {
+            if let Err(e) = TaskRepository::log_activity(
                 conn,
                 &LogActivityParams {
-                    task_id: blocker_id.to_string(),
-                    session_id: session_id.map(String::from),
+                    task_id: task.id.clone(),
+                    session_id: Some(session_id.to_string()),
                     event_id: None,
-                    action: ActivityAction::DependencyRemoved,
-                    old_value: Some(blocked_id.to_string()),
-                    new_value: None,
-                    detail: Some(format!("No longer blocks {blocked_id}")),
-                    minutes_logged: None,
+                    action: ActivityAction::StatusChanged,
+                    old_value: Some("in_progress".to_string()),
+                    new_value: Some("stale".to_string()),
+                    detail: Some("Session ended — task marked stale".to_string()),
                 },
-            )
-        {
-            warn!(error = %error, "Failed to log dependency removal activity");
+            ) {
+                warn!(task_id = %task.id, error = %e, "failed to log stale activity");
+            }
         }
-        Ok(removed)
+
+        Ok(count)
+    }
+
+    /// Batch create tasks atomically.
+    pub fn batch_create_tasks(
+        conn: &Connection,
+        items: &[TaskCreateParams],
+        _session_id: Option<&str>,
+    ) -> Result<Value, TaskError> {
+        if items.is_empty() {
+            return Ok(json!({"affected": 0, "ids": []}));
+        }
+
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+
+        let mut ids = Vec::new();
+        for item in items {
+            match Self::create_task(conn, item) {
+                Ok(task) => ids.push(task.id),
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    return Err(e);
+                }
+            }
+        }
+
+        conn.execute_batch("COMMIT")?;
+
+        Ok(json!({
+            "affected": ids.len(),
+            "ids": ids,
+        }))
     }
 }

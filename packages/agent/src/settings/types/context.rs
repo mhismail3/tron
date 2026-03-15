@@ -65,8 +65,8 @@ impl Default for CompactorSettings {
             force_always: None,
             trigger_token_threshold: Some(0.70),
             alert_zone_threshold: Some(0.50),
-            default_turn_fallback: Some(8),
-            alert_turn_fallback: Some(5),
+            default_turn_fallback: Some(25),
+            alert_turn_fallback: Some(15),
             preserve_recent_count: 5,
         }
     }

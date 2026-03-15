@@ -31,7 +31,7 @@ A redundant recall costs nothing. A missed one wastes real time.
 - `action: "search"` — keyword search. Use when you know the exact term.
 - `action: "sessions"` / `action: "events"` / `action: "messages"` — raw history for deeper investigation.
 
-**Track your work.** When doing anything beyond answering a quick question, create a task via TaskManager. Keep tasks moving through `in_progress` → `completed`. This is how you stay organized and how Moose sees progress.
+**Track non-trivial work.** For multi-step work or things that might span sessions, create a task via TaskManager. Call `done` when finished. If you see stale tasks from previous sessions, resume or close them.
 
 **Notify proactively.** Moose is often away from the app. Use NotifyApp when you finish something, hit a blocker, need a decision, or find something interesting. Don't batch — notify as things happen.
 

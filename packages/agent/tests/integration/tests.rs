@@ -383,7 +383,7 @@ async fn e2e_rapid_fire_requests() {
 }
 
 #[tokio::test]
-async fn e2e_project_crud() {
+async fn e2e_task_done_and_add_note() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
@@ -391,26 +391,32 @@ async fn e2e_project_crud() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "projects.create",
-        Some(json!({"title": "Test project"})),
+        "tasks.create",
+        Some(json!({"title": "Test task"})),
     )
     .await;
     assert_eq!(resp["success"], true);
-    let pid = resp["result"]["id"].as_str().unwrap().to_string();
+    let tid = resp["result"]["id"].as_str().unwrap().to_string();
 
-    let resp = rpc_call(&mut ws, 2, "projects.list", None).await;
+    let resp = rpc_call(
+        &mut ws,
+        2,
+        "tasks.addNote",
+        Some(json!({"taskId": tid, "note": "progress note"})),
+    )
+    .await;
     assert_eq!(resp["success"], true);
-    let projects = resp["result"]["projects"].as_array().unwrap();
-    assert!(projects.iter().any(|p| p["id"] == pid));
+    assert!(resp["result"]["notes"].as_str().unwrap().contains("progress note"));
 
     let resp = rpc_call(
         &mut ws,
         3,
-        "projects.delete",
-        Some(json!({"projectId": pid})),
+        "tasks.done",
+        Some(json!({"taskId": tid})),
     )
     .await;
     assert_eq!(resp["success"], true);
+    assert_eq!(resp["result"]["status"], "completed");
 
     server.shutdown().shutdown();
 }
@@ -696,7 +702,7 @@ async fn e2e_session_list_enriched_fields() {
 }
 
 #[tokio::test]
-async fn e2e_projects_get_details() {
+async fn e2e_task_batch_create() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
@@ -704,32 +710,16 @@ async fn e2e_projects_get_details() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "projects.create",
-        Some(json!({"title": "Detail Project"})),
+        "tasks.batchCreate",
+        Some(json!({"items": [{"title": "A"}, {"title": "B"}]})),
     )
     .await;
     assert_eq!(resp["success"], true);
-    let pid = resp["result"]["id"].as_str().unwrap().to_string();
+    assert_eq!(resp["result"]["affected"], 2);
 
-    // Create task under project
-    let _ = rpc_call(
-        &mut ws,
-        2,
-        "tasks.create",
-        Some(json!({"title": "Task in project", "projectId": pid})),
-    )
-    .await;
-
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "projects.getDetails",
-        Some(json!({"projectId": pid})),
-    )
-    .await;
+    let resp = rpc_call(&mut ws, 2, "tasks.list", None).await;
     assert_eq!(resp["success"], true);
-    assert_eq!(resp["result"]["title"], "Detail Project");
-    assert_eq!(resp["result"]["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(resp["result"]["total"], 2);
 
     server.shutdown().shutdown();
 }

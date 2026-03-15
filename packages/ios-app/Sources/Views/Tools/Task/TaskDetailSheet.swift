@@ -86,10 +86,6 @@ struct TaskDetailSheet: View {
             taskListSection(items)
         case .searchResults(let items):
             searchResultsSection(items)
-        case .projects(let items):
-            projectListSection(items)
-        case .areas(let items):
-            areaListSection(items)
         case .empty(let message):
             emptyResultSection(message)
         }
@@ -126,39 +122,15 @@ struct TaskDetailSheet: View {
             statusDot(for: item.mark)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                        .foregroundStyle(item.mark == "x" ? .tronTextMuted : .tronTextPrimary)
-                        .strikethrough(item.mark == "x", color: .tronTextMuted)
-                        .lineLimit(2)
+                Text(item.title)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                    .foregroundStyle(item.mark == "x" ? .tronTextMuted : .tronTextPrimary)
+                    .strikethrough(item.mark == "x", color: .tronTextMuted)
+                    .lineLimit(2)
 
-                    if let priority = item.priority {
-                        Text(priority)
-                            .font(TronTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(TaskFormatting.priorityColor(priority))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(TaskFormatting.priorityColor(priority).opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    Text(item.taskId)
-                        .font(TronTypography.mono(size: 10, weight: .regular))
-                        .foregroundStyle(.tronTextMuted.opacity(0.6))
-
-                    if let due = item.dueDate {
-                        HStack(spacing: 3) {
-                            Image(systemName: "calendar")
-                                .font(TronTypography.sans(size: TronTypography.sizeSM))
-                            Text(due)
-                        }
-                        .font(TronTypography.mono(size: 10, weight: .regular))
-                        .foregroundStyle(.tronWarning)
-                    }
-                }
+                Text(item.taskId)
+                    .font(TronTypography.mono(size: 10, weight: .regular))
+                    .foregroundStyle(.tronTextMuted.opacity(0.6))
             }
 
             Spacer()
@@ -211,155 +183,34 @@ struct TaskDetailSheet: View {
         }
     }
 
-    // MARK: - Project List
-
-    @ViewBuilder
-    private func projectListSection(_ items: [ProjectListItem]) -> some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                        .foregroundStyle(.tronTextMuted)
-                    Text("Projects")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                    countPill(items.count)
-                    Spacer()
-                }
-
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(item.title)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                                .foregroundStyle(.tronTextPrimary)
-                                .lineLimit(2)
-
-                            statusPill(item.status)
-
-                            Spacer()
-                        }
-
-                        HStack(spacing: 8) {
-                            Text(item.projectId)
-                                .font(TronTypography.mono(size: 10, weight: .regular))
-                                .foregroundStyle(.tronTextMuted.opacity(0.6))
-
-                            if let completed = item.completedTasks, let total = item.totalTasks, total > 0 {
-                                progressIndicator(completed: completed, total: total)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-    }
-
-    // MARK: - Area List
-
-    @ViewBuilder
-    private func areaListSection(_ items: [AreaListItem]) -> some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                        .foregroundStyle(.tronTextMuted)
-                    Text("Areas")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                    countPill(items.count)
-                    Spacer()
-                }
-
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(item.title)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                                .foregroundStyle(.tronTextPrimary)
-                                .lineLimit(2)
-
-                            statusPill(item.status)
-
-                            Spacer()
-                        }
-
-                        HStack(spacing: 8) {
-                            Text(item.areaId)
-                                .font(TronTypography.mono(size: 10, weight: .regular))
-                                .foregroundStyle(.tronTextMuted.opacity(0.6))
-
-                            if let pc = item.projectCount {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "folder")
-                                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                                    Text("\(pc) project\(pc == 1 ? "" : "s")")
-                                }
-                                .font(TronTypography.mono(size: 10, weight: .regular))
-                                .foregroundStyle(.tronTextMuted)
-                            }
-
-                            if let tc = item.taskCount, let ac = item.activeTaskCount {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "checklist")
-                                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                                    Text("\(tc) task\(tc == 1 ? "" : "s") (\(ac) active)")
-                                }
-                                .font(TronTypography.mono(size: 10, weight: .regular))
-                                .foregroundStyle(.tronTextMuted)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-    }
-
     // MARK: - Batch Result
 
     @ViewBuilder
     private func batchResultSection(_ result: BatchResult) -> some View {
         glassCard {
             VStack(alignment: .leading, spacing: 12) {
-                // Header with icon and action
                 HStack(spacing: 8) {
-                    Image(systemName: batchIcon(result.action))
+                    Image(systemName: "plus.circle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(batchColor(result.action))
+                        .foregroundStyle(.tronSuccess)
 
-                    Text(batchTitle(result))
+                    Text("Batch Create")
                         .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     Spacer()
-
-                    if result.dryRun {
-                        Text("preview")
-                            .font(TronTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(.tronAmber)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.tronAmber.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
                 }
 
-                // Affected count
                 HStack(spacing: 6) {
                     Text("\(result.affected)")
                         .font(TronTypography.mono(size: 28, weight: .bold))
-                        .foregroundStyle(batchColor(result.action))
+                        .foregroundStyle(.tronSuccess)
 
-                    Text("task\(result.affected == 1 ? "" : "s") \(batchVerb(result))")
+                    Text("task\(result.affected == 1 ? "" : "s") created")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                         .foregroundStyle(.tronTextSecondary)
                 }
 
-                // Created IDs (batch_create only)
                 if !result.ids.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Created IDs")
@@ -380,40 +231,6 @@ struct TaskDetailSheet: View {
                     .padding(.top, 4)
                 }
             }
-        }
-    }
-
-    private func batchIcon(_ action: BatchResult.BatchAction) -> String {
-        switch action {
-        case .create: "plus.circle.fill"
-        case .delete: "trash.fill"
-        case .update: "pencil.circle.fill"
-        }
-    }
-
-    private func batchColor(_ action: BatchResult.BatchAction) -> Color {
-        switch action {
-        case .create: .tronSuccess
-        case .delete: .tronError
-        case .update: .tronTeal
-        }
-    }
-
-    private func batchTitle(_ result: BatchResult) -> String {
-        if result.dryRun { return "Dry Run" }
-        switch result.action {
-        case .create: return "Batch Create"
-        case .delete: return "Batch Delete"
-        case .update: return "Batch Update"
-        }
-    }
-
-    private func batchVerb(_ result: BatchResult) -> String {
-        if result.dryRun { return "would be affected" }
-        switch result.action {
-        case .create: return "created"
-        case .delete: return "deleted"
-        case .update: return "updated"
         }
     }
 
@@ -530,33 +347,12 @@ struct TaskDetailSheet: View {
     }
 
     @ViewBuilder
-    private func progressIndicator(completed: Int, total: Int) -> some View {
-        HStack(spacing: 4) {
-            // Mini progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.tronBorder.opacity(0.3))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(completed == total ? Color.tronSuccess : accentColor)
-                        .frame(width: geometry.size.width * CGFloat(completed) / CGFloat(max(total, 1)))
-                }
-            }
-            .frame(width: 40, height: 4)
-
-            Text("\(completed)/\(total)")
-                .font(TronTypography.mono(size: 10, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
-        }
-    }
-
-    @ViewBuilder
     private func statusDot(for mark: String) -> some View {
         let color: Color = switch mark {
         case "x": .tronSuccess
         case ">": .tronTeal
-        case "b": .tronSlate
         case "-": .tronError
+        case "?": .tronAmber
         default: .tronSlate.opacity(0.5)
         }
         Circle()

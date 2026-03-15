@@ -525,6 +525,7 @@ async fn main() -> Result<()> {
         .unwrap_or(settings.server.max_concurrent_sessions);
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.clone()));
+    session_manager.set_task_pool(task_pool.clone());
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 

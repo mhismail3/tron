@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Shared task status/priority color and mark helpers.
-/// Replaces duplicate logic in EntitySnapshotCard and TaskDetailSheet.
+/// Shared task status color and mark helpers.
 enum TaskFormatting {
 
     static func statusColor(_ status: String) -> Color {
@@ -9,21 +8,9 @@ enum TaskFormatting {
         case "completed": return .tronSuccess
         case "in_progress": return .tronTeal
         case "cancelled": return .tronError
-        case "backlog": return .tronSlate
-        case "paused": return .tronAmber
-        case "archived": return .tronSlate
-        case "active": return .tronTeal
+        case "stale": return .tronAmber
         case "pending": return .tronSlate
         default: return .tronSlate
-        }
-    }
-
-    static func priorityColor(_ priority: String) -> Color {
-        switch priority {
-        case "critical", "[critical]": return .tronError
-        case "high", "[high]": return .orange
-        case "low", "[low]": return .tronTextMuted
-        default: return .tronTextSecondary
         }
     }
 
@@ -32,7 +19,7 @@ enum TaskFormatting {
         case "completed": return "x"
         case "in_progress": return ">"
         case "cancelled": return "-"
-        case "backlog": return "b"
+        case "stale": return "?"
         default: return " "
         }
     }

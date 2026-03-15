@@ -13,17 +13,11 @@ struct EntityDetailParserTests {
         Created task task_abc: Add 2FA [pending]
 
         # Add 2FA
-        ID: task_abc | Status: pending | Priority: high
+        ID: task_abc | Status: pending
 
         Implement two-factor authentication
         Active form: Adding 2FA support
-        Project: Auth Refactor (proj_xyz)
-        Area: Security (area_123)
-        Due: 2026-03-01
-        Deferred until: 2026-02-15
-        Time: 0/120min
-        Tags: security, auth
-        Source: agent
+        Parent: parent_xyz
         Created: 2026-02-11T10:00:00Z
         Updated: 2026-02-11T10:00:00Z
 
@@ -34,9 +28,6 @@ struct EntityDetailParserTests {
           [x] task_sub1: Research 2FA providers
           [ ] task_sub2: Implement TOTP
 
-        Blocked by: task_dep1, task_dep2
-        Blocks: task_dep3
-
         Recent activity:
           2026-02-11: created
           2026-02-11: status_changed - pending → in_progress
@@ -45,21 +36,11 @@ struct EntityDetailParserTests {
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "create")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.title == "Add 2FA")
         #expect(entity?.id == "task_abc")
         #expect(entity?.status == "pending")
-        #expect(entity?.priority == "high")
         #expect(entity?.description == "Implement two-factor authentication")
         #expect(entity?.activeForm == "Adding 2FA support")
-        #expect(entity?.projectName == "Auth Refactor (proj_xyz)")
-        #expect(entity?.areaName == "Security (area_123)")
-        #expect(entity?.dueDate == "2026-03-01")
-        #expect(entity?.deferredUntil == "2026-02-15")
-        #expect(entity?.estimatedMinutes == 120)
-        #expect(entity?.actualMinutes == 0)
-        #expect(entity?.tags == ["security", "auth"])
-        #expect(entity?.source == "agent")
         #expect(entity?.createdAt == "2026-02-11T10:00:00Z")
         #expect(entity?.updatedAt == "2026-02-11T10:00:00Z")
         #expect(entity?.notes?.contains("Initial setup notes") == true)
@@ -69,9 +50,6 @@ struct EntityDetailParserTests {
         #expect(entity?.subtasks[0].id == "task_sub1")
         #expect(entity?.subtasks[0].title == "Research 2FA providers")
         #expect(entity?.subtasks[1].mark == " ")
-
-        #expect(entity?.blockedBy == ["task_dep1", "task_dep2"])
-        #expect(entity?.blocks == ["task_dep3"])
 
         #expect(entity?.activity.count == 2)
         #expect(entity?.activity[0].date == "2026-02-11")
@@ -83,8 +61,7 @@ struct EntityDetailParserTests {
     func testParseMinimalTask() {
         let result = """
         # Simple task
-        ID: task_min | Status: pending | Priority: medium
-        Source: agent
+        ID: task_min | Status: pending
         Created: 2026-02-11T10:00:00Z
         Updated: 2026-02-11T10:00:00Z
         """
@@ -92,15 +69,11 @@ struct EntityDetailParserTests {
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "get")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.title == "Simple task")
         #expect(entity?.id == "task_min")
         #expect(entity?.status == "pending")
-        #expect(entity?.priority == "medium")
         #expect(entity?.description == nil)
-        #expect(entity?.tags.isEmpty == true)
         #expect(entity?.subtasks.isEmpty == true)
-        #expect(entity?.blockedBy.isEmpty == true)
         #expect(entity?.activity.isEmpty == true)
     }
 
@@ -110,8 +83,7 @@ struct EntityDetailParserTests {
         Updated task task_abc: Fix bug [in_progress]
 
         # Fix bug
-        ID: task_abc | Status: in_progress | Priority: high
-        Source: agent
+        ID: task_abc | Status: in_progress
         Started: 2026-02-11T11:00:00Z
         Created: 2026-02-11T10:00:00Z
         Updated: 2026-02-11T11:00:00Z
@@ -120,10 +92,8 @@ struct EntityDetailParserTests {
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "update")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.title == "Fix bug")
         #expect(entity?.status == "in_progress")
-        #expect(entity?.priority == "high")
         #expect(entity?.startedAt == "2026-02-11T11:00:00Z")
     }
 
@@ -133,9 +103,7 @@ struct EntityDetailParserTests {
         Deleted task task_abc: Old task
 
         # Old task
-        ID: task_abc | Status: completed | Priority: low
-        Tags: cleanup
-        Source: agent
+        ID: task_abc | Status: completed
         Completed: 2026-02-10T15:00:00Z
         Created: 2026-02-09T10:00:00Z
         Updated: 2026-02-10T15:00:00Z
@@ -144,149 +112,9 @@ struct EntityDetailParserTests {
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "delete")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.title == "Old task")
         #expect(entity?.status == "completed")
         #expect(entity?.completedAt == "2026-02-10T15:00:00Z")
-        #expect(entity?.tags == ["cleanup"])
-    }
-
-    @Test("Parses task with time tracking from log_time")
-    func testParseLogTimeTask() {
-        let result = """
-        Logged 15min on task_abc. Total: 15min/30min
-
-        # Review PR
-        ID: task_abc | Status: in_progress | Priority: medium
-        Time: 15/30min
-        Source: agent
-        Created: 2026-02-11T10:00:00Z
-        Updated: 2026-02-11T10:15:00Z
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "log_time")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .task)
-        #expect(entity?.title == "Review PR")
-        #expect(entity?.estimatedMinutes == 30)
-        #expect(entity?.actualMinutes == 15)
-    }
-
-    // MARK: - Project Parsing
-
-    @Test("Parses project with tasks")
-    func testParseProjectWithTasks() {
-        let result = """
-        Created project proj_abc: Auth Overhaul
-
-        # Auth Overhaul
-        ID: proj_abc | Status: active | 1/3 tasks
-
-        Rewrite the authentication system
-        Area: Engineering (area_eng)
-        Tags: security, backend
-        Created: 2026-02-11T10:00:00Z
-        Updated: 2026-02-11T10:00:00Z
-
-        Tasks (3):
-          [x] task_1: Set up OAuth [high]
-          [>] task_2: Implement JWT
-          [ ] task_3: Write tests [low]
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_project")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .project)
-        #expect(entity?.title == "Auth Overhaul")
-        #expect(entity?.id == "proj_abc")
-        #expect(entity?.status == "active")
-        #expect(entity?.taskCount == 3)
-        #expect(entity?.completedTaskCount == 1)
-        #expect(entity?.description == "Rewrite the authentication system")
-        #expect(entity?.areaName == "Engineering (area_eng)")
-        #expect(entity?.tags == ["security", "backend"])
-
-        #expect(entity?.tasks.count == 3)
-        #expect(entity?.tasks[0].mark == "x")
-        #expect(entity?.tasks[0].id == "task_1")
-        #expect(entity?.tasks[0].title == "Set up OAuth")
-        #expect(entity?.tasks[0].extra == "[high]")
-        #expect(entity?.tasks[1].mark == ">")
-        #expect(entity?.tasks[2].mark == " ")
-        #expect(entity?.tasks[2].extra == "[low]")
-    }
-
-    @Test("Parses minimal project")
-    func testParseMinimalProject() {
-        let result = """
-        # Empty Project
-        ID: proj_min | Status: active | 0/0 tasks
-        Created: 2026-02-11T10:00:00Z
-        Updated: 2026-02-11T10:00:00Z
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "get_project")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .project)
-        #expect(entity?.title == "Empty Project")
-        #expect(entity?.taskCount == 0)
-        #expect(entity?.completedTaskCount == 0)
-        #expect(entity?.tasks.isEmpty == true)
-    }
-
-    // MARK: - Area Parsing
-
-    @Test("Parses area with counts")
-    func testParseAreaWithCounts() {
-        let result = """
-        Created area area_abc: Security [active]
-
-        # Security
-        ID: area_abc | Status: active
-        2 projects, 5 tasks (3 active)
-
-        Ongoing security and compliance work
-        Tags: infra, compliance
-        Created: 2026-02-11T10:00:00Z
-        Updated: 2026-02-11T10:00:00Z
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_area")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .area)
-        #expect(entity?.title == "Security")
-        #expect(entity?.id == "area_abc")
-        #expect(entity?.status == "active")
-        #expect(entity?.projectCount == 2)
-        #expect(entity?.taskCount == 5)
-        #expect(entity?.activeTaskCount == 3)
-        #expect(entity?.description == "Ongoing security and compliance work")
-        #expect(entity?.tags == ["infra", "compliance"])
-        #expect(entity?.createdAt == "2026-02-11T10:00:00Z")
-    }
-
-    @Test("Parses minimal area")
-    func testParseMinimalArea() {
-        let result = """
-        # Quality
-        ID: area_min | Status: active
-        0 projects, 0 tasks (0 active)
-        Created: 2026-02-11T10:00:00Z
-        Updated: 2026-02-11T10:00:00Z
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "get_area")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .area)
-        #expect(entity?.title == "Quality")
-        #expect(entity?.projectCount == 0)
-        #expect(entity?.taskCount == 0)
-        #expect(entity?.activeTaskCount == 0)
     }
 
     // MARK: - Edge Cases
@@ -302,18 +130,6 @@ struct EntityDetailParserTests {
     func testReturnsNilForSearchAction() {
         let result = "Search results for \"bug\" (2):\n  task1: Fix bug [pending]"
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "search")
-        #expect(entity == nil)
-    }
-
-    @Test("Returns nil for list_projects action")
-    func testReturnsNilForListProjectsAction() {
-        let entity = ToolResultParser.parseEntityDetail(from: "Projects (2):", action: "list_projects")
-        #expect(entity == nil)
-    }
-
-    @Test("Returns nil for list_areas action")
-    func testReturnsNilForListAreasAction() {
-        let entity = ToolResultParser.parseEntityDetail(from: "Areas (1):", action: "list_areas")
         #expect(entity == nil)
     }
 
@@ -333,48 +149,16 @@ struct EntityDetailParserTests {
 
     @Test("Detects task entity type from task actions")
     func testDetectsTaskEntityType() {
-        let taskActions = ["create", "update", "get", "delete", "log_time"]
+        let taskActions = ["create", "update", "get", "delete"]
         for action in taskActions {
             let result = """
             # Test
-            ID: task_abc | Status: pending | Priority: medium
-            Source: agent
+            ID: task_abc | Status: pending
             Created: 2026-02-11T10:00:00Z
             Updated: 2026-02-11T10:00:00Z
             """
             let entity = ToolResultParser.parseEntityDetail(from: result, action: action)
-            #expect(entity?.entityType == .task, "Expected .task for action '\(action)'")
-        }
-    }
-
-    @Test("Detects project entity type from project actions")
-    func testDetectsProjectEntityType() {
-        let projectActions = ["create_project", "update_project", "get_project", "delete_project"]
-        for action in projectActions {
-            let result = """
-            # Test
-            ID: proj_abc | Status: active | 0/0 tasks
-            Created: 2026-02-11T10:00:00Z
-            Updated: 2026-02-11T10:00:00Z
-            """
-            let entity = ToolResultParser.parseEntityDetail(from: result, action: action)
-            #expect(entity?.entityType == .project, "Expected .project for action '\(action)'")
-        }
-    }
-
-    @Test("Detects area entity type from area actions")
-    func testDetectsAreaEntityType() {
-        let areaActions = ["create_area", "update_area", "get_area", "delete_area"]
-        for action in areaActions {
-            let result = """
-            # Test
-            ID: area_abc | Status: active
-            0 projects, 0 tasks (0 active)
-            Created: 2026-02-11T10:00:00Z
-            Updated: 2026-02-11T10:00:00Z
-            """
-            let entity = ToolResultParser.parseEntityDetail(from: result, action: action)
-            #expect(entity?.entityType == .area, "Expected .area for action '\(action)'")
+            #expect(entity != nil, "Expected entity for action '\(action)'")
         }
     }
 
@@ -386,8 +170,7 @@ struct EntityDetailParserTests {
         Created task task_abc: Fix bug [pending]
 
         # Fix bug
-        ID: task_abc | Status: pending | Priority: high
-        Source: agent
+        ID: task_abc | Status: pending
         Created: 2026-02-11T10:00:00Z
         Updated: 2026-02-11T10:00:00Z
         """
@@ -402,9 +185,7 @@ struct EntityDetailParserTests {
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData?.entityDetail != nil)
-        #expect(chipData?.entityDetail?.entityType == .task)
         #expect(chipData?.entityDetail?.title == "Fix bug")
-        #expect(chipData?.entityDetail?.priority == "high")
     }
 
     @Test("parseTaskManager returns nil entityDetail for list action")
@@ -444,28 +225,19 @@ struct EntityDetailParserTests {
           "id": "task_abc",
           "title": "Add 2FA",
           "status": "pending",
-          "priority": "high",
           "description": "Implement two-factor auth",
-          "tags": ["security", "auth"],
           "createdAt": "2026-02-11T10:00:00Z",
-          "updatedAt": "2026-02-11T10:00:00Z",
-          "blockedBy": ["task_dep1"],
-          "blocks": ["task_dep2"]
+          "updatedAt": "2026-02-11T10:00:00Z"
         }
         """
 
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "create")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.title == "Add 2FA")
         #expect(entity?.id == "task_abc")
         #expect(entity?.status == "pending")
-        #expect(entity?.priority == "high")
         #expect(entity?.description == "Implement two-factor auth")
-        #expect(entity?.tags == ["security", "auth"])
-        #expect(entity?.blockedBy == ["task_dep1"])
-        #expect(entity?.blocks == ["task_dep2"])
     }
 
     @Test("Parses delete confirmation from JSON")
@@ -480,95 +252,8 @@ struct EntityDetailParserTests {
         let entity = ToolResultParser.parseEntityDetail(from: result, action: "delete")
 
         #expect(entity != nil)
-        #expect(entity?.entityType == .task)
         #expect(entity?.id == "task_abc")
         #expect(entity?.status == "confirmed")
-    }
-
-    @Test("Parses delete project confirmation from JSON")
-    func testParseDeleteProjectConfirmationFromJSON() {
-        let result = """
-        {
-          "success": true,
-          "projectId": "proj_abc"
-        }
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "delete_project")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .project)
-        #expect(entity?.id == "proj_abc")
-        #expect(entity?.status == "confirmed")
-    }
-
-    @Test("Parses log_time confirmation from JSON")
-    func testParseLogTimeConfirmationFromJSON() {
-        let result = """
-        {
-          "success": true,
-          "taskId": "task_abc",
-          "minutesLogged": 30
-        }
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "log_time")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .task)
-        #expect(entity?.id == "task_abc")
-        #expect(entity?.status == "confirmed")
-    }
-
-    @Test("Parses project from JSON")
-    func testParseProjectFromJSON() {
-        let result = """
-        {
-          "id": "proj_abc",
-          "title": "Auth Overhaul",
-          "status": "active",
-          "description": "Rewrite the auth system",
-          "taskCount": 5,
-          "completedTaskCount": 2,
-          "createdAt": "2026-02-11T10:00:00Z"
-        }
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_project")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .project)
-        #expect(entity?.title == "Auth Overhaul")
-        #expect(entity?.id == "proj_abc")
-        #expect(entity?.status == "active")
-        #expect(entity?.description == "Rewrite the auth system")
-        #expect(entity?.taskCount == 5)
-        #expect(entity?.completedTaskCount == 2)
-    }
-
-    @Test("Parses area from JSON")
-    func testParseAreaFromJSON() {
-        let result = """
-        {
-          "id": "area_abc",
-          "title": "Security",
-          "status": "active",
-          "projectCount": 2,
-          "taskCount": 10,
-          "activeTaskCount": 4
-        }
-        """
-
-        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_area")
-
-        #expect(entity != nil)
-        #expect(entity?.entityType == .area)
-        #expect(entity?.title == "Security")
-        #expect(entity?.id == "area_abc")
-        #expect(entity?.status == "active")
-        #expect(entity?.projectCount == 2)
-        #expect(entity?.taskCount == 10)
-        #expect(entity?.activeTaskCount == 4)
     }
 
     @Test("Returns nil for JSON with no id or success")
@@ -590,8 +275,8 @@ struct EntityDetailParserTests {
         let result = """
         {
           "tasks": [
-            {"id": "task_1", "title": "Fix bug", "status": "pending", "priority": "high"},
-            {"id": "task_2", "title": "Add tests", "status": "in_progress", "priority": "medium"},
+            {"id": "task_1", "title": "Fix bug", "status": "pending"},
+            {"id": "task_2", "title": "Add tests", "status": "in_progress"},
             {"id": "task_3", "title": "Done task", "status": "completed"}
           ],
           "count": 3
@@ -605,9 +290,8 @@ struct EntityDetailParserTests {
             #expect(items[0].taskId == "task_1")
             #expect(items[0].title == "Fix bug")
             #expect(items[0].mark == " ")
-            #expect(items[0].priority == "high")
+            #expect(items[0].status == "pending")
             #expect(items[1].mark == ">")
-            #expect(items[1].priority == nil) // medium is suppressed
             #expect(items[2].mark == "x")
         } else {
             Issue.record("Expected .tasks but got \(String(describing: listResult))")
@@ -635,57 +319,6 @@ struct EntityDetailParserTests {
             #expect(items[0].status == "pending")
         } else {
             Issue.record("Expected .searchResults but got \(String(describing: listResult))")
-        }
-    }
-
-    @Test("Parses project list from JSON")
-    func testParseProjectListFromJSON() {
-        let result = """
-        {
-          "projects": [
-            {"id": "proj_1", "title": "Auth", "status": "active"},
-            {"id": "proj_2", "title": "UI", "status": "completed", "completedTaskCount": 5, "taskCount": 5}
-          ],
-          "count": 2
-        }
-        """
-
-        let listResult = ToolResultParser.parseListResult(from: result, action: "list_projects")
-
-        if case .projects(let items) = listResult {
-            #expect(items.count == 2)
-            #expect(items[0].projectId == "proj_1")
-            #expect(items[0].title == "Auth")
-            #expect(items[0].status == "active")
-            #expect(items[1].completedTasks == 5)
-            #expect(items[1].totalTasks == 5)
-        } else {
-            Issue.record("Expected .projects but got \(String(describing: listResult))")
-        }
-    }
-
-    @Test("Parses area list from JSON")
-    func testParseAreaListFromJSON() {
-        let result = """
-        {
-          "areas": [
-            {"id": "area_1", "title": "Security", "status": "active", "projectCount": 2, "taskCount": 10, "activeTaskCount": 3}
-          ],
-          "count": 1
-        }
-        """
-
-        let listResult = ToolResultParser.parseListResult(from: result, action: "list_areas")
-
-        if case .areas(let items) = listResult {
-            #expect(items.count == 1)
-            #expect(items[0].areaId == "area_1")
-            #expect(items[0].title == "Security")
-            #expect(items[0].projectCount == 2)
-            #expect(items[0].taskCount == 10)
-            #expect(items[0].activeTaskCount == 3)
-        } else {
-            Issue.record("Expected .areas but got \(String(describing: listResult))")
         }
     }
 
@@ -743,8 +376,7 @@ struct EntityDetailParserTests {
         {
           "id": "task_abc",
           "title": "New task",
-          "status": "pending",
-          "priority": "medium"
+          "status": "pending"
         }
         """
 
@@ -770,7 +402,6 @@ struct EntityDetailParserTests {
         let result = """
         {
           "affected": 5,
-          "dryRun": false,
           "ids": ["task_1", "task_2", "task_3", "task_4", "task_5"]
         }
         """
@@ -785,84 +416,11 @@ struct EntityDetailParserTests {
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData?.batchResult != nil)
-        #expect(chipData?.batchResult?.action == .create)
         #expect(chipData?.batchResult?.affected == 5)
-        #expect(chipData?.batchResult?.dryRun == false)
         #expect(chipData?.batchResult?.ids.count == 5)
         #expect(chipData?.entityDetail == nil)
         #expect(chipData?.listResult == nil)
         #expect(chipData?.chipSummary == "Created 5 tasks")
-    }
-
-    @Test("parseTaskManager attaches batchResult for batch_delete")
-    func testParseTaskManagerBatchDelete() {
-        let result = """
-        {
-          "affected": 3,
-          "dryRun": false
-        }
-        """
-
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_batch_del",
-            arguments: "{\"action\":\"batch_delete\",\"ids\":[\"a\",\"b\",\"c\"]}",
-            status: .success,
-            result: result
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.batchResult != nil)
-        #expect(chipData?.batchResult?.action == .delete)
-        #expect(chipData?.batchResult?.affected == 3)
-        #expect(chipData?.batchResult?.dryRun == false)
-        #expect(chipData?.chipSummary == "Deleted 3 tasks")
-    }
-
-    @Test("parseTaskManager handles batch_update dry run")
-    func testParseTaskManagerBatchUpdateDryRun() {
-        let result = """
-        {
-          "affected": 7,
-          "dryRun": true
-        }
-        """
-
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_batch_upd",
-            arguments: "{\"action\":\"batch_update\",\"filter\":{\"status\":\"pending\"}}",
-            status: .success,
-            result: result
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.batchResult != nil)
-        #expect(chipData?.batchResult?.action == .update)
-        #expect(chipData?.batchResult?.affected == 7)
-        #expect(chipData?.batchResult?.dryRun == true)
-        #expect(chipData?.chipSummary == "7 tasks (preview)")
-    }
-
-    @Test("parseTaskManager batch_delete with single task")
-    func testParseTaskManagerBatchDeleteSingle() {
-        let result = """
-        {
-          "affected": 1,
-          "dryRun": false
-        }
-        """
-
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_batch_single",
-            arguments: "{\"action\":\"batch_delete\",\"ids\":[\"a\"]}",
-            status: .success,
-            result: result
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.chipSummary == "Deleted 1 task")
     }
 
     @Test("parseBatchResult returns nil for non-batch actions")

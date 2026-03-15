@@ -515,6 +515,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             rules_index,
             pre_activated_rules,
             subagent_manager: subagent_manager.clone(),
+            compaction_trigger_config: compactor_settings.into(),
         },
     );
 
