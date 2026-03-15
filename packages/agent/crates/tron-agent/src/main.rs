@@ -51,18 +51,18 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
 use tron_agent::db_path_policy::resolve_production_db_path;
-use tron_events::{ConnectionConfig, EventStore};
-use tron_llm::provider::ProviderFactory;
-use tron_runtime::orchestrator::orchestrator::Orchestrator;
-use tron_runtime::orchestrator::session_manager::SessionManager;
-use tron_runtime::orchestrator::subagent_manager::SubagentManager;
-use tron_server::config::ServerConfig;
-use tron_server::rpc::context::{AgentDeps, RpcContext};
-use tron_server::rpc::registry::MethodRegistry;
-use tron_server::server::TronServer;
-use tron_server::websocket::event_bridge::EventBridge;
-use tron_skills::registry::SkillRegistry;
-use tron_tools::registry::ToolRegistry;
+use tron::events::{ConnectionConfig, EventStore};
+use tron::llm::provider::ProviderFactory;
+use tron::runtime::orchestrator::orchestrator::Orchestrator;
+use tron::runtime::orchestrator::session_manager::SessionManager;
+use tron::runtime::orchestrator::subagent_manager::SubagentManager;
+use tron::server::config::ServerConfig;
+use tron::server::rpc::context::{AgentDeps, RpcContext};
+use tron::server::rpc::registry::MethodRegistry;
+use tron::server::server::TronServer;
+use tron::server::websocket::event_bridge::EventBridge;
+use tron::skills::registry::SkillRegistry;
+use tron::tools::registry::ToolRegistry;
 
 /// Tron agent server.
 #[derive(Parser, Debug)]
@@ -99,7 +99,7 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 
 /// Resolve the auth file path (`~/.tron/auth.json`).
 fn auth_path() -> PathBuf {
-    tron_settings::loader::auth_path()
+    tron::settings::loader::auth_path()
 }
 
 /// Backfill unembedded `memory.ledger` events on startup.
@@ -109,7 +109,7 @@ fn auth_path() -> PathBuf {
 /// the ONNX model is initialized and the service is set on the controller.
 async fn startup_backfill(
     store: Arc<EventStore>,
-    ctrl: Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>,
+    ctrl: Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
 ) {
     let unembedded = match store.pool().get() {
         Ok(conn) => {
@@ -150,11 +150,11 @@ async fn startup_backfill(
         return;
     }
 
-    let entries: Vec<tron_embeddings::BackfillEntry> = unembedded
+    let entries: Vec<tron::embeddings::BackfillEntry> = unembedded
         .into_iter()
         .filter_map(|(event_id, payload_str, workspace_id)| {
             let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
-            Some(tron_embeddings::BackfillEntry {
+            Some(tron::embeddings::BackfillEntry {
                 event_id,
                 workspace_id,
                 payload,
@@ -186,16 +186,16 @@ async fn startup_backfill(
 /// Captures shared resources (event store, task pool, API keys) so the
 /// tool factory closure can create real provider implementations.
 struct ToolRegistryConfig {
-    event_store: Arc<tron_events::EventStore>,
-    task_pool: tron_events::ConnectionPool,
+    event_store: Arc<tron::events::EventStore>,
+    task_pool: tron::events::ConnectionPool,
     brave_api_key: Option<String>,
-    browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>>,
-    apns_service: Option<Arc<tron_server::platform::apns::ApnsService>>,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    browser_delegate: Option<Arc<dyn tron::tools::traits::BrowserDelegate>>,
+    apns_service: Option<Arc<tron::server::platform::apns::ApnsService>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
     /// Device request broker for iOS round-trip tools (set after server creation via `OnceLock`).
-    device_request_broker: Arc<std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>>,
+    device_request_broker: Arc<std::sync::OnceLock<Arc<tron::server::device::DeviceRequestBroker>>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -207,14 +207,14 @@ struct ToolRegistryConfig {
 /// - Communication tools: not registered (not in TS server)
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
-    use tron_tools::providers::{
+    use tron::tools::providers::{
         NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
         StubNotifyDelegate, TokioProcessRunner,
     };
 
-    let fs: Arc<dyn tron_tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
-    let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
-    let http: Arc<dyn tron_tools::traits::HttpClient> =
+    let fs: Arc<dyn tron::tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
+    let runner: Arc<dyn tron::tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
+    let http: Arc<dyn tron::tools::traits::HttpClient> =
         Arc::new(ReqwestHttpClient::from_client(config.http_client.clone()));
 
     // Real providers backed by SQLite
@@ -222,8 +222,8 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     if let Some(ref ec) = config.embedding_controller {
         store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
     }
-    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
-    let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> = Arc::new(
+    let store_query: Arc<dyn tron::tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
+    let task_mgr: Arc<dyn tron::tools::traits::TaskManagerDelegate> = Arc::new(
         providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
     );
 
@@ -231,64 +231,64 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     // Registration order matches the TypeScript server exactly:
     // 1–3: Filesystem tools
-    registry.register(Arc::new(tron_tools::fs::read::ReadTool::new(fs.clone())));
-    registry.register(Arc::new(tron_tools::fs::write::WriteTool::new(fs.clone())));
-    registry.register(Arc::new(tron_tools::fs::edit::EditTool::new(fs.clone())));
+    registry.register(Arc::new(tron::tools::fs::read::ReadTool::new(fs.clone())));
+    registry.register(Arc::new(tron::tools::fs::write::WriteTool::new(fs.clone())));
+    registry.register(Arc::new(tron::tools::fs::edit::EditTool::new(fs.clone())));
 
     // 4: Bash (with blob store for large output storage)
-    let blob_store: Arc<dyn tron_tools::traits::BlobStore> =
+    let blob_store: Arc<dyn tron::tools::traits::BlobStore> =
         Arc::new(providers::SqliteBlobStore::new(config.event_store.clone()));
-    registry.register(Arc::new(tron_tools::system::bash::BashTool::new(
+    registry.register(Arc::new(tron::tools::system::bash::BashTool::new(
         runner.clone(),
         Some(blob_store),
     )));
 
     // 5: Search
-    registry.register(Arc::new(tron_tools::search::search_tool::SearchTool::new(
+    registry.register(Arc::new(tron::tools::search::search_tool::SearchTool::new(
         runner,
     )));
 
     // 6: Find
-    registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
+    registry.register(Arc::new(tron::tools::fs::find::FindTool::new()));
 
     // 7: BrowseTheWeb (real CDP delegate if Chrome found, otherwise stub)
-    let browser_delegate: Arc<dyn tron_tools::traits::BrowserDelegate> = config
+    let browser_delegate: Arc<dyn tron::tools::traits::BrowserDelegate> = config
         .browser_delegate
         .clone()
         .unwrap_or_else(|| Arc::new(StubBrowserDelegate));
     registry.register(Arc::new(
-        tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
+        tron::tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
     ));
 
     // 8: AskUserQuestion
     registry.register(Arc::new(
-        tron_tools::ui::ask_user::AskUserQuestionTool::new(),
+        tron::tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
 
     // 9: OpenURL — fire-and-forget (iOS opens Safari via tool event)
-    let open_url_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
+    let open_url_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> =
         Arc::new(NoOpOpenUrlDelegate);
-    registry.register(Arc::new(tron_tools::browser::open_url::OpenURLTool::new(
+    registry.register(Arc::new(tron::tools::browser::open_url::OpenURLTool::new(
         open_url_delegate,
     )));
 
     // 10: RenderAppUI
     registry.register(Arc::new(
-        tron_tools::ui::render_app_ui::RenderAppUITool::new(),
+        tron::tools::ui::render_app_ui::RenderAppUITool::new(),
     ));
 
     // 11: TaskManager
     registry.register(Arc::new(
-        tron_tools::ui::task_manager::TaskManagerTool::new(task_mgr),
+        tron::tools::ui::task_manager::TaskManagerTool::new(task_mgr),
     ));
 
     // 12: Remember
-    registry.register(Arc::new(tron_tools::system::remember::RememberTool::new(
+    registry.register(Arc::new(tron::tools::system::remember::RememberTool::new(
         store_query,
     )));
 
     // 13: NotifyApp — real APNS when available, stub fallback
-    let notify_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
+    let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> =
         if let Some(ref apns) = config.apns_service {
             Arc::new(providers::ApnsNotifyDelegate::new(
                 apns.clone(),
@@ -297,31 +297,31 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         } else {
             Arc::new(StubNotifyDelegate)
         };
-    registry.register(Arc::new(tron_tools::ui::notify::NotifyAppTool::new(
+    registry.register(Arc::new(tron::tools::ui::notify::NotifyAppTool::new(
         notify_delegate,
     )));
 
     // 14: SetClipboard (fire-and-forget — iOS handles via tool event)
-    registry.register(Arc::new(tron_tools::ui::clipboard::SetClipboardTool::new()));
+    registry.register(Arc::new(tron::tools::ui::clipboard::SetClipboardTool::new()));
 
     // 15–17: Device-querying tools (conditional on device request broker)
     if let Some(broker) = config.device_request_broker.get() {
-        let device_delegate: Arc<dyn tron_tools::traits::DeviceDelegate> =
+        let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> =
             Arc::new(providers::BrokerDeviceDelegate::new(broker.clone()));
 
         let settings =
-            tron_settings::loader::load_settings_from_path(&tron_settings::loader::settings_path())
+            tron::settings::loader::load_settings_from_path(&tron::settings::loader::settings_path())
                 .unwrap_or_default();
 
         if settings.integrations.calendar.enabled {
-            registry.register(Arc::new(tron_tools::ui::calendar::ManageCalendarTool::new(
+            registry.register(Arc::new(tron::tools::ui::calendar::ManageCalendarTool::new(
                 device_delegate.clone(),
                 settings.integrations.calendar.allow_write,
             )));
         }
 
         if settings.integrations.contacts.enabled {
-            registry.register(Arc::new(tron_tools::ui::contacts::SearchContactsTool::new(
+            registry.register(Arc::new(tron::tools::ui::contacts::SearchContactsTool::new(
                 device_delegate.clone(),
             )));
         }
@@ -329,20 +329,20 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         if settings.integrations.health.enabled
             && !settings.integrations.health.data_types.is_empty()
         {
-            registry.register(Arc::new(tron_tools::ui::health::ReadHealthTool::new(
+            registry.register(Arc::new(tron::tools::ui::health::ReadHealthTool::new(
                 device_delegate,
             )));
         }
     }
 
     // 18: WebFetch (always available)
-    registry.register(Arc::new(tron_tools::web::web_fetch::WebFetchTool::new(
+    registry.register(Arc::new(tron::tools::web::web_fetch::WebFetchTool::new(
         http.clone(),
     )));
 
     // 15: WebSearch — conditional on Brave API key (matches TS server)
     if let Some(ref api_key) = config.brave_api_key {
-        registry.register(Arc::new(tron_tools::web::web_search::WebSearchTool::new(
+        registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
             http,
             api_key.clone(),
         )));
@@ -364,8 +364,8 @@ async fn main() -> Result<()> {
     // after MAX_DEPLOY_STARTUP_ATTEMPTS and auto-rolls back to the backup binary.
     {
         const MAX_DEPLOY_STARTUP_ATTEMPTS: u32 = 3;
-        let deploy_dir = tron_settings::deploy_dir();
-        let sentinel = tron_server::deploy::read_sentinel(&deploy_dir);
+        let deploy_dir = tron::settings::deploy_dir();
+        let sentinel = tron::server::deploy::read_sentinel(&deploy_dir);
 
         if let Some(ref s) = sentinel
             && s.status == "restarting"
@@ -380,8 +380,8 @@ async fn main() -> Result<()> {
                 eprintln!(
                     "DEPLOY SAFETY: {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts exceeded, auto-rolling back"
                 );
-                let binary_path = tron_settings::tron_home_dir().join("tron");
-                tron_server::deploy::auto_rollback(
+                let binary_path = tron::settings::tron_home_dir().join("tron");
+                tron::server::deploy::auto_rollback(
                     &deploy_dir,
                     &binary_path,
                     &format!("exceeded {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts"),
@@ -399,15 +399,15 @@ async fn main() -> Result<()> {
     let db_path = resolve_production_db_path(args.db_path)?;
     ensure_parent_dir(&db_path)?;
     let db_str = db_path.to_string_lossy();
-    let pool = tron_events::new_file(&db_str, &ConnectionConfig::default())
+    let pool = tron::events::new_file(&db_str, &ConnectionConfig::default())
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
         let migration_result =
-            tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
-        tron_runtime::tasks::migrations::run_migrations(&conn)
+            tron::events::run_migrations(&conn).context("Failed to run event migrations")?;
+        tron::runtime::tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
-        tron_cron::migrations::run_migrations(&conn).context("Failed to run cron migrations")?;
+        tron::cron::migrations::run_migrations(&conn).context("Failed to run cron migrations")?;
 
         // v4 purges ~1.55M ort::logging rows. VACUUM reclaims the freed space.
         // VACUUM cannot run inside a transaction, so it runs here after migrations commit.
@@ -420,9 +420,9 @@ async fn main() -> Result<()> {
     }
 
     // Load settings early (needed for log level before logging init)
-    let settings_path = tron_settings::loader::settings_path();
+    let settings_path = tron::settings::loader::settings_path();
     let settings =
-        tron_settings::loader::load_settings_from_path(&settings_path).unwrap_or_default();
+        tron::settings::loader::load_settings_from_path(&settings_path).unwrap_or_default();
 
     // Initialize logging with SQLite persistence (dedicated connection, separate from pool).
     // Must set WAL + busy_timeout to match pool connections — without busy_timeout,
@@ -443,13 +443,13 @@ async fn main() -> Result<()> {
         .log_level
         .as_deref()
         .unwrap_or_else(|| settings.logging.db_log_level.as_filter_str());
-    let log_handle = tron_core::logging::init_subscriber_with_sqlite(
+    let log_handle = tron::core::logging::init_subscriber_with_sqlite(
         effective_log_level,
         &module_overrides,
         log_conn,
         Some(origin.clone()),
     );
-    let flush_task = tron_core::logging::spawn_flush_task(log_handle.clone());
+    let flush_task = tron::core::logging::spawn_flush_task(log_handle.clone());
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -463,7 +463,7 @@ async fn main() -> Result<()> {
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     // Load Brave API key for web search (matches TS server conditional registration)
-    let brave_api_key = tron_llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
+    let brave_api_key = tron::llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
         .into_iter()
         .next();
     if brave_api_key.is_some() {
@@ -471,26 +471,26 @@ async fn main() -> Result<()> {
     }
 
     // Browser service (optional — only if Chrome is found)
-    let browser_service = tron_tools::cdp::chrome::find_chrome().map(|chrome_path| {
+    let browser_service = tron::tools::cdp::chrome::find_chrome().map(|chrome_path| {
         tracing::info!(path = %chrome_path.display(), "Chrome found — browser streaming enabled");
-        Arc::new(tron_tools::cdp::service::BrowserService::new(chrome_path))
+        Arc::new(tron::tools::cdp::service::BrowserService::new(chrome_path))
     });
     if browser_service.is_none() {
         tracing::info!("Chrome not found — browser streaming disabled");
     }
 
     // Browser delegate for tool registry (real CDP if Chrome found)
-    let browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>> =
+    let browser_delegate: Option<Arc<dyn tron::tools::traits::BrowserDelegate>> =
         browser_service.as_ref().map(|svc| {
-            Arc::new(tron_tools::cdp::delegate::CdpBrowserDelegate::new(
+            Arc::new(tron::tools::cdp::delegate::CdpBrowserDelegate::new(
                 svc.clone(),
-            )) as Arc<dyn tron_tools::traits::BrowserDelegate>
+            )) as Arc<dyn tron::tools::traits::BrowserDelegate>
         });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
-    let apns_service: Option<Arc<tron_server::platform::apns::ApnsService>> =
-        tron_server::platform::apns::load_apns_config().and_then(|apns_config| {
-            match tron_server::platform::apns::ApnsService::new(apns_config) {
+    let apns_service: Option<Arc<tron::server::platform::apns::ApnsService>> =
+        tron::server::platform::apns::load_apns_config().and_then(|apns_config| {
+            match tron::server::platform::apns::ApnsService::new(apns_config) {
                 Ok(svc) => {
                     tracing::info!("APNS service initialized — push notifications enabled");
                     Some(Arc::new(svc))
@@ -507,14 +507,14 @@ async fn main() -> Result<()> {
 
     // Embedding controller (optional — fire-and-forget ONNX model loading)
     let embedding_controller: Option<
-        Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>,
+        Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
     > = {
         #[cfg(feature = "embeddings")]
         {
             let emb_settings = &settings.context.memory.embedding;
             if emb_settings.enabled {
-                let emb_config = tron_embeddings::EmbeddingConfig::from_settings(emb_settings);
-                let mut ctrl = tron_embeddings::EmbeddingController::new(emb_config.clone());
+                let emb_config = tron::embeddings::EmbeddingConfig::from_settings(emb_settings);
+                let mut ctrl = tron::embeddings::EmbeddingController::new(emb_config.clone());
 
                 // Create vector repository with a dedicated connection (VectorRepository owns a
                 // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
@@ -523,14 +523,14 @@ async fn main() -> Result<()> {
                 vec_conn
                     .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
                     .expect("vector connection pragmas");
-                let repo = tron_embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
+                let repo = tron::embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
                 repo.ensure_table().expect("vector table creation");
                 ctrl.set_vector_repo(Arc::new(parking_lot::Mutex::new(repo)));
 
                 let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
 
                 // Fire-and-forget: load ONNX model + backfill unembedded entries
-                let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(
+                let service = Arc::new(tron::embeddings::ort_service::OnnxEmbeddingService::new(
                     emb_config,
                 ));
                 let service_clone = Arc::clone(&service);
@@ -590,7 +590,7 @@ async fn main() -> Result<()> {
 
     // Deferred device request broker reference (set after TronServer creation when BroadcastManager is available)
     let device_broker_cell: Arc<
-        std::sync::OnceLock<Arc<tron_server::device::DeviceRequestBroker>>,
+        std::sync::OnceLock<Arc<tron::server::device::DeviceRequestBroker>>,
     > = Arc::new(std::sync::OnceLock::new());
 
     // Clone before move into ToolRegistryConfig
@@ -615,7 +615,7 @@ async fn main() -> Result<()> {
         .is_ok();
 
     // Deferred cron scheduler reference for tool factory (set after CronScheduler creation)
-    let cron_scheduler_cell: Arc<std::sync::OnceLock<Arc<tron_cron::CronScheduler>>> =
+    let cron_scheduler_cell: Arc<std::sync::OnceLock<Arc<tron::cron::CronScheduler>>> =
         Arc::new(std::sync::OnceLock::new());
 
     let (agent_deps, shared_subagent_manager) = if startup_auth_ok {
@@ -638,28 +638,28 @@ async fn main() -> Result<()> {
 
         // Build tool factory that includes subagent tools + summarizer-backed WebFetch
         let config = tool_config.clone();
-        let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = subagent_manager.clone();
+        let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
         let sm_for_summarizer = subagent_manager.clone();
         let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
             let mut registry = create_tool_registry(&config);
             registry.register(Arc::new(
-                tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
+                tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
             ));
             registry.register(Arc::new(
-                tron_tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
+                tron::tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
             ));
 
             // Re-register WebFetch with LLM summarizer (overrides the basic version)
-            let summarizer: Arc<dyn tron_tools::traits::ContentSummarizer> = Arc::new(
-                tron_runtime::agent::compaction_handler::SubagentContentSummarizer {
+            let summarizer: Arc<dyn tron::tools::traits::ContentSummarizer> = Arc::new(
+                tron::runtime::agent::compaction_handler::SubagentContentSummarizer {
                     manager: sm_for_summarizer.clone(),
                 },
             );
-            let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(
-                tron_tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()),
+            let http: Arc<dyn tron::tools::traits::HttpClient> = Arc::new(
+                tron::tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()),
             );
             registry.register(Arc::new(
-                tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
+                tron::tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
             ));
 
             registry
@@ -690,7 +690,7 @@ async fn main() -> Result<()> {
         let cell = Arc::clone(&transcription_engine);
         #[allow(clippy::let_underscore_future)]
         let _ = tokio::spawn(async move {
-            match tron_transcription::MlxEngine::new().await {
+            match tron::transcription::MlxEngine::new().await {
                 Ok(engine) => {
                     let _ = cell.set(engine);
                     tracing::info!("transcription sidecar ready (parakeet-mlx)");
@@ -704,12 +704,12 @@ async fn main() -> Result<()> {
 
     // Cron scheduler
     let cron_cancel = tokio_util::sync::CancellationToken::new();
-    let cron_config_path = tron_settings::tron_home_dir()
+    let cron_config_path = tron::settings::tron_home_dir()
         .join("artifacts")
         .join("automations.json");
-    let cron_backup_path = tron_settings::deploy_dir().join("automations.json.bak");
+    let cron_backup_path = tron::settings::deploy_dir().join("automations.json.bak");
 
-    let cron_agent_executor: Option<Arc<dyn tron_cron::AgentTurnExecutor>> =
+    let cron_agent_executor: Option<Arc<dyn tron::cron::AgentTurnExecutor>> =
         agent_deps.as_ref().map(|deps| {
             Arc::new(providers::CronAgentTurnExecutor::new(
                 event_store.clone(),
@@ -719,27 +719,27 @@ async fn main() -> Result<()> {
                 origin.clone(),
                 shared_subagent_manager.clone(),
                 embedding_controller.clone(),
-            )) as Arc<dyn tron_cron::AgentTurnExecutor>
+            )) as Arc<dyn tron::cron::AgentTurnExecutor>
         });
-    let cron_deps = tron_cron::ExecutorDeps {
+    let cron_deps = tron::cron::ExecutorDeps {
         agent_executor: cron_agent_executor,
         broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
         push_notifier: tool_config.apns_service.as_ref().map(|apns| {
             Arc::new(providers::CronPushNotifier::new(
                 apns.clone(),
                 task_pool.clone(),
-            )) as Arc<dyn tron_cron::PushNotifier>
+            )) as Arc<dyn tron::cron::PushNotifier>
         }),
         event_injector: Some(
             Arc::new(providers::CronSystemEventInjector::new(event_store.clone()))
-                as Arc<dyn tron_cron::SystemEventInjector>,
+                as Arc<dyn tron::cron::SystemEventInjector>,
         ),
         http_client: tool_config.http_client.clone(),
         pool: task_pool.clone(),
     };
-    let cron_scheduler = Arc::new(tron_cron::CronScheduler::new(
+    let cron_scheduler = Arc::new(tron::cron::CronScheduler::new(
         task_pool.clone(),
-        Arc::new(tron_cron::SystemClock),
+        Arc::new(tron::cron::SystemClock),
         cron_deps,
         cron_config_path,
         cron_backup_path,
@@ -751,8 +751,8 @@ async fn main() -> Result<()> {
 
     // Worktree coordinator (with broadcast sender for real-time WebSocket events)
     let worktree_coordinator = {
-        let wt_config = tron_worktree::WorktreeConfig::from_settings(&settings.session);
-        let coord = Arc::new(tron_worktree::WorktreeCoordinator::with_broadcast(
+        let wt_config = tron::worktree::WorktreeConfig::from_settings(&settings.session);
+        let coord = Arc::new(tron::worktree::WorktreeCoordinator::with_broadcast(
             wt_config,
             event_store.clone(),
             orchestrator.broadcast().sender(),
@@ -793,20 +793,20 @@ async fn main() -> Result<()> {
         transcription_engine,
         embedding_controller,
         subagent_manager: shared_subagent_manager,
-        health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None, // set by TronServer after creation
         origin: origin.clone(),
         cron_scheduler: Some(cron_scheduler.clone()),
         worktree_coordinator,
         device_request_broker: None, // set after TronServer creation (needs broadcast)
         context_artifacts: Arc::new(
-            tron_server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
     };
 
     // Method registry
     let mut registry = MethodRegistry::new();
-    tron_server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::handlers::register_all(&mut registry);
     let method_count = registry.methods().len();
 
     // Server config
@@ -817,7 +817,7 @@ async fn main() -> Result<()> {
     };
 
     // Install Prometheus metrics recorder (must be before any metrics are recorded)
-    let metrics_handle = tron_server::metrics::install_recorder();
+    let metrics_handle = tron::server::metrics::install_recorder();
 
     // Build and start server
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
@@ -866,13 +866,13 @@ async fn main() -> Result<()> {
     // Post-deploy self-test (after DB/settings/APNS init, before port binding).
     // If self-test fails, auto-rollback to backup binary immediately.
     {
-        let deploy_dir = tron_settings::deploy_dir();
-        if let Some(sentinel) = tron_server::deploy::read_sentinel(&deploy_dir)
+        let deploy_dir = tron::settings::deploy_dir();
+        if let Some(sentinel) = tron::server::deploy::read_sentinel(&deploy_dir)
             && sentinel.status == "restarting"
         {
             let auth = auth_path();
-            let binary_path = tron_settings::tron_home_dir().join("tron");
-            let test_result = tron_server::deploy::run_self_test(
+            let binary_path = tron::settings::tron_home_dir().join("tron");
+            let test_result = tron::server::deploy::run_self_test(
                 &db_path,
                 &settings_path_for_selftest,
                 &auth,
@@ -888,7 +888,7 @@ async fn main() -> Result<()> {
                     .collect();
                 let reason = format!("self-test failed: {}", failed.join(", "));
                 eprintln!("DEPLOY SAFETY: {reason}");
-                tron_server::deploy::auto_rollback(&deploy_dir, &binary_path, &reason);
+                tron::server::deploy::auto_rollback(&deploy_dir, &binary_path, &reason);
                 // auto_rollback never returns
             }
 
@@ -901,9 +901,9 @@ async fn main() -> Result<()> {
             let _ = std::fs::remove_file(deploy_dir.join("startup-attempts"));
 
             // Store self-test result in sentinel for audit
-            if let Some(mut s) = tron_server::deploy::read_sentinel(&deploy_dir) {
+            if let Some(mut s) = tron::server::deploy::read_sentinel(&deploy_dir) {
                 s.self_test = Some(test_result);
-                let _ = tron_server::deploy::write_sentinel(&deploy_dir, &s);
+                let _ = tron::server::deploy::write_sentinel(&deploy_dir, &s);
             }
         }
     }
@@ -926,15 +926,15 @@ async fn main() -> Result<()> {
 
     // Post-deploy sentinel processing
     {
-        let deploy_dir = tron_settings::deploy_dir();
-        match tron_server::deploy::complete_sentinel(&deploy_dir) {
+        let deploy_dir = tron::settings::deploy_dir();
+        match tron::server::deploy::complete_sentinel(&deploy_dir) {
             Ok(Some(sentinel)) => {
                 tracing::info!(
                     commit = sentinel.commit.as_str(),
                     previous = sentinel.previous_commit.as_str(),
                     "post-deploy restart completed successfully"
                 );
-                if let Err(e) = tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
+                if let Err(e) = tron::server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
                     tracing::warn!(error = %e, "failed to write last-deployment.json");
                 }
 
@@ -942,7 +942,7 @@ async fn main() -> Result<()> {
                 if let Some(ref apns) = apns_for_deploy {
                     let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
                     let commit_subject =
-                        tron_server::deploy::resolve_workspace_root().and_then(|root| {
+                        tron::server::deploy::resolve_workspace_root().and_then(|root| {
                             std::process::Command::new("git")
                                 .args(["log", "-1", "--format=%s", &sentinel.commit])
                                 .current_dir(root)
@@ -979,7 +979,7 @@ async fn main() -> Result<()> {
                         })
                         .unwrap_or_default();
                     if !tokens.is_empty() {
-                        let notification = tron_server::platform::apns::ApnsNotification {
+                        let notification = tron::server::platform::apns::ApnsNotification {
                             title: "Deploy Complete".into(),
                             body,
                             data: std::collections::HashMap::from([
@@ -1025,7 +1025,7 @@ async fn main() -> Result<()> {
                 if !tokens.is_empty() {
                     let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
                     let reason = data["reason"].as_str().unwrap_or("unknown");
-                    let notification = tron_server::platform::apns::ApnsNotification {
+                    let notification = tron::server::platform::apns::ApnsNotification {
                         title: "Deploy Rolled Back".into(),
                         body: format!("Tron restored: {reason}"),
                         data: std::collections::HashMap::from([
@@ -1088,7 +1088,7 @@ mod tests {
         PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
         validate_production_db_path_for_home,
     };
-    use tron_settings::TronSettings;
+    use tron::settings::TronSettings;
 
     #[test]
     fn cli_default_host() {
@@ -1137,7 +1137,7 @@ mod tests {
         let result = factory.create_for_model("unknown-model").await;
         assert!(matches!(
             result,
-            Err(tron_llm::provider::ProviderError::UnsupportedModel { .. })
+            Err(tron::llm::provider::ProviderError::UnsupportedModel { .. })
         ));
     }
 
@@ -1201,7 +1201,7 @@ mod tests {
         // With no env vars and no auth.json, OpenAI returns None
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron_llm::auth::openai::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::openai::load_server_auth(&path, None, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1211,7 +1211,7 @@ mod tests {
     async fn google_returns_none_without_auth() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron_llm::auth::google::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::google::load_server_auth(&path, None, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1230,16 +1230,16 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save fresh OAuth tokens
-        let tokens = tron_llm::auth::OAuthTokens {
+        let tokens = tron::llm::auth::OAuthTokens {
             access_token: "sk-ant-oat-test".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_llm::auth::now_ms() + 3_600_000,
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron_llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         // load_server_auth should find the OAuth tokens
-        let config = tron_llm::auth::anthropic::default_config();
-        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let config = tron::llm::auth::anthropic::default_config();
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1253,17 +1253,17 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save both OAuth and API key
-        tron_llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-api-key").unwrap();
-        let tokens = tron_llm::auth::OAuthTokens {
+        tron::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-api-key").unwrap();
+        let tokens = tron::llm::auth::OAuthTokens {
             access_token: "sk-ant-oat-primary".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_llm::auth::now_ms() + 3_600_000,
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron_llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         // OAuth takes priority
-        let config = tron_llm::auth::anthropic::default_config();
-        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let config = tron::llm::auth::anthropic::default_config();
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1277,24 +1277,24 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save two accounts
-        let work_tokens = tron_llm::auth::OAuthTokens {
+        let work_tokens = tron::llm::auth::OAuthTokens {
             access_token: "work-tok".to_string(),
             refresh_token: "ref1".to_string(),
-            expires_at: tron_llm::auth::now_ms() + 3_600_000,
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        let personal_tokens = tron_llm::auth::OAuthTokens {
+        let personal_tokens = tron::llm::auth::OAuthTokens {
             access_token: "personal-tok".to_string(),
             refresh_token: "ref2".to_string(),
-            expires_at: tron_llm::auth::now_ms() + 3_600_000,
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron_llm::auth::storage::save_account_oauth_tokens(
+        tron::llm::auth::storage::save_account_oauth_tokens(
             &path,
             "anthropic",
             "work",
             &work_tokens,
         )
         .unwrap();
-        tron_llm::auth::storage::save_account_oauth_tokens(
+        tron::llm::auth::storage::save_account_oauth_tokens(
             &path,
             "anthropic",
             "personal",
@@ -1302,17 +1302,17 @@ mod tests {
         )
         .unwrap();
 
-        let config = tron_llm::auth::anthropic::default_config();
+        let config = tron::llm::auth::anthropic::default_config();
 
         // Select "personal" account
         let result =
-            tron_llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
+            tron::llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
                 .await
                 .unwrap();
         assert_eq!(result.unwrap().token(), "personal-tok");
 
         // No preference → first account
-        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         assert_eq!(result.unwrap().token(), "work-tok");
@@ -1323,19 +1323,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        let tokens = tron_llm::auth::OAuthTokens {
+        let tokens = tron::llm::auth::OAuthTokens {
             access_token: "openai-oauth-tok".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_llm::auth::now_ms() + 3_600_000,
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron_llm::auth::storage::save_provider_oauth_tokens(
+        tron::llm::auth::storage::save_provider_oauth_tokens(
             &path,
-            tron_llm::auth::openai::PROVIDER_KEY,
+            tron::llm::auth::openai::PROVIDER_KEY,
             &tokens,
         )
         .unwrap();
 
-        let result = tron_llm::auth::openai::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::openai::load_server_auth(&path, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1348,34 +1348,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        let gpa = tron_llm::auth::GoogleProviderAuth {
-            base: tron_llm::auth::ProviderAuth {
-                oauth: Some(tron_llm::auth::OAuthTokens {
+        let gpa = tron::llm::auth::GoogleProviderAuth {
+            base: tron::llm::auth::ProviderAuth {
+                oauth: Some(tron::llm::auth::OAuthTokens {
                     access_token: "ya29.google-tok".to_string(),
                     refresh_token: "ref".to_string(),
-                    expires_at: tron_llm::auth::now_ms() + 3_600_000,
+                    expires_at: tron::llm::auth::now_ms() + 3_600_000,
                 }),
                 ..Default::default()
             },
-            endpoint: Some(tron_llm::auth::GoogleOAuthEndpoint::Antigravity),
+            endpoint: Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity),
             ..Default::default()
         };
-        tron_llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+        tron::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
-        let result = tron_llm::auth::google::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::google::load_server_auth(&path, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.auth.token(), "ya29.google-tok");
         assert_eq!(
             auth.endpoint,
-            Some(tron_llm::auth::GoogleOAuthEndpoint::Antigravity)
+            Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity)
         );
     }
 
     #[tokio::test]
     async fn server_auth_maps_to_anthropic_oauth_auth() {
-        let server_auth = tron_llm::auth::ServerAuth::OAuth {
+        let server_auth = tron::llm::auth::ServerAuth::OAuth {
             access_token: "tok".to_string(),
             refresh_token: "ref".to_string(),
             expires_at: 999,
@@ -1387,7 +1387,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_auth_maps_to_api_key_auth() {
-        let server_auth = tron_llm::auth::ServerAuth::from_api_key("sk-123");
+        let server_auth = tron::llm::auth::ServerAuth::from_api_key("sk-123");
         assert!(!server_auth.is_oauth());
         assert_eq!(server_auth.token(), "sk-123");
     }
@@ -1400,11 +1400,11 @@ mod tests {
 
         // Single DB for events + tasks
         let db_str = db_path.to_string_lossy();
-        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
-            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
+            let _ = tron::events::run_migrations(&conn).unwrap();
+            tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let event_store = Arc::new(EventStore::new(pool));
@@ -1426,19 +1426,19 @@ mod tests {
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
-            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
             context_artifacts: Arc::new(
-                tron_server::rpc::session_context::ContextArtifactsService::new(),
+                tron::server::rpc::session_context::ContextArtifactsService::new(),
             ),
         };
 
         let mut registry = MethodRegistry::new();
-        tron_server::rpc::handlers::register_all(&mut registry);
+        tron::server::rpc::handlers::register_all(&mut registry);
 
         let config = ServerConfig::default();
         let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -1474,9 +1474,9 @@ mod tests {
         assert!(!db_path.exists());
 
         let db_str = db_path.to_string_lossy();
-        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         let conn = pool.get().unwrap();
-        let _ = tron_events::run_migrations(&conn).unwrap();
+        let _ = tron::events::run_migrations(&conn).unwrap();
 
         assert!(db_path.exists());
     }
@@ -1486,9 +1486,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("tron.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         let conn = pool.get().unwrap();
-        let _ = tron_events::run_migrations(&conn).unwrap();
+        let _ = tron::events::run_migrations(&conn).unwrap();
 
         // Verify tables exist
         let count: i64 = conn
@@ -1505,11 +1505,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("tools-test.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
-            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
+            let _ = tron::events::run_migrations(&conn).unwrap();
+            tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let event_store = Arc::new(EventStore::new(pool.clone()));
         ToolRegistryConfig {
@@ -1586,7 +1586,7 @@ mod tests {
     #[test]
     fn server_registers_all_rpc_methods() {
         let mut registry = MethodRegistry::new();
-        tron_server::rpc::handlers::register_all(&mut registry);
+        tron::server::rpc::handlers::register_all(&mut registry);
         // Should have a substantial number of methods registered
         assert!(registry.methods().len() >= 50);
     }
@@ -1596,10 +1596,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("events.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
+            let _ = tron::events::run_migrations(&conn).unwrap();
         }
         let event_store = Arc::new(EventStore::new(pool));
         let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -1618,19 +1618,19 @@ mod tests {
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
-            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
             context_artifacts: Arc::new(
-                tron_server::rpc::session_context::ContextArtifactsService::new(),
+                tron::server::rpc::session_context::ContextArtifactsService::new(),
             ),
         };
 
         let mut registry = MethodRegistry::new();
-        tron_server::rpc::handlers::register_all(&mut registry);
+        tron::server::rpc::handlers::register_all(&mut registry);
 
         let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
             .build_recorder()

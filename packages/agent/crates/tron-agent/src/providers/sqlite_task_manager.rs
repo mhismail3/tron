@@ -1,4 +1,4 @@
-//! Real `TaskManagerDelegate` backed by `tron_runtime::tasks::TaskService`.
+//! Real `TaskManagerDelegate` backed by `tron::runtime::tasks::TaskService`.
 //!
 //! Provides the `TaskManager` tool with actual database access for CRUD
 //! operations on tasks, projects, and areas. Each entity type has its own
@@ -6,14 +6,14 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_events::ConnectionPool;
-use tron_runtime::tasks::service::TaskService;
-use tron_runtime::tasks::types::{
+use tron::events::ConnectionPool;
+use tron::runtime::tasks::service::TaskService;
+use tron::runtime::tasks::types::{
     AreaCreateParams, AreaFilter, AreaUpdateParams, BatchTarget, ProjectCreateParams,
     ProjectFilter, ProjectUpdateParams, TaskCreateParams, TaskFilter, TaskUpdateParams,
 };
-use tron_tools::errors::ToolError;
-use tron_tools::traits::TaskManagerDelegate;
+use tron::tools::errors::ToolError;
+use tron::tools::traits::TaskManagerDelegate;
 
 /// Real task manager backed by `SQLite` via `TaskService`.
 pub struct SqliteTaskManagerDelegate {
@@ -382,14 +382,14 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron_events::ConnectionConfig;
+    use tron::events::ConnectionConfig;
 
     fn setup_pool() -> ConnectionPool {
-        let pool = tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
-            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
+            let _ = tron::events::run_migrations(&conn).unwrap();
+            tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         pool
     }

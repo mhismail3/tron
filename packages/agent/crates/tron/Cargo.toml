@@ -1,0 +1,115 @@
+[package]
+name = "tron"
+description = "Unified library crate for the Tron agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+ort = ["dep:ort", "dep:tokenizers", "dep:hf-hub", "dep:ndarray"]
+apns = ["dep:jsonwebtoken"]
+browser-integration = []
+
+[lib]
+doctest = false
+
+[dependencies]
+# Async runtime
+tokio.workspace = true
+tokio-util.workspace = true
+tokio-stream.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+futures.workspace = true
+pin-project-lite.workspace = true
+
+# HTTP / WebSocket
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio-tungstenite.workspace = true
+reqwest.workspace = true
+eventsource-stream.workspace = true
+
+# Database
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging / Tracing
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Metrics
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# IDs and time
+uuid.workspace = true
+chrono.workspace = true
+chrono-tz = "0.10"
+
+# Crypto
+sha2.workspace = true
+base64.workspace = true
+rand.workspace = true
+percent-encoding.workspace = true
+
+# Filesystem
+globset.workspace = true
+walkdir.workspace = true
+regex.workspace = true
+rustix.workspace = true
+
+# HTML
+scraper.workspace = true
+html2text.workspace = true
+
+# Concurrency
+parking_lot.workspace = true
+dashmap.workspace = true
+
+# Zero-copy
+bytemuck.workspace = true
+
+# Misc
+bytes.workspace = true
+indexmap = "2"
+url = "2"
+urlencoding = "2"
+
+# Embeddings (optional)
+ort = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }
+
+# APNS (optional)
+jsonwebtoken = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+insta.workspace = true
+proptest.workspace = true
+mockall.workspace = true
+assert_matches.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite.workspace = true
+async-stream.workspace = true
+reqwest.workspace = true

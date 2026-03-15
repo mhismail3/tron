@@ -1,0 +1,321 @@
+//! Skills handlers: list, get, refresh, remove.
+
+use async_trait::async_trait;
+use serde_json::Value;
+use tracing::instrument;
+
+use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::errors::{self, RpcError};
+use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::registry::MethodHandler;
+
+/// Shape skill for the wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
+fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
+    serde_json::json!({
+        "name": skill.name,
+        "displayName": skill.display_name,
+        "description": skill.description,
+        "source": skill.source,
+        "tags": skill.frontmatter.tags,
+        "content": skill.content,
+        "path": skill.path,
+        "additionalFiles": skill.additional_files,
+    })
+}
+
+fn remove_skill_name(params: Option<&Value>) -> Result<&str, RpcError> {
+    params
+        .and_then(|p| p.get("skillName").or_else(|| p.get("name")))
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::InvalidParams {
+            message: "Missing required parameter: skillName".into(),
+        })
+}
+
+/// List available skills.
+pub struct ListSkillsHandler;
+
+#[async_trait]
+impl MethodHandler for ListSkillsHandler {
+    #[instrument(skip(self, ctx), fields(method = "skill.list"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let registry = ctx.skill_registry.read();
+        let skills = registry.list(None);
+        Ok(serde_json::json!({ "skills": skills }))
+    }
+}
+
+/// Get a specific skill by name.
+pub struct GetSkillHandler;
+
+#[async_trait]
+impl MethodHandler for GetSkillHandler {
+    #[instrument(skip(self, ctx), fields(method = "skill.get"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let name = require_string_param(params.as_ref(), "name")?;
+        let registry = ctx.skill_registry.read();
+
+        let skill = registry.get(&name).ok_or_else(|| RpcError::NotFound {
+            code: errors::NOT_FOUND.into(),
+            message: format!("Skill '{name}' not found"),
+        })?;
+
+        // Wire format: { skill: SkillMetadata, found: bool } wrapper
+        Ok(serde_json::json!({
+            "skill": skill_to_wire(skill),
+            "found": true,
+        }))
+    }
+}
+
+/// Refresh skills from disk.
+pub struct RefreshSkillsHandler;
+
+#[async_trait]
+impl MethodHandler for RefreshSkillsHandler {
+    #[instrument(skip(self, ctx), fields(method = "skill.refresh"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let working_dir = opt_string(params.as_ref(), "workingDirectory");
+        let working_dir = working_dir.as_deref().unwrap_or("/tmp");
+
+        let skill_registry = ctx.skill_registry.clone();
+        let working_dir = working_dir.to_string();
+        let count = ctx
+            .run_blocking("skill.refresh", move || {
+                let mut registry = skill_registry.write();
+                registry.refresh(&working_dir);
+                Ok(registry.list(None).len())
+            })
+            .await?;
+
+        Ok(serde_json::json!({ "success": true, "skillCount": count }))
+    }
+}
+
+/// Remove a skill.
+pub struct RemoveSkillHandler;
+
+#[async_trait]
+impl MethodHandler for RemoveSkillHandler {
+    #[instrument(skip(self, ctx), fields(method = "skill.remove"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let name = remove_skill_name(params.as_ref())?;
+
+        let session_id = opt_string(params.as_ref(), "sessionId");
+
+        let mut registry = ctx.skill_registry.write();
+        if !registry.has(name) {
+            return Err(RpcError::NotFound {
+                code: errors::NOT_FOUND.into(),
+                message: format!("Skill '{name}' not found"),
+            });
+        }
+
+        let _ = registry.remove(name);
+
+        // Broadcast skill removed event
+        if let Some(sid) = session_id {
+            let _ = ctx
+                .orchestrator
+                .broadcast()
+                .emit(crate::core::events::TronEvent::SkillRemoved {
+                    base: crate::core::events::BaseEvent::now(sid),
+                    skill_name: name.to_owned(),
+                });
+        }
+
+        Ok(serde_json::json!({
+            "success": true,
+            "removedSkill": name,
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use serde_json::json;
+    use crate::skills::types::{SkillFrontmatter, SkillMetadata, SkillSource};
+
+    fn make_skill(name: &str) -> SkillMetadata {
+        SkillMetadata {
+            name: name.to_string(),
+            display_name: name.to_string(),
+            description: format!("{name} skill"),
+            content: format!("{name} content"),
+            frontmatter: SkillFrontmatter::default(),
+            source: SkillSource::Global,
+            path: String::new(),
+            skill_md_path: String::new(),
+            additional_files: Vec::new(),
+            last_modified: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_skills_empty() {
+        let ctx = make_test_context();
+        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert!(result["skills"].is_array());
+        assert!(result["skills"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_skill_not_found() {
+        let ctx = make_test_context();
+        let err = GetSkillHandler
+            .handle(Some(json!({"name": "nonexistent"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn get_skill_missing_name() {
+        let ctx = make_test_context();
+        let err = GetSkillHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn refresh_skills_returns_count() {
+        let ctx = make_test_context();
+        let result = RefreshSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(result["success"], true);
+        assert!(result["skillCount"].is_number());
+    }
+
+    #[tokio::test]
+    async fn refresh_skills_wire_format_field_names() {
+        let ctx = make_test_context();
+        let result = RefreshSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert!(result.get("success").is_some());
+        assert!(result.get("skillCount").is_some());
+        assert!(result.get("refreshed").is_none());
+        assert!(result.get("count").is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_skill_success() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("test-skill"));
+
+        let result = RemoveSkillHandler
+            .handle(
+                Some(json!({"skillName": "test-skill", "sessionId": "s1"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(result["removedSkill"], "test-skill");
+        assert!(!ctx.skill_registry.read().has("test-skill"));
+    }
+
+    #[tokio::test]
+    async fn remove_skill_not_found() {
+        let ctx = make_test_context();
+        let err = RemoveSkillHandler
+            .handle(Some(json!({"skillName": "nonexistent"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn remove_skill_missing_params() {
+        let ctx = make_test_context();
+        let err = RemoveSkillHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn remove_skill_accepts_name_param() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("other"));
+
+        let result = RemoveSkillHandler
+            .handle(Some(json!({"name": "other"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+    }
+
+    #[tokio::test]
+    async fn remove_skill_emits_event() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("my-skill"));
+        let mut rx = ctx.orchestrator.subscribe();
+
+        let _ = RemoveSkillHandler
+            .handle(
+                Some(json!({"skillName": "my-skill", "sessionId": "s1"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.event_type(), "skill_removed");
+    }
+
+    #[tokio::test]
+    async fn get_skill_returns_wrapped_response() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("my-skill"));
+
+        let result = GetSkillHandler
+            .handle(Some(json!({"name": "my-skill"})), &ctx)
+            .await
+            .unwrap();
+
+        // Wire format: { skill: {...}, found: true }
+        assert_eq!(result["found"], true);
+        assert!(result["skill"].is_object());
+        assert_eq!(result["skill"]["name"], "my-skill");
+        assert_eq!(result["skill"]["description"], "my-skill skill");
+    }
+
+    #[tokio::test]
+    async fn list_skills_sorted_alphabetically() {
+        let ctx = make_test_context();
+        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert!(result["skills"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refresh_clears_stale_skills() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("stale-skill"));
+        assert!(ctx.skill_registry.read().has("stale-skill"));
+
+        // Refresh with empty tmpdir — stale-skill should be gone
+        let result = RefreshSkillsHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/empty-nonexistent"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        assert!(!ctx.skill_registry.read().has("stale-skill"));
+    }
+
+    #[tokio::test]
+    async fn list_skills_returns_canonical_shape() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("alpha"));
+        ctx.skill_registry.write().insert(make_skill("beta"));
+
+        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(result["skills"].as_array().map_or(0, Vec::len), 2);
+        assert!(result.get("totalCount").is_none());
+    }
+}

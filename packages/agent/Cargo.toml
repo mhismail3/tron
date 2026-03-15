@@ -1,35 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tron-core",
-    "crates/tron-events",
-    "crates/tron-settings",
-    "crates/tron-embeddings",
-    "crates/tron-cron",
-    "crates/tron-worktree",
-    "crates/tron-llm",
-    "crates/tron-runtime",
-    "crates/tron-tools",
-    "crates/tron-skills",
-    "crates/tron-transcription",
-    "crates/tron-server",
+    "crates/tron",
     "crates/tron-agent",
     "crates/tron-bench",
     "crates/tron-backfill",
 ]
 default-members = [
-    "crates/tron-core",
-    "crates/tron-events",
-    "crates/tron-settings",
-    "crates/tron-embeddings",
-    "crates/tron-cron",
-    "crates/tron-worktree",
-    "crates/tron-llm",
-    "crates/tron-runtime",
-    "crates/tron-tools",
-    "crates/tron-skills",
-    "crates/tron-transcription",
-    "crates/tron-server",
+    "crates/tron",
     "crates/tron-agent",
 ]
 
@@ -135,19 +113,8 @@ tokio-util = { version = "0.7", features = ["codec", "io"] }
 tokio-stream = "0.1"
 rustix = { version = "1.1", features = ["fs"] }
 
-# Internal crates
-tron-core = { path = "crates/tron-core" }
-tron-events = { path = "crates/tron-events" }
-tron-settings = { path = "crates/tron-settings" }
-tron-embeddings = { path = "crates/tron-embeddings" }
-tron-llm = { path = "crates/tron-llm" }
-tron-runtime = { path = "crates/tron-runtime" }
-tron-tools = { path = "crates/tron-tools" }
-tron-skills = { path = "crates/tron-skills" }
-tron-transcription = { path = "crates/tron-transcription" }
-tron-cron = { path = "crates/tron-cron" }
-tron-worktree = { path = "crates/tron-worktree" }
-tron-server = { path = "crates/tron-server" }
+# Internal
+tron = { path = "crates/tron" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

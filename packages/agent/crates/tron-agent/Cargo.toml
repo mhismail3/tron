@@ -11,25 +11,14 @@ workspace = true
 
 [features]
 default = ["embeddings"]
-embeddings = ["tron-embeddings/ort"]
+embeddings = ["tron/ort"]
 
 [[bin]]
 name = "tron"
 path = "src/main.rs"
 
 [dependencies]
-tron-core.workspace = true
-tron-cron.workspace = true
-tron-events.workspace = true
-tron-settings.workspace = true
-tron-embeddings.workspace = true
-tron-llm.workspace = true
-tron-runtime.workspace = true
-tron-tools.workspace = true
-tron-skills.workspace = true
-tron-server = { workspace = true, features = ["apns"] }
-tron-transcription.workspace = true
-tron-worktree.workspace = true
+tron = { path = "../tron", features = ["apns"] }
 mimalloc.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

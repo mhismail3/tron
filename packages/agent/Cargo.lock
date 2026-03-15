@@ -3590,6 +3590,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "tron"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "bytemuck",
+ "bytes",
+ "chrono",
+ "chrono-tz",
+ "dashmap",
+ "eventsource-stream",
+ "futures",
+ "globset",
+ "hf-hub",
+ "html2text",
+ "indexmap",
+ "insta",
+ "jsonwebtoken",
+ "libc",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "mockall",
+ "ndarray 0.16.1",
+ "ort",
+ "parking_lot",
+ "percent-encoding",
+ "pin-project-lite",
+ "proptest",
+ "r2d2",
+ "r2d2_sqlite",
+ "rand 0.9.2",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rustix",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite 0.26.2",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "urlencoding",
+ "uuid",
+ "walkdir",
+ "wiremock",
+]
+
+[[package]]
 name = "tron-agent"
 version = "0.1.0"
 dependencies = [
@@ -3609,18 +3670,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tron-core",
- "tron-cron",
- "tron-embeddings",
- "tron-events",
- "tron-llm",
- "tron-runtime",
- "tron-server",
- "tron-settings",
- "tron-skills",
- "tron-tools",
- "tron-transcription",
- "tron-worktree",
+ "tron",
  "uuid",
 ]
 
@@ -3639,9 +3689,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tron-embeddings",
- "tron-events",
- "tron-settings",
+ "tron",
  "uuid",
 ]
 
@@ -3657,308 +3705,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "tokio",
- "tron-events",
- "tron-runtime",
- "tron-server",
-]
-
-[[package]]
-name = "tron-core"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "chrono",
- "insta",
- "proptest",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "tron-cron"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "chrono-tz",
- "insta",
- "libc",
- "parking_lot",
- "r2d2",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tron-core",
- "tron-events",
- "tron-settings",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "tron-embeddings"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "chrono",
- "hf-hub",
- "ndarray 0.16.1",
- "ort",
- "parking_lot",
- "proptest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokenizers",
- "tokio",
- "tracing",
- "tron-events",
- "tron-settings",
-]
-
-[[package]]
-name = "tron-events"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "chrono",
- "insta",
- "metrics",
- "mockall",
- "proptest",
- "r2d2",
- "r2d2_sqlite",
- "rand 0.9.2",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tron-core",
- "tron-settings",
- "uuid",
-]
-
-[[package]]
-name = "tron-llm"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "eventsource-stream",
- "futures",
- "insta",
- "metrics",
- "mockall",
- "parking_lot",
- "percent-encoding",
- "pin-project-lite",
- "proptest",
- "rand 0.9.2",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tron-core",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "tron-runtime"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "chrono",
- "dashmap",
- "futures",
- "globset",
- "insta",
- "metrics",
- "mockall",
- "parking_lot",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tron-core",
- "tron-events",
- "tron-llm",
- "tron-settings",
- "tron-tools",
- "tron-worktree",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "tron-server"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "chrono",
- "futures",
- "insta",
- "jsonwebtoken",
- "metrics",
- "metrics-exporter-prometheus",
- "mockall",
- "parking_lot",
- "regex",
- "reqwest",
- "rusqlite",
- "rustix",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "tokio-util",
- "tower",
- "tower-http",
- "tracing",
- "tron-core",
- "tron-cron",
- "tron-embeddings",
- "tron-events",
- "tron-llm",
- "tron-runtime",
- "tron-settings",
- "tron-skills",
- "tron-tools",
- "tron-transcription",
- "tron-worktree",
- "uuid",
-]
-
-[[package]]
-name = "tron-settings"
-version = "0.1.0"
-dependencies = [
- "parking_lot",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "tron-skills"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "tron-tools"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "dashmap",
- "futures",
- "globset",
- "html2text",
- "indexmap",
- "insta",
- "metrics",
- "mockall",
- "parking_lot",
- "regex",
- "reqwest",
- "scraper",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "tokio-util",
- "tracing",
- "tron-core",
- "url",
- "urlencoding",
- "uuid",
- "walkdir",
- "wiremock",
-]
-
-[[package]]
-name = "tron-transcription"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "tron-worktree"
-version = "0.1.0"
-dependencies = [
- "parking_lot",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tron-core",
- "tron-events",
- "tron-settings",
+ "tron",
 ]
 
 [[package]]

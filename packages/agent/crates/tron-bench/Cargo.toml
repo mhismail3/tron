@@ -13,9 +13,7 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tron-events.workspace = true
-tron-runtime = { path = "../tron-runtime" }
-tron-server = { path = "../tron-server" }
+tron = { path = "../tron" }
 tokio.workspace = true
 sysinfo = "0.33"
 

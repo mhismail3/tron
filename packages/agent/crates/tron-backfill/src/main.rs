@@ -127,24 +127,24 @@ fn default_db_path() -> PathBuf {
 
 fn open_store(
     db_path_override: Option<PathBuf>,
-) -> Result<(Arc<tron_events::EventStore>, PathBuf)> {
+) -> Result<(Arc<tron::events::EventStore>, PathBuf)> {
     let db_path = db_path_override.unwrap_or_else(default_db_path);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
     }
     let db_str = db_path.to_string_lossy();
-    let pool = tron_events::new_file(&db_str, &tron_events::ConnectionConfig::default())
+    let pool = tron::events::new_file(&db_str, &tron::events::ConnectionConfig::default())
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
-        let _ = tron_events::run_migrations(&conn).context("Failed to run migrations")?;
+        let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
-    Ok((Arc::new(tron_events::EventStore::new(pool)), db_path))
+    Ok((Arc::new(tron::events::EventStore::new(pool)), db_path))
 }
 
 /// Check if a ledger entry with the given meta ID already exists in the DB.
-fn has_ledger_entry(store: &tron_events::EventStore, meta_id: &str) -> bool {
+fn has_ledger_entry(store: &tron::events::EventStore, meta_id: &str) -> bool {
     let Ok(conn) = store.pool().get() else {
         return false;
     };
@@ -165,7 +165,7 @@ fn has_ledger_entry(store: &tron_events::EventStore, meta_id: &str) -> bool {
 // ─── Import ──────────────────────────────────────────────────────────────────
 
 fn run_import(
-    store: &tron_events::EventStore,
+    store: &tron::events::EventStore,
     ledger_path: &std::path::Path,
     project_filter: Option<&str>,
     dry_run: bool,
@@ -257,9 +257,9 @@ fn run_import(
         });
 
         let _ = store
-            .append(&tron_events::AppendOptions {
+            .append(&tron::events::AppendOptions {
                 session_id: &session_id,
-                event_type: tron_events::EventType::MemoryLedger,
+                event_type: tron::events::EventType::MemoryLedger,
                 payload,
                 parent_id: None,
             })
@@ -289,20 +289,20 @@ fn run_import(
 // ─── Embed ───────────────────────────────────────────────────────────────────
 
 async fn run_embed(
-    store: &tron_events::EventStore,
+    store: &tron::events::EventStore,
     db_path: &std::path::Path,
     force: bool,
 ) -> Result<()> {
     // Load settings to pick up user overrides (model, cache dir, etc.)
-    let settings = tron_settings::get_settings();
+    let settings = tron::settings::get_settings();
     let config =
-        tron_embeddings::EmbeddingConfig::from_settings(&settings.context.memory.embedding);
+        tron::embeddings::EmbeddingConfig::from_settings(&settings.context.memory.embedding);
 
     // Set up vector repository (dedicated connection, same DB)
     let conn = rusqlite::Connection::open(db_path).context("Failed to open DB for vector repo")?;
     conn.execute_batch("PRAGMA busy_timeout = 5000;")
         .context("Failed to set busy timeout")?;
-    let repo = tron_embeddings::VectorRepository::new(conn, config.dimensions);
+    let repo = tron::embeddings::VectorRepository::new(conn, config.dimensions);
     repo.ensure_table()?;
 
     if force {
@@ -345,21 +345,21 @@ async fn run_embed(
     );
 
     // Initialize ONNX embedding service
-    let ort_service = Arc::new(tron_embeddings::OnnxEmbeddingService::new(config.clone()));
+    let ort_service = Arc::new(tron::embeddings::OnnxEmbeddingService::new(config.clone()));
     ort_service.initialize().await?;
 
     // Set up controller
     let repo = Arc::new(parking_lot::Mutex::new(repo));
-    let mut controller = tron_embeddings::EmbeddingController::new(config);
+    let mut controller = tron::embeddings::EmbeddingController::new(config);
     controller.set_service(ort_service);
     controller.set_vector_repo(repo);
 
     // Convert to BackfillEntry
-    let entries: Vec<tron_embeddings::BackfillEntry> = unembedded
+    let entries: Vec<tron::embeddings::BackfillEntry> = unembedded
         .into_iter()
         .filter_map(|(event_id, payload_str, workspace_id)| {
             let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
-            Some(tron_embeddings::BackfillEntry {
+            Some(tron::embeddings::BackfillEntry {
                 event_id,
                 workspace_id,
                 payload,

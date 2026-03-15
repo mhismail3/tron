@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tron_events::EventStore;
-use tron_events::sqlite::repositories::blob::BlobRepo;
-use tron_tools::errors::ToolError;
-use tron_tools::traits::BlobStore;
+use tron::events::EventStore;
+use tron::events::sqlite::repositories::blob::BlobRepo;
+use tron::tools::errors::ToolError;
+use tron::tools::traits::BlobStore;
 
 /// SQLite-backed blob store wrapping `BlobRepo`.
 pub struct SqliteBlobStore {

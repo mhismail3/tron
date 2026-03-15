@@ -9,15 +9,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::debug;
-use tron_events::ConnectionPool;
-use tron_events::sqlite::repositories::device_token::DeviceTokenRepo;
-use tron_server::platform::apns::{ApnsNotification, ApnsService};
-use tron_tools::errors::ToolError;
-use tron_tools::traits::{Notification, NotifyDelegate, NotifyResult};
+use tron::events::ConnectionPool;
+use tron::events::sqlite::repositories::device_token::DeviceTokenRepo;
+use tron::server::platform::apns::{ApnsNotification, ApnsService};
+use tron::tools::errors::ToolError;
+use tron::tools::traits::{Notification, NotifyDelegate, NotifyResult};
 
 /// Return the first 8 bytes of a token for logging (UTF-8–safe).
 fn token_prefix(token: &str) -> &str {
-    tron_core::text::truncate_str(token, 8)
+    tron::core::text::truncate_str(token, 8)
 }
 
 /// Real APNS notification delegate.
@@ -199,7 +199,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron_tools::traits::Notification;
+    use tron::tools::traits::Notification;
 
     #[test]
     fn maps_notification_fields() {

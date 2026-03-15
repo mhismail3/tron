@@ -11,16 +11,14 @@ workspace = true
 
 [features]
 default = ["embeddings"]
-embeddings = ["tron-embeddings/ort"]
+embeddings = ["tron/ort"]
 
 [[bin]]
 name = "tron-backfill"
 path = "src/main.rs"
 
 [dependencies]
-tron-events.workspace = true
-tron-embeddings.workspace = true
-tron-settings.workspace = true
+tron = { path = "../tron" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true

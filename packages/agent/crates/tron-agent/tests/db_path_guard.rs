@@ -101,7 +101,7 @@ fn startup_migrations_only_touch_tron_db() {
 
     let db_path = resolve_production_db_path_for_home(None, &home).unwrap();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    tron_events::run_migrations(&conn).unwrap();
+    tron::events::run_migrations(&conn).unwrap();
     drop(conn);
 
     let db_meta = std::fs::metadata(&db_path).unwrap();

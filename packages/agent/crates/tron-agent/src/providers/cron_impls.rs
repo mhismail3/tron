@@ -10,15 +10,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tron_cron::errors::CronError;
-use tron_cron::types::{CronJob, CronRun};
-use tron_events::ConnectionPool;
-use tron_server::platform::apns::{ApnsNotification, ApnsService};
-use tron_server::rpc::types::RpcEvent;
-use tron_server::websocket::broadcast::BroadcastManager;
+use tron::cron::errors::CronError;
+use tron::cron::types::{CronJob, CronRun};
+use tron::events::ConnectionPool;
+use tron::server::platform::apns::{ApnsNotification, ApnsService};
+use tron::server::rpc::types::RpcEvent;
+use tron::server::websocket::broadcast::BroadcastManager;
 // ── Agent Turn Execution ──────────────────────────────────────────────
 
-/// Maximum output size stored on a [`tron_cron::AgentTurnResult`].
+/// Maximum output size stored on a [`tron::cron::AgentTurnResult`].
 /// Full output is always available via the session's event history.
 const MAX_OUTPUT_CHARS: usize = 4096;
 
@@ -31,27 +31,27 @@ const DEFAULT_TURN_TIMEOUT_SECS: u64 = 1800;
 /// the agent loop), extracts the final assistant text, then ends the session.
 /// The session persists in the event store for auditability.
 pub struct CronAgentTurnExecutor {
-    event_store: Arc<tron_events::EventStore>,
-    session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
-    provider_factory: Arc<dyn tron_llm::provider::ProviderFactory>,
-    tool_factory: Arc<dyn Fn() -> tron_tools::registry::ToolRegistry + Send + Sync>,
+    event_store: Arc<tron::events::EventStore>,
+    session_manager: Arc<tron::runtime::orchestrator::session_manager::SessionManager>,
+    provider_factory: Arc<dyn tron::llm::provider::ProviderFactory>,
+    tool_factory: Arc<dyn Fn() -> tron::tools::registry::ToolRegistry + Send + Sync>,
     origin: String,
-    subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    subagent_manager: Option<Arc<tron::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
 }
 
 impl CronAgentTurnExecutor {
     /// Create a new agent turn executor.
     pub fn new(
-        event_store: Arc<tron_events::EventStore>,
-        session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
-        provider_factory: Arc<dyn tron_llm::provider::ProviderFactory>,
-        tool_factory: Arc<dyn Fn() -> tron_tools::registry::ToolRegistry + Send + Sync>,
+        event_store: Arc<tron::events::EventStore>,
+        session_manager: Arc<tron::runtime::orchestrator::session_manager::SessionManager>,
+        provider_factory: Arc<dyn tron::llm::provider::ProviderFactory>,
+        tool_factory: Arc<dyn Fn() -> tron::tools::registry::ToolRegistry + Send + Sync>,
         origin: String,
         subagent_manager: Option<
-            Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>,
+            Arc<tron::runtime::orchestrator::subagent_manager::SubagentManager>,
         >,
-        embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+        embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
     ) -> Self {
         Self {
             event_store,
@@ -65,13 +65,13 @@ impl CronAgentTurnExecutor {
     }
 
     /// Extract output text from the agent's last assistant message.
-    fn extract_output(agent: &tron_runtime::agent::tron_agent::TronAgent) -> (String, bool) {
+    fn extract_output(agent: &tron::runtime::agent::tron_agent::TronAgent) -> (String, bool) {
         let messages = agent.context_manager().get_messages();
         let text = messages
             .iter()
             .rev()
             .find_map(|m| {
-                if let tron_core::messages::Message::Assistant { content, .. } = m {
+                if let tron::core::messages::Message::Assistant { content, .. } = m {
                     let text: String = content
                         .iter()
                         .filter_map(|c| c.as_text())
@@ -95,19 +95,19 @@ impl CronAgentTurnExecutor {
 }
 
 #[async_trait]
-impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
+impl tron::cron::AgentTurnExecutor for CronAgentTurnExecutor {
     async fn execute(
         &self,
         prompt: &str,
         model: Option<&str>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
-        tool_restrictions: Option<&tron_cron::ToolRestrictions>,
+        tool_restrictions: Option<&tron::cron::ToolRestrictions>,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<tron_cron::AgentTurnResult, CronError> {
+    ) -> Result<tron::cron::AgentTurnResult, CronError> {
         // Resolve model (fall back to settings default)
         let settings =
-            tron_settings::loader::load_settings_from_path(&tron_settings::loader::settings_path())
+            tron::settings::loader::load_settings_from_path(&tron::settings::loader::settings_path())
                 .unwrap_or_default();
         let model = model.unwrap_or(&settings.server.default_model);
 
@@ -115,7 +115,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         let workspace_path = workspace_id
             .and_then(|wid| {
                 self.event_store.pool().get().ok().and_then(|conn| {
-                    tron_events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
+                    tron::events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
                         &conn, wid,
                     )
                     .ok()
@@ -149,7 +149,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         };
 
         // 3. Build agent config
-        let agent_config = tron_runtime::AgentConfig {
+        let agent_config = tron::runtime::AgentConfig {
             model: model.to_owned(),
             system_prompt: system_prompt.map(String::from),
             max_turns: 100,
@@ -157,7 +157,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             working_directory: Some(workspace_path.clone()),
             server_origin: Some(self.origin.clone()),
             workspace_id: workspace_id.map(String::from),
-            ..tron_runtime::AgentConfig::default()
+            ..tron::runtime::AgentConfig::default()
         };
 
         // 4. Create tools
@@ -172,10 +172,10 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // are removed automatically by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory
-        let mut agent = tron_runtime::AgentFactory::create_agent(
+        let mut agent = tron::runtime::AgentFactory::create_agent(
             agent_config,
             session_id.clone(),
-            tron_runtime::CreateAgentOpts {
+            tron::runtime::CreateAgentOpts {
                 provider,
                 tools,
                 guardrails: None,
@@ -205,20 +205,20 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // 8. Persist the user message event
         let _ = self
             .event_store
-            .append(&tron_events::AppendOptions {
+            .append(&tron::events::AppendOptions {
                 session_id: &session_id,
-                event_type: tron_events::EventType::MessageUser,
+                event_type: tron::events::EventType::MessageUser,
                 payload: serde_json::json!({"content": prompt}),
                 parent_id: None,
             })
             .map_err(|e| CronError::Execution(format!("persist user message: {e}")))?;
 
         // 9. Run agent with timeout
-        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
-        let run_ctx = tron_runtime::RunContext::default();
+        let broadcast = Arc::new(tron::runtime::EventEmitter::new());
+        let run_ctx = tron::runtime::RunContext::default();
 
         let result = tokio::select! {
-            r = tron_runtime::run_agent(
+            r = tron::runtime::run_agent(
                 &mut agent,
                 prompt,
                 run_ctx,
@@ -259,7 +259,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         )
         .await;
 
-        Ok(tron_cron::AgentTurnResult {
+        Ok(tron::cron::AgentTurnResult {
             session_id,
             output,
             output_truncated,
@@ -272,7 +272,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
 /// Ensures sessions are cleaned up even if the executor panics or returns
 /// early due to errors. Uses `try_end_session` which is sync-safe.
 struct SessionGuard {
-    session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    session_manager: Arc<tron::runtime::orchestrator::session_manager::SessionManager>,
     session_id: String,
 }
 
@@ -287,18 +287,18 @@ impl Drop for SessionGuard {
 #[allow(clippy::ref_option)]
 async fn write_cron_ledger(
     session_id: &str,
-    event_store: &Arc<tron_events::EventStore>,
-    subagent_manager: &Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
-    embedding_controller: &Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    event_store: &Arc<tron::events::EventStore>,
+    subagent_manager: &Option<Arc<tron::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    embedding_controller: &Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
 ) -> bool {
-    let deps = tron_server::rpc::memory_ledger::LedgerWriteDeps {
+    let deps = tron::server::rpc::memory_ledger::LedgerWriteDeps {
         event_store: event_store.clone(),
         subagent_manager: subagent_manager.clone(),
         embedding_controller: embedding_controller.clone(),
         shutdown_coordinator: None,
     };
     let result =
-        tron_server::rpc::memory_ledger::execute_ledger_write(session_id, &deps, "cron").await;
+        tron::server::rpc::memory_ledger::execute_ledger_write(session_id, &deps, "cron").await;
     if result.written {
         tracing::debug!(
             session_id,
@@ -335,14 +335,14 @@ impl CronPushNotifier {
             .get()
             .map_err(|e| CronError::Execution(format!("DB connection: {e}")))?;
         let tokens =
-            tron_events::sqlite::repositories::device_token::DeviceTokenRepo::get_all_active(&conn)
+            tron::events::sqlite::repositories::device_token::DeviceTokenRepo::get_all_active(&conn)
                 .map_err(|e| CronError::Execution(format!("query device tokens: {e}")))?;
         Ok(tokens.into_iter().map(|t| t.device_token).collect())
     }
 }
 
 #[async_trait]
-impl tron_cron::PushNotifier for CronPushNotifier {
+impl tron::cron::PushNotifier for CronPushNotifier {
     async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {
         let tokens = self.active_tokens()?;
         if tokens.is_empty() {
@@ -388,7 +388,7 @@ impl CronEventBroadcaster {
 }
 
 #[async_trait]
-impl tron_cron::EventBroadcaster for CronEventBroadcaster {
+impl tron::cron::EventBroadcaster for CronEventBroadcaster {
     async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun) {
         let event = RpcEvent {
             event_type: "cron.runComplete".to_owned(),
@@ -423,18 +423,18 @@ impl tron_cron::EventBroadcaster for CronEventBroadcaster {
 
 /// Injects system events into existing sessions.
 pub struct CronSystemEventInjector {
-    event_store: Arc<tron_events::EventStore>,
+    event_store: Arc<tron::events::EventStore>,
 }
 
 impl CronSystemEventInjector {
     /// Create a new injector.
-    pub fn new(event_store: Arc<tron_events::EventStore>) -> Self {
+    pub fn new(event_store: Arc<tron::events::EventStore>) -> Self {
         Self { event_store }
     }
 }
 
 #[async_trait]
-impl tron_cron::SystemEventInjector for CronSystemEventInjector {
+impl tron::cron::SystemEventInjector for CronSystemEventInjector {
     async fn inject(&self, session_id: &str, message: &str) -> Result<(), CronError> {
         let payload = serde_json::json!({
             "source": "cron",
@@ -443,9 +443,9 @@ impl tron_cron::SystemEventInjector for CronSystemEventInjector {
 
         let _ = self
             .event_store
-            .append(&tron_events::AppendOptions {
+            .append(&tron::events::AppendOptions {
                 session_id,
-                event_type: tron_events::EventType::MessageSystem,
+                event_type: tron::events::EventType::MessageSystem,
                 payload,
                 parent_id: None,
             })
@@ -468,17 +468,17 @@ mod tests {
     use super::*;
 
     fn make_test_store_and_manager() -> (
-        Arc<tron_events::EventStore>,
-        Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+        Arc<tron::events::EventStore>,
+        Arc<tron::runtime::orchestrator::session_manager::SessionManager>,
     ) {
-        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_in_memory(&tron::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
+            let _ = tron::events::run_migrations(&conn).unwrap();
         }
-        let store = Arc::new(tron_events::EventStore::new(pool));
+        let store = Arc::new(tron::events::EventStore::new(pool));
         let mgr = Arc::new(
-            tron_runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
+            tron::runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
         );
         (store, mgr)
     }
@@ -488,9 +488,9 @@ mod tests {
         let (store, mgr) = make_test_store_and_manager();
         let sid = mgr.create_session("mock", "/tmp", Some("test")).unwrap();
         // Append a user message so compute_cycle_messages finds something
-        let _ = store.append(&tron_events::AppendOptions {
+        let _ = store.append(&tron::events::AppendOptions {
             session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
+            event_type: tron::events::EventType::MessageUser,
             payload: serde_json::json!({"content": "hello"}),
             parent_id: None,
         });
@@ -517,7 +517,7 @@ mod tests {
             "nonexistent",
             &store,
             &None,
-            &None::<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+            &None::<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
         )
         .await;
         // Must not panic — gracefully returns false
@@ -528,11 +528,11 @@ mod tests {
 
     use async_trait::async_trait;
     use futures::stream;
-    use tron_core::content::AssistantContent;
-    use tron_core::events::{AssistantMessage, StreamEvent};
-    use tron_core::messages::TokenUsage;
-    use tron_llm::models::types::Provider as ProviderKind;
-    use tron_llm::provider::{
+    use tron::core::content::AssistantContent;
+    use tron::core::events::{AssistantMessage, StreamEvent};
+    use tron::core::messages::TokenUsage;
+    use tron::llm::models::types::Provider as ProviderKind;
+    use tron::llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
 
@@ -549,7 +549,7 @@ mod tests {
         }
         async fn stream(
             &self,
-            _c: &tron_core::messages::Context,
+            _c: &tron::core::messages::Context,
             _o: &ProviderStreamOptions,
         ) -> Result<StreamEventStream, ProviderError> {
             let s = stream::iter(vec![
@@ -582,11 +582,11 @@ mod tests {
     }
 
     fn make_subagent_manager_with_mock_llm(
-        store: &Arc<tron_events::EventStore>,
-        mgr: &Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
-    ) -> Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager> {
-        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
-        let manager = tron_runtime::orchestrator::subagent_manager::SubagentManager::new(
+        store: &Arc<tron::events::EventStore>,
+        mgr: &Arc<tron::runtime::orchestrator::session_manager::SessionManager>,
+    ) -> Arc<tron::runtime::orchestrator::subagent_manager::SubagentManager> {
+        let broadcast = Arc::new(tron::runtime::EventEmitter::new());
+        let manager = tron::runtime::orchestrator::subagent_manager::SubagentManager::new(
             mgr.clone(),
             store.clone(),
             broadcast,
@@ -594,22 +594,22 @@ mod tests {
             None,
             None,
         );
-        manager.set_tool_factory(Arc::new(tron_tools::registry::ToolRegistry::new));
+        manager.set_tool_factory(Arc::new(tron::tools::registry::ToolRegistry::new));
         Arc::new(manager)
     }
 
     /// Seed a session with a user + assistant message cycle for ledger generation.
     fn seed_session_with_messages(
-        store: &tron_events::EventStore,
-        mgr: &tron_runtime::orchestrator::session_manager::SessionManager,
+        store: &tron::events::EventStore,
+        mgr: &tron::runtime::orchestrator::session_manager::SessionManager,
     ) -> String {
         let sid = mgr
             .create_session("mock", "/tmp", Some("cron test"))
             .unwrap();
         let _ = store
-            .append(&tron_events::AppendOptions {
+            .append(&tron::events::AppendOptions {
                 session_id: &sid,
-                event_type: tron_events::EventType::MessageUser,
+                event_type: tron::events::EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello from cron"}),
                 parent_id: None,
             })
@@ -617,9 +617,9 @@ mod tests {
         // Assistant text must be >= 500 chars to pass cron no-op filter
         let long_response = "x".repeat(600);
         let _ = store
-            .append(&tron_events::AppendOptions {
+            .append(&tron::events::AppendOptions {
                 session_id: &sid,
-                event_type: tron_events::EventType::MessageAssistant,
+                event_type: tron::events::EventType::MessageAssistant,
                 payload: serde_json::json!({
                     "content": [{"type": "text", "text": long_response}],
                     "turn": 1,
@@ -638,13 +638,13 @@ mod tests {
         let sid = seed_session_with_messages(&store, &mgr);
         let subagent = make_subagent_manager_with_mock_llm(&store, &mgr);
 
-        let deps = tron_server::rpc::memory_ledger::LedgerWriteDeps {
+        let deps = tron::server::rpc::memory_ledger::LedgerWriteDeps {
             event_store: store.clone(),
             subagent_manager: Some(subagent),
             embedding_controller: None,
             shutdown_coordinator: None,
         };
-        let lw = tron_server::rpc::memory_ledger::execute_ledger_write(&sid, &deps, "cron").await;
+        let lw = tron::server::rpc::memory_ledger::execute_ledger_write(&sid, &deps, "cron").await;
         assert!(
             lw.written,
             "ledger write should succeed: reason={:?}",

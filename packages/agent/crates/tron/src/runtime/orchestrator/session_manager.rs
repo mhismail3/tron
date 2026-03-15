@@ -1,0 +1,804 @@
+//! Session manager — create, resume, end, fork, archive, list sessions.
+
+use std::sync::Arc;
+
+use dashmap::DashMap;
+use serde_json::json;
+use crate::events::{AppendOptions, EventStore, EventType};
+
+use tracing::{debug, instrument};
+
+use crate::runtime::errors::RuntimeError;
+use crate::runtime::orchestrator::session_context::SessionContext;
+use crate::runtime::orchestrator::session_reconstructor::{self, ReconstructedState};
+
+/// Result of a session fork operation.
+pub struct ForkSessionResult {
+    /// The new forked session ID.
+    pub new_session_id: String,
+    /// The root event in the new session (the fork event).
+    pub root_event_id: String,
+    /// The event ID from which the fork was created.
+    pub forked_from_event_id: String,
+}
+
+/// Active session wrapper.
+pub struct ActiveSession {
+    /// Session context with persister and state.
+    pub context: SessionContext,
+    /// Reconstructed state (messages, model, etc.).
+    pub state: ReconstructedState,
+}
+
+/// Filter for listing sessions.
+#[derive(Clone, Debug, Default)]
+pub struct SessionFilter {
+    /// Filter by workspace path.
+    pub workspace_path: Option<String>,
+    /// Include archived sessions.
+    pub include_archived: bool,
+    /// Exclude subagent sessions (`spawning_session_id` IS NULL).
+    pub exclude_subagents: bool,
+    /// Show only user-created sessions (exclude cron, etc.).
+    pub user_only: bool,
+    /// Maximum number of results.
+    pub limit: Option<usize>,
+}
+
+/// Session manager.
+pub struct SessionManager {
+    event_store: Arc<EventStore>,
+    active_sessions: DashMap<String, Arc<ActiveSession>>,
+    plan_mode: DashMap<String, bool>,
+    origin: Option<String>,
+    worktree_coordinator: std::sync::OnceLock<Arc<crate::worktree::WorktreeCoordinator>>,
+}
+
+impl SessionManager {
+    /// Create a new session manager.
+    pub fn new(event_store: Arc<EventStore>) -> Self {
+        Self {
+            event_store,
+            active_sessions: DashMap::new(),
+            plan_mode: DashMap::new(),
+            origin: None,
+            worktree_coordinator: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Set the server origin (e.g. "localhost:9847") for all sessions created by this manager.
+    #[must_use]
+    pub fn with_origin(mut self, origin: String) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
+    /// Set the worktree coordinator for session isolation.
+    ///
+    /// Uses `OnceLock` so this can be called after the manager is `Arc`-wrapped.
+    pub fn set_worktree_coordinator(&self, coordinator: Arc<crate::worktree::WorktreeCoordinator>) {
+        let _ = self.worktree_coordinator.set(coordinator);
+    }
+
+    /// Create a new session.
+    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
+    pub fn create_session(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+    ) -> Result<String, RuntimeError> {
+        let result = self
+            .event_store
+            .create_session(model, workspace_path, title, None, self.origin.as_deref())
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        let session_id = result.session.id.clone();
+
+        let state = ReconstructedState {
+            model: model.to_owned(),
+            working_directory: Some(workspace_path.to_owned()),
+            ..Default::default()
+        };
+
+        let ctx = SessionContext::new(session_id.clone(), self.event_store.clone());
+        let active = Arc::new(ActiveSession {
+            context: ctx,
+            state,
+        });
+
+        let _ = self.active_sessions.insert(session_id.clone(), active);
+        debug!(session_id, "session created");
+        Ok(session_id)
+    }
+
+    /// Resume an existing session (reconstruct from events).
+    ///
+    /// INVARIANT: callers must drain background hooks before calling this.
+    /// The prompt handler drains via `agent_runner` pre-run step.
+    #[instrument(skip(self), fields(session_id))]
+    pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
+        // Check if already active
+        if let Some(existing) = self.active_sessions.get(session_id) {
+            return Ok(existing.clone());
+        }
+
+        // Reconstruct from events
+        let state = session_reconstructor::reconstruct(&self.event_store, session_id)?;
+
+        let ctx = SessionContext::new(session_id.to_owned(), self.event_store.clone());
+        let active = Arc::new(ActiveSession {
+            context: ctx,
+            state,
+        });
+
+        let _ = self
+            .active_sessions
+            .insert(session_id.to_owned(), active.clone());
+        debug!(session_id, "session resumed");
+        Ok(active)
+    }
+
+    /// End a session (flush events, persist session.end, remove from active map).
+    ///
+    /// INVARIANT: worktree is released BEFORE `session.end` event is persisted.
+    pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        // Release worktree before ending the session
+        if let Some(coord) = self.worktree_coordinator.get()
+            && let Err(e) = coord.release(session_id).await
+        {
+            tracing::warn!(
+                session_id,
+                error = %e,
+                "failed to release worktree during session end"
+            );
+        }
+
+        if let Some((_, active)) = self.active_sessions.remove(session_id) {
+            active.context.persister.flush().await?;
+        }
+        // Persist session.end event before marking the session as ended
+        let _ = self
+            .event_store
+            .append(&AppendOptions {
+                session_id,
+                event_type: EventType::SessionEnd,
+                payload: json!({"reason": "completed"}),
+                parent_id: None,
+            })
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        let _ = self
+            .event_store
+            .end_session(session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Fork a session, optionally from a specific event (defaults to HEAD).
+    pub fn fork_session(
+        &self,
+        session_id: &str,
+        from_event_id: Option<&str>,
+        model: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<ForkSessionResult, RuntimeError> {
+        let fork_event_id = match from_event_id {
+            Some(id) => id.to_owned(),
+            None => {
+                let session = self
+                    .event_store
+                    .get_session(session_id)
+                    .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+                    .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
+                session
+                    .head_event_id
+                    .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?
+            }
+        };
+
+        let result = self
+            .event_store
+            .fork(&fork_event_id, &crate::events::ForkOptions { model, title })
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        Ok(ForkSessionResult {
+            new_session_id: result.session.id,
+            root_event_id: result.fork_event.id,
+            forked_from_event_id: fork_event_id,
+        })
+    }
+
+    /// Archive a session.
+    pub fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        let _ = self.active_sessions.remove(session_id);
+        let _ = self
+            .event_store
+            .end_session(session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Unarchive a session.
+    pub fn unarchive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        let _ = self
+            .event_store
+            .clear_session_ended(session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Delete a session.
+    pub fn delete_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        let _ = self.active_sessions.remove(session_id);
+        let _ = self
+            .event_store
+            .delete_session(session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Get session info.
+    pub fn get_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::events::sqlite::row_types::SessionRow>, RuntimeError> {
+        self.event_store
+            .get_session(session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))
+    }
+
+    /// List sessions.
+    pub fn list_sessions(
+        &self,
+        filter: &SessionFilter,
+    ) -> Result<Vec<crate::events::sqlite::row_types::SessionRow>, RuntimeError> {
+        use crate::events::sqlite::repositories::session::ListSessionsOptions;
+        let opts = ListSessionsOptions {
+            workspace_id: None,
+            ended: if filter.include_archived {
+                None
+            } else {
+                Some(false)
+            },
+            exclude_subagents: if filter.exclude_subagents {
+                Some(true)
+            } else {
+                None
+            },
+            #[allow(clippy::cast_possible_wrap)]
+            limit: filter.limit.map(|l| l as i64),
+            offset: None,
+            origin: self.origin.as_deref(),
+            user_only: if filter.user_only { Some(true) } else { None },
+        };
+        self.event_store
+            .list_sessions(&opts)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))
+    }
+
+    /// Create a session for a subagent (linked to parent via `spawning_session_id`).
+    #[instrument(skip(self), fields(model, working_dir = workspace_path, parent = spawning_session_id))]
+    pub fn create_session_for_subagent(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        spawning_session_id: &str,
+        spawn_type: &str,
+        spawn_task: &str,
+    ) -> Result<String, RuntimeError> {
+        let session_id = self.create_session(model, workspace_path, title)?;
+
+        let _ = self
+            .event_store
+            .update_spawn_info(&session_id, spawning_session_id, spawn_type, spawn_task)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        debug!(session_id, spawning_session_id, "subagent session created");
+        Ok(session_id)
+    }
+
+    /// Check if a session is active.
+    pub fn is_active(&self, session_id: &str) -> bool {
+        self.active_sessions.contains_key(session_id)
+    }
+
+    /// Number of active sessions.
+    pub fn active_count(&self) -> usize {
+        self.active_sessions.len()
+    }
+
+    /// Invalidate cached session state, forcing re-reconstruction on next `resume_session`.
+    pub fn invalidate_session(&self, session_id: &str) {
+        let _ = self.active_sessions.remove(session_id);
+    }
+
+    /// Get or create the singleton chat session.
+    ///
+    /// Chat sessions use `source = "chat"` and are singleton — at most one
+    /// exists at any time. Returns `(session_id, created)`.
+    pub fn get_or_create_chat_session(
+        &self,
+        model: &str,
+        working_directory: &str,
+    ) -> Result<(String, bool), RuntimeError> {
+        // Check for existing active chat session
+        if let Some(existing) = self
+            .event_store
+            .find_chat_session()
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+        {
+            return Ok((existing.id, false));
+        }
+
+        // Create a new session and mark it as chat
+        let session_id = self.create_session(model, working_directory, Some("Chat"))?;
+        let _ = self
+            .event_store
+            .update_source(&session_id, "chat")
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        Ok((session_id, true))
+    }
+
+    /// Check if a session is the chat session.
+    pub fn is_chat_session(&self, session_id: &str) -> bool {
+        self.event_store
+            .get_session(session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|s| s.source.as_deref() == Some("chat"))
+    }
+
+    /// Reset the chat session: archive the current one and create a fresh replacement.
+    ///
+    /// Returns `(new_session_id, old_session_id)`. Fails if no active chat session exists.
+    pub fn reset_chat_session(
+        &self,
+        model: &str,
+        working_directory: &str,
+    ) -> Result<(String, String), RuntimeError> {
+        let old = self
+            .event_store
+            .find_chat_session()
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+            .ok_or_else(|| {
+                RuntimeError::SessionNotFound("no active chat session to reset".into())
+            })?;
+
+        // Archive the old chat session (evict from cache + set ended_at)
+        self.archive_session(&old.id)?;
+
+        // Create a fresh session and mark it as chat
+        let new_id = self.create_session(model, working_directory, Some("Chat"))?;
+        let _ = self
+            .event_store
+            .update_source(&new_id, "chat")
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        Ok((new_id, old.id))
+    }
+
+    /// Get the event store.
+    pub fn event_store(&self) -> &Arc<EventStore> {
+        &self.event_store
+    }
+
+    // ── Plan mode ──────────────────────────────────────────────────────
+
+    /// Set plan mode for a session.
+    pub fn set_plan_mode(&self, session_id: &str, enabled: bool) {
+        let _ = self.plan_mode.insert(session_id.to_owned(), enabled);
+    }
+
+    /// Check if a session is in plan mode.
+    pub fn is_plan_mode(&self, session_id: &str) -> bool {
+        self.plan_mode.get(session_id).is_some_and(|v| *v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_manager() -> SessionManager {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        SessionManager::new(Arc::new(EventStore::new(pool)))
+    }
+
+    #[tokio::test]
+    async fn create_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+        assert!(!sid.is_empty());
+        assert!(mgr.is_active(&sid));
+        assert_eq!(mgr.active_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn resume_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Drop from active
+        let _ = mgr.active_sessions.remove(&sid);
+        assert!(!mgr.is_active(&sid));
+
+        // Resume should reconstruct
+        let active = mgr.resume_session(&sid).unwrap();
+        assert_eq!(active.state.model, "test-model");
+        assert!(mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn resume_already_active() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Resume when already active should return existing
+        let active = mgr.resume_session(&sid).unwrap();
+        assert_eq!(active.state.model, "test-model");
+        assert_eq!(mgr.active_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn end_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        mgr.end_session(&sid).await.unwrap();
+        assert!(!mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn fork_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        let result = mgr.fork_session(&sid, None, None, Some("forked")).unwrap();
+        assert!(!result.new_session_id.is_empty());
+        assert_ne!(result.new_session_id, sid);
+        assert!(!result.root_event_id.is_empty());
+        assert!(!result.forked_from_event_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_specific_event() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Append an event so we have something besides the root to fork from
+        let evt = mgr
+            .event_store
+            .append(&crate::events::AppendOptions {
+                session_id: &sid,
+                event_type: crate::events::EventType::MessageUser,
+                payload: serde_json::json!({"text": "hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Append another event so HEAD is different from our target
+        let _ = mgr
+            .event_store
+            .append(&crate::events::AppendOptions {
+                session_id: &sid,
+                event_type: crate::events::EventType::MessageAssistant,
+                payload: serde_json::json!({"text": "world"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = mgr
+            .fork_session(&sid, Some(&evt.id), None, None)
+            .unwrap();
+        assert_eq!(
+            result.forked_from_event_id, evt.id,
+            "should fork from the specified event, not HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_head_when_no_event_id() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        // Get the HEAD event
+        let session = mgr.event_store.get_session(&sid).unwrap().unwrap();
+        let head_event_id = session.head_event_id.unwrap();
+
+        let result = mgr.fork_session(&sid, None, None, None).unwrap();
+        assert_eq!(
+            result.forked_from_event_id, head_event_id,
+            "fork with no event ID should fork from HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_from_nonexistent_event_fails() {
+        let mgr = make_manager();
+        let _sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        let result = mgr.fork_session(&_sid, Some("nonexistent-event-id"), None, None);
+        assert!(
+            result.is_err(),
+            "fork from nonexistent event should return error"
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_and_unarchive() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        mgr.archive_session(&sid).unwrap();
+        assert!(!mgr.is_active(&sid));
+
+        mgr.unarchive_session(&sid).unwrap();
+        // Unarchive makes it available but doesn't add to active map
+        assert!(!mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn delete_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        mgr.delete_session(&sid).unwrap();
+        assert!(!mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn list_sessions() {
+        let mgr = make_manager();
+        let _ = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
+        let _ = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
+
+        let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_session() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
+
+        let session = mgr.get_session(&sid).unwrap();
+        assert!(session.is_some());
+    }
+
+    #[tokio::test]
+    async fn session_not_found() {
+        let mgr = make_manager();
+        let result = mgr.resume_session("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_session_with_origin() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone()).with_origin("localhost:9847".to_string());
+
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("origin test"))
+            .unwrap();
+        let session = store.get_session(&sid).unwrap().unwrap();
+        assert_eq!(session.origin.as_deref(), Some("localhost:9847"));
+    }
+
+    #[tokio::test]
+    async fn create_session_without_origin() {
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("no origin"))
+            .unwrap();
+        let session = mgr.get_session(&sid).unwrap().unwrap();
+        assert!(session.origin.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_user_only() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let cron_sid = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_sid, "cron").unwrap());
+
+        let filtered = mgr
+            .list_sessions(&SessionFilter {
+                user_only: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_ne!(filtered[0].id, cron_sid);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_default_shows_all() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let cron_sid = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_sid, "cron").unwrap());
+
+        let all = mgr.list_sessions(&SessionFilter::default()).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_or_create_chat_session_creates_then_returns_existing() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        // First call creates
+        let (id1, created) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
+        assert!(created);
+        assert!(!id1.is_empty());
+
+        // Second call returns existing
+        let (id2, created2) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
+        assert!(!created2);
+        assert_eq!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn is_chat_session() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let (chat_id, _) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
+        assert!(mgr.is_chat_session(&chat_id));
+
+        let normal_id = mgr
+            .create_session("test-model", "/tmp", Some("normal"))
+            .unwrap();
+        assert!(!mgr.is_chat_session(&normal_id));
+    }
+
+    #[tokio::test]
+    async fn user_only_includes_chat_sessions() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr
+            .create_session("test-model", "/tmp", Some("user session"))
+            .unwrap();
+        let (chat_id, _) = mgr
+            .get_or_create_chat_session("test-model", "/tmp")
+            .unwrap();
+        let cron_id = mgr
+            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .unwrap();
+        assert!(store.update_source(&cron_id, "cron").unwrap());
+
+        let filtered = mgr
+            .list_sessions(&SessionFilter {
+                user_only: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Should include user session + chat, but NOT cron
+        assert_eq!(filtered.len(), 2);
+        let ids: Vec<&str> = filtered.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&chat_id.as_str()));
+        assert!(!ids.contains(&cron_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn reset_chat_session_replaces_with_new() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let (old_id, created) = mgr.get_or_create_chat_session("m", "/tmp").unwrap();
+        assert!(created);
+
+        let (new_id, returned_old) = mgr.reset_chat_session("m", "/tmp").unwrap();
+        assert_eq!(returned_old, old_id);
+        assert_ne!(new_id, old_id);
+
+        // Old session should be archived
+        let old = store.get_session(&old_id).unwrap().unwrap();
+        assert!(old.ended_at.is_some());
+
+        // New session should be the active chat
+        assert!(mgr.is_chat_session(&new_id));
+
+        // get_or_create should return the new one
+        let (found_id, found_created) = mgr.get_or_create_chat_session("m", "/tmp").unwrap();
+        assert_eq!(found_id, new_id);
+        assert!(!found_created);
+    }
+
+    #[tokio::test]
+    async fn reset_chat_session_fails_without_existing() {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store);
+
+        let err = mgr.reset_chat_session("m", "/tmp").unwrap_err();
+        assert!(matches!(err, RuntimeError::SessionNotFound(_)));
+    }
+}

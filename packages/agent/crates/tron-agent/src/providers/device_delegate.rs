@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tron_server::device::DeviceRequestBroker;
-use tron_tools::errors::ToolError;
-use tron_tools::traits::DeviceDelegate;
+use tron::server::device::DeviceRequestBroker;
+use tron::tools::errors::ToolError;
+use tron::tools::traits::DeviceDelegate;
 
 /// Default timeout for device requests (30 seconds).
 const DEVICE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);

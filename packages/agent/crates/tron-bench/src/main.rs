@@ -19,11 +19,11 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sysinfo::{ProcessesToUpdate, System};
-use tron_events::{AppendOptions, ConnectionConfig, EventStore, EventType};
-use tron_runtime::orchestrator::session_manager::SessionManager;
-use tron_server::rpc::types::RpcEvent;
-use tron_server::websocket::broadcast::BroadcastManager;
-use tron_server::websocket::connection::ClientConnection;
+use tron::events::{AppendOptions, ConnectionConfig, EventStore, EventType};
+use tron::runtime::orchestrator::session_manager::SessionManager;
+use tron::server::rpc::types::RpcEvent;
+use tron::server::websocket::broadcast::BroadcastManager;
+use tron::server::websocket::connection::ClientConnection;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -270,13 +270,13 @@ fn setup_store() -> Result<(Arc<EventStore>, tempfile::TempDir)> {
     let dir = tempfile::tempdir().context("failed to create temp dir for benchmark db")?;
     let db = dir.path().join("bench.db");
     let path = db.to_string_lossy().to_string();
-    let pool = tron_events::new_file(&path, &ConnectionConfig::default())
+    let pool = tron::events::new_file(&path, &ConnectionConfig::default())
         .context("failed to open benchmark sqlite database")?;
     {
         let conn = pool
             .get()
             .context("failed to get benchmark db connection")?;
-        let _ = tron_events::run_migrations(&conn).context("failed to run benchmark migrations")?;
+        let _ = tron::events::run_migrations(&conn).context("failed to run benchmark migrations")?;
     }
     Ok((Arc::new(EventStore::new(pool)), dir))
 }
