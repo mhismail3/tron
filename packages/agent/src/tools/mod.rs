@@ -1,8 +1,8 @@
-//! # tron-tools
+//! # tools
 //!
 //! Tool trait and all tool implementations for the Tron agent.
 //!
-//! This crate defines the [`TronTool`](traits::TronTool) trait that every tool
+//! This module defines the [`TronTool`](traits::TronTool) trait that every tool
 //! implements, plus the [`ToolRegistry`](registry::ToolRegistry) for managing
 //! registered tools. Tools are grouped by category:
 //!
@@ -16,10 +16,10 @@
 //! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
 //! - **Communication**: `send_message`, `receive_messages`
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Depends on: tron-core.
-//! Depended on by: tron-runtime, tron-server.
+//! Depends on: core.
+//! Depended on by: runtime, server.
 
 #![deny(unsafe_code)]
 // The TronTool trait returns `&str` from `fn name()` — clippy's `unnecessary_literal_bound`

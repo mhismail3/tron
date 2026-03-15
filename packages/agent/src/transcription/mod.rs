@@ -10,10 +10,10 @@
 //! → parakeet-mlx (MLX backend) → text result
 //! ```
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Standalone (no tron crate dependencies).
-//! Depended on by: tron-server.
+//! Standalone (no tron module dependencies).
+//! Depended on by: server.
 
 #[path = "runtime/mlx.rs"]
 pub mod mlx;

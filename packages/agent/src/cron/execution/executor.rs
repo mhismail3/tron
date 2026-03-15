@@ -16,7 +16,7 @@ use crate::events::ConnectionPool;
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun, ExecutionOutput, Payload, RunStatus, ToolRestrictions};
 
-/// Execute an isolated agent turn. Implemented in `tron-agent/main.rs`.
+/// Execute an isolated agent turn. Implemented in `main.rs`.
 #[async_trait]
 pub trait AgentTurnExecutor: Send + Sync {
     /// Run a prompt and return the result.

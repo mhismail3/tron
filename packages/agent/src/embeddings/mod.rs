@@ -1,4 +1,4 @@
-//! # tron-embeddings
+//! # embeddings
 //!
 //! Semantic embeddings and vector search for the Tron agent.
 //!
@@ -8,10 +8,10 @@
 //! - `SQLite` BLOB storage with brute-force KNN search
 //! - Hybrid retrieval: vector cosine + FTS5 BM25 via Reciprocal Rank Fusion
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Standalone (no tron crate dependencies).
-//! Depended on by: tron-server.
+//! Standalone (no tron module dependencies).
+//! Depended on by: server.
 
 #![deny(unsafe_code)]
 

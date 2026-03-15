@@ -93,7 +93,7 @@ impl SqliteTransport {
     /// Create a new transport with the given connection and config.
     ///
     /// The connection must have the `logs` table already created
-    /// (via tron-events migrations).
+    /// (via events migrations).
     pub fn new(conn: Connection, config: TransportConfig) -> Self {
         Self {
             inner: Arc::new(Mutex::new(TransportInner {

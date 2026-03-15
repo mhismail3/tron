@@ -1,4 +1,4 @@
-//! # tron-settings
+//! # settings
 //!
 //! Configuration management with layered sources for the Tron agent.
 //!
@@ -23,10 +23,10 @@
 //! println!("WebSocket port: {}", settings.server.ws_port);
 //! ```
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
 //! Depends on: (none — standalone schema + loader).
-//! Depended on by: tron-events, tron-runtime, tron-server.
+//! Depended on by: events, runtime, server.
 
 #![deny(unsafe_code)]
 

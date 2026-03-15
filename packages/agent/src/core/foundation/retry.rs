@@ -1,7 +1,7 @@
 //! Retry configuration and backoff calculation.
 //!
 //! Provides the types and math for retry logic. The actual async retry
-//! execution lives in `tron-runtime` (which has access to tokio), while
+//! execution lives in `runtime` (which has access to tokio), while
 //! this module contains the portable, sync-only building blocks:
 //!
 //! - [`RetryConfig`]: Retry parameters (max retries, backoff, jitter)

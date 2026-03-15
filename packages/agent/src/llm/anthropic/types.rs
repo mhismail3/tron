@@ -44,7 +44,7 @@ pub struct AnthropicConfig {
     pub base_url: Option<String>,
     /// Retry configuration override (None = use defaults).
     pub retry: Option<crate::llm::StreamRetryConfig>,
-    /// Provider settings (shared settings from tron-settings).
+    /// Provider settings (shared settings from settings).
     pub provider_settings: AnthropicProviderSettings,
 }
 

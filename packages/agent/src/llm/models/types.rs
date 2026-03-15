@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// Re-export from tron-core as the canonical Provider type.
+// Re-export from core as the canonical Provider type.
 pub use crate::core::messages::Provider;
 
 /// Model tier classification.

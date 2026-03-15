@@ -1,4 +1,4 @@
-//! # tron-events
+//! # events
 //!
 //! Event sourcing engine with `SQLite` backend for the Tron agent.
 //!
@@ -13,10 +13,10 @@
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding messages from event history
 //! - **Migrations**: Version-tracked SQL schema evolution
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Depends on: tron-core, tron-settings.
-//! Depended on by: tron-runtime, tron-server.
+//! Depends on: core, settings.
+//! Depended on by: runtime, server.
 
 #![deny(unsafe_code)]
 

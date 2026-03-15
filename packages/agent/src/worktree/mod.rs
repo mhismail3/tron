@@ -1,4 +1,4 @@
-//! # tron-worktree
+//! # worktree
 //!
 //! Git worktree isolation for parallel agent sessions.
 //!
@@ -6,11 +6,11 @@
 //! Parallel sessions produce parallel branches. The user's working
 //! tree is never touched. Branches are preserved after session end.
 //!
-//! ## Crate Boundaries
+//! ## Module Boundaries
 //!
-//! Depends on `tron-events`, `tron-settings`.
-//! Does NOT depend on `tron-runtime` or `tron-llm` — the coordinator
-//! is injected into runtime from the binary crate.
+//! Depends on `events`, `settings`.
+//! Does NOT depend on `runtime` or `llm` — the coordinator
+//! is injected into runtime from `main.rs`.
 
 #[path = "runtime/coordinator.rs"]
 pub mod coordinator;

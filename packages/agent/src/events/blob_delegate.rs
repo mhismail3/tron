@@ -45,7 +45,7 @@ impl BlobStore for SqliteBlobStore {
 mod tests {
     use super::*;
 
-    // SqliteBlobStore is integration-tested via BlobRepo tests in tron-events.
+    // SqliteBlobStore is integration-tested via BlobRepo tests in events.
     // Unit tests here verify construction.
     #[test]
     fn sqlite_blob_store_requires_event_store() {

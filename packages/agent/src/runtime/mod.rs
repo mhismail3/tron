@@ -1,4 +1,4 @@
-//! # tron-runtime
+//! # runtime
 //!
 //! Agent execution loop, session management, and orchestration.
 //!
@@ -9,11 +9,11 @@
 //! - **Agent runner**: High-level: skill injection, user content building, interrupt handling
 //! - **Orchestrator**: Multi-session management with event broadcasting
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Aggregation layer. Depends on: tron-core, tron-events, tron-llm, tron-tools,
-//! tron-skills, tron-settings.
-//! Depended on by: tron-server.
+//! Aggregation layer. Depends on: core, events, llm, tools,
+//! skills, settings.
+//! Depended on by: server.
 
 #![deny(unsafe_code)]
 

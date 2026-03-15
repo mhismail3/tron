@@ -1,9 +1,9 @@
 //! # tron
 //!
-//! Tron agent server binary — wires together all crates and starts the
+//! Tron agent server binary — wires together all modules and starts the
 //! HTTP/WebSocket server.
 //!
-//! ## Module Architecture (tron library crate)
+//! ## Module Architecture
 //!
 //! ```text
 //! tron::core          Foundation types, errors, branded IDs, message model
@@ -16,13 +16,12 @@
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
 //! tron::server        Axum HTTP/WS, RPC handlers, event bridge, APNS
-//! tron (binary)       This binary — wires all modules, CLI, DB startup
 //! ```
 //!
 //! ## Data Path
 //!
 //! 1. Client sends JSON-RPC over WebSocket
-//! 2. `tron-server` dispatches to RPC handlers
+//! 2. `server` dispatches to RPC handlers
 //! 3. Handlers call runtime/orchestrator/event store
 //! 4. iOS compatibility adapted at boundary (`rpc/adapters.rs`)
 //! 5. Events broadcast back through WebSocket channels

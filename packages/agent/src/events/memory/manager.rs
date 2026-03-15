@@ -1,7 +1,7 @@
 //! Memory manager.
 //!
 //! Handles ledger writing after each agent turn. Compaction is owned
-//! exclusively by `CompactionHandler` in `tron-runtime` (pre-turn).
+//! exclusively by `CompactionHandler` in `runtime` (pre-turn).
 //!
 //! All operations are **fail-silent** — errors are logged but never propagated.
 //! Memory errors must never crash a session.

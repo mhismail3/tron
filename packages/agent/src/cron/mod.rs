@@ -1,4 +1,4 @@
-//! # tron-cron
+//! # cron
 //!
 //! Cron scheduling, job execution, and result delivery for the Tron agent.
 //!
@@ -10,12 +10,12 @@
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
 //!
-//! ## Crate Boundaries
+//! ## Module Boundaries
 //!
-//! Depends on `tron-core`, `tron-events`, `tron-settings`.
-//! Does NOT depend on `tron-runtime` or `tron-llm` — agent execution is
+//! Depends on `core`, `events`, `settings`.
+//! Does NOT depend on `runtime` or `llm` — agent execution is
 //! injected via the [`executor::AgentTurnExecutor`] trait, implemented
-//! in `tron-agent/main.rs`.
+//! in `main.rs`.
 
 #[path = "runtime/clock.rs"]
 pub mod clock;

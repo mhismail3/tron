@@ -1,8 +1,8 @@
-//! # tron-llm
+//! # llm
 //!
 //! LLM provider trait and shared streaming utilities.
 //!
-//! This crate defines the [`Provider`] trait that all LLM backends implement,
+//! This module defines the [`Provider`] trait that all LLM backends implement,
 //! plus shared infrastructure used across providers:
 //!
 //! - [`provider`] — Core [`Provider`] trait, [`ProviderStreamOptions`], [`ProviderError`]
@@ -15,14 +15,14 @@
 //!
 //! # Architecture
 //!
-//! Each provider crate (`tron-llm-anthropic`, `tron-llm-openai`, `tron-llm-google`)
-//! depends on this crate and implements the [`Provider`] trait. The shared utilities
+//! Each provider module (`llm::anthropic`, `llm::openai`, `llm::google`)
+//! implements the [`Provider`] trait. The shared utilities
 //! here eliminate duplication while allowing provider-specific behavior.
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Depends on: tron-core.
-//! Depended on by: tron-runtime, tron-server.
+//! Depends on: core.
+//! Depended on by: runtime, server.
 
 #![deny(unsafe_code)]
 

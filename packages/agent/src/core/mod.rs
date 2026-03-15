@@ -1,8 +1,8 @@
-//! # tron-core
+//! # core
 //!
 //! Foundation types, errors, branded IDs, and utilities for the Tron agent.
 //!
-//! This crate provides the shared vocabulary that all other Tron crates depend on:
+//! This module provides the shared vocabulary that all other Tron modules depend on:
 //!
 //! - **Branded IDs**: [`ids::EventId`], [`ids::SessionId`], [`ids::WorkspaceId`] as newtypes
 //! - **Messages**: [`messages::Message`] enum with `User`, `Assistant`, `ToolResult` variants
@@ -14,9 +14,9 @@
 //! - **`AskUserQuestion`**: [`ask_user_question::AskUserQuestion`] interactive tool types
 //! - **Memory**: [`memory::SessionMemory`]
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Foundation crate. Depended on by all other tron crates.
+//! Foundation module. Depended on by all other tron modules.
 
 #![deny(unsafe_code)]
 

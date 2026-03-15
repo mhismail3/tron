@@ -1,6 +1,6 @@
 //! # Message Converter
 //!
-//! Converts tron-core [`Context`] messages into Anthropic Messages API format.
+//! Converts core [`Context`] messages into Anthropic Messages API format.
 //! Handles:
 //! - User/assistant/tool-result message conversion
 //! - Thinking block signature handling (only include with signature)

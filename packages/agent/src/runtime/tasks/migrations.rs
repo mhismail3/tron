@@ -4,7 +4,7 @@
 //! `areas`, and FTS virtual tables. Mirrors migrations v007 and v008 from
 //! the TypeScript codebase.
 //!
-//! These tables share the same database as `tron-events` — the runtime
+//! These tables share the same database as `events` — the runtime
 //! calls [`run_migrations`] after the event store migrations complete.
 
 use rusqlite::Connection;

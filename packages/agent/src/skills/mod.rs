@@ -1,4 +1,4 @@
-//! # tron-skills
+//! # skills
 //!
 //! Skill loader, registry, and context injector.
 //!
@@ -29,10 +29,10 @@
 //! println!("Context: {}", result.skill_context);
 //! ```
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! Standalone (no tron crate dependencies).
-//! Depended on by: tron-runtime, tron-server.
+//! Standalone (no tron module dependencies).
+//! Depended on by: runtime, server.
 
 #![deny(unsafe_code)]
 

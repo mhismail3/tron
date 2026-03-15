@@ -1,4 +1,4 @@
-//! # tron-server
+//! # server
 //!
 //! Axum HTTP + `WebSocket` server and event broadcasting.
 //!
@@ -7,9 +7,9 @@
 //! - Event fan-out to connected clients via `BroadcastManager`
 //! - Graceful shutdown via `CancellationToken` coordination
 //!
-//! ## Crate Position
+//! ## Module Position
 //!
-//! HTTP/WS surface. Depends on all other tron crates.
+//! HTTP/WS surface. Depends on all other tron modules.
 
 #![deny(unsafe_code)]
 
