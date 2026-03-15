@@ -30,13 +30,10 @@
 #[path = "testing/testutil.rs"]
 pub(crate) mod testutil;
 
+pub mod backends;
 pub mod cdp;
-#[path = "core/errors.rs"]
 pub mod errors;
-pub mod providers;
-#[path = "core/registry.rs"]
 pub mod registry;
-#[path = "core/traits.rs"]
 pub mod traits;
 pub(crate) mod utils;
 

@@ -243,7 +243,7 @@ struct ToolRegistryConfig {
 /// - Communication tools: not registered (not in TS server)
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
-    use tron::tools::providers::{
+    use tron::tools::backends::{
         NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
         StubNotifyDelegate, TokioProcessRunner,
     };
@@ -698,7 +698,7 @@ async fn main() -> Result<()> {
                 },
             );
             let http: Arc<dyn tron::tools::traits::HttpClient> = Arc::new(
-                tron::tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()),
+                tron::tools::backends::ReqwestHttpClient::from_client(config.http_client.clone()),
             );
             registry.register(Arc::new(
                 tron::tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
