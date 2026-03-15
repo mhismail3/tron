@@ -57,12 +57,11 @@ BIN_DIR="$HOME/.local/bin"
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
-BENCH_BASELINE_DIR="$RUST_WORKSPACE/crates/tron-bench/baselines"
+BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
+BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"
 BENCH_GATE_ITERATIONS=50
-BENCH_GATE_CONCURRENCY=8
 BENCH_GATE_MAX_P95_REGRESSION_PCT=15
 BENCH_GATE_MAX_MEAN_REGRESSION_PCT=35
-BENCH_GATE_MAX_PEAK_MEMORY_REGRESSION_PCT=15
 
 # Installed binary
 INSTALLED_BINARY="$TRON_HOME/tron"
@@ -230,16 +229,14 @@ run_bench_gate() {
     out_file="$SCRIPT_DIR/artifacts/benchmarks/compare-${stamp}.json"
 
     print_status "Running benchmark regression gate against $(basename "$baseline")..."
-    (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+    python3 "$BENCH_SCRIPT" \
         --scenario gate \
         --iterations "$BENCH_GATE_ITERATIONS" \
-        --concurrency "$BENCH_GATE_CONCURRENCY" \
         --baseline "$baseline" \
         --enforce-gates \
         --max-p95-regression-pct "$BENCH_GATE_MAX_P95_REGRESSION_PCT" \
         --max-mean-regression-pct "$BENCH_GATE_MAX_MEAN_REGRESSION_PCT" \
-        --max-peak-memory-regression-pct "$BENCH_GATE_MAX_PEAK_MEMORY_REGRESSION_PCT" \
-        --output "$out_file") || {
+        --output "$out_file" || {
             print_error "Benchmark gate failed"
             print_status "Comparison report: $out_file"
             return 1
@@ -632,8 +629,8 @@ cmd_dev() {
 
     # Ensure transcription sidecar files are deployed
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
 
     if [ "$do_build" = true ]; then
         build_rust
@@ -1015,8 +1012,8 @@ cmd_deploy() {
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
 
     # Install runtime CLI (only if changed)
     local cli_source="$SCRIPT_DIR/tron-cli"
@@ -1124,8 +1121,8 @@ cmd_install() {
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
     print_success "Deployed transcription sidecar"
 
     # Create launchd plist
@@ -1734,13 +1731,11 @@ cmd_bench() {
     case "$subcmd" in
         run)
             local iterations=100
-            local concurrency=16
             local scenario="all"
             local save=false
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     -i|--iterations) iterations="$2"; shift 2 ;;
-                    -c|--concurrency) concurrency="$2"; shift 2 ;;
                     -s|--scenario)    scenario="$2"; shift 2 ;;
                     --save)           save=true; shift ;;
                     -h|--help)
@@ -1751,10 +1746,7 @@ cmd_bench() {
                         echo ""
                         echo "Options:"
                         echo "  -i, --iterations N   Turns per scenario (default: 100)"
-                        echo "  -c, --concurrency N  Parallel sessions (default: 16)"
-                        echo "  -s, --scenario NAME  Scenario: prompt_text_only, prompt_with_tools,"
-                        echo "                       concurrent_sessions, session_create,"
-                        echo "                       ws_session_fanout, gate, all (default: all)"
+                        echo "  -s, --scenario NAME  ping, session_create, session_list, gate, all"
                         echo "  --save               Save result as a baseline"
                         echo ""
                         return 0
@@ -1773,11 +1765,10 @@ cmd_bench() {
             fi
 
             print_header "Running benchmarks"
-            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+            python3 "$BENCH_SCRIPT" \
                 --scenario "$scenario" \
                 --iterations "$iterations" \
-                --concurrency "$concurrency" \
-                "${output_args[@]}")
+                "${output_args[@]}"
 
             if [ "$save" = true ]; then
                 print_success "Baseline saved to: $out_file"
@@ -1791,12 +1782,10 @@ cmd_bench() {
 
             print_header "Refreshing benchmark baseline"
             print_status "Writing baseline to $baseline"
-            print_status "Using stable gate scenario set (prompt/tool/session_create/ws fanout)"
-            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+            python3 "$BENCH_SCRIPT" \
                 --scenario gate \
                 --iterations "$BENCH_GATE_ITERATIONS" \
-                --concurrency "$BENCH_GATE_CONCURRENCY" \
-                --output "$baseline")
+                --output "$baseline"
 
             print_success "Baseline refreshed: $baseline"
             ;;
@@ -1804,13 +1793,11 @@ cmd_bench() {
         compare)
             local baseline=""
             local iterations="$BENCH_GATE_ITERATIONS"
-            local concurrency="$BENCH_GATE_CONCURRENCY"
             local enforce=true
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     -b|--baseline)    baseline="$2"; shift 2 ;;
                     -i|--iterations)  iterations="$2"; shift 2 ;;
-                    -c|--concurrency) concurrency="$2"; shift 2 ;;
                     --no-enforce)     enforce=false; shift ;;
                     -h|--help)
                         echo ""
@@ -1822,10 +1809,7 @@ cmd_bench() {
                         echo "  -b, --baseline FILE  Baseline JSON to compare against"
                         echo "                       (default: $(default_bench_baseline))"
                         echo "  -i, --iterations N   Turns per scenario (default: $BENCH_GATE_ITERATIONS)"
-                        echo "  -c, --concurrency N  Parallel sessions (default: $BENCH_GATE_CONCURRENCY)"
                         echo "  --no-enforce         Don't fail on gate violations"
-                        echo ""
-                        echo "Uses the stable 'gate' scenario set by default."
                         echo ""
                         return 0
                         ;;
@@ -1848,13 +1832,12 @@ cmd_bench() {
             fi
 
             print_header "Comparing against baseline"
-            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+            python3 "$BENCH_SCRIPT" \
                 --scenario all \
                 --iterations "$iterations" \
-                --concurrency "$concurrency" \
                 --baseline "$baseline" \
                 "${enforce_args[@]}" \
-                --output "$out_file")
+                --output "$out_file"
 
             print_success "Comparison saved to: $out_file"
             ;;
@@ -1866,7 +1849,7 @@ cmd_bench() {
             echo "Usage: tron bench <subcommand> [options]"
             echo ""
             echo "Subcommands:"
-            echo "  run       Run benchmarks (use --save to store baseline)"
+            echo "  run       Run benchmarks (use --save to store results)"
             echo "  bless     Refresh the checked-in benchmark baseline for this platform"
             echo "  compare   Compare current performance against a baseline"
             echo ""

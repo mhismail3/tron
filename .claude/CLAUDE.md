@@ -11,7 +11,7 @@
 
 ```bash
 # REQUIRED before completing any task
-cd packages/agent && cargo build --release && cargo test --workspace
+cd packages/agent && cargo build --release && cargo test
 
 # iOS
 cd packages/ios-app && xcodegen generate
@@ -32,10 +32,10 @@ Path-scoped rules in `.claude/rules/` load automatically.
 
 The codebase uses progressive disclosure — documentation lives in the code:
 
-- **Library crate**: `crates/tron/src/lib.rs` — top-level module declarations
+- **Library crate**: `packages/agent/src/lib.rs` — top-level module declarations
 - **Module level**: `mod.rs` — submodule table, entry points, key invariants
 - **File level**: `// INVARIANT:` markers for critical correctness constraints
-- **Binary entry point**: `crates/tron/src/main.rs`
+- **Binary entry point**: `packages/agent/src/main.rs`
 
 ### iOS App
 
