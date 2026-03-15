@@ -60,6 +60,11 @@ use tron::server::websocket::event_bridge::EventBridge;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
+#[cfg(feature = "apns")]
+type ApnsServiceOption = Option<Arc<tron::server::platform::apns::ApnsService>>;
+#[cfg(not(feature = "apns"))]
+type ApnsServiceOption = Option<()>;
+
 /// Tron agent — server and CLI tools.
 #[derive(Parser, Debug)]
 #[command(name = "tron", about = "Tron agent server and tools")]
@@ -151,6 +156,7 @@ fn auth_path() -> PathBuf {
 }
 
 /// Embed unembedded `memory.ledger` events on startup (fire-and-forget).
+#[cfg(feature = "ort")]
 async fn startup_embed(
     store: Arc<EventStore>,
     ctrl: Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
@@ -201,8 +207,16 @@ async fn run_backfill_command(action: BackfillAction, db_path: Option<PathBuf>) 
             tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), dry_run)
         }
         BackfillAction::Embed { force } => {
-            let (store, db_path) = tron::backfill::open_store(db_path)?;
-            tron::backfill::run_embed(&store, &db_path, force).await
+            #[cfg(feature = "ort")]
+            {
+                let (store, db_path) = tron::backfill::open_store(db_path)?;
+                tron::backfill::run_embed(&store, &db_path, force).await
+            }
+            #[cfg(not(feature = "ort"))]
+            {
+                let _ = force;
+                anyhow::bail!("embedding requires the `ort` feature (build with default features)")
+            }
         }
         BackfillAction::All {
             ledger_path,
@@ -211,7 +225,13 @@ async fn run_backfill_command(action: BackfillAction, db_path: Option<PathBuf>) 
         } => {
             let (store, db_path) = tron::backfill::open_store(db_path)?;
             tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), false)?;
-            tron::backfill::run_embed(&store, &db_path, force).await
+            #[cfg(feature = "ort")]
+            { tron::backfill::run_embed(&store, &db_path, force).await }
+            #[cfg(not(feature = "ort"))]
+            {
+                let _ = (db_path, force);
+                anyhow::bail!("embedding requires the `ort` feature (build with default features)")
+            }
         }
     }
 }
@@ -225,7 +245,8 @@ struct ToolRegistryConfig {
     task_pool: tron::events::ConnectionPool,
     brave_api_key: Option<String>,
     browser_delegate: Option<Arc<dyn tron::tools::traits::BrowserDelegate>>,
-    apns_service: Option<Arc<tron::server::platform::apns::ApnsService>>,
+    #[cfg_attr(not(feature = "apns"), allow(dead_code))]
+    apns_service: ApnsServiceOption,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
@@ -324,7 +345,8 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     )));
 
     // 13: NotifyApp — real APNS when available, stub fallback
-    let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> =
+    let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
+        #[cfg(feature = "apns")]
         if let Some(ref apns) = config.apns_service {
             Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
                 apns.clone(),
@@ -332,7 +354,10 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
             ))
         } else {
             Arc::new(StubNotifyDelegate)
-        };
+        }
+        #[cfg(not(feature = "apns"))]
+        { Arc::new(StubNotifyDelegate) }
+    };
     registry.register(Arc::new(tron::tools::ui::notify::NotifyAppTool::new(
         notify_delegate,
     )));
@@ -529,22 +554,29 @@ async fn main() -> Result<()> {
         });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
-    let apns_service: Option<Arc<tron::server::platform::apns::ApnsService>> =
-        tron::server::platform::apns::load_apns_config().and_then(|apns_config| {
-            match tron::server::platform::apns::ApnsService::new(apns_config) {
-                Ok(svc) => {
-                    tracing::info!("APNS service initialized — push notifications enabled");
-                    Some(Arc::new(svc))
+    let apns_service: ApnsServiceOption = {
+        #[cfg(feature = "apns")]
+        {
+            let svc = tron::server::platform::apns::load_apns_config().and_then(|apns_config| {
+                match tron::server::platform::apns::ApnsService::new(apns_config) {
+                    Ok(svc) => {
+                        tracing::info!("APNS service initialized — push notifications enabled");
+                        Some(Arc::new(svc))
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "APNS init failed — push notifications disabled");
+                        None
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "APNS init failed — push notifications disabled");
-                    None
-                }
+            });
+            if svc.is_none() {
+                tracing::info!("No APNS config — push notifications disabled");
             }
-        });
-    if apns_service.is_none() {
-        tracing::info!("No APNS config — push notifications disabled");
-    }
+            svc
+        }
+        #[cfg(not(feature = "apns"))]
+        { None }
+    };
 
     // Embedding controller (optional — fire-and-forget ONNX model loading)
     let embedding_controller: Option<
@@ -635,6 +667,7 @@ async fn main() -> Result<()> {
     > = Arc::new(std::sync::OnceLock::new());
 
     // Clone before move into ToolRegistryConfig
+    #[cfg(feature = "apns")]
     let apns_for_deploy = apns_service.clone();
 
     // Tool registry config (shared resources for per-session tool factories)
@@ -764,12 +797,17 @@ async fn main() -> Result<()> {
     let cron_deps = tron::cron::ExecutorDeps {
         agent_executor: cron_agent_executor,
         broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
-        push_notifier: tool_config.apns_service.as_ref().map(|apns| {
-            Arc::new(tron::cron::impls::CronPushNotifier::new(
-                apns.clone(),
-                task_pool.clone(),
-            )) as _
-        }),
+        push_notifier: {
+            #[cfg(feature = "apns")]
+            { tool_config.apns_service.as_ref().map(|apns| {
+                Arc::new(tron::cron::impls::CronPushNotifier::new(
+                    apns.clone(),
+                    task_pool.clone(),
+                )) as _
+            }) }
+            #[cfg(not(feature = "apns"))]
+            { None }
+        },
         event_injector: Some(
             Arc::new(tron::cron::impls::CronSystemEventInjector::new(event_store.clone())) as _,
         ),
@@ -818,6 +856,7 @@ async fn main() -> Result<()> {
     // RPC context
     let session_manager_for_startup = session_manager.clone();
     let settings_path_for_selftest = settings_path.clone();
+    #[cfg(feature = "apns")]
     let task_pool_for_deploy = task_pool.clone();
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
@@ -978,6 +1017,7 @@ async fn main() -> Result<()> {
                 }
 
                 // Send APNS push notification for successful deploy
+                #[cfg(feature = "apns")]
                 if let Some(ref apns) = apns_for_deploy {
                     let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
                     let commit_subject =
@@ -1044,6 +1084,7 @@ async fn main() -> Result<()> {
         // Send pending rollback notification (written by auto_rollback on previous startup)
         let pending_path = deploy_dir.join("deploy-notification-pending.json");
         if pending_path.exists() {
+            #[cfg(feature = "apns")]
             if let Some(ref apns) = apns_for_deploy
                 && let Ok(content) = std::fs::read_to_string(&pending_path)
                 && let Ok(data) = serde_json::from_str::<serde_json::Value>(&content)

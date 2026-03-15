@@ -100,7 +100,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     /// Algorithm:
     /// 1. Walk backward from end counting real user turns (skip compaction summaries)
     /// 2. Stop when `preserve_recent_turns` reached OR token budget exceeded
-    /// 3. Apply orphaned-ToolResult fixup (walk backward past ToolResults at boundary)
+    /// 3. Apply orphaned-`ToolResult` fixup (walk backward past `ToolResult`s at boundary)
     /// 4. Guarantee: if `preserve_recent_turns > 0` and there are messages,
     ///    preserve at least 1 complete turn
     fn compute_split_point(&self, messages: &[Message]) -> usize {

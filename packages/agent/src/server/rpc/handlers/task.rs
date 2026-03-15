@@ -80,8 +80,8 @@ impl MethodHandler for CreateTaskHandler {
                 conn,
                 &crate::runtime::tasks::TaskCreateParams {
                     title,
-                    description,
                     project_id,
+                    description,
                     ..Default::default()
                 },
             )
@@ -247,8 +247,8 @@ impl MethodHandler for CreateProjectHandler {
                 conn,
                 &crate::runtime::tasks::ProjectCreateParams {
                     title,
-                    description,
                     area_id,
+                    description,
                     ..Default::default()
                 },
             )

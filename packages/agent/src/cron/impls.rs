@@ -6,13 +6,16 @@
 //! - [`CronEventBroadcaster`] — WebSocket event broadcasting
 //! - [`CronSystemEventInjector`] — Session event injection
 
+#[cfg(feature = "apns")]
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun};
+#[cfg(feature = "apns")]
 use crate::events::ConnectionPool;
+#[cfg(feature = "apns")]
 use crate::server::platform::apns::{ApnsNotification, ApnsService};
 use crate::server::rpc::types::RpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
@@ -318,11 +321,13 @@ async fn write_cron_ledger(
 // ── Push Notifications ──────────────────────────────────────────────
 
 /// Sends APNS push notifications for cron job results.
+#[cfg(feature = "apns")]
 pub struct CronPushNotifier {
     apns: Arc<ApnsService>,
     pool: ConnectionPool,
 }
 
+#[cfg(feature = "apns")]
 impl CronPushNotifier {
     /// Create a new notifier with APNS service and DB pool for device tokens.
     pub fn new(apns: Arc<ApnsService>, pool: ConnectionPool) -> Self {
@@ -341,6 +346,7 @@ impl CronPushNotifier {
     }
 }
 
+#[cfg(feature = "apns")]
 #[async_trait]
 impl crate::cron::executor::PushNotifier for CronPushNotifier {
     async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {

@@ -182,18 +182,17 @@ impl SessionManager {
         model: Option<&str>,
         title: Option<&str>,
     ) -> Result<ForkSessionResult, RuntimeError> {
-        let fork_event_id = match from_event_id {
-            Some(id) => id.to_owned(),
-            None => {
-                let session = self
-                    .event_store
-                    .get_session(session_id)
-                    .map_err(|e| RuntimeError::Persistence(e.to_string()))?
-                    .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
-                session
-                    .head_event_id
-                    .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?
-            }
+        let fork_event_id = if let Some(id) = from_event_id {
+            id.to_owned()
+        } else {
+            let session = self
+                .event_store
+                .get_session(session_id)
+                .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+                .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
+            session
+                .head_event_id
+                .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?
         };
 
         let result = self

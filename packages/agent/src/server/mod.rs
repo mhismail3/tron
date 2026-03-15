@@ -28,6 +28,7 @@ pub mod metrics;
 pub mod platform;
 pub mod rpc;
 #[path = "app/server.rs"]
+#[allow(clippy::module_inception)]
 pub mod server;
 #[path = "app/shutdown.rs"]
 pub mod shutdown;

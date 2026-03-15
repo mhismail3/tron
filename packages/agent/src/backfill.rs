@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+#[cfg(feature = "ort")]
 use tracing::info;
 
 use crate::events::{AppendOptions, EventStore, EventType};
@@ -280,6 +281,7 @@ pub fn to_backfill_entries(
 }
 
 /// Embed all unembedded `memory.ledger` events. Optionally force-recreate vectors.
+#[cfg(feature = "ort")]
 pub async fn run_embed(
     store: &EventStore,
     db_path: &Path,
