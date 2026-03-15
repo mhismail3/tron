@@ -1992,8 +1992,9 @@ mod tests {
     fn setup_file_backed() -> (EventStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
+        let config = ConnectionConfig { pool_size: 2, ..ConnectionConfig::default() };
         let pool =
-            connection::new_file(db_path.to_str().unwrap(), &ConnectionConfig::default()).unwrap();
+            connection::new_file(db_path.to_str().unwrap(), &config).unwrap();
         {
             let conn = pool.get().unwrap();
             run_migrations(&conn).unwrap();

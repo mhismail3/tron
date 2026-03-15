@@ -1171,6 +1171,15 @@ mod tests {
     };
     use tron::settings::TronSettings;
 
+    /// Small pool size for tests — prevents FD exhaustion when many tests
+    /// run in parallel, each opening a file-backed SQLite pool.
+    fn test_db_config() -> ConnectionConfig {
+        ConnectionConfig {
+            pool_size: 2,
+            ..ConnectionConfig::default()
+        }
+    }
+
     #[test]
     fn cli_default_host() {
         let cli = Cli::parse_from(["tron"]);
@@ -1481,7 +1490,7 @@ mod tests {
 
         // Single DB for events + tasks
         let db_str = db_path.to_string_lossy();
-        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
@@ -1555,7 +1564,7 @@ mod tests {
         assert!(!db_path.exists());
 
         let db_str = db_path.to_string_lossy();
-        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
 
@@ -1567,7 +1576,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("tron.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
 
@@ -1586,7 +1595,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("tools-test.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
@@ -1677,7 +1686,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("events.db");
         let db_str = db_path.to_string_lossy();
-        let pool = tron::events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
