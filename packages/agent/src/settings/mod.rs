@@ -30,6 +30,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod db_path_policy;
 pub mod errors;
 #[path = "storage/loader.rs"]
 pub mod loader;

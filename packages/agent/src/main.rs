@@ -46,9 +46,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
-use tron::bootstrap::db_path_policy::resolve_production_db_path;
-use tron::bootstrap::provider_factory;
-use tron::providers;
+use tron::settings::db_path_policy::resolve_production_db_path;
+use tron::llm::factory as provider_factory;
 use tron::events::{ConnectionConfig, EventStore};
 use tron::llm::provider::ProviderFactory;
 use tron::runtime::orchestrator::orchestrator::Orchestrator;
@@ -255,13 +254,14 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         Arc::new(ReqwestHttpClient::from_client(config.http_client.clone()));
 
     // Real providers backed by SQLite
-    let mut store_query_builder = providers::SqliteEventStoreQuery::new(config.event_store.clone());
+    let mut store_query_builder =
+        tron::events::query_delegate::SqliteEventStoreQuery::new(config.event_store.clone());
     if let Some(ref ec) = config.embedding_controller {
         store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
     }
     let store_query: Arc<dyn tron::tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
     let task_mgr: Arc<dyn tron::tools::traits::TaskManagerDelegate> = Arc::new(
-        providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
+        tron::runtime::tasks::delegate::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
     );
 
     let mut registry = ToolRegistry::new();
@@ -274,7 +274,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     // 4: Bash (with blob store for large output storage)
     let blob_store: Arc<dyn tron::tools::traits::BlobStore> =
-        Arc::new(providers::SqliteBlobStore::new(config.event_store.clone()));
+        Arc::new(tron::events::blob_delegate::SqliteBlobStore::new(config.event_store.clone()));
     registry.register(Arc::new(tron::tools::system::bash::BashTool::new(
         runner.clone(),
         Some(blob_store),
@@ -327,7 +327,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 13: NotifyApp — real APNS when available, stub fallback
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> =
         if let Some(ref apns) = config.apns_service {
-            Arc::new(providers::ApnsNotifyDelegate::new(
+            Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
                 apns.clone(),
                 config.task_pool.clone(),
             ))
@@ -344,7 +344,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 15–17: Device-querying tools (conditional on device request broker)
     if let Some(broker) = config.device_request_broker.get() {
         let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> =
-            Arc::new(providers::BrokerDeviceDelegate::new(broker.clone()));
+            Arc::new(tron::server::device_delegate::BrokerDeviceDelegate::new(broker.clone()));
 
         let settings =
             tron::settings::loader::load_settings_from_path(&tron::settings::loader::settings_path())
@@ -753,7 +753,7 @@ async fn main() -> Result<()> {
 
     let cron_agent_executor: Option<Arc<dyn tron::cron::AgentTurnExecutor>> =
         agent_deps.as_ref().map(|deps| {
-            Arc::new(providers::CronAgentTurnExecutor::new(
+            Arc::new(tron::cron::impls::CronAgentTurnExecutor::new(
                 event_store.clone(),
                 session_manager.clone(),
                 deps.provider_factory.clone(),
@@ -767,13 +767,13 @@ async fn main() -> Result<()> {
         agent_executor: cron_agent_executor,
         broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
         push_notifier: tool_config.apns_service.as_ref().map(|apns| {
-            Arc::new(providers::CronPushNotifier::new(
+            Arc::new(tron::cron::impls::CronPushNotifier::new(
                 apns.clone(),
                 task_pool.clone(),
             )) as Arc<dyn tron::cron::PushNotifier>
         }),
         event_injector: Some(
-            Arc::new(providers::CronSystemEventInjector::new(event_store.clone()))
+            Arc::new(tron::cron::impls::CronSystemEventInjector::new(event_store.clone()))
                 as Arc<dyn tron::cron::SystemEventInjector>,
         ),
         http_client: tool_config.http_client.clone(),
@@ -887,7 +887,7 @@ async fn main() -> Result<()> {
     );
 
     // Wire cron broadcaster (needs BroadcastManager from server)
-    cron_scheduler.set_broadcaster(Arc::new(providers::CronEventBroadcaster::new(
+    cron_scheduler.set_broadcaster(Arc::new(tron::cron::impls::CronEventBroadcaster::new(
         server.broadcast().clone(),
     )));
 
@@ -1126,7 +1126,7 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
-    use tron::bootstrap::db_path_policy::{
+    use tron::settings::db_path_policy::{
         PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
         validate_production_db_path_for_home,
     };

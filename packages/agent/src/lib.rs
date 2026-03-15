@@ -26,7 +26,5 @@ pub mod runtime;
 // Interface (depends on everything)
 pub mod server;
 
-// Binary wiring (provider impls, factory, DB path policy, backfill)
+// Binary wiring (backfill CLI)
 pub mod backfill;
-pub mod bootstrap;
-pub mod providers;

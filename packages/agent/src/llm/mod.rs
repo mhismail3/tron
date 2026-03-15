@@ -28,6 +28,7 @@
 
 pub mod anthropic;
 pub mod auth;
+pub mod factory;
 #[path = "shared/context_composition.rs"]
 pub mod context_composition;
 #[path = "shared/error_parsing.rs"]

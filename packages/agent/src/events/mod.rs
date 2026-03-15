@@ -20,12 +20,14 @@
 
 #![deny(unsafe_code)]
 
+pub mod blob_delegate;
 #[path = "event/envelope.rs"]
 pub mod envelope;
 pub mod errors;
 #[path = "event/factory.rs"]
 pub mod factory;
 pub mod memory;
+pub mod query_delegate;
 #[path = "event/reconstruct.rs"]
 pub mod reconstruct;
 pub mod sqlite;

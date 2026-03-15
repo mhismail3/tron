@@ -3,6 +3,7 @@
 //! Provides JWT-based authentication and HTTP/2 push notification delivery
 //! to Apple's APNs servers. Configuration is loaded from `~/.tron/mods/apns/`.
 
+pub mod delegate;
 mod config;
 mod service;
 mod types;
