@@ -95,7 +95,7 @@ impl CronAgentTurnExecutor {
 }
 
 #[async_trait]
-impl crate::cron::AgentTurnExecutor for CronAgentTurnExecutor {
+impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
     async fn execute(
         &self,
         prompt: &str,
@@ -342,7 +342,7 @@ impl CronPushNotifier {
 }
 
 #[async_trait]
-impl crate::cron::PushNotifier for CronPushNotifier {
+impl crate::cron::executor::PushNotifier for CronPushNotifier {
     async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {
         let tokens = self.active_tokens()?;
         if tokens.is_empty() {
@@ -388,7 +388,7 @@ impl CronEventBroadcaster {
 }
 
 #[async_trait]
-impl crate::cron::EventBroadcaster for CronEventBroadcaster {
+impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
     async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun) {
         let event = RpcEvent {
             event_type: "cron.runComplete".to_owned(),
@@ -434,7 +434,7 @@ impl CronSystemEventInjector {
 }
 
 #[async_trait]
-impl crate::cron::SystemEventInjector for CronSystemEventInjector {
+impl crate::cron::executor::SystemEventInjector for CronSystemEventInjector {
     async fn inject(&self, session_id: &str, message: &str) -> Result<(), CronError> {
         let payload = serde_json::json!({
             "source": "cron",

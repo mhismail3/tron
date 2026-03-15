@@ -751,18 +751,17 @@ async fn main() -> Result<()> {
         .join("automations.json");
     let cron_backup_path = tron::settings::deploy_dir().join("automations.json.bak");
 
-    let cron_agent_executor: Option<Arc<dyn tron::cron::AgentTurnExecutor>> =
-        agent_deps.as_ref().map(|deps| {
-            Arc::new(tron::cron::impls::CronAgentTurnExecutor::new(
-                event_store.clone(),
-                session_manager.clone(),
-                deps.provider_factory.clone(),
-                deps.tool_factory.clone(),
-                origin.clone(),
-                shared_subagent_manager.clone(),
-                embedding_controller.clone(),
-            )) as Arc<dyn tron::cron::AgentTurnExecutor>
-        });
+    let cron_agent_executor = agent_deps.as_ref().map(|deps| {
+        Arc::new(tron::cron::impls::CronAgentTurnExecutor::new(
+            event_store.clone(),
+            session_manager.clone(),
+            deps.provider_factory.clone(),
+            deps.tool_factory.clone(),
+            origin.clone(),
+            shared_subagent_manager.clone(),
+            embedding_controller.clone(),
+        )) as _
+    });
     let cron_deps = tron::cron::ExecutorDeps {
         agent_executor: cron_agent_executor,
         broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
@@ -770,11 +769,10 @@ async fn main() -> Result<()> {
             Arc::new(tron::cron::impls::CronPushNotifier::new(
                 apns.clone(),
                 task_pool.clone(),
-            )) as Arc<dyn tron::cron::PushNotifier>
+            )) as _
         }),
         event_injector: Some(
-            Arc::new(tron::cron::impls::CronSystemEventInjector::new(event_store.clone()))
-                as Arc<dyn tron::cron::SystemEventInjector>,
+            Arc::new(tron::cron::impls::CronSystemEventInjector::new(event_store.clone())) as _,
         ),
         http_client: tool_config.http_client.clone(),
         pool: task_pool.clone(),
