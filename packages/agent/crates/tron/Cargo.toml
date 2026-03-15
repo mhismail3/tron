@@ -1,6 +1,6 @@
 [package]
 name = "tron"
-description = "Unified library crate for the Tron agent"
+description = "Unified library and binary crate for the Tron agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,13 +10,17 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["ort", "apns"]
 ort = ["dep:ort", "dep:tokenizers", "dep:hf-hub", "dep:ndarray"]
 apns = ["dep:jsonwebtoken"]
 browser-integration = []
 
 [lib]
 doctest = false
+
+[[bin]]
+name = "tron"
+path = "src/main.rs"
 
 [dependencies]
 # Async runtime
@@ -55,11 +59,15 @@ metrics-exporter-prometheus.workspace = true
 
 # Error handling
 thiserror.workspace = true
+anyhow.workspace = true
 
 # IDs and time
 uuid.workspace = true
 chrono.workspace = true
 chrono-tz = "0.10"
+
+# CLI
+clap.workspace = true
 
 # Crypto
 sha2.workspace = true
@@ -83,6 +91,9 @@ dashmap.workspace = true
 
 # Zero-copy
 bytemuck.workspace = true
+
+# Allocator
+mimalloc.workspace = true
 
 # Misc
 bytes.workspace = true
@@ -113,3 +124,4 @@ tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 async-stream.workspace = true
 reqwest.workspace = true
+futures.workspace = true

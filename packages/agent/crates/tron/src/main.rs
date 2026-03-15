@@ -3,20 +3,20 @@
 //! Tron agent server binary — wires together all crates and starts the
 //! HTTP/WebSocket server.
 //!
-//! ## Workspace Architecture
+//! ## Module Architecture (tron library crate)
 //!
 //! ```text
-//! tron-core          Foundation types, errors, branded IDs, message model
-//! tron-settings      Settings schema, layered loading, global singleton
-//! tron-events        SQLite event store, migrations, session reconstruction
-//! tron-llm           Provider trait, model registry, SSE streaming, auth
-//! tron-tools         Tool trait, registry, filesystem/bash/web/browser/subagent tools
-//! tron-skills        SKILL.md parser, registry, context injection
-//! tron-embeddings    ONNX embeddings (EmbeddingGemma-300M), vector search
-//! tron-transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
-//! tron-runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
-//! tron-server        Axum HTTP/WS, RPC handlers, event bridge, APNS
-//! tron-agent         This binary — wires all crates, CLI, DB startup
+//! tron::core          Foundation types, errors, branded IDs, message model
+//! tron::settings      Settings schema, layered loading, global singleton
+//! tron::events        SQLite event store, migrations, session reconstruction
+//! tron::llm           Provider trait, model registry, SSE streaming, auth
+//! tron::tools         Tool trait, registry, filesystem/bash/web/browser/subagent tools
+//! tron::skills        SKILL.md parser, registry, context injection
+//! tron::embeddings    ONNX embeddings (EmbeddingGemma-300M), vector search
+//! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
+//! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
+//! tron::server        Axum HTTP/WS, RPC handlers, event bridge, APNS
+//! tron (binary)       This binary — wires all modules, CLI, DB startup
 //! ```
 //!
 //! ## Data Path
@@ -40,17 +40,15 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-#[path = "bootstrap/provider_factory.rs"]
-mod provider_factory;
-mod providers;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
-use tron_agent::db_path_policy::resolve_production_db_path;
+use tron::bootstrap::db_path_policy::resolve_production_db_path;
+use tron::bootstrap::provider_factory;
+use tron::providers;
 use tron::events::{ConnectionConfig, EventStore};
 use tron::llm::provider::ProviderFactory;
 use tron::runtime::orchestrator::orchestrator::Orchestrator;
@@ -64,29 +62,81 @@ use tron::server::websocket::event_bridge::EventBridge;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
-/// Tron agent server.
+/// Tron agent — server and CLI tools.
 #[derive(Parser, Debug)]
-#[command(name = "tron", about = "Tron agent server")]
+#[command(name = "tron", about = "Tron agent server and tools")]
 struct Cli {
-    /// Host to bind.
-    #[arg(long, default_value = "0.0.0.0")]
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Host to bind (server mode).
+    #[arg(long, default_value = "0.0.0.0", global = true)]
     host: String,
 
-    /// Port to bind (0 for auto-assign).
-    #[arg(long, default_value = "9847")]
+    /// Port to bind (server mode, 0 for auto-assign).
+    #[arg(long, default_value = "9847", global = true)]
     port: u16,
 
     /// Path to the `SQLite` database (events + tasks in one file).
-    #[arg(long)]
+    #[arg(long, global = true)]
     db_path: Option<PathBuf>,
 
     /// Maximum concurrent sessions (overrides settings if specified).
-    #[arg(long)]
+    #[arg(long, global = true)]
     max_sessions: Option<usize>,
 
     /// Override database log level (trace, debug, info, warn, error).
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_level: Option<String>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Import LEDGER.jsonl and embed memory entries.
+    BackfillLedger {
+        #[command(subcommand)]
+        action: BackfillAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum BackfillAction {
+    /// Import LEDGER.jsonl entries as memory.ledger events (idempotent).
+    Import {
+        /// Path to LEDGER.jsonl file.
+        #[arg(long)]
+        ledger_path: PathBuf,
+
+        /// Only import entries whose front.path starts with this prefix.
+        #[arg(long)]
+        project_filter: Option<String>,
+
+        /// Parse and report without writing to DB.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Embed all unembedded memory.ledger events.
+    Embed {
+        /// Drop and recreate the `memory_vectors` table before embedding.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Import LEDGER.jsonl entries then embed them.
+    All {
+        /// Path to LEDGER.jsonl file.
+        #[arg(long)]
+        ledger_path: PathBuf,
+
+        /// Only import entries whose front.path starts with this prefix.
+        #[arg(long)]
+        project_filter: Option<String>,
+
+        /// Drop and recreate vectors before embedding.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -102,66 +152,19 @@ fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
-/// Backfill unembedded `memory.ledger` events on startup.
-///
-/// Queries for events that don't yet have vectors in `memory_vectors`,
-/// then uses the embedding controller to generate them. Runs after
-/// the ONNX model is initialized and the service is set on the controller.
-async fn startup_backfill(
+/// Embed unembedded `memory.ledger` events on startup (fire-and-forget).
+async fn startup_embed(
     store: Arc<EventStore>,
     ctrl: Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
 ) {
-    let unembedded = match store.pool().get() {
-        Ok(conn) => {
-            let mut stmt = match conn.prepare(
-                "SELECT e.id, e.payload, COALESCE(w.path, '') \
-                 FROM events e \
-                 LEFT JOIN sessions s ON e.session_id = s.id \
-                 LEFT JOIN workspaces w ON s.workspace_id = w.id \
-                 LEFT JOIN memory_vectors mv ON e.id = mv.event_id \
-                 WHERE e.type = 'memory.ledger' AND mv.id IS NULL",
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(error = %e, "startup backfill: failed to prepare query");
-                    return;
-                }
-            };
-            let rows: Vec<(String, String, String)> = stmt
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                })
-                .map(|iter| iter.filter_map(std::result::Result::ok).collect())
-                .unwrap_or_default();
-            rows
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "startup backfill: failed to get DB connection");
-            return;
-        }
-    };
+    let unembedded = tron::backfill::find_unembedded(&store);
 
     if unembedded.is_empty() {
         tracing::debug!("startup backfill: all memory.ledger events are embedded");
         return;
     }
 
-    let entries: Vec<tron::embeddings::BackfillEntry> = unembedded
-        .into_iter()
-        .filter_map(|(event_id, payload_str, workspace_id)| {
-            let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
-            Some(tron::embeddings::BackfillEntry {
-                event_id,
-                workspace_id,
-                payload,
-            })
-        })
-        .collect();
-
+    let entries = tron::backfill::to_backfill_entries(unembedded);
     let count = entries.len();
     tracing::info!(count, "startup backfill: embedding unembedded entries");
 
@@ -177,6 +180,40 @@ async fn startup_backfill(
         }
         Err(e) => {
             tracing::warn!(error = %e, "startup backfill failed");
+        }
+    }
+}
+
+/// Run the backfill-ledger CLI subcommand.
+async fn run_backfill_command(action: BackfillAction, db_path: Option<PathBuf>) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ort=warn")),
+        )
+        .init();
+
+    match action {
+        BackfillAction::Import {
+            ledger_path,
+            project_filter,
+            dry_run,
+        } => {
+            let (store, _) = tron::backfill::open_store(db_path)?;
+            tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), dry_run)
+        }
+        BackfillAction::Embed { force } => {
+            let (store, db_path) = tron::backfill::open_store(db_path)?;
+            tron::backfill::run_embed(&store, &db_path, force).await
+        }
+        BackfillAction::All {
+            ledger_path,
+            project_filter,
+            force,
+        } => {
+            let (store, db_path) = tron::backfill::open_store(db_path)?;
+            tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), false)?;
+            tron::backfill::run_embed(&store, &db_path, force).await
         }
     }
 }
@@ -359,6 +396,11 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
+    // Dispatch subcommands before server startup.
+    if let Some(Command::BackfillLedger { action }) = args.command {
+        return run_backfill_command(action, args.db_path).await;
+    }
+
     // INVARIANT: Deploy crash-loop protection runs FIRST (pure filesystem, no dependencies).
     // If the previous deploy crashed the process before self-test could run, this catches it
     // after MAX_DEPLOY_STARTUP_ATTEMPTS and auto-rolls back to the backup binary.
@@ -509,7 +551,7 @@ async fn main() -> Result<()> {
     let embedding_controller: Option<
         Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
     > = {
-        #[cfg(feature = "embeddings")]
+        #[cfg(feature = "ort")]
         {
             let emb_settings = &settings.context.memory.embedding;
             if emb_settings.enabled {
@@ -548,8 +590,8 @@ async fn main() -> Result<()> {
                             ctrl_for_init.lock().await.set_service(service_clone);
                             tracing::info!("embedding service ready — semantic memory enabled");
 
-                            // Fire-and-forget: backfill any unembedded memory.ledger events
-                            startup_backfill(
+                            // Fire-and-forget: embed any unembedded memory.ledger events
+                            startup_embed(
                                 Arc::clone(&store_for_backfill),
                                 Arc::clone(&ctrl_for_init),
                             )
@@ -573,7 +615,7 @@ async fn main() -> Result<()> {
                 None
             }
         }
-        #[cfg(not(feature = "embeddings"))]
+        #[cfg(not(feature = "ort"))]
         {
             tracing::info!("embeddings feature disabled");
             None
@@ -1084,7 +1126,7 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
-    use tron_agent::db_path_policy::{
+    use tron::bootstrap::db_path_policy::{
         PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
         validate_production_db_path_for_home,
     };

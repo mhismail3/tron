@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tron::server::device::DeviceRequestBroker;
-use tron::tools::errors::ToolError;
-use tron::tools::traits::DeviceDelegate;
+use crate::server::device::DeviceRequestBroker;
+use crate::tools::errors::ToolError;
+use crate::tools::traits::DeviceDelegate;
 
 /// Default timeout for device requests (30 seconds).
 const DEVICE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -18,6 +18,7 @@ pub struct BrokerDeviceDelegate {
 }
 
 impl BrokerDeviceDelegate {
+    /// Create a new delegate.
     pub fn new(broker: Arc<DeviceRequestBroker>) -> Self {
         Self { broker }
     }

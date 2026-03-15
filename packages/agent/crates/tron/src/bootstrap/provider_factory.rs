@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::{info, warn};
-use tron::llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
-use tron::llm::provider::{Provider, ProviderError, ProviderFactory};
+use crate::llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
+use crate::llm::provider::{Provider, ProviderError, ProviderFactory};
 
 // ─── Captured settings ───────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ pub struct DefaultProviderFactory {
 
 impl DefaultProviderFactory {
     /// Create a new factory from the current server settings.
-    pub fn new(settings: &tron::settings::TronSettings) -> Self {
+    pub fn new(settings: &crate::settings::TronSettings) -> Self {
         let http_client = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(90))
             .timeout(std::time::Duration::from_secs(300))
@@ -77,8 +77,8 @@ impl DefaultProviderFactory {
     }
 
     /// Override the auth path (for testing with non-existent auth files).
-    #[cfg(test)]
-    pub(crate) fn with_auth_path(mut self, path: PathBuf) -> Self {
+    #[must_use]
+    pub fn with_auth_path(mut self, path: PathBuf) -> Self {
         self.auth_path = path;
         self
     }
@@ -91,14 +91,14 @@ impl DefaultProviderFactory {
     // ── Per-provider construction ────────────────────────────────────
 
     async fn create_anthropic(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let mut oauth_config = tron::llm::auth::anthropic::default_config();
+        let mut oauth_config = crate::llm::auth::anthropic::default_config();
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
         let env_token = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
         let preferred = self.anthropic.preferred_account.as_deref();
 
-        let server_auth = match tron::llm::auth::anthropic::load_server_auth_with_client(
+        let server_auth = match crate::llm::auth::anthropic::load_server_auth_with_client(
             &self.auth_path,
             &oauth_config,
             env_token.as_deref(),
@@ -111,7 +111,7 @@ impl DefaultProviderFactory {
             Ok(None) => match std::env::var("ANTHROPIC_API_KEY") {
                 Ok(key) => {
                     info!("using ANTHROPIC_API_KEY env var (no OAuth tokens found)");
-                    tron::llm::auth::ServerAuth::from_api_key(key)
+                    crate::llm::auth::ServerAuth::from_api_key(key)
                 }
                 Err(_) => {
                     return Err(ProviderError::Auth {
@@ -122,7 +122,7 @@ impl DefaultProviderFactory {
             Err(e) => match std::env::var("ANTHROPIC_API_KEY") {
                 Ok(key) => {
                     warn!(error = %e, "Anthropic OAuth failed, falling back to API key");
-                    tron::llm::auth::ServerAuth::from_api_key(key)
+                    crate::llm::auth::ServerAuth::from_api_key(key)
                 }
                 Err(_) => {
                     return Err(ProviderError::Auth {
@@ -133,31 +133,31 @@ impl DefaultProviderFactory {
         };
 
         let auth = match server_auth {
-            tron::llm::auth::ServerAuth::OAuth {
+            crate::llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 account_label,
-            } => tron::llm::anthropic::types::AnthropicAuth::OAuth {
-                tokens: tron::llm::auth::OAuthTokens {
+            } => crate::llm::anthropic::types::AnthropicAuth::OAuth {
+                tokens: crate::llm::auth::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
                 account_label,
             },
-            tron::llm::auth::ServerAuth::ApiKey { api_key } => {
-                tron::llm::anthropic::types::AnthropicAuth::ApiKey { api_key }
+            crate::llm::auth::ServerAuth::ApiKey { api_key } => {
+                crate::llm::anthropic::types::AnthropicAuth::ApiKey { api_key }
             }
         };
 
-        let config = tron::llm::anthropic::types::AnthropicConfig {
+        let config = crate::llm::anthropic::types::AnthropicConfig {
             model: model.to_string(),
             auth,
             max_tokens: None,
             base_url: None,
-            retry: Some(tron::llm::StreamRetryConfig {
-                retry: tron::core::retry::RetryConfig {
+            retry: Some(crate::llm::StreamRetryConfig {
+                retry: crate::core::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -166,14 +166,14 @@ impl DefaultProviderFactory {
                 emit_retry_events: true,
                 cancel_token: None,
             }),
-            provider_settings: tron::llm::anthropic::types::AnthropicProviderSettings {
+            provider_settings: crate::llm::anthropic::types::AnthropicProviderSettings {
                 system_prompt_prefix: Some(self.anthropic.system_prompt_prefix.clone()),
                 token_expiry_buffer_seconds: Some(self.anthropic.token_expiry_buffer_seconds),
                 oauth_beta_headers: self.anthropic.oauth_beta_headers.clone(),
             },
         };
         Ok(Arc::new(
-            tron::llm::anthropic::provider::AnthropicProvider::with_client(
+            crate::llm::anthropic::provider::AnthropicProvider::with_client(
                 config,
                 self.http_client.clone(),
             ),
@@ -184,7 +184,7 @@ impl DefaultProviderFactory {
         let env_token = std::env::var("OPENAI_OAUTH_TOKEN").ok();
         let env_api_key = std::env::var("OPENAI_API_KEY").ok();
 
-        let server_auth = match tron::llm::auth::openai::load_server_auth_with_client(
+        let server_auth = match crate::llm::auth::openai::load_server_auth_with_client(
             &self.auth_path,
             env_token.as_deref(),
             env_api_key.as_deref(),
@@ -206,34 +206,34 @@ impl DefaultProviderFactory {
         };
 
         let auth = match server_auth {
-            tron::llm::auth::ServerAuth::OAuth {
+            crate::llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
-            } => tron::llm::openai::types::OpenAIAuth::OAuth {
-                tokens: tron::llm::auth::OAuthTokens {
+            } => crate::llm::openai::types::OpenAIAuth::OAuth {
+                tokens: crate::llm::auth::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
             },
-            tron::llm::auth::ServerAuth::ApiKey { api_key } => {
-                tron::llm::openai::types::OpenAIAuth::ApiKey { api_key }
+            crate::llm::auth::ServerAuth::ApiKey { api_key } => {
+                crate::llm::openai::types::OpenAIAuth::ApiKey { api_key }
             }
         };
 
-        let config = tron::llm::openai::types::OpenAIConfig {
+        let config = crate::llm::openai::types::OpenAIConfig {
             model: model.to_string(),
             auth,
             max_tokens: None,
             temperature: None,
             base_url: None,
             reasoning_effort: None,
-            provider_settings: tron::llm::openai::types::OpenAIApiSettings::default(),
+            provider_settings: crate::llm::openai::types::OpenAIApiSettings::default(),
         };
         Ok(Arc::new(
-            tron::llm::openai::provider::OpenAIProvider::with_client(
+            crate::llm::openai::provider::OpenAIProvider::with_client(
                 config,
                 self.http_client.clone(),
             ),
@@ -244,7 +244,7 @@ impl DefaultProviderFactory {
         let env_token = std::env::var("GOOGLE_OAUTH_TOKEN").ok();
         let env_api_key = std::env::var("GOOGLE_API_KEY").ok();
 
-        let google_auth = match tron::llm::auth::google::load_server_auth_with_client(
+        let google_auth = match crate::llm::auth::google::load_server_auth_with_client(
             &self.auth_path,
             env_token.as_deref(),
             env_api_key.as_deref(),
@@ -266,7 +266,7 @@ impl DefaultProviderFactory {
         };
 
         let auth = match google_auth.auth {
-            tron::llm::auth::ServerAuth::OAuth {
+            crate::llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
@@ -275,16 +275,16 @@ impl DefaultProviderFactory {
                 let endpoint = google_auth
                     .endpoint
                     .map(|e| match e {
-                        tron::llm::auth::GoogleOAuthEndpoint::CloudCodeAssist => {
-                            tron::llm::google::types::GoogleOAuthEndpoint::CloudCodeAssist
+                        crate::llm::auth::GoogleOAuthEndpoint::CloudCodeAssist => {
+                            crate::llm::google::types::GoogleOAuthEndpoint::CloudCodeAssist
                         }
-                        tron::llm::auth::GoogleOAuthEndpoint::Antigravity => {
-                            tron::llm::google::types::GoogleOAuthEndpoint::Antigravity
+                        crate::llm::auth::GoogleOAuthEndpoint::Antigravity => {
+                            crate::llm::google::types::GoogleOAuthEndpoint::Antigravity
                         }
                     })
                     .unwrap_or_default();
-                tron::llm::google::types::GoogleAuth::Oauth {
-                    tokens: tron::llm::auth::OAuthTokens {
+                crate::llm::google::types::GoogleAuth::Oauth {
+                    tokens: crate::llm::auth::OAuthTokens {
                         access_token,
                         refresh_token,
                         expires_at,
@@ -293,12 +293,12 @@ impl DefaultProviderFactory {
                     project_id: google_auth.project_id,
                 }
             }
-            tron::llm::auth::ServerAuth::ApiKey { api_key } => {
-                tron::llm::google::types::GoogleAuth::ApiKey { api_key }
+            crate::llm::auth::ServerAuth::ApiKey { api_key } => {
+                crate::llm::google::types::GoogleAuth::ApiKey { api_key }
             }
         };
 
-        let config = tron::llm::google::types::GoogleConfig {
+        let config = crate::llm::google::types::GoogleConfig {
             model: model.to_string(),
             auth,
             max_tokens: None,
@@ -307,10 +307,10 @@ impl DefaultProviderFactory {
             thinking_level: None,
             thinking_budget: None,
             safety_settings: None,
-            provider_settings: tron::llm::google::types::GoogleApiSettings::default(),
+            provider_settings: crate::llm::google::types::GoogleApiSettings::default(),
         };
         Ok(Arc::new(
-            tron::llm::google::provider::GoogleProvider::with_client(
+            crate::llm::google::provider::GoogleProvider::with_client(
                 config,
                 self.http_client.clone(),
             ),
@@ -322,7 +322,7 @@ impl DefaultProviderFactory {
             info!("using MINIMAX_API_KEY env var");
             key
         } else if let Some(pa) =
-            tron::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
+            crate::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
         {
             if let Some(key) = pa.api_key {
                 info!("using MiniMax API key from auth.json");
@@ -339,13 +339,13 @@ impl DefaultProviderFactory {
             });
         };
 
-        let config = tron::llm::minimax::types::MiniMaxConfig {
+        let config = crate::llm::minimax::types::MiniMaxConfig {
             model: model.to_string(),
-            auth: tron::llm::minimax::types::MiniMaxAuth::ApiKey { api_key },
+            auth: crate::llm::minimax::types::MiniMaxAuth::ApiKey { api_key },
             max_tokens: None,
             base_url: self.minimax_base_url.clone(),
-            retry: Some(tron::llm::StreamRetryConfig {
-                retry: tron::core::retry::RetryConfig {
+            retry: Some(crate::llm::StreamRetryConfig {
+                retry: crate::core::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -356,7 +356,7 @@ impl DefaultProviderFactory {
             }),
         };
         Ok(Arc::new(
-            tron::llm::minimax::provider::MiniMaxProvider::with_client(
+            crate::llm::minimax::provider::MiniMaxProvider::with_client(
                 config,
                 self.http_client.clone(),
             ),
@@ -367,7 +367,7 @@ impl DefaultProviderFactory {
 #[async_trait]
 impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        use tron::core::messages::Provider as ProviderKind;
+        use crate::core::messages::Provider as ProviderKind;
 
         let bare_model = strip_provider_prefix(model);
         // INVARIANT: unknown model/provider → fail-fast with typed error.
@@ -393,7 +393,7 @@ impl ProviderFactory for DefaultProviderFactory {
 
 /// Resolve the auth file path (`~/.tron/auth.json`).
 fn auth_path() -> PathBuf {
-    tron::settings::loader::auth_path()
+    crate::settings::loader::auth_path()
 }
 
 #[cfg(test)]
@@ -402,14 +402,14 @@ mod tests {
 
     /// Build a factory that reads from a non-existent auth file (no credentials).
     fn no_auth_factory() -> DefaultProviderFactory {
-        let settings = tron::settings::TronSettings::default();
+        let settings = crate::settings::TronSettings::default();
         DefaultProviderFactory::new(&settings)
             .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"))
     }
 
     #[test]
     fn factory_captures_anthropic_settings() {
-        let mut settings = tron::settings::TronSettings::default();
+        let mut settings = crate::settings::TronSettings::default();
         settings.api.anthropic.client_id = "test-client-id".into();
         settings.server.anthropic_account = Some("work".into());
 
@@ -423,14 +423,14 @@ mod tests {
 
     #[test]
     fn factory_default_settings() {
-        let settings = tron::settings::TronSettings::default();
+        let settings = crate::settings::TronSettings::default();
         let factory = DefaultProviderFactory::new(&settings);
         assert!(factory.anthropic.preferred_account.is_none());
     }
 
     #[test]
     fn factory_captures_retry_settings() {
-        let mut settings = tron::settings::TronSettings::default();
+        let mut settings = crate::settings::TronSettings::default();
         settings.retry.max_retries = 5;
         settings.retry.base_delay_ms = 2000;
         settings.retry.max_delay_ms = 30_000;

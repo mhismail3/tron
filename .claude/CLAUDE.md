@@ -5,7 +5,7 @@
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
 2. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
 3. **Use `@tron-db` skill** to investigate issues. Query `~/.tron/database/` directly — don't guess.
-4. **Follow established patterns.** Read the relevant crate's `lib.rs` and `mod.rs` docs before implementing new features.
+4. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
 
 ## Commands
 
@@ -32,10 +32,10 @@ Path-scoped rules in `.claude/rules/` load automatically.
 
 The codebase uses progressive disclosure — documentation lives in the code:
 
-- **Crate level**: `lib.rs` — purpose, dependencies, module overview
+- **Library crate**: `crates/tron/src/lib.rs` — top-level module declarations
 - **Module level**: `mod.rs` — submodule table, entry points, key invariants
 - **File level**: `// INVARIANT:` markers for critical correctness constraints
-- **Workspace overview**: `crates/tron-agent/src/main.rs`
+- **Binary entry point**: `crates/tron/src/main.rs`
 
 ### iOS App
 

@@ -2,13 +2,10 @@
 resolver = "2"
 members = [
     "crates/tron",
-    "crates/tron-agent",
     "crates/tron-bench",
-    "crates/tron-backfill",
 ]
 default-members = [
     "crates/tron",
-    "crates/tron-agent",
 ]
 
 [workspace.package]

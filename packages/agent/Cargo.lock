@@ -3593,6 +3593,7 @@ dependencies = [
 name = "tron"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "async-stream",
  "async-trait",
@@ -3602,6 +3603,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
+ "clap",
  "dashmap",
  "eventsource-stream",
  "futures",
@@ -3614,6 +3616,7 @@ dependencies = [
  "libc",
  "metrics",
  "metrics-exporter-prometheus",
+ "mimalloc",
  "mockall",
  "ndarray 0.16.1",
  "ort",
@@ -3648,49 +3651,6 @@ dependencies = [
  "uuid",
  "walkdir",
  "wiremock",
-]
-
-[[package]]
-name = "tron-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "futures",
- "metrics-exporter-prometheus",
- "mimalloc",
- "parking_lot",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tron",
- "uuid",
-]
-
-[[package]]
-name = "tron-backfill"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "parking_lot",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tron",
- "uuid",
 ]
 
 [[package]]

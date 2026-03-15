@@ -1,4 +1,4 @@
-//! Real `EventStoreQuery` backed by `tron::events::EventStore`.
+//! Real `EventStoreQuery` backed by `crate::events::EventStore`.
 //!
 //! Provides the Remember tool with actual database access for session queries,
 //! event lookups, blob retrieval, and schema introspection.
@@ -9,19 +9,20 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron::embeddings::{HybridSearchOptions, apply_temporal_decay};
-use tron::events::EventStore;
-use tron::events::sqlite::repositories::event::ListEventsOptions;
-use tron::tools::errors::ToolError;
-use tron::tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
+use crate::embeddings::{HybridSearchOptions, apply_temporal_decay};
+use crate::events::EventStore;
+use crate::events::sqlite::repositories::event::ListEventsOptions;
+use crate::tools::errors::ToolError;
+use crate::tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
 
 /// Real event store query backed by `SQLite` via `EventStore`.
 pub struct SqliteEventStoreQuery {
     store: Arc<EventStore>,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
 }
 
 impl SqliteEventStoreQuery {
+    /// Create a new event store query.
     pub fn new(store: Arc<EventStore>) -> Self {
         Self {
             store,
@@ -30,9 +31,10 @@ impl SqliteEventStoreQuery {
     }
 
     /// Set the embedding controller for semantic recall.
+    #[must_use]
     pub fn with_embedding_controller(
         mut self,
-        ec: Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
+        ec: Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>,
     ) -> Self {
         self.embedding_controller = Some(ec);
         self
@@ -63,7 +65,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 let cross_project_top_k = ctrl.config().cross_project_top_k;
 
                 // Local hybrid search (vector + memory_vectors FTS)
-                let local_opts = tron::embeddings::SearchOptions {
+                let local_opts = crate::embeddings::SearchOptions {
                     limit: limit as usize * 2,
                     workspace_id: workspace_id.map(String::from),
                     ..Default::default()
@@ -85,7 +87,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 if let Some(ws) = workspace_id
                     && cross_project_top_k > 0
                 {
-                    let cross_opts = tron::embeddings::SearchOptions {
+                    let cross_opts = crate::embeddings::SearchOptions {
                         limit: cross_project_top_k * 2,
                         exclude_workspace_id: Some(ws.to_string()),
                         ..Default::default()
@@ -169,7 +171,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
     }
 
     async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError> {
-        let opts = tron::events::sqlite::repositories::session::ListSessionsOptions {
+        let opts = crate::events::sqlite::repositories::session::ListSessionsOptions {
             workspace_id: None,
             ended: None,
             exclude_subagents: Some(true),
@@ -365,13 +367,13 @@ impl EventStoreQuery for SqliteEventStoreQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron::events::{ConnectionConfig, EventStore};
+    use crate::events::{ConnectionConfig, EventStore};
 
     fn setup_store() -> Arc<EventStore> {
-        let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
+        let pool = crate::events::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = tron::events::run_migrations(&conn).unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
         }
         Arc::new(EventStore::new(pool))
     }

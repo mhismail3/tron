@@ -1,72 +1,20 @@
-//! Standalone tool to import LEDGER.jsonl entries and embed memory events.
+//! LEDGER.jsonl import and memory embedding.
 //!
-//! Three subcommands:
-//! - `import` — Import LEDGER.jsonl entries as `memory.ledger` events (idempotent)
-//! - `embed`  — Embed all unembedded `memory.ledger` events
-//! - `all`    — Import then embed in sequence
+//! Provides two operations:
+//! - **Import**: Parse `~/.claude/LEDGER.jsonl` → `memory.ledger` events (idempotent)
+//! - **Embed**: Generate vector embeddings for unembedded `memory.ledger` events
+//!
+//! Used by:
+//! - `tron backfill-ledger` CLI subcommand (manual bulk operations)
+//! - Server startup (auto-embeds unembedded events after ONNX model loads)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
 use tracing::info;
 
-// ─── CLI ─────────────────────────────────────────────────────────────────────
-
-#[derive(Parser)]
-#[command(
-    name = "tron-backfill",
-    about = "Import LEDGER.jsonl and embed memory entries"
-)]
-struct Cli {
-    /// Path to the `SQLite` database file.
-    #[arg(long, global = true)]
-    db_path: Option<PathBuf>,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Import LEDGER.jsonl entries as memory.ledger events (idempotent).
-    Import {
-        /// Path to LEDGER.jsonl file.
-        #[arg(long)]
-        ledger_path: PathBuf,
-
-        /// Only import entries whose front.path starts with this prefix.
-        #[arg(long)]
-        project_filter: Option<String>,
-
-        /// Parse and report without writing to DB.
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Embed all unembedded memory.ledger events.
-    Embed {
-        /// Drop and recreate the `memory_vectors` table before embedding.
-        #[arg(long)]
-        force: bool,
-    },
-
-    /// Import LEDGER.jsonl entries then embed them.
-    All {
-        /// Path to LEDGER.jsonl file.
-        #[arg(long)]
-        ledger_path: PathBuf,
-
-        /// Only import entries whose front.path starts with this prefix.
-        #[arg(long)]
-        project_filter: Option<String>,
-
-        /// Drop and recreate vectors before embedding.
-        #[arg(long)]
-        force: bool,
-    },
-}
+use crate::events::{AppendOptions, EventStore, EventType};
 
 // ─── LEDGER.jsonl types ──────────────────────────────────────────────────────
 
@@ -125,26 +73,27 @@ fn default_db_path() -> PathBuf {
         .join("tron.db")
 }
 
-fn open_store(
+/// Open an event store, creating the database and running migrations if needed.
+pub fn open_store(
     db_path_override: Option<PathBuf>,
-) -> Result<(Arc<tron::events::EventStore>, PathBuf)> {
+) -> Result<(Arc<EventStore>, PathBuf)> {
     let db_path = db_path_override.unwrap_or_else(default_db_path);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
     }
     let db_str = db_path.to_string_lossy();
-    let pool = tron::events::new_file(&db_str, &tron::events::ConnectionConfig::default())
+    let pool = crate::events::new_file(&db_str, &crate::events::ConnectionConfig::default())
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
-        let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
+        let _ = crate::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
-    Ok((Arc::new(tron::events::EventStore::new(pool)), db_path))
+    Ok((Arc::new(EventStore::new(pool)), db_path))
 }
 
-/// Check if a ledger entry with the given meta ID already exists in the DB.
-fn has_ledger_entry(store: &tron::events::EventStore, meta_id: &str) -> bool {
+/// Check if a ledger entry with the given meta ID already exists.
+fn has_ledger_entry(store: &EventStore, meta_id: &str) -> bool {
     let Ok(conn) = store.pool().get() else {
         return false;
     };
@@ -164,9 +113,10 @@ fn has_ledger_entry(store: &tron::events::EventStore, meta_id: &str) -> bool {
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
-fn run_import(
-    store: &tron::events::EventStore,
-    ledger_path: &std::path::Path,
+/// Import LEDGER.jsonl entries as `memory.ledger` events. Idempotent.
+pub fn run_import(
+    store: &EventStore,
+    ledger_path: &Path,
     project_filter: Option<&str>,
     dry_run: bool,
 ) -> Result<()> {
@@ -257,9 +207,9 @@ fn run_import(
         });
 
         let _ = store
-            .append(&tron::events::AppendOptions {
+            .append(&AppendOptions {
                 session_id: &session_id,
-                event_type: tron::events::EventType::MemoryLedger,
+                event_type: EventType::MemoryLedger,
                 payload,
                 parent_id: None,
             })
@@ -269,7 +219,6 @@ fn run_import(
     }
 
     // End all backfill sessions so they don't appear in the session list.
-    // Events retain their workspace_id — memory recall doesn't need active sessions.
     for sid in workspace_sessions.values() {
         let _ = store.end_session(sid);
     }
@@ -288,21 +237,62 @@ fn run_import(
 
 // ─── Embed ───────────────────────────────────────────────────────────────────
 
-async fn run_embed(
-    store: &tron::events::EventStore,
-    db_path: &std::path::Path,
+/// Find unembedded `memory.ledger` events in the database.
+pub fn find_unembedded(store: &EventStore) -> Vec<(String, String, String)> {
+    let Ok(conn) = store.pool().get() else {
+        return Vec::new();
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT e.id, e.payload, COALESCE(w.path, '') as workspace_path \
+         FROM events e \
+         LEFT JOIN sessions s ON e.session_id = s.id \
+         LEFT JOIN workspaces w ON s.workspace_id = w.id \
+         LEFT JOIN memory_vectors mv ON e.id = mv.event_id \
+         WHERE e.type = 'memory.ledger' AND mv.id IS NULL",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })
+    .map(|iter| iter.filter_map(std::result::Result::ok).collect())
+    .unwrap_or_default()
+}
+
+/// Convert raw DB rows to `BackfillEntry` values for the embedding controller.
+pub fn to_backfill_entries(
+    rows: Vec<(String, String, String)>,
+) -> Vec<crate::embeddings::BackfillEntry> {
+    rows.into_iter()
+        .filter_map(|(event_id, payload_str, workspace_id)| {
+            let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
+            Some(crate::embeddings::BackfillEntry {
+                event_id,
+                workspace_id,
+                payload,
+            })
+        })
+        .collect()
+}
+
+/// Embed all unembedded `memory.ledger` events. Optionally force-recreate vectors.
+pub async fn run_embed(
+    store: &EventStore,
+    db_path: &Path,
     force: bool,
 ) -> Result<()> {
-    // Load settings to pick up user overrides (model, cache dir, etc.)
-    let settings = tron::settings::get_settings();
+    let settings = crate::settings::get_settings();
     let config =
-        tron::embeddings::EmbeddingConfig::from_settings(&settings.context.memory.embedding);
+        crate::embeddings::EmbeddingConfig::from_settings(&settings.context.memory.embedding);
 
-    // Set up vector repository (dedicated connection, same DB)
     let conn = rusqlite::Connection::open(db_path).context("Failed to open DB for vector repo")?;
     conn.execute_batch("PRAGMA busy_timeout = 5000;")
         .context("Failed to set busy timeout")?;
-    let repo = tron::embeddings::VectorRepository::new(conn, config.dimensions);
+    let repo = crate::embeddings::VectorRepository::new(conn, config.dimensions);
     repo.ensure_table()?;
 
     if force {
@@ -310,29 +300,7 @@ async fn run_embed(
         repo.drop_and_recreate()?;
     }
 
-    // Find unembedded events
-    let pool_conn = store.pool().get().context("Failed to get DB connection")?;
-    let mut stmt = pool_conn.prepare(
-        "SELECT e.id, e.payload, COALESCE(w.path, '') as workspace_path \
-         FROM events e \
-         LEFT JOIN sessions s ON e.session_id = s.id \
-         LEFT JOIN workspaces w ON s.workspace_id = w.id \
-         LEFT JOIN memory_vectors mv ON e.id = mv.event_id \
-         WHERE e.type = 'memory.ledger' AND mv.id IS NULL",
-    )?;
-
-    let unembedded: Vec<(String, String, String)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .filter_map(std::result::Result::ok)
-        .collect();
-    drop(stmt);
-    drop(pool_conn);
+    let unembedded = find_unembedded(store);
 
     if unembedded.is_empty() {
         println!("No unembedded memory.ledger events found.");
@@ -344,28 +312,15 @@ async fn run_embed(
         unembedded.len()
     );
 
-    // Initialize ONNX embedding service
-    let ort_service = Arc::new(tron::embeddings::OnnxEmbeddingService::new(config.clone()));
+    let ort_service = Arc::new(crate::embeddings::OnnxEmbeddingService::new(config.clone()));
     ort_service.initialize().await?;
 
-    // Set up controller
     let repo = Arc::new(parking_lot::Mutex::new(repo));
-    let mut controller = tron::embeddings::EmbeddingController::new(config);
+    let mut controller = crate::embeddings::EmbeddingController::new(config);
     controller.set_service(ort_service);
     controller.set_vector_repo(repo);
 
-    // Convert to BackfillEntry
-    let entries: Vec<tron::embeddings::BackfillEntry> = unembedded
-        .into_iter()
-        .filter_map(|(event_id, payload_str, workspace_id)| {
-            let payload: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
-            Some(tron::embeddings::BackfillEntry {
-                event_id,
-                workspace_id,
-                payload,
-            })
-        })
-        .collect();
+    let entries = to_backfill_entries(unembedded);
 
     println!("Embedding {} entries...", entries.len());
     let result = controller.backfill(entries).await?;
@@ -376,44 +331,6 @@ async fn run_embed(
     );
 
     Ok(())
-}
-
-// ─── Main ────────────────────────────────────────────────────────────────────
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ort=warn")),
-        )
-        .init();
-
-    let cli = Cli::parse();
-
-    match cli.command {
-        Command::Import {
-            ledger_path,
-            project_filter,
-            dry_run,
-        } => {
-            let (store, _) = open_store(cli.db_path)?;
-            run_import(&store, &ledger_path, project_filter.as_deref(), dry_run)
-        }
-        Command::Embed { force } => {
-            let (store, db_path) = open_store(cli.db_path)?;
-            run_embed(&store, &db_path, force).await
-        }
-        Command::All {
-            ledger_path,
-            project_filter,
-            force,
-        } => {
-            let (store, db_path) = open_store(cli.db_path)?;
-            run_import(&store, &ledger_path, project_filter.as_deref(), false)?;
-            run_embed(&store, &db_path, force).await
-        }
-    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -442,7 +359,7 @@ mod tests {
         )
         .unwrap();
 
-        let (store, _) = open_store(Some(db_path.clone())).unwrap();
+        let (store, _) = open_store(Some(db_path)).unwrap();
         run_import(&store, &ledger_path, None, true).unwrap();
 
         let conn = store.pool().get().unwrap();
@@ -471,7 +388,7 @@ mod tests {
         )
         .unwrap();
 
-        let (store, _) = open_store(Some(db_path.clone())).unwrap();
+        let (store, _) = open_store(Some(db_path)).unwrap();
         run_import(&store, &ledger_path, None, false).unwrap();
 
         let conn = store.pool().get().unwrap();
@@ -493,7 +410,7 @@ mod tests {
         let entry = r#"{"_meta":{"id":"id-unique","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"test","path":"/tmp","title":"Test","type":"feature","status":"completed","tags":[]},"body":{"input":"req","actions":["a"],"files":[],"decisions":[],"lessons":["l"]},"history":{"embedded":false}}"#;
         std::fs::write(&ledger_path, entry).unwrap();
 
-        let (store, _) = open_store(Some(db_path.clone())).unwrap();
+        let (store, _) = open_store(Some(db_path)).unwrap();
         run_import(&store, &ledger_path, None, false).unwrap();
         run_import(&store, &ledger_path, None, false).unwrap();
 
@@ -523,7 +440,7 @@ mod tests {
         )
         .unwrap();
 
-        let (store, _) = open_store(Some(db_path.clone())).unwrap();
+        let (store, _) = open_store(Some(db_path)).unwrap();
         run_import(&store, &ledger_path, Some("/Users/moose/tron"), false).unwrap();
 
         let conn = store.pool().get().unwrap();
