@@ -20,38 +20,11 @@ struct Migration {
 }
 
 /// All migrations in version order.
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        description: "Complete schema — core tables, FTS, indexes, triggers, origin tracking",
-        sql: include_str!("v001_schema.sql"),
-    },
-    Migration {
-        version: 2,
-        description: "Add source column to sessions (cron filtering)",
-        sql: include_str!("v002_session_source.sql"),
-    },
-    Migration {
-        version: 3,
-        description: "Notification read state tracking",
-        sql: include_str!("v003_notification_read_state.sql"),
-    },
-    Migration {
-        version: 4,
-        description: "Purge ONNX Runtime log spam (ort::logging rows)",
-        sql: include_str!("v004_purge_ort_logs.sql"),
-    },
-    Migration {
-        version: 5,
-        description: "Deduplicate iOS client logs and add partial unique index",
-        sql: include_str!("v005_dedup_client_logs.sql"),
-    },
-    Migration {
-        version: 6,
-        description: "Drop logs FTS (unused, 82% of DB) and purge noise rows",
-        sql: include_str!("v006_drop_logs_fts_purge_noise.sql"),
-    },
-];
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    description: "Complete schema — core tables, FTS, indexes, triggers",
+    sql: include_str!("v001_schema.sql"),
+}];
 
 /// Result of running migrations.
 #[derive(Debug)]
@@ -202,8 +175,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 6);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 1);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -252,10 +225,13 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        assert!(tables.contains(&"events_fts".to_string()));
+        assert!(
+            !tables.contains(&"events_fts".to_string()),
+            "events_fts should not exist"
+        );
         assert!(
             !tables.contains(&"logs_fts".to_string()),
-            "logs_fts should be dropped by v006"
+            "logs_fts should not exist"
         );
         assert!(tables.contains(&"tasks_fts".to_string()));
         assert!(tables.contains(&"areas_fts".to_string()));
@@ -265,7 +241,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 6);
+        assert_eq!(first.applied, 1);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -283,12 +259,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 6);
+        assert_eq!(current_version(&conn).unwrap(), 1);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 6);
+        assert_eq!(latest_version(), 1);
     }
 
     #[test]
@@ -306,7 +282,6 @@ mod tests {
 
         assert_eq!(version, 1);
         assert!(desc.contains("Complete schema"));
-        assert!(desc.contains("origin tracking"));
     }
 
     #[test]
@@ -329,7 +304,6 @@ mod tests {
             "idx_events_tool_call_id",
             "idx_sessions_workspace",
             "idx_sessions_created",
-            "idx_logs_timestamp",
             "idx_logs_trace_id",
             "idx_tasks_status",
             "idx_areas_workspace",
@@ -346,6 +320,20 @@ mod tests {
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
         }
+
+        // Verify removed indexes are gone
+        assert!(
+            !indexes.contains(&"idx_logs_timestamp".to_string()),
+            "idx_logs_timestamp should not exist"
+        );
+        assert!(
+            !indexes.contains(&"idx_events_timestamp".to_string()),
+            "idx_events_timestamp should not exist"
+        );
+        assert!(
+            !indexes.contains(&"idx_logs_event".to_string()),
+            "idx_logs_event should not exist"
+        );
     }
 
     #[test]
@@ -362,8 +350,6 @@ mod tests {
             .collect();
 
         let expected = [
-            "events_fts_insert",
-            "events_fts_delete",
             "tasks_fts_insert",
             "tasks_fts_update",
             "tasks_fts_delete",
@@ -377,6 +363,16 @@ mod tests {
                 "missing trigger: {trigger}"
             );
         }
+
+        // Verify events_fts triggers are gone
+        assert!(
+            !triggers.contains(&"events_fts_insert".to_string()),
+            "events_fts_insert should not exist"
+        );
+        assert!(
+            !triggers.contains(&"events_fts_delete".to_string()),
+            "events_fts_delete should not exist"
+        );
     }
 
     #[test]
@@ -507,85 +503,6 @@ mod tests {
     }
 
     #[test]
-    fn fts_events_trigger_fires_on_insert() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        // Insert a workspace and session first (FK constraints)
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Insert an event
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z',
-                     '{\"content\": \"hello world\"}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-
-        // Verify FTS was populated
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'hello'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn fts_events_trigger_fires_on_delete() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z',
-                     '{\"content\": \"hello world\"}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-
-        // Delete the event
-        conn.execute("DELETE FROM events WHERE id = 'evt_1'", [])
-            .unwrap();
-
-        // FTS entry should be gone
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'hello'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
     fn foreign_keys_enforced() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
@@ -604,7 +521,6 @@ mod tests {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // Insert a workspace and session for FK constraints
         conn.execute(
             "INSERT INTO workspaces (id, path, created_at, last_activity_at)
              VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
@@ -696,7 +612,6 @@ mod tests {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // Insert prerequisites
         conn.execute(
             "INSERT INTO workspaces (id, path, created_at, last_activity_at)
              VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
@@ -717,123 +632,6 @@ mod tests {
             [],
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn sessions_source_column_exists() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let columns: Vec<String> = conn
-            .prepare("PRAGMA table_info(sessions)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert!(
-            columns.contains(&"source".to_string()),
-            "sessions table missing source column"
-        );
-    }
-
-    #[test]
-    fn v002_backfills_cron_sessions() {
-        let conn = open_memory();
-        // Apply v001 only
-        ensure_version_table(&conn).unwrap();
-        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
-
-        // Insert a workspace + cron session before v002
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at, title)
-             VALUES ('sess_cron', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'Cron: daily backup')",
-            [],
-        )
-        .unwrap();
-
-        // Apply v002
-        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
-
-        let source: Option<String> = conn
-            .query_row(
-                "SELECT source FROM sessions WHERE id = 'sess_cron'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(source.as_deref(), Some("cron"));
-    }
-
-    #[test]
-    fn v002_does_not_backfill_non_cron_sessions() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at, title)
-             VALUES ('sess_user', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'My regular session')",
-            [],
-        )
-        .unwrap();
-
-        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
-
-        let source: Option<String> = conn
-            .query_row(
-                "SELECT source FROM sessions WHERE id = 'sess_user'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(source.is_none());
-    }
-
-    #[test]
-    fn v002_backfill_is_idempotent() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        // Running full migrations (which includes v002) on a fresh DB is fine.
-        // Verify no panic and version is correct.
-        assert_eq!(current_version(&conn).unwrap(), 6);
-
-        // Running again skips all migrations.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 0);
-    }
-
-    #[test]
-    fn v002_source_index_exists() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let indexes: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert!(
-            indexes.contains(&"idx_sessions_source".to_string()),
-            "missing index: idx_sessions_source"
-        );
     }
 
     #[test]
@@ -873,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn v003_notification_read_state_table_exists() {
+    fn notification_read_state_table_exists() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -892,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn v003_notification_read_state_insert_and_query() {
+    fn notification_read_state_insert_and_query() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -915,95 +713,7 @@ mod tests {
     }
 
     #[test]
-    fn v003_notification_read_state_duplicate_is_rejected() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        let duplicate = conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-02T00:00:00Z')",
-            [],
-        );
-        assert!(duplicate.is_err());
-    }
-
-    #[test]
-    fn v003_insert_or_ignore_is_idempotent() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // INSERT OR IGNORE should not fail
-        conn.execute(
-            "INSERT OR IGNORE INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-02T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Original read_at should be preserved
-        let read_at: String = conn
-            .query_row(
-                "SELECT read_at FROM notification_read_state WHERE event_id = 'evt_1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(read_at, "2026-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn v005_removes_duplicate_client_logs() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        // Apply v001 through v004
-        for m in &MIGRATIONS[..4] {
-            apply_migration(&conn, m).unwrap();
-        }
-
-        // Insert duplicate ios-client logs
-        for _ in 0..3 {
-            conn.execute(
-                "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
-                 VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
-                [],
-            )
-            .unwrap();
-        }
-
-        let before: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(before, 3);
-
-        // Apply v005
-        apply_migration(&conn, &MIGRATIONS[4]).unwrap();
-
-        let after: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(after, 1);
-    }
-
-    #[test]
-    fn v005_unique_index_prevents_duplicate_inserts() {
+    fn ios_client_dedup_index_prevents_duplicates() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1041,123 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn v006_drops_logs_fts() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        // Apply v001 through v005
-        for m in &MIGRATIONS[..5] {
-            apply_migration(&conn, m).unwrap();
-        }
-
-        // logs_fts should exist before v006
-        let has_fts: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'logs_fts'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(has_fts, "logs_fts should exist before v006");
-
-        // Apply v006
-        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
-
-        // logs_fts should be gone
-        let has_fts_after: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'logs_fts'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(!has_fts_after, "logs_fts should be dropped by v006");
-
-        // Triggers should be gone too
-        let trigger_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'logs_fts%'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(trigger_count, 0, "logs_fts triggers should be dropped");
-    }
-
-    #[test]
-    fn v006_purges_ort_and_sanitizer_logs() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for m in &MIGRATIONS[..5] {
-            apply_migration(&conn, m).unwrap();
-        }
-
-        // Insert noise rows
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message)
-             VALUES ('2026-03-01T00:00:00Z', 'info', 30, 'ort::logging', 'BFCArena alloc')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message)
-             VALUES ('2026-03-01T00:00:01Z', 'warn', 40, 'tron_llm::anthropic::message_sanitizer', 'Converted signed thinking block')",
-            [],
-        )
-        .unwrap();
-        // A legitimate log
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message)
-             VALUES ('2026-03-01T00:00:02Z', 'error', 50, 'tron_server', 'real error')",
-            [],
-        )
-        .unwrap();
-
-        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1, "only the legitimate log should survive");
-
-        let msg: String = conn
-            .query_row("SELECT message FROM logs", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(msg, "real error");
-    }
-
-    #[test]
-    fn v006_preserves_legitimate_logs() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for m in &MIGRATIONS[..5] {
-            apply_migration(&conn, m).unwrap();
-        }
-
-        // Warn from a real component (not message_sanitizer)
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message)
-             VALUES ('2026-03-01T00:00:00Z', 'warn', 40, 'tron_runtime::agent', 'guardrail blocked')",
-            [],
-        )
-        .unwrap();
-        // Error from message_sanitizer (only warn is purged)
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message)
-             VALUES ('2026-03-01T00:00:01Z', 'error', 50, 'tron_llm::anthropic::message_sanitizer', 'unexpected error')",
-            [],
-        )
-        .unwrap();
-
-        apply_migration(&conn, &MIGRATIONS[5]).unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 2, "both legitimate logs should survive");
-    }
-
-    #[test]
-    fn v005_unique_index_does_not_affect_server_logs() {
+    fn ios_dedup_does_not_affect_server_logs() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1171,7 +765,6 @@ mod tests {
             .unwrap();
         }
 
-        // Two server logs with identical content but different origins
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM logs WHERE origin != 'ios-client'",

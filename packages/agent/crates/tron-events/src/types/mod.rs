@@ -22,6 +22,6 @@ pub use base::SessionEvent;
 pub use generated::{ALL_EVENT_TYPES, EventType, SessionEventPayload};
 pub use payloads::{TokenRecord, TokenTotals, TokenUsage};
 pub use state::{
-    Branch, BranchRef, ForkRef, Message, MessageWithEventId, SearchResult, SessionMetadata,
-    SessionState, SessionSummary, Workspace,
+    Branch, BranchRef, ForkRef, Message, MessageWithEventId, SessionMetadata, SessionState,
+    SessionSummary, Workspace,
 };

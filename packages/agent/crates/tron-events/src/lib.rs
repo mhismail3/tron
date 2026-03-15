@@ -51,6 +51,6 @@ pub use store::{
     event_rows_to_session_events,
 };
 pub use types::{
-    ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SearchResult, SessionEvent,
+    ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SessionEvent,
     SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,
 };

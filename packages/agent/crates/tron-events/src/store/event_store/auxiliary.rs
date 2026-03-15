@@ -1,10 +1,8 @@
 use crate::errors::Result;
 use crate::sqlite::repositories::blob::BlobRepo;
 use crate::sqlite::repositories::device_token::{DeviceTokenRepo, RegisterTokenResult};
-use crate::sqlite::repositories::search::{SearchOptions, SearchRepo};
 use crate::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::sqlite::row_types::{BlobRow, DeviceTokenRow, WorkspaceRow};
-use crate::types::state::SearchResult;
 
 use super::EventStore;
 
@@ -53,23 +51,6 @@ impl EventStore {
     pub fn get_blob(&self, blob_id: &str) -> Result<Option<BlobRow>> {
         let conn = self.conn()?;
         BlobRepo::get_by_id(&conn, blob_id)
-    }
-
-    /// Full-text search across all events.
-    pub fn search(&self, query: &str, opts: &SearchOptions<'_>) -> Result<Vec<SearchResult>> {
-        let conn = self.conn()?;
-        SearchRepo::search(&conn, query, opts)
-    }
-
-    /// Search within a specific session.
-    pub fn search_in_session(
-        &self,
-        session_id: &str,
-        query: &str,
-        limit: Option<i64>,
-    ) -> Result<Vec<SearchResult>> {
-        let conn = self.conn()?;
-        SearchRepo::search_in_session(&conn, session_id, query, limit)
     }
 
     /// Register or update a device token. Returns `{id, created}`.

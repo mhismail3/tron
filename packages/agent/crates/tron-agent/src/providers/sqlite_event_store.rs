@@ -1,7 +1,8 @@
 //! Real `EventStoreQuery` backed by `tron_events::EventStore`.
 //!
 //! Provides the Remember tool with actual database access for session queries,
-//! event lookups, FTS search, blob retrieval, and schema introspection.
+//! event lookups, blob retrieval, and schema introspection.
+//! Memory recall uses hybrid vector + FTS search via `memory_vectors`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,7 +11,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tron_embeddings::{HybridSearchOptions, apply_temporal_decay};
 use tron_events::EventStore;
-use tron_events::EventType;
 use tron_events::sqlite::repositories::event::ListEventsOptions;
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
@@ -55,30 +55,14 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             return Ok(Vec::new());
         }
 
-        // 1. FTS search (scoped to memory.ledger events)
-        let memory_types = [EventType::MemoryLedger];
-        let fts_opts = tron_events::sqlite::repositories::search::SearchOptions {
-            workspace_id,
-            session_id: None,
-            types: Some(&memory_types),
-            limit: Some(i64::from(limit) * 2), // over-fetch for RRF
-            offset: None,
-        };
-        let fts_raw = self.store.search(query, &fts_opts).unwrap_or_default();
-        #[allow(clippy::cast_possible_truncation)]
-        let fts_results: Vec<(String, f32)> = fts_raw
-            .iter()
-            .map(|r| (r.event_id.clone(), r.score as f32))
-            .collect();
-
-        // 2. Hybrid search (if embeddings ready)
+        // Hybrid search via memory_vectors (vector + FTS on embeddings table)
         if let Some(ref ec) = self.embedding_controller {
             let ctrl = ec.lock().await;
             if ctrl.is_ready() {
                 let half_life_days = ctrl.config().half_life_days;
                 let cross_project_top_k = ctrl.config().cross_project_top_k;
 
-                // 2a. Local hybrid search (vector + FTS)
+                // Local hybrid search (vector + memory_vectors FTS)
                 let local_opts = tron_embeddings::SearchOptions {
                     limit: limit as usize * 2,
                     workspace_id: workspace_id.map(String::from),
@@ -87,7 +71,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 let mut all_results = ctrl
                     .hybrid_search(
                         query,
-                        &fts_results,
+                        &[], // no external FTS results
                         &HybridSearchOptions {
                             limit: limit as usize,
                             ..Default::default()
@@ -97,7 +81,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                     .await
                     .unwrap_or_default();
 
-                // 2b. Cross-project search (vector-only, excludes current workspace)
+                // Cross-project search (vector-only, excludes current workspace)
                 if let Some(ws) = workspace_id
                     && cross_project_top_k > 0
                 {
@@ -109,7 +93,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                     if let Ok(mut cross) = ctrl
                         .hybrid_search(
                             query,
-                            &[], // vector-only for cross-project
+                            &[],
                             &HybridSearchOptions {
                                 limit: cross_project_top_k,
                                 ..Default::default()
@@ -123,7 +107,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 }
 
                 if !all_results.is_empty() {
-                    // 3. Apply temporal decay
+                    // Apply temporal decay
                     let now = chrono::Utc::now();
                     let mut timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> =
                         HashMap::new();
@@ -137,7 +121,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                     }
                     apply_temporal_decay(&mut all_results, &timestamps, half_life_days, now);
 
-                    // 4. Convert to MemoryEntry (capped at limit)
+                    // Convert to MemoryEntry (capped at limit)
                     let entries: Vec<MemoryEntry> = all_results
                         .into_iter()
                         .take(limit as usize)
@@ -181,68 +165,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             }
         }
 
-        // 5. Fall back to FTS-only if no hybrid results
-        if !fts_raw.is_empty() {
-            return Ok(fts_raw
-                .into_iter()
-                .take(limit as usize)
-                .map(|r| {
-                    let content = if r.snippet.is_empty() {
-                        r.event_type.to_string()
-                    } else {
-                        r.snippet
-                    };
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let normalized = ((-r.score).min(20.0) / 20.0 * 100.0) as u32;
-                    MemoryEntry {
-                        content,
-                        session_id: Some(r.session_id),
-                        score: Some(normalized.min(100)),
-                        timestamp: Some(r.timestamp),
-                    }
-                })
-                .collect());
-        }
-        self.search_memory(None, query, limit, 0).await
-    }
-
-    async fn search_memory(
-        &self,
-        session_id: Option<&str>,
-        query: &str,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError> {
-        if query.is_empty() {
-            return Ok(Vec::new());
-        }
-        let opts = tron_events::sqlite::repositories::search::SearchOptions {
-            workspace_id: None,
-            session_id,
-            types: None,
-            limit: Some(i64::from(limit)),
-            offset: Some(i64::from(offset)),
-        };
-        let results = self.store.search(query, &opts).map_err(tool_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| {
-                let content = if r.snippet.is_empty() {
-                    r.event_type.to_string()
-                } else {
-                    r.snippet
-                };
-                // BM25 score is negative (lower = better); normalize to 0-100
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let normalized = ((-r.score).min(20.0) / 20.0 * 100.0) as u32;
-                MemoryEntry {
-                    content,
-                    session_id: Some(r.session_id),
-                    score: Some(normalized.min(100)),
-                    timestamp: Some(r.timestamp),
-                }
-            })
-            .collect())
+        Ok(Vec::new())
     }
 
     async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError> {

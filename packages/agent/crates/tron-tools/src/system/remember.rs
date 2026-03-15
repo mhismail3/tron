@@ -16,8 +16,6 @@ use crate::utils::validation::{get_optional_string, get_optional_u64, validate_r
 
 const VALID_ACTIONS: &[&str] = &[
     "recall",
-    "search",
-    "memory",
     "schema",
     "sessions",
     "session",
@@ -108,13 +106,6 @@ async fn dispatch_action(
             let entries = store.recall_memory(&q, workspace_id, limit).await?;
             format_entries(&entries)
         }
-        "search" | "memory" => {
-            let q = query.unwrap_or_default();
-            let entries = store
-                .search_memory(session_id.as_deref(), &q, limit, offset)
-                .await?;
-            format_entries(&entries)
-        }
         "sessions" => {
             let sessions = store.list_sessions(limit, offset).await?;
             format_sessions(&sessions)
@@ -200,7 +191,6 @@ review session history, and retrieve stored content.\n\n\
 Available actions:\n\
 - recall (default): Semantic memory search — \"find memories about X\". Uses vector similarity to find \
 the most relevant past work even when exact keywords don't match. ALWAYS provide a query.\n\
-- search: Keyword search via exact term matching in memory ledger entries.\n\
 - sessions: List recent sessions (title, tokens, cost)\n\
 - session: Get details for a specific session\n\
 - events: Get raw events (filter by session_id, type, turn)\n\
@@ -210,9 +200,8 @@ the most relevant past work even when exact keywords don't match. ALWAYS provide
 - stats: Get database statistics\n\
 - schema: List database tables and columns\n\
 - read_blob: Read stored content from blob storage\n\n\
-Search strategy: Use \"recall\" for finding relevant past work (semantic). Use \"search\" for exact \
-keyword matching. Start narrow (query + small limit), then broaden if needed.\n\
-Use read_blob to retrieve full content when tool results reference a blob_id.",
+Use recall with a query to find relevant past work. Start narrow (query + small limit), \
+then broaden if needed. Use read_blob to retrieve full content when tool results reference a blob_id.",
         )
         .required_property("action", json!({
             "type": "string",
@@ -279,20 +268,6 @@ mod tests {
                 content: "recalled memory".into(),
                 session_id: None,
                 score: Some(85),
-                timestamp: None,
-            }])
-        }
-        async fn search_memory(
-            &self,
-            _sid: Option<&str>,
-            _q: &str,
-            _limit: u32,
-            _offset: u32,
-        ) -> Result<Vec<MemoryEntry>, ToolError> {
-            Ok(vec![MemoryEntry {
-                content: "searched memory".into(),
-                session_id: None,
-                score: None,
                 timestamp: None,
             }])
         }
@@ -370,24 +345,6 @@ mod tests {
             .unwrap();
         assert!(extract_text(&r).contains("recalled memory"));
         assert!(extract_text(&r).contains("relevance: 85%"));
-    }
-
-    #[tokio::test]
-    async fn search_action() {
-        let r = tool()
-            .execute(json!({"action": "search", "query": "test"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(extract_text(&r).contains("searched memory"));
-    }
-
-    #[tokio::test]
-    async fn memory_alias_for_search() {
-        let r = tool()
-            .execute(json!({"action": "memory", "query": "test"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(extract_text(&r).contains("searched memory"));
     }
 
     #[tokio::test]

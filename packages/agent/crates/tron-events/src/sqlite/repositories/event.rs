@@ -1242,31 +1242,6 @@ mod tests {
         assert_eq!(summary.output_tokens, 0);
     }
 
-    #[test]
-    fn fts_trigger_indexes_on_insert() {
-        let conn = setup();
-        EventRepo::insert(
-            &conn,
-            &make_event(
-                "evt_1",
-                1,
-                EventType::MessageUser,
-                None,
-                json!({"content": "search for this phrase"}),
-            ),
-        )
-        .unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'phrase'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
     // ── Batch operations ─────────────────────────────────────────────
 
     #[test]

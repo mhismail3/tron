@@ -2,8 +2,8 @@
 --
 -- Tables: workspaces, sessions, events, blobs, branches,
 --         logs, device_tokens, projects, tasks, task_dependencies,
---         task_activity, task_backlog, areas
--- FTS:    events_fts, logs_fts, tasks_fts, areas_fts
+--         task_activity, task_backlog, areas, notification_read_state
+-- FTS:    tasks_fts, areas_fts
 -- Meta:   schema_version
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   spawning_session_id        TEXT,
   spawn_type                 TEXT,
   spawn_task                 TEXT,
-  origin                     TEXT
+  origin                     TEXT,
+  source                     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace   ON sessions(workspace_id);
@@ -68,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_ended       ON sessions(ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_created     ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_spawning    ON sessions(spawning_session_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_origin      ON sessions(origin);
+CREATE INDEX IF NOT EXISTS idx_sessions_source      ON sessions(source);
 
 -- Events (immutable append-only log — heart of event sourcing)
 CREATE TABLE IF NOT EXISTS events (
@@ -103,7 +105,6 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_session_seq       ON events(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_events_parent            ON events(parent_id);
 CREATE INDEX IF NOT EXISTS idx_events_type              ON events(type);
-CREATE INDEX IF NOT EXISTS idx_events_timestamp         ON events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_workspace         ON events(workspace_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_tool_call_id      ON events(tool_call_id) WHERE tool_call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_message_preview   ON events(session_id, type, sequence DESC)
@@ -168,15 +169,18 @@ CREATE TABLE IF NOT EXISTS logs (
   origin          TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_logs_timestamp      ON logs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_session_time   ON logs(session_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_level_time     ON logs(level_num, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_event          ON logs(event_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_trace_id       ON logs(trace_id);
 CREATE INDEX IF NOT EXISTS idx_logs_parent_trace   ON logs(parent_trace_id);
 CREATE INDEX IF NOT EXISTS idx_logs_origin         ON logs(origin);
+
+-- Partial unique index: dedup iOS client logs
+CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_ios_client_dedup
+  ON logs(timestamp, component, message)
+  WHERE origin = 'ios-client';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Device Tokens (push notifications)
@@ -332,71 +336,17 @@ CREATE INDEX IF NOT EXISTS idx_backlog_status    ON task_backlog(status, restore
 CREATE INDEX IF NOT EXISTS idx_backlog_session   ON task_backlog(source_session_id);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Full-Text Search
+-- Notification Read State
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- Events FTS
-CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
-  id UNINDEXED, session_id UNINDEXED, type, content, tool_name,
-  tokenize='porter unicode61'
+CREATE TABLE IF NOT EXISTS notification_read_state (
+    event_id TEXT PRIMARY KEY,
+    read_at  TEXT NOT NULL
 );
 
-CREATE TRIGGER IF NOT EXISTS events_fts_insert
-AFTER INSERT ON events
-BEGIN
-  INSERT INTO events_fts (id, session_id, type, content, tool_name)
-  VALUES (
-    NEW.id,
-    NEW.session_id,
-    NEW.type,
-    CASE WHEN json_valid(NEW.payload)
-      THEN COALESCE(json_extract(NEW.payload, '$.content'), '')
-      ELSE ''
-    END,
-    COALESCE(
-      NEW.tool_name,
-      CASE WHEN json_valid(NEW.payload)
-        THEN COALESCE(
-          json_extract(NEW.payload, '$.toolName'),
-          json_extract(NEW.payload, '$.name')
-        )
-        ELSE NULL
-      END,
-      ''
-    )
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS events_fts_delete
-AFTER DELETE ON events
-BEGIN
-  DELETE FROM events_fts WHERE id = OLD.id;
-END;
-
--- Logs FTS
-CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
-  log_id UNINDEXED, session_id UNINDEXED, component, message, error_message,
-  tokenize='porter unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS logs_fts_insert
-AFTER INSERT ON logs
-BEGIN
-  INSERT INTO logs_fts (log_id, session_id, component, message, error_message)
-  VALUES (
-    NEW.id,
-    NEW.session_id,
-    NEW.component,
-    NEW.message,
-    COALESCE(NEW.error_message, '')
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS logs_fts_delete
-AFTER DELETE ON logs
-BEGIN
-  DELETE FROM logs_fts WHERE log_id = OLD.id;
-END;
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Full-Text Search (tasks and areas only)
+-- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Tasks FTS
 CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(

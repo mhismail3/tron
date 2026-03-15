@@ -443,45 +443,6 @@ async fn e2e_context_snapshot() {
 }
 
 #[tokio::test]
-async fn e2e_search_events() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
-    )
-    .await;
-    let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
-
-    let _ = rpc_call(
-        &mut ws,
-        2,
-        "events.append",
-        Some(json!({
-            "sessionId": sid,
-            "type": "message.user",
-            "payload": {"text": "unique_search_term_xyz"}
-        })),
-    )
-    .await;
-
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "search.content",
-        Some(json!({"query": "unique_search_term_xyz"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
 async fn e2e_concurrent_sessions() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;

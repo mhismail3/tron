@@ -350,35 +350,33 @@ WHERE w.path LIKE '%/my-project%'
 ORDER BY s.last_activity_at DESC;
 ```
 
-### 15. Full-Text Search Events
+### 15. Search Events by Content (LIKE)
 
 ```sql
 SELECT
-  e.id,
-  e.session_id,
-  e.type,
-  datetime(e.timestamp) as time,
-  snippet(events_fts, 0, '>>>', '<<<', '...', 30) as match
-FROM events_fts
-JOIN events e ON events_fts.rowid = e.rowid
-WHERE events_fts MATCH 'error OR exception'
-ORDER BY e.timestamp DESC
+  id,
+  session_id,
+  type,
+  datetime(timestamp) as time,
+  substr(payload, 1, 200) as payload_preview
+FROM events
+WHERE payload LIKE '%error%'
+ORDER BY timestamp DESC
 LIMIT 20;
 ```
 
-### 16. Full-Text Search Logs
+### 16. Search Logs by Message (LIKE)
 
 ```sql
 SELECT
-  l.id,
-  l.session_id,
-  datetime(l.timestamp) as time,
-  l.level,
-  snippet(logs_fts, 0, '>>>', '<<<', '...', 30) as match
-FROM logs_fts
-JOIN logs l ON logs_fts.rowid = l.id
-WHERE logs_fts MATCH 'timeout OR failed'
-ORDER BY l.timestamp DESC
+  id,
+  session_id,
+  datetime(timestamp) as time,
+  level,
+  message
+FROM logs
+WHERE message LIKE '%timeout%' OR message LIKE '%failed%'
+ORDER BY timestamp DESC
 LIMIT 20;
 ```
 
@@ -531,20 +529,19 @@ WHERE origin = 'ios-client'
 ORDER BY timestamp;
 ```
 
-### 25. Full-Text Search iOS Client Logs
+### 25. Search iOS Client Logs by Message (LIKE)
 
 ```sql
 SELECT
-  l.id,
-  datetime(l.timestamp) as time,
-  l.level,
-  l.component,
-  snippet(logs_fts, 0, '>>>', '<<<', '...', 30) as match
-FROM logs_fts
-JOIN logs l ON logs_fts.rowid = l.id
-WHERE logs_fts MATCH 'timeout OR disconnect'
-  AND l.origin = 'ios-client'
-ORDER BY l.timestamp DESC
+  id,
+  datetime(timestamp) as time,
+  level,
+  component,
+  message
+FROM logs
+WHERE (message LIKE '%timeout%' OR message LIKE '%disconnect%')
+  AND origin = 'ios-client'
+ORDER BY timestamp DESC
 LIMIT 20;
 ```
 

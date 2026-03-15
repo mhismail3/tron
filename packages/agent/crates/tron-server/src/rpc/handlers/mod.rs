@@ -12,8 +12,7 @@
 //! ## `register_capabilities` — Domain features
 //!
 //! `skills` (list, get, refresh), `filesystem` (list, read, mkdir),
-//! `search` (content, events), `task`/`projects`/`areas` (CRUD),
-//! `tree` (visualization, branches)
+//! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches)
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -38,7 +37,6 @@ pub mod model;
 pub mod notifications;
 pub mod plan;
 pub mod sandbox;
-pub mod search;
 pub mod session;
 pub mod settings;
 pub mod skills;
@@ -147,10 +145,6 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("filesystem.getHome", filesystem::GetHomeHandler);
     registry.register("filesystem.createDir", filesystem::CreateDirHandler);
     registry.register("file.read", filesystem::ReadFileHandler);
-
-    // Search
-    registry.register("search.content", search::ContentSearchHandler);
-    registry.register("search.events", search::EventSearchHandler);
 
     // Tasks (plural to match TypeScript wire format)
     registry.register("tasks.create", task::CreateTaskHandler);
@@ -538,8 +532,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            124,
-            "expected 124 methods, got {}",
+            122,
+            "expected 122 methods, got {}",
             reg.methods().len()
         );
     }

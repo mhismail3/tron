@@ -100,7 +100,6 @@ mod tests {
     use crate::sqlite::connection::{self, ConnectionConfig};
     use crate::sqlite::migrations::run_migrations;
     use crate::sqlite::repositories::event::ListEventsOptions;
-    use crate::sqlite::repositories::search::SearchOptions;
     use crate::sqlite::repositories::session::ListSessionsOptions;
 
     fn setup() -> EventStore {
@@ -1223,62 +1222,6 @@ mod tests {
         let blob = store.get_blob(&blob_id).unwrap().unwrap();
         assert_eq!(blob.mime_type, "text/plain");
         assert_eq!(blob.size_original, 11);
-    }
-
-    // ── Search ────────────────────────────────────────────────────────
-
-    #[test]
-    fn search_events() {
-        let store = setup();
-        let cr = store
-            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
-            .unwrap();
-
-        store
-            .append(&AppendOptions {
-                session_id: &cr.session.id,
-                event_type: EventType::MessageUser,
-                payload: serde_json::json!({"content": "rust programming"}),
-                parent_id: None,
-            })
-            .unwrap();
-
-        let results = store.search("rust", &SearchOptions::default()).unwrap();
-        assert_eq!(results.len(), 1);
-    }
-
-    #[test]
-    fn search_in_session() {
-        let store = setup();
-        let cr1 = store
-            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
-            .unwrap();
-        let cr2 = store
-            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
-            .unwrap();
-
-        store
-            .append(&AppendOptions {
-                session_id: &cr1.session.id,
-                event_type: EventType::MessageUser,
-                payload: serde_json::json!({"content": "hello world"}),
-                parent_id: None,
-            })
-            .unwrap();
-        store
-            .append(&AppendOptions {
-                session_id: &cr2.session.id,
-                event_type: EventType::MessageUser,
-                payload: serde_json::json!({"content": "hello cosmos"}),
-                parent_id: None,
-            })
-            .unwrap();
-
-        let results = store
-            .search_in_session(&cr1.session.id, "hello", None)
-            .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].session_id, cr1.session.id);
     }
 
     // ── Workspace ─────────────────────────────────────────────────────

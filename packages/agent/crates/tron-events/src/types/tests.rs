@@ -803,21 +803,6 @@ mod state_type_tests {
     }
 
     #[test]
-    fn search_result_serde() {
-        let sr = SearchResult {
-            event_id: "evt-1".into(),
-            session_id: "sess-1".into(),
-            event_type: crate::types::EventType::MessageUser,
-            timestamp: "2026-01-01T00:00:00Z".into(),
-            snippet: "Hello <mark>world</mark>".into(),
-            score: 0.95,
-        };
-        let json = serde_json::to_value(&sr).unwrap();
-        assert_eq!(json["type"], "message.user");
-        assert_eq!(json["score"], 0.95);
-    }
-
-    #[test]
     fn branch_serde_roundtrip() {
         let b = Branch {
             id: "br-1".into(),

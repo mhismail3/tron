@@ -1,11 +1,10 @@
-//! State types for sessions, workspaces, and search results.
+//! State types for sessions, workspaces, and branches.
 //!
 //! These match the TypeScript `state.ts` types for wire compatibility.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::generated::EventType;
 use super::payloads::TokenUsage;
 
 /// A reconstructed message from the event history.
@@ -191,21 +190,3 @@ pub struct Workspace {
     pub session_count: i64,
 }
 
-/// Search result from FTS5 search.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchResult {
-    /// Event ID.
-    pub event_id: String,
-    /// Session ID.
-    pub session_id: String,
-    /// Event type.
-    #[serde(rename = "type")]
-    pub event_type: EventType,
-    /// Timestamp.
-    pub timestamp: String,
-    /// Highlighted snippet.
-    pub snippet: String,
-    /// BM25 relevance score.
-    pub score: f64,
-}

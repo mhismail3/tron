@@ -133,15 +133,6 @@ impl EventStoreQuery for StubEventStoreQuery {
     ) -> Result<Vec<MemoryEntry>, ToolError> {
         Err(not_available("Memory recall"))
     }
-    async fn search_memory(
-        &self,
-        _session_id: Option<&str>,
-        _query: &str,
-        _limit: u32,
-        _offset: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError> {
-        Err(not_available("Memory search"))
-    }
     async fn list_sessions(
         &self,
         _limit: u32,

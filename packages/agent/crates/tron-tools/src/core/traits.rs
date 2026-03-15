@@ -522,14 +522,6 @@ pub trait EventStoreQuery: Send + Sync {
         workspace_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<MemoryEntry>, ToolError>;
-    /// Full-text search.
-    async fn search_memory(
-        &self,
-        session_id: Option<&str>,
-        query: &str,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError>;
     /// List sessions.
     async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError>;
     /// Get a single session.
