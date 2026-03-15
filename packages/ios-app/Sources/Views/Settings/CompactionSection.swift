@@ -54,7 +54,7 @@ struct CompactionSection: View {
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .frame(minWidth: 20)
-                TronStepper(value: $defaultTurnFallback, range: 3...20)
+                TronStepper(value: $defaultTurnFallback, range: 3...50)
             }
             .onChange(of: defaultTurnFallback) { _, newValue in
                 updateServerSetting {

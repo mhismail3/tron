@@ -89,7 +89,7 @@ struct ServerSettings: Decodable {
         static let defaults = CompactionSettings(
             preserveRecentCount: 5, forceAlways: false,
             triggerTokenThreshold: 0.70, alertZoneThreshold: 0.50,
-            defaultTurnFallback: 8, alertTurnFallback: 5,
+            defaultTurnFallback: 25, alertTurnFallback: 15,
             maxPreservedRatio: 0.20
         )
 
@@ -118,8 +118,8 @@ struct ServerSettings: Decodable {
             forceAlways = (try? container.decodeIfPresent(Bool.self, forKey: .forceAlways)) ?? false
             triggerTokenThreshold = (try? container.decodeIfPresent(Double.self, forKey: .triggerTokenThreshold)) ?? 0.70
             alertZoneThreshold = (try? container.decodeIfPresent(Double.self, forKey: .alertZoneThreshold)) ?? 0.50
-            defaultTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .defaultTurnFallback)) ?? 8
-            alertTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .alertTurnFallback)) ?? 5
+            defaultTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .defaultTurnFallback)) ?? 25
+            alertTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .alertTurnFallback)) ?? 15
             maxPreservedRatio = (try? container.decodeIfPresent(Double.self, forKey: .maxPreservedRatio)) ?? 0.20
         }
     }
