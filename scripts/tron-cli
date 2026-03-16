@@ -90,7 +90,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,workspace/canvases,workspace/deployment,workspace/scratch,workspace/downloads,workspace/cron}
+    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,workspace/canvases,workspace/deployment,workspace/scratch,workspace/cron}
     mkdir -p "$TRON_HOME"/mods/apns
 }
 

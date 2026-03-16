@@ -741,8 +741,7 @@ The deploy process:
 +-- workspace/
 |   +-- canvases/          Generated artifacts
 |   +-- deployment/        Deploy state files
-|   +-- scratch/           Temp files, experiments
-|   +-- downloads/         Downloaded files
+|   +-- scratch/           Downloads, temp files, experiments
 |   +-- cron/              Cron job working directories
 ```
 

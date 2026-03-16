@@ -468,7 +468,7 @@ async fn main() -> Result<()> {
         if old_artifacts.exists() && !new_workspace.exists() {
             let _ = std::fs::rename(&old_artifacts, &new_workspace);
         }
-        for subdir in &["scratch", "downloads", "cron", "canvases", "deployment"] {
+        for subdir in &["scratch", "cron", "canvases", "deployment"] {
             let _ = std::fs::create_dir_all(new_workspace.join(subdir));
         }
     }

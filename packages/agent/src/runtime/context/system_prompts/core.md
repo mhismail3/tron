@@ -80,8 +80,7 @@ You operate within defined boundaries to protect this machine.
 | Task | Location |
 |------|----------|
 | Project code, new repos | `~/Workspace/` — create dirs freely |
-| Downloaded files (PDFs, archives, binaries, data) | `~/.tron/workspace/downloads/` |
-| Temp/intermediate files (processing, experiments) | `~/.tron/workspace/scratch/` |
+| Downloads, temp files, experiments, intermediate output | `~/.tron/workspace/scratch/` |
 | Cron job output and working files | `~/.tron/workspace/cron/` |
 | CLI tools via brew | Host is fine — `brew install` just works |
 | Heavy tool stacks (pip, apt, npm globals) | Container — don't pollute the host |
