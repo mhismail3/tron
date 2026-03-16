@@ -201,14 +201,6 @@ struct CommandToolTypesTests {
         #expect(config.displayName == "File Search")
     }
 
-    @Test("Registry returns correct config for OpenURL tool")
-    func testRegistryOpenURLConfig() {
-        let config = CommandToolRegistry.config(for: "openurl")
-
-        #expect(config.icon == "safari")
-        #expect(config.displayName == "Open URL")
-    }
-
     @Test("Registry returns correct config for WebFetch tool")
     func testRegistryWebFetchConfig() {
         let config = CommandToolRegistry.config(for: "webfetch")
@@ -264,7 +256,6 @@ struct CommandToolTypesTests {
         #expect(commandTools.contains("glob"))
         #expect(commandTools.contains("find"))
         #expect(commandTools.contains("browsetheweb"))
-        #expect(commandTools.contains("openurl"))
         #expect(commandTools.contains("webfetch"))
         #expect(commandTools.contains("websearch"))
         #expect(commandTools.contains("task"))

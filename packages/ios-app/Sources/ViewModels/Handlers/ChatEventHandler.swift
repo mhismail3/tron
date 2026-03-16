@@ -209,7 +209,18 @@ final class ChatEventHandler {
         // Detect tool types
         let isAskUserQuestion = kind == .askUserQuestion
         let isBrowserTool = kind == .browseTheWeb
-        let isOpenURL = kind == .openURL
+
+        // Detect BrowseTheWeb openURL action
+        let isOpenURL: Bool
+        if kind == .browseTheWeb,
+           let args = pluginResult.arguments,
+           let actionValue = args["action"],
+           let actionStr = actionValue.value as? String,
+           actionStr == "openURL" {
+            isOpenURL = true
+        } else {
+            isOpenURL = false
+        }
 
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?
@@ -219,7 +230,7 @@ final class ChatEventHandler {
             }
         }
 
-        // Parse OpenURL URL if applicable
+        // Parse openURL URL from BrowseTheWeb action
         var openURL: URL?
         if isOpenURL {
             if let args = pluginResult.arguments,

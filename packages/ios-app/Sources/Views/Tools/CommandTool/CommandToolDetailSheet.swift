@@ -11,12 +11,9 @@ struct CommandToolDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isResultExpanded = true
 
-    /// Parsed URL for openurl tools
+    /// Parsed URL for tools that provide a URL to open
     private var parsedURL: URL? {
-        guard data.normalizedName == "openurl" else { return nil }
-        let urlString = extractUrl(from: data.arguments)
-        guard !urlString.isEmpty else { return nil }
-        return URL(string: urlString)
+        return nil
     }
 
     var body: some View {
@@ -202,7 +199,7 @@ struct CommandToolDetailSheet: View {
             return extractPattern(from: data.arguments)
         case "browsetheweb":
             return extractBrowserDetails(from: data.arguments)
-        case "openurl", "webfetch":
+        case "webfetch":
             return extractUrl(from: data.arguments)
         case "websearch":
             return extractQuery(from: data.arguments)
@@ -346,12 +343,6 @@ struct CommandToolDetailSheet: View {
         case "browsetheweb":
             BrowserToolViewer(
                 action: extractBrowserAction(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
-            )
-        case "openurl":
-            OpenURLResultViewer(
-                url: extractUrl(from: data.arguments),
                 result: result,
                 isExpanded: $isResultExpanded
             )

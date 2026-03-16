@@ -192,14 +192,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 0)
     }
 
-    func testToolGeneratingSkipsOpenURL() async throws {
-        let result = ToolGeneratingPlugin.Result(toolName: "OpenURL", toolCallId: "gen_openurl")
-
-        coordinator.handleToolGenerating(result, context: mockContext)
-
-        XCTAssertEqual(mockContext.messages.count, 0)
-    }
-
     func testToolStartUpdatesDuplicateFromGenerating() async throws {
         // Given: tool_generating already created a chip with empty arguments
         let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_first")
@@ -625,26 +617,26 @@ final class ToolEventCoordinatorTests: XCTestCase {
         }
     }
 
-    // MARK: - OpenURL Tool Tests
+    // MARK: - BrowseTheWeb openURL Action Tests
 
-    func testOpenURLToolStart() async throws {
-        // Given: An OpenURL tool start
+    func testBrowseTheWebOpenURLAction() async throws {
+        // Given: A BrowseTheWeb tool start with openURL action
         let url = URL(string: "https://example.com")!
         let event = ToolStartPlugin.Result(
-            toolName: "OpenURL",
+            toolName: "BrowseTheWeb",
             toolCallId: "browser_123",
-            arguments: ["url": AnyCodable("https://example.com")],
-            formattedArguments: "{\"url\": \"https://example.com\"}"
+            arguments: ["action": AnyCodable("openURL"), "url": AnyCodable("https://example.com")],
+            formattedArguments: "{\"action\": \"openURL\", \"url\": \"https://example.com\"}"
         )
         let result = ToolStartResult(
             tool: ToolUseData(
-                toolName: "OpenURL",
+                toolName: "BrowseTheWeb",
                 toolCallId: "browser_123",
-                arguments: "{\"url\": \"https://example.com\"}",
+                arguments: "{\"action\": \"openURL\", \"url\": \"https://example.com\"}",
                 status: .running
             ),
             isAskUserQuestion: false,
-            isBrowserTool: false,
+            isBrowserTool: true,
             isOpenURL: true,
             askUserQuestionParams: nil,
             openURL: url
@@ -659,7 +651,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         // Then: Should ALSO create regular tool message (don't return early)
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .toolUse(let tool) = mockContext.messages[0].content {
-            XCTAssertEqual(tool.toolName, "OpenURL")
+            XCTAssertEqual(tool.toolName, "BrowseTheWeb")
         } else {
             XCTFail("Expected toolUse content")
         }

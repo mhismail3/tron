@@ -275,7 +275,6 @@ struct ServerSettings: Decodable {
 
     struct IntegrationSettings: Decodable {
         let deviceContext: DeviceContextSettings
-        let clipboard: ClipboardSettings
         let haptics: HapticsSettings
         let calendar: CalendarSettings
         let contacts: ContactsSettings
@@ -283,20 +282,19 @@ struct ServerSettings: Decodable {
         let location: LocationSettings
 
         static let defaults = IntegrationSettings(
-            deviceContext: .defaults, clipboard: .defaults, haptics: .defaults,
+            deviceContext: .defaults, haptics: .defaults,
             calendar: .defaults, contacts: .defaults, health: .defaults, location: .defaults
         )
 
         private enum CodingKeys: String, CodingKey {
-            case deviceContext, clipboard, haptics, calendar, contacts, health, location
+            case deviceContext, haptics, calendar, contacts, health, location
         }
 
-        init(deviceContext: DeviceContextSettings, clipboard: ClipboardSettings,
+        init(deviceContext: DeviceContextSettings,
              haptics: HapticsSettings, calendar: CalendarSettings,
              contacts: ContactsSettings, health: HealthSettings,
              location: LocationSettings) {
             self.deviceContext = deviceContext
-            self.clipboard = clipboard
             self.haptics = haptics
             self.calendar = calendar
             self.contacts = contacts
@@ -307,7 +305,6 @@ struct ServerSettings: Decodable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             deviceContext = (try? container.decodeIfPresent(DeviceContextSettings.self, forKey: .deviceContext)) ?? .defaults
-            clipboard = (try? container.decodeIfPresent(ClipboardSettings.self, forKey: .clipboard)) ?? .defaults
             haptics = (try? container.decodeIfPresent(HapticsSettings.self, forKey: .haptics)) ?? .defaults
             calendar = (try? container.decodeIfPresent(CalendarSettings.self, forKey: .calendar)) ?? .defaults
             contacts = (try? container.decodeIfPresent(ContactsSettings.self, forKey: .contacts)) ?? .defaults
@@ -354,19 +351,6 @@ struct ServerSettings: Decodable {
                 activity = (try? container.decodeIfPresent(Bool.self, forKey: .activity)) ?? true
                 calendarPreview = (try? container.decodeIfPresent(Bool.self, forKey: .calendarPreview)) ?? true
             }
-        }
-
-        struct ClipboardSettings: Decodable {
-            let enabled: Bool
-            static let defaults = ClipboardSettings(enabled: false)
-
-            init(enabled: Bool) { self.enabled = enabled }
-
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
-            }
-            private enum CodingKeys: String, CodingKey { case enabled }
         }
 
         struct HapticsSettings: Decodable {
@@ -552,7 +536,6 @@ struct ServerSettingsUpdate: Encodable {
 
     struct IntegrationsUpdate: Encodable {
         var deviceContext: DeviceContextUpdate?
-        var clipboard: ClipboardUpdate?
         var haptics: HapticsUpdate?
         var calendar: CalendarUpdate?
         var contacts: ContactsUpdate?
@@ -567,10 +550,6 @@ struct ServerSettingsUpdate: Encodable {
             var display: Bool?
             var activity: Bool?
             var calendarPreview: Bool?
-        }
-
-        struct ClipboardUpdate: Encodable {
-            var enabled: Bool?
         }
 
         struct HapticsUpdate: Encodable {

@@ -409,7 +409,7 @@ protocol ErrorClassifying {
 // MARK: - Classified Error Section
 
 /// Shared error section that uses `ErrorClassification` to render structured error UI.
-/// Replaces the duplicated error section pattern across WebFetch, WebSearch, Remember, and OpenURL sheets.
+/// Replaces the duplicated error section pattern across WebFetch, WebSearch, and Remember sheets.
 @available(iOS 26.0, *)
 struct ToolClassifiedErrorSection<AdditionalContent: View>: View {
     let errorMessage: String

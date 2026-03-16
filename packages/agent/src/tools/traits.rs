@@ -266,75 +266,6 @@ pub struct NotifyResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Message bus types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// An outgoing inter-session message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OutgoingMessage {
-    /// Target session ID.
-    pub target_session_id: String,
-    /// Message type.
-    pub message_type: String,
-    /// Message payload.
-    pub payload: Value,
-    /// Whether to wait for a reply.
-    pub wait_for_reply: bool,
-    /// Timeout in milliseconds for reply wait.
-    pub timeout_ms: u64,
-}
-
-/// Result from sending a message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageSendResult {
-    /// Message ID.
-    pub message_id: String,
-    /// Reply (only if `wait_for_reply` was true).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply: Option<Value>,
-}
-
-/// Filter for receiving messages.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageFilter {
-    /// Filter by message type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message_type: Option<String>,
-    /// Filter by sender session ID.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from_session_id: Option<String>,
-    /// Whether to mark messages as read.
-    #[serde(default = "default_true")]
-    pub mark_as_read: bool,
-    /// Maximum messages to return.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// A received message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReceivedMessage {
-    /// Message ID.
-    pub message_id: String,
-    /// Sender session ID.
-    pub from_session_id: String,
-    /// Message type.
-    pub message_type: String,
-    /// Message payload.
-    pub payload: Value,
-    /// Timestamp.
-    pub timestamp: String,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Memory types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -487,7 +418,7 @@ pub trait BrowserDelegate: Send + Sync {
     async fn close_session(&self, session_id: &str) -> Result<(), ToolError>;
 }
 
-/// iOS app notifications (`NotifyApp`, `OpenURL`).
+/// iOS app notifications (`NotifyApp`).
 #[async_trait]
 pub trait NotifyDelegate: Send + Sync {
     /// Send a push notification.
@@ -495,21 +426,6 @@ pub trait NotifyDelegate: Send + Sync {
         &self,
         notification: &Notification,
     ) -> Result<NotifyResult, ToolError>;
-    /// Open a URL in the app.
-    async fn open_url_in_app(&self, url: &str) -> Result<(), ToolError>;
-}
-
-/// Inter-session message bus (`send_message`, `receive_messages`).
-#[async_trait]
-pub trait MessageBus: Send + Sync {
-    /// Send a message to another session.
-    async fn send_message(&self, msg: &OutgoingMessage) -> Result<MessageSendResult, ToolError>;
-    /// Receive messages for a session.
-    async fn receive_messages(
-        &self,
-        session_id: &str,
-        filter: &MessageFilter,
-    ) -> Result<Vec<ReceivedMessage>, ToolError>;
 }
 
 /// Event store queries (`Remember` tool).

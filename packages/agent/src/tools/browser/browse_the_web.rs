@@ -1,7 +1,8 @@
-//! `BrowseTheWeb` tool — CDP-based browser automation.
+//! `BrowseTheWeb` tool — CDP-based browser automation + fire-and-forget URL opening.
 //!
-//! Routes browser actions to the [`BrowserDelegate`] trait. Supports 18 actions
-//! across navigation, observation, interaction, waiting, scrolling, and export.
+//! Routes browser actions to the [`BrowserDelegate`] trait. Supports 19 actions
+//! across navigation, observation, interaction, waiting, scrolling, export, and
+//! the `openURL` action (opens a URL in iOS Safari, fire-and-forget).
 
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ const VALID_ACTIONS: &[&str] = &[
     "getAttribute",
     "pdf",
     "close",
+    "openURL",
 ];
 
 /// The `BrowseTheWeb` tool provides full browser automation via a delegate.
@@ -88,7 +90,8 @@ Actions:\n\
 - getText: Get text from element. Required: selector\n\
 - getAttribute: Get attribute value. Required: selector, attribute\n\
 - pdf: Generate PDF. Optional: path\n\
-- close: Close browser session\n\n\
+- close: Close browser session\n\
+- openURL: Open a URL in Safari on the user's device (fire-and-forget). Required: url\n\n\
 Element references from snapshot (e1, e2) are automatically resolved. \
 Browser sessions are persistent — once created, you can perform multiple actions.",
         )
@@ -136,6 +139,42 @@ Browser sessions are persistent — once created, you can perform multiple actio
                 }),
                 Err(e) => Ok(error_result(format!("Failed to close browser: {e}"))),
             };
+        }
+
+        // Handle openURL — fire-and-forget, iOS opens Safari via tool event
+        if action_name == "openURL" {
+            let url = match validate_required_string(&params, "url", "URL") {
+                Ok(u) => u,
+                Err(e) => return Ok(e),
+            };
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                return Ok(error_result("Missing required parameter: url"));
+            }
+            let Ok(parsed) = url::Url::parse(trimmed) else {
+                return Ok(error_result(format!(
+                    "Invalid URL format: \"{trimmed}\". Please provide a valid URL."
+                )));
+            };
+            let scheme = parsed.scheme();
+            if scheme != "http" && scheme != "https" {
+                return Ok(error_result(format!(
+                    "Invalid URL scheme: \"{scheme}\". Only http:// and https:// URLs are allowed."
+                )));
+            }
+            return Ok(TronToolResult {
+                content: ToolResultBody::Blocks(vec![
+                    crate::core::content::ToolResultContent::text(
+                        format!("Opening {trimmed} in Safari"),
+                    ),
+                ]),
+                details: Some(json!({
+                    "url": trimmed,
+                    "action": "openURL",
+                })),
+                is_error: None,
+                stop_turn: None,
+            });
         }
 
         // Build BrowserAction from params
@@ -422,10 +461,13 @@ mod tests {
     async fn all_actions_dispatch() {
         let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
         for action in VALID_ACTIONS {
-            let r = tool
-                .execute(json!({"action": action}), &make_ctx())
-                .await
-                .unwrap();
+            // openURL requires a url param to succeed
+            let params = if *action == "openURL" {
+                json!({"action": action, "url": "https://example.com"})
+            } else {
+                json!({"action": action})
+            };
+            let r = tool.execute(params, &make_ctx()).await.unwrap();
             assert!(r.is_error.is_none(), "Action {action} returned error");
         }
     }
@@ -496,5 +538,112 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error.is_none());
+    }
+
+    // --- openURL action tests ---
+
+    #[tokio::test]
+    async fn open_url_valid_https() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "https://example.com"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        assert!(text.contains("Opening"));
+        assert!(text.contains("example.com"));
+        assert_eq!(r.details.unwrap()["action"], "openURL");
+    }
+
+    #[tokio::test]
+    async fn open_url_valid_http() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "http://example.com"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn open_url_invalid_scheme() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "ftp://files.example.com"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("Invalid URL scheme"));
+    }
+
+    #[tokio::test]
+    async fn open_url_javascript_rejected() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "javascript:alert(1)"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn open_url_missing_url() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(json!({"action": "openURL"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn open_url_empty_url() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(json!({"action": "openURL", "url": "  "}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn open_url_invalid_format() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "not a valid url"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("Invalid URL format"));
+    }
+
+    #[tokio::test]
+    async fn open_url_whitespace_trimmed() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "openURL", "url": "  https://example.com  "}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert_eq!(r.details.unwrap()["url"], "https://example.com");
     }
 }

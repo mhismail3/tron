@@ -69,7 +69,7 @@ pub struct TronSettings {
     pub session: SessionSettings,
     /// UI/TUI appearance settings.
     pub ui: UiSettings,
-    /// iOS integration settings (device context, clipboard, haptics, etc.).
+    /// iOS integration settings (device context, haptics, calendar, etc.).
     pub integrations: IntegrationSettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]

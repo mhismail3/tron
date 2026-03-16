@@ -4,7 +4,7 @@
 
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
 2. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
-3. **Use `@tron-db` skill** to investigate issues. Query `~/.tron/database/` directly — don't guess.
+3. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/database/` directly — don't guess.
 4. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
 
 ## Commands

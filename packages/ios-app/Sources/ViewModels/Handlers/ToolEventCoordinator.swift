@@ -5,7 +5,7 @@ import UIKit
 ///
 /// Responsibilities:
 /// - Creating tool messages on tool.start
-/// - Handling special tools: AskUserQuestion, OpenURL, RenderAppUI
+/// - Handling special tools: AskUserQuestion, RenderAppUI, BrowseTheWeb openURL action
 /// - Managing RenderAppUI chip race conditions (chunk vs tool_start order)
 /// - Tracking tool calls for the current turn
 /// - Enqueuing tool events for ordered UI processing
@@ -29,7 +29,7 @@ final class ToolEventCoordinator {
     ) {
         // Skip tools with custom UI flows or side-effects that require full ToolStartResult
         let kind = ToolKind(toolName: pluginResult.toolName)
-        if kind == .renderAppUI || kind == .openURL { return }
+        if kind == .renderAppUI { return }
 
         // Finalize any active thinking message before tool chip appears
         context.finalizeThinkingMessageIfNeeded()
@@ -380,37 +380,21 @@ final class ToolEventCoordinator {
     }
 
     /// Handle tool start side-effects that must run regardless of whether the chip
-    /// was pre-created by tool_generating. Clipboard copy, URL opening, etc.
+    /// was pre-created by tool_generating. URL opening via BrowseTheWeb openURL action.
     private func handleToolStartSideEffects(
         _ pluginResult: ToolStartPlugin.Result,
         result: ToolStartResult,
         context: ToolEventContext
     ) {
-        // Handle OpenURL - opens Safari but also displays as regular tool
+        // Handle BrowseTheWeb openURL action - opens Safari in-app
         if result.isOpenURL {
-            handleOpenURLToolStart(url: result.openURL, context: context)
-        }
-
-        // Handle SetClipboard - copy content to pasteboard
-        if pluginResult.toolName == "SetClipboard" {
-            if let content = pluginResult.arguments?["content"]?.value as? String {
-                UIPasteboard.general.string = content
-                context.logInfo("Clipboard set: \(content.prefix(50))")
+            if let url = result.openURL {
+                context.logInfo("Opening Safari with URL: \(url.absoluteString)")
+                context.safariURL = url
+            } else {
+                context.logError("BrowseTheWeb openURL action missing valid URL")
             }
         }
-    }
-
-    /// Handle OpenURL tool start - opens Safari in-app browser
-    private func handleOpenURLToolStart(url: URL?, context: ToolEventContext) {
-        context.logInfo("OpenURL tool detected")
-
-        guard let url = url else {
-            context.logError("Failed to parse OpenURL URL from arguments")
-            return
-        }
-
-        context.logInfo("Opening Safari with URL: \(url.absoluteString)")
-        context.safariURL = url
     }
 
     /// Handle RenderAppUI tool start - manages chip creation/update.

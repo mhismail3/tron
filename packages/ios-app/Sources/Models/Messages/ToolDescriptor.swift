@@ -34,12 +34,11 @@ enum ToolRegistry {
         "read", "write", "edit",
         "bash",
         "search", "glob", "find",
-        "browsetheweb", "openurl",
+        "browsetheweb",
         "webfetch", "websearch",
         "task",
         "remember",
         "manageautomations",
-        "setclipboard",
         "managecalendar",
         "searchcontacts",
         "readhealth"
@@ -205,25 +204,6 @@ enum ToolRegistry {
                 ))
             }
         ),
-        "openurl": ToolDescriptor(
-            icon: "safari",
-            iconColor: .blue,
-            displayName: "Open URL",
-            completedDisplayName: "Opened",
-            summaryExtractor: { args in
-                let url = ToolArgumentParser.url(from: args)
-                return url.count > 50 ? String(url.prefix(50)) + "..." : url
-            },
-            viewerFactory: { tool, isExpanded in
-                let url = ToolArgumentParser.url(from: tool.arguments)
-                let display = url.count > 50 ? String(url.prefix(50)) + "..." : url
-                return AnyView(OpenURLResultViewer(
-                    url: display,
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
-                ))
-            }
-        ),
         "webfetch": ToolDescriptor(
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
@@ -305,17 +285,6 @@ enum ToolRegistry {
             completedDisplayName: "Automated",
             summaryExtractor: { args in
                 ToolArgumentParser.action(from: args)
-            },
-            viewerFactory: nil
-        ),
-        "setclipboard": ToolDescriptor(
-            icon: "doc.on.clipboard",
-            iconColor: .tronEmerald,
-            displayName: "Clipboard",
-            completedDisplayName: "Copied",
-            summaryExtractor: { args in
-                let label = ToolArgumentParser.string("label", from: args) ?? ""
-                return label.isEmpty ? "Text" : label
             },
             viewerFactory: nil
         ),

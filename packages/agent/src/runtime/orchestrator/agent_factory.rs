@@ -480,7 +480,7 @@ mod tests {
     #[async_trait]
     impl TronTool for InteractiveTool2 {
         fn name(&self) -> &'static str {
-            "open_url"
+            "interactive_tool_2"
         }
         fn category(&self) -> ToolCategory {
             ToolCategory::Custom
@@ -490,7 +490,7 @@ mod tests {
         }
         fn definition(&self) -> Tool {
             Tool {
-                name: "open_url".into(),
+                name: "interactive_tool_2".into(),
                 description: "Open".into(),
                 parameters: ToolParameterSchema {
                     schema_type: "object".into(),
@@ -566,7 +566,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(names.contains(&"ask_user".into()));
-        assert!(names.contains(&"open_url".into()));
+        assert!(names.contains(&"interactive_tool_2".into()));
     }
 
     #[test]
@@ -606,7 +606,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"open_url".into()));
+        assert!(!names.contains(&"interactive_tool_2".into()));
         assert!(names.contains(&"bash".into()));
         assert!(names.contains(&"SpawnSubagent".into()));
     }
@@ -622,7 +622,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"open_url".into())); // still removed as interactive
+        assert!(!names.contains(&"interactive_tool_2".into())); // still removed as interactive
     }
 
     #[test]
@@ -636,7 +636,7 @@ mod tests {
         let names = agent.context_manager().tool_names();
         // Interactive tools removed
         assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"open_url".into()));
+        assert!(!names.contains(&"interactive_tool_2".into()));
         // Spawn tools removed at depth 0
         assert!(!names.contains(&"SpawnSubagent".into()));
         assert!(!names.contains(&"WaitForAgents".into()));
@@ -662,13 +662,13 @@ mod tests {
         // Verify ordering independence: denied removal + interactive removal are separate passes
         let mut opts = default_opts(Arc::new(MockProvider), full_registry());
         opts.is_unattended = true;
-        opts.denied_tools = vec!["bash".into(), "open_url".into()];
+        opts.denied_tools = vec!["bash".into(), "interactive_tool_2".into()];
         opts.subagent_max_depth = 3;
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(!names.contains(&"bash".into())); // denied
-        assert!(!names.contains(&"open_url".into())); // denied + interactive
+        assert!(!names.contains(&"interactive_tool_2".into())); // denied + interactive
         assert!(!names.contains(&"ask_user".into())); // interactive
         assert!(names.contains(&"SpawnSubagent".into())); // kept (depth > 0)
     }
@@ -688,7 +688,7 @@ mod tests {
 
         // All interactive tools removed (the key fix — cron was missing these)
         assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"open_url".into()));
+        assert!(!names.contains(&"interactive_tool_2".into()));
 
         // Spawn tools removed at depth 0
         assert!(!names.contains(&"SpawnSubagent".into()));

@@ -44,24 +44,6 @@ struct IntegrationSettingsSection: View {
                 .font(TronTypography.caption2)
         }
 
-        // MARK: - Clipboard
-
-        Section {
-            Toggle(isOn: $settingsState.integrationClipboardEnabled) {
-                Label("Clipboard", systemImage: "doc.on.clipboard")
-                    .font(TronTypography.subheadline)
-            }
-            .tint(.tronEmerald)
-            .onChange(of: settingsState.integrationClipboardEnabled) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(integrations: .init(clipboard: .init(enabled: newValue)))
-                }
-            }
-        } footer: {
-            Text("Allows the agent to copy text to your clipboard.")
-                .font(TronTypography.caption2)
-        }
-
         // MARK: - Haptics
 
         Section {

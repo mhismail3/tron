@@ -163,37 +163,6 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         })
     }
 
-    async fn open_url_in_app(&self, url: &str) -> Result<(), ToolError> {
-        let token_strings = self.active_tokens()?;
-
-        if token_strings.is_empty() {
-            return Ok(());
-        }
-
-        // Send silent push with URL data
-        let mut data = HashMap::new();
-        let _ = data.insert("url".to_string(), url.to_string());
-
-        let notif = ApnsNotification {
-            title: String::new(),
-            body: String::new(),
-            data,
-            priority: "normal".to_string(),
-            sound: None,
-            badge: None,
-            thread_id: None,
-        };
-
-        let results = self.apns.send_to_many(&token_strings, &notif).await;
-        let success_count = results.iter().filter(|r| r.success).count();
-        debug!(
-            url = url,
-            total = token_strings.len(),
-            success_count,
-            "open_url_in_app silent push results"
-        );
-        Ok(())
-    }
 }
 
 #[cfg(test)]

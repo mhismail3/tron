@@ -71,7 +71,7 @@ struct SettingsView: View {
                     }
 
                     Button { showIntegrationsPage = true } label: {
-                        settingsRow("iphone.and.arrow.forward", "Integrations", "Device context, clipboard, haptics")
+                        settingsRow("iphone.and.arrow.forward", "Integrations", "Device context, haptics, calendar")
                     }
 
                     if #available(iOS 26.0, *) {

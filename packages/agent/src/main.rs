@@ -260,11 +260,10 @@ struct ToolRegistryConfig {
 /// the TypeScript server:
 /// - Tools with real backends use real providers
 /// - BrowseTheWeb/NotifyApp: conditionally registered (only with backend)
-/// - Communication tools: not registered (not in TS server)
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
-        NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
+        RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
         StubNotifyDelegate, TokioProcessRunner,
     };
 
@@ -322,14 +321,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         tron::tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
 
-    // 9: OpenURL — fire-and-forget (iOS opens Safari via tool event)
-    let open_url_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> =
-        Arc::new(NoOpOpenUrlDelegate);
-    registry.register(Arc::new(tron::tools::browser::open_url::OpenURLTool::new(
-        open_url_delegate,
-    )));
-
-    // 10: RenderAppUI
+    // 9: RenderAppUI
     registry.register(Arc::new(
         tron::tools::ui::render_app_ui::RenderAppUITool::new(),
     ));
@@ -362,10 +354,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         notify_delegate,
     )));
 
-    // 14: SetClipboard (fire-and-forget — iOS handles via tool event)
-    registry.register(Arc::new(tron::tools::ui::clipboard::SetClipboardTool::new()));
-
-    // 15–17: Device-querying tools (conditional on device request broker)
+    // 14–16: Device-querying tools (conditional on device request broker)
     if let Some(broker) = config.device_request_broker.get() {
         let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> =
             Arc::new(tron::server::device_delegate::BrokerDeviceDelegate::new(broker.clone()));
@@ -1661,12 +1650,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 15 tools without Brave API key (no WebSearch), without subagent tools
-        // Includes SetClipboard (always registered)
+        // 13 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            15,
-            "expected 15 tools (no WebSearch without Brave key), got: {:?}",
+            13,
+            "expected 13 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1680,8 +1668,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            16,
-            "expected 16 tools with WebSearch, got: {:?}",
+            14,
+            "expected 14 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }

@@ -5,7 +5,6 @@ import Foundation
 enum ToolKind: Sendable, Equatable {
     case askUserQuestion
     case renderAppUI
-    case openURL
     case browseTheWeb
     case bash
     case read
@@ -26,7 +25,6 @@ enum ToolKind: Sendable, Equatable {
         switch toolName.lowercased() {
         case "askuserquestion":   self = .askUserQuestion
         case "renderappui":       self = .renderAppUI
-        case "openurl":           self = .openURL
         case "browsetheweb":      self = .browseTheWeb
         case "bash":              self = .bash
         case "read":              self = .read

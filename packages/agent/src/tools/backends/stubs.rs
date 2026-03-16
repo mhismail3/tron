@@ -9,10 +9,9 @@ use serde_json::Value;
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    BrowserAction, BrowserDelegate, BrowserResult, EventStoreQuery, MemoryEntry, MessageBus,
-    MessageFilter, MessageSendResult, Notification, NotifyDelegate, NotifyResult, OutgoingMessage,
-    ReceivedMessage, SessionInfo, SubagentConfig, SubagentHandle, SubagentResult, SubagentSpawner,
-    TaskManagerDelegate, WaitMode,
+    BrowserAction, BrowserDelegate, BrowserResult, EventStoreQuery, MemoryEntry,
+    Notification, NotifyDelegate, NotifyResult, SessionInfo, SubagentConfig,
+    SubagentHandle, SubagentResult, SubagentSpawner, TaskManagerDelegate, WaitMode,
 };
 
 fn not_available(feature: &str) -> ToolError {
@@ -62,27 +61,6 @@ impl BrowserDelegate for StubBrowserDelegate {
 
 // ─── NotifyDelegate ──────────────────────────────────────────────────────────
 
-/// ADAPTER(tool-compat): Fire-and-forget notify delegate for `OpenURL`.
-///
-/// `OpenURL` doesn't need real APNS — it validates the URL and returns success.
-/// iOS opens Safari when it receives the `tool_execution_start` event.
-///
-/// REMOVE: When `OpenURL` is refactored to not require a `NotifyDelegate`.
-pub struct NoOpOpenUrlDelegate;
-
-#[async_trait]
-impl NotifyDelegate for NoOpOpenUrlDelegate {
-    async fn send_notification(
-        &self,
-        _notification: &Notification,
-    ) -> Result<NotifyResult, ToolError> {
-        Err(not_available("Push notifications"))
-    }
-    async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
-        Ok(()) // Fire-and-forget — iOS handles via tool event
-    }
-}
-
 /// Stub notification delegate — APNS push isn't wired yet.
 pub struct StubNotifyDelegate;
 
@@ -93,28 +71,6 @@ impl NotifyDelegate for StubNotifyDelegate {
         _notification: &Notification,
     ) -> Result<NotifyResult, ToolError> {
         Err(not_available("Push notifications"))
-    }
-    async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
-        Err(not_available("URL opening"))
-    }
-}
-
-// ─── MessageBus ──────────────────────────────────────────────────────────────
-
-/// Stub message bus — inter-session messaging isn't wired yet.
-pub struct StubMessageBus;
-
-#[async_trait]
-impl MessageBus for StubMessageBus {
-    async fn send_message(&self, _msg: &OutgoingMessage) -> Result<MessageSendResult, ToolError> {
-        Err(not_available("Inter-session messaging"))
-    }
-    async fn receive_messages(
-        &self,
-        _session_id: &str,
-        _filter: &MessageFilter,
-    ) -> Result<Vec<ReceivedMessage>, ToolError> {
-        Err(not_available("Inter-session messaging"))
     }
 }
 
@@ -247,20 +203,6 @@ mod tests {
             sheet_content: None,
         };
         let err = delegate.send_notification(&notification).await;
-        assert!(err.is_err());
-    }
-
-    #[tokio::test]
-    async fn stub_message_bus_returns_error() {
-        let bus = StubMessageBus;
-        let msg = OutgoingMessage {
-            target_session_id: "s2".into(),
-            message_type: "test".into(),
-            payload: serde_json::json!({}),
-            wait_for_reply: false,
-            timeout_ms: 5000,
-        };
-        let err = bus.send_message(&msg).await;
         assert!(err.is_err());
     }
 

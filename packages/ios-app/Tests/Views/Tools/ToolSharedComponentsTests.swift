@@ -25,7 +25,6 @@ struct ToolSharedComponentsTests {
             ("Write", "tronPink"),
             ("Edit", "orange"),
             ("Remember", "purple"),
-            ("OpenURL", "blue"),
             ("Read", "tronSlate"),
             ("Bash", "tronEmerald"),
             ("Search", "purple"),
@@ -33,7 +32,7 @@ struct ToolSharedComponentsTests {
             ("WebFetch", "tronInfo"),
             ("WebSearch", "tronInfo"),
         ]
-        #expect(colors.count == 10)
+        #expect(colors.count == 9)
     }
 
     // MARK: - ToolStatusRow

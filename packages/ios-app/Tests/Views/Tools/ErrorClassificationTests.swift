@@ -93,18 +93,6 @@ struct ErrorClassificationTests {
         #expect(notFound.title == "Not Found")
     }
 
-    // MARK: - OpenURL Classifier
-
-    @Test("OpenURL classifies URL errors")
-    func testOpenURLErrors() {
-        let invalidFormat = OpenURLDetailParser.classifyError("Invalid URL format: bad")
-        #expect(invalidFormat.title == "Invalid URL")
-        #expect(invalidFormat.code == "INVALID_FORMAT")
-
-        let invalidScheme = OpenURLDetailParser.classifyError("Invalid URL scheme: ftp")
-        #expect(invalidScheme.title == "Invalid Scheme")
-    }
-
     // MARK: - Search Classifier
 
     @Test("Search classifies invalid regex")

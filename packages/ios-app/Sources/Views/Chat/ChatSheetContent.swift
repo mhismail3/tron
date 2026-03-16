@@ -175,8 +175,6 @@ struct ChatSheetContent: View {
             WebFetchToolDetailSheet(data: liveData)
         case "websearch":
             WebSearchToolDetailSheet(data: liveData)
-        case "openurl":
-            OpenURLToolDetailSheet(data: liveData)
         case "remember":
             RememberToolDetailSheet(data: liveData)
         default:

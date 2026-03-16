@@ -10,11 +10,10 @@
 //! - **System**: `Bash`, `Remember`
 //! - **Search**: text/AST unified search
 //! - **Web**: `WebFetch`, `WebSearch`
-//! - **Browser**: `OpenURL`, `BrowseTheWeb`
+//! - **Browser**: `BrowseTheWeb` (includes openURL action)
 //! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`, `RenderAppUI`
 //! - **Automations**: Managed via `manage-automations` skill (Read/Write/Edit on `~/.tron/workspace/automations.json`)
 //! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
-//! - **Communication**: `send_message`, `receive_messages`
 //!
 //! ## Module Position
 //!
@@ -39,7 +38,6 @@ pub(crate) mod utils;
 
 // Tool implementation modules
 pub mod browser;
-pub mod communication;
 pub mod fs;
 pub mod search;
 pub mod subagent;

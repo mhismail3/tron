@@ -36,7 +36,6 @@ final class SettingsState {
     var integrationDeviceContextDisplay: Bool = true
     var integrationDeviceContextActivity: Bool = true
     var integrationDeviceContextCalendarPreview: Bool = true
-    var integrationClipboardEnabled: Bool = false
     var integrationHapticsEnabled: Bool = false
     var integrationHapticsOnTaskComplete: Bool = true
     var integrationHapticsOnError: Bool = true
@@ -99,7 +98,6 @@ final class SettingsState {
             integrationDeviceContextDisplay = settings.integrations.deviceContext.display
             integrationDeviceContextActivity = settings.integrations.deviceContext.activity
             integrationDeviceContextCalendarPreview = settings.integrations.deviceContext.calendarPreview
-            integrationClipboardEnabled = settings.integrations.clipboard.enabled
             integrationHapticsEnabled = settings.integrations.haptics.enabled
             integrationHapticsOnTaskComplete = settings.integrations.haptics.onTaskComplete
             integrationHapticsOnError = settings.integrations.haptics.onError
@@ -157,7 +155,6 @@ final class SettingsState {
         integrationDeviceContextDisplay = true
         integrationDeviceContextActivity = true
         integrationDeviceContextCalendarPreview = true
-        integrationClipboardEnabled = false
         integrationHapticsEnabled = false
         integrationHapticsOnTaskComplete = true
         integrationHapticsOnError = true
@@ -202,7 +199,6 @@ final class SettingsState {
                     enabled: false, battery: true, network: true, audioRoute: true,
                     display: true, activity: true, calendarPreview: true
                 ),
-                clipboard: .init(enabled: false),
                 haptics: .init(enabled: false, onTaskComplete: true, onError: true, onNotification: true),
                 calendar: .init(enabled: false, allowWrite: false),
                 contacts: .init(enabled: false),

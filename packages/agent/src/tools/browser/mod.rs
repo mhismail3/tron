@@ -1,4 +1,3 @@
-//! Browser tools: `OpenURL`, `BrowseTheWeb`.
+//! Browser tools: `BrowseTheWeb` (includes openURL action).
 
 pub mod browse_the_web;
-pub mod open_url;

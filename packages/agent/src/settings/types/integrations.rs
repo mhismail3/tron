@@ -1,8 +1,8 @@
 //! iOS integration settings.
 //!
-//! Controls device-side features: context injection, clipboard, haptics,
-//! calendar, contacts, health, and location. All default to `enabled: false`
-//! (opt-in). Sub-toggles default to `true` when the parent is enabled.
+//! Controls device-side features: context injection, haptics, calendar,
+//! contacts, health, and location. All default to `enabled: false` (opt-in).
+//! Sub-toggles default to `true` when the parent is enabled.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 pub struct IntegrationSettings {
     /// Device context signals injected into system prompt.
     pub device_context: DeviceContextSettings,
-    /// Clipboard write access.
-    pub clipboard: ClipboardSettings,
     /// Haptic feedback on events.
     pub haptics: HapticsSettings,
     /// Calendar read/write access.
@@ -59,15 +57,6 @@ impl Default for DeviceContextSettings {
             calendar_preview: false,
         }
     }
-}
-
-/// Clipboard write access.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-#[derive(Default)]
-pub struct ClipboardSettings {
-    /// Master toggle for clipboard write access.
-    pub enabled: bool,
 }
 
 /// Haptic feedback on agent events.
@@ -166,7 +155,6 @@ mod tests {
     fn defaults_all_disabled() {
         let s = IntegrationSettings::default();
         assert!(!s.device_context.enabled);
-        assert!(!s.clipboard.enabled);
         assert!(!s.haptics.enabled);
         assert!(!s.calendar.enabled);
         assert!(!s.contacts.enabled);
@@ -196,11 +184,9 @@ mod tests {
     #[test]
     fn partial_json_override() {
         let json = serde_json::json!({
-            "clipboard": { "enabled": true },
             "haptics": { "enabled": true, "onError": false }
         });
         let s: IntegrationSettings = serde_json::from_value(json).unwrap();
-        assert!(s.clipboard.enabled);
         assert!(s.haptics.enabled);
         assert!(!s.haptics.on_error);
         assert!(s.haptics.on_task_complete); // default preserved

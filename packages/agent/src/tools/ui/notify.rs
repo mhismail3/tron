@@ -178,9 +178,6 @@ mod tests {
             *self.last_notification.lock().unwrap() = Some(notification.clone());
             Ok(self.result.clone())
         }
-        async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
-            Ok(())
-        }
     }
 
     #[tokio::test]

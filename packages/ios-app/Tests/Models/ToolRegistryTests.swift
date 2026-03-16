@@ -64,13 +64,6 @@ struct ToolRegistryTests {
         #expect(d.displayName == "Browse")
     }
 
-    @Test("OpenURL tool has correct icon and display name")
-    func testOpenURLDescriptor() {
-        let d = ToolRegistry.descriptor(for: "openurl")
-        #expect(d.icon == "safari")
-        #expect(d.displayName == "Open URL")
-    }
-
     @Test("WebFetch tool has correct icon and display name")
     func testWebFetchDescriptor() {
         let d = ToolRegistry.descriptor(for: "webfetch")
@@ -189,22 +182,6 @@ struct ToolRegistryTests {
         #expect(summary == "click: #submit")
     }
 
-    @Test("OpenURL summary extracts and truncates URL")
-    func testOpenURLSummary() {
-        let d = ToolRegistry.descriptor(for: "openurl")
-        let summary = d.summaryExtractor("{\"url\": \"https://example.com\"}")
-        #expect(summary == "https://example.com")
-    }
-
-    @Test("OpenURL summary truncates long URLs")
-    func testOpenURLSummaryLong() {
-        let d = ToolRegistry.descriptor(for: "openurl")
-        let longUrl = "https://example.com/" + String(repeating: "x", count: 100)
-        let summary = d.summaryExtractor("{\"url\": \"\(longUrl)\"}")
-        #expect(summary.count <= 53)
-        #expect(summary.hasSuffix("..."))
-    }
-
     @Test("WebFetch summary shows domain and prompt")
     func testWebFetchSummary() {
         let d = ToolRegistry.descriptor(for: "webfetch")
@@ -303,7 +280,7 @@ struct ToolRegistryTests {
 
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "openurl", "webfetch", "websearch", "task", "remember", "manageautomations", "setclipboard", "managecalendar", "searchcontacts", "readhealth"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "webfetch", "websearch", "task", "remember", "manageautomations", "managecalendar", "searchcontacts", "readhealth"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 
@@ -326,7 +303,7 @@ struct ToolRegistryTests {
 
     @Test("Command tools have viewer factories")
     func testViewerFactories() {
-        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "browsetheweb", "openurl", "webfetch", "websearch"] {
+        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "browsetheweb", "webfetch", "websearch"] {
             let d = ToolRegistry.descriptor(for: name)
             #expect(d.viewerFactory != nil, "Expected viewer factory for \(name)")
         }
