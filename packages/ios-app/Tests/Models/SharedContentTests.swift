@@ -60,14 +60,14 @@ struct SharedContentTests {
 @Suite("SharedContent.buildSharePrompt")
 struct SharedContentBuildPromptTests {
 
-    @Test("URL-only share produces notes prompt with skill")
+    @Test("URL-only share produces knowledge prompt with skill")
     func urlOnlyShare() {
         let content = SharedContent(text: nil, url: "https://example.com/article", timestamp: Date())
         let payload = content.buildSharePrompt()
 
         #expect(payload != nil)
-        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com/article")
-        #expect(payload?.skillName == "obsidian")
+        #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com/article")
+        #expect(payload?.skillName == "knowledge")
     }
 
     @Test("URL + text share includes both in prompt")
@@ -76,8 +76,8 @@ struct SharedContentBuildPromptTests {
         let payload = content.buildSharePrompt()
 
         #expect(payload != nil)
-        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com\n\nGreat article about Swift")
-        #expect(payload?.skillName == "obsidian")
+        #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com\n\nGreat article about Swift")
+        #expect(payload?.skillName == "knowledge")
     }
 
     @Test("text-only share sends raw text without skill")
@@ -117,13 +117,13 @@ struct SharedContentBuildPromptTests {
         let content = SharedContent(text: "", url: "https://example.com", timestamp: Date())
         let payload = content.buildSharePrompt()
 
-        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com")
-        #expect(payload?.skillName == "obsidian")
+        #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com")
+        #expect(payload?.skillName == "knowledge")
     }
 
-    @Test("skill name constant is obsidian")
+    @Test("skill name constant is knowledge")
     func skillNameConstant() {
-        #expect(SharedContent.urlShareSkillName == "obsidian")
+        #expect(SharedContent.urlShareSkillName == "knowledge")
     }
 }
 

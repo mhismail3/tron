@@ -737,7 +737,7 @@ The deploy process:
 +-- mods/
 |   +-- apns/             APNS credentials (p8 key + config)
 |   +-- models/           Cached ONNX models (embeddings, transcription)
-+-- notes/                Agent notes
++-- knowledge/            Knowledge base (notes, voice notes, research)
 +-- workspace/
 |   +-- canvases/          Generated artifacts
 |   +-- deployment/        Deploy state files

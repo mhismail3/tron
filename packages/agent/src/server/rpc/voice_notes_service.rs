@@ -1,10 +1,12 @@
+//! Voice notes service: storage and listing for `~/.tron/knowledge/voice-notes/`.
+
 use serde_json::Value;
 
 use crate::server::rpc::errors::RpcError;
 
 pub(crate) fn notes_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    format!("{home}/.tron/notes/Voice Notes")
+    format!("{home}/.tron/knowledge/voice-notes")
 }
 
 pub(crate) fn ensure_notes_dir(dir: &str) -> Result<(), RpcError> {
@@ -25,7 +27,7 @@ pub(crate) fn list_notes(dir: &str, limit: usize, offset: usize) -> Value {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with("-voice-note.md") {
+            if !name.ends_with(".md") || name.starts_with('.') {
                 continue;
             }
 
@@ -112,5 +114,40 @@ mod tests {
         let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
 
         assert!(result["notes"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn notes_dir_points_to_knowledge_voice_notes() {
+        let dir = notes_dir();
+        assert!(
+            dir.ends_with("knowledge/voice-notes"),
+            "expected knowledge/voice-notes dir, got: {dir}"
+        );
+    }
+
+    #[test]
+    fn list_notes_includes_all_md_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("2026-01-01-000000-000-voice-note.md"),
+            "---\ntype: voice-note\ncreated: 2026-01-01\nduration: 1.0\nlanguage: en\n---\n\nHello",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("another-note.md"), "Also a voice note").unwrap();
+
+        let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
+        let notes = result["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 2, "all .md files in voice-notes dir should be listed");
+    }
+
+    #[test]
+    fn list_notes_skips_hidden_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("visible.md"), "note").unwrap();
+        std::fs::write(dir.path().join(".hidden.md"), "hidden").unwrap();
+
+        let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
+        let notes = result["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 1);
     }
 }

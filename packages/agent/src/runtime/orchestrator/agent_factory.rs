@@ -39,7 +39,7 @@ pub struct CreateAgentOpts {
     pub rules_content: Option<String>,
     /// Messages restored from session history.
     pub initial_messages: Vec<Message>,
-    /// Workspace memory content (~/.tron/notes/MEMORY.md).
+    /// Workspace memory content (loaded from embedded events via semantic search).
     pub memory_content: Option<String>,
     /// Scoped rules index for dynamic path-based activation.
     pub rules_index: Option<RulesIndex>,

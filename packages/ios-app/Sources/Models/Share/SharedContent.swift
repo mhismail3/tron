@@ -17,15 +17,15 @@ struct ShareMessagePayload {
 }
 
 extension SharedContent {
-    static let urlShareSkillName = "obsidian"
+    static let urlShareSkillName = "knowledge"
 
     /// Build the prompt text and determine whether to auto-attach a skill.
     ///
-    /// URL shares: "Add this to your notes\n\n{url}" (+ optional text), attaches obsidian skill.
+    /// URL shares: "Save this to knowledge\n\n{url}" (+ optional text), attaches knowledge skill.
     /// Text-only shares: raw text, no skill attachment.
     func buildSharePrompt() -> ShareMessagePayload? {
         if let url, !url.isEmpty {
-            var prompt = "Add this to your notes\n\n\(url)"
+            var prompt = "Save this to your knowledge base\n\n\(url)"
             if let text, !text.isEmpty {
                 prompt += "\n\n\(text)"
             }

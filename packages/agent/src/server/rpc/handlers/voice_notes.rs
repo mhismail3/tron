@@ -86,7 +86,7 @@ impl MethodHandler for SaveHandler {
     }
 }
 
-/// List voice notes (reads from ~/.tron/notes/).
+/// List voice notes (reads from `~/.tron/knowledge/voice-notes/`).
 pub struct ListHandler;
 
 #[async_trait]
@@ -133,11 +133,11 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn notes_dir_returns_voice_notes_subdirectory() {
+    fn notes_dir_returns_knowledge_voice_notes_directory() {
         let dir = voice_notes_service::notes_dir();
         assert!(
-            dir.ends_with("Voice Notes"),
-            "Expected 'Voice Notes' subdir, got: {dir}"
+            dir.ends_with("knowledge/voice-notes"),
+            "Expected 'knowledge/voice-notes' dir, got: {dir}"
         );
     }
 
