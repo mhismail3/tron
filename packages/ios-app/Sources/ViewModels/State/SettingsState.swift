@@ -16,7 +16,8 @@ final class SettingsState {
     var maxPreservedRatio: Double = 0.20
     var forceAlwaysCompact: Bool = false
     var triggerTokenThreshold: Double = 0.70
-    var defaultTurnFallback: Int = 8
+    var defaultTurnFallback: Int = 25
+    var alertTurnFallback: Int = 15
     var memoryLedgerEnabled: Bool = true
     var memoryAutoInject: Bool = true
     var memoryAutoInjectCount: Int = 5
@@ -81,6 +82,7 @@ final class SettingsState {
             forceAlwaysCompact = settings.compaction.forceAlways
             triggerTokenThreshold = settings.compaction.triggerTokenThreshold
             defaultTurnFallback = settings.compaction.defaultTurnFallback
+            alertTurnFallback = settings.compaction.alertTurnFallback
             memoryLedgerEnabled = settings.memory.ledger.enabled
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
@@ -138,7 +140,8 @@ final class SettingsState {
         maxPreservedRatio = 0.20
         forceAlwaysCompact = false
         triggerTokenThreshold = 0.70
-        defaultTurnFallback = 8
+        defaultTurnFallback = 25
+        alertTurnFallback = 15
         memoryLedgerEnabled = true
         memoryAutoInject = true
         memoryAutoInjectCount = 5
@@ -179,7 +182,8 @@ final class SettingsState {
                 preserveRecentCount: 5,
                 forceAlways: false,
                 triggerTokenThreshold: 0.70,
-                defaultTurnFallback: 8,
+                defaultTurnFallback: 25,
+                alertTurnFallback: 15,
                 maxPreservedRatio: 0.20
                 ),
                 memory: .init(

@@ -3,6 +3,7 @@ import SwiftUI
 struct CompactionSection: View {
     @Binding var triggerTokenThreshold: Double
     @Binding var defaultTurnFallback: Int
+    @Binding var alertTurnFallback: Int
     @Binding var preserveRecentCount: Int
     @Binding var maxPreservedRatio: Double
     @Binding var forceAlwaysCompact: Bool
@@ -43,10 +44,10 @@ struct CompactionSection: View {
                 .font(TronTypography.caption2)
         }
 
-        // Max Turns stepper (3–20)
+        // Turn Fallback stepper (3–50)
         Section {
             HStack {
-                Label("Max Turns", systemImage: "repeat")
+                Label("Turn Fallback", systemImage: "repeat")
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text("\(defaultTurnFallback)")
@@ -64,7 +65,32 @@ struct CompactionSection: View {
                 }
             }
         } footer: {
-            Text("Maximum turns between compactions, even if the threshold hasn't been reached.")
+            Text("Compact after this many turns even if the threshold hasn't been reached.")
+                .font(TronTypography.caption2)
+        }
+
+        // Alert Zone Turn Fallback stepper (3–30)
+        Section {
+            HStack {
+                Label("Alert Zone Fallback", systemImage: "exclamationmark.triangle")
+                    .font(TronTypography.subheadline)
+                Spacer()
+                Text("\(alertTurnFallback)")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .frame(minWidth: 20)
+                TronStepper(value: $alertTurnFallback, range: 3...30)
+            }
+            .onChange(of: alertTurnFallback) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(
+                        alertTurnFallback: newValue
+                    )))
+                }
+            }
+        } footer: {
+            Text("Fewer turns between compactions when context usage exceeds the alert zone threshold.")
                 .font(TronTypography.caption2)
         }
 
