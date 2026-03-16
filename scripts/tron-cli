@@ -2,7 +2,7 @@
 # tron-cli - Runtime CLI for Tron server management
 #
 # Self-contained script with NO workspace dependencies.
-# Installed to ~/.tron/artifacts/deployment/tron-cli
+# Installed to ~/.tron/workspace/deployment/tron-cli
 # Symlinked from ~/.local/bin/tron
 #
 # Usage: tron <command> [options]
@@ -42,7 +42,7 @@ PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 PROD_PORT=9847
 
 # File paths
-DEPLOY_DIR="$TRON_HOME/artifacts/deployment"
+DEPLOY_DIR="$TRON_HOME/workspace/deployment"
 PROD_LOG_FILE="$DEPLOY_DIR/server.log"
 DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
 
@@ -90,7 +90,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,artifacts/canvases,artifacts/deployment}
+    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,workspace/canvases,workspace/deployment,workspace/scratch,workspace/downloads,workspace/cron}
     mkdir -p "$TRON_HOME"/mods/apns
 }
 

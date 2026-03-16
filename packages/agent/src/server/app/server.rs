@@ -67,7 +67,7 @@ pub struct AppState {
     pub deploy_restart_initiated: Arc<AtomicBool>,
     /// Path to the installed server binary (e.g. `~/.tron/tron`).
     pub deploy_binary_path: PathBuf,
-    /// Deployment artifacts directory (e.g. `~/.tron/artifacts/deployment/`).
+    /// Deployment directory (e.g. `~/.tron/workspace/deployment/`).
     pub deploy_dir: PathBuf,
 }
 

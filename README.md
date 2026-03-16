@@ -738,8 +738,12 @@ The deploy process:
 |   +-- apns/             APNS credentials (p8 key + config)
 |   +-- models/           Cached ONNX models (embeddings, transcription)
 +-- notes/                Agent notes
-+-- artifacts/
-    +-- canvases/          Generated artifacts
++-- workspace/
+|   +-- canvases/          Generated artifacts
+|   +-- deployment/        Deploy state files
+|   +-- scratch/           Temp files, experiments
+|   +-- downloads/         Downloaded files
+|   +-- cron/              Cron job working directories
 ```
 
 ### Service (launchd)

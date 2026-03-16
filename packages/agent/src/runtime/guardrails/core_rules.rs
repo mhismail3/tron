@@ -3,13 +3,15 @@
 //! Defines all core (immutable) and standard (configurable) rules that ship
 //! with the guardrail engine. Core rules cannot be disabled by configuration.
 //!
-//! ## Core Rules (6)
+//! ## Core Rules (8)
 //! - `core.destructive-commands` — blocks rm -rf /, fork bombs, dd to devices, etc.
 //! - `core.tron-no-delete` — prevents deletion of files in ~/.tron
 //! - `core.tron-app-protection` — protects ~/.tron/app/
 //! - `core.tron-db-protection` — protects ~/.tron/database/
 //! - `core.tron-auth-protection` — protects ~/.tron/auth.json
 //! - `core.synology-drive-protection` — protects Synology Drive cloud storage
+//! - `core.system-protection` — blocks writes to OS-critical paths (/System, /usr, /etc, etc.)
+//! - `core.dotfiles-protection` — read-only access to dotfiles (~/.ssh, ~/.aws, ~/.config, etc.)
 //!
 //! ## Standard Rules (3)
 //! - `path.traversal` — blocks `..` sequences in filesystem operations
@@ -33,6 +35,8 @@ pub const CORE_RULE_IDS: &[&str] = &[
     "core.tron-db-protection",
     "core.tron-auth-protection",
     "core.synology-drive-protection",
+    "core.system-protection",
+    "core.dotfiles-protection",
 ];
 
 /// Check if a rule ID is a core rule.
@@ -60,6 +64,8 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         core_tron_db_protection(),
         core_tron_auth_protection(),
         core_synology_drive_protection(),
+        core_system_protection(),
+        core_dotfiles_protection(),
         // Standard rules
         path_traversal(),
         path_hidden_mkdir(),
@@ -238,6 +244,97 @@ fn core_synology_drive_protection() -> GuardrailRule {
     })
 }
 
+/// Core rule: Block writes to OS-critical paths.
+fn core_system_protection() -> GuardrailRule {
+    GuardrailRule::Path(PathRule {
+        base: RuleBase {
+            id: "core.system-protection".into(),
+            name: "System Protection".into(),
+            description: "Blocks writes to OS-critical system paths".into(),
+            severity: Severity::Block,
+            scope: Scope::Global,
+            tier: RuleTier::Core,
+            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            priority: 1000,
+            enabled: true,
+            tags: vec!["security".into(), "system-protection".into()],
+        },
+        path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
+        protected_paths: vec![
+            "/System".into(),
+            "/System/**".into(),
+            "/Library".into(),
+            "/Library/**".into(),
+            "/usr".into(),
+            "/usr/**".into(),
+            "/bin".into(),
+            "/bin/**".into(),
+            "/sbin".into(),
+            "/sbin/**".into(),
+            "/etc".into(),
+            "/etc/**".into(),
+            "/var".into(),
+            "/var/**".into(),
+            "/private/etc".into(),
+            "/private/etc/**".into(),
+            "/private/var".into(),
+            "/private/var/**".into(),
+            "/Applications".into(),
+            "/Applications/**".into(),
+            "/opt".into(),
+            "/opt/**".into(),
+            "/Volumes".into(),
+            "/Volumes/**".into(),
+        ],
+        block_traversal: false,
+        block_hidden: false,
+    })
+}
+
+/// Core rule: Read-only access to dotfiles.
+fn core_dotfiles_protection() -> GuardrailRule {
+    let home = homedir();
+
+    GuardrailRule::Path(PathRule {
+        base: RuleBase {
+            id: "core.dotfiles-protection".into(),
+            name: "Dotfiles Protection".into(),
+            description: "Prevents writing to dotfiles and config directories (read-only access)"
+                .into(),
+            severity: Severity::Block,
+            scope: Scope::Global,
+            tier: RuleTier::Core,
+            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            priority: 1000,
+            enabled: true,
+            tags: vec!["security".into(), "config-protection".into()],
+        },
+        path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
+        protected_paths: vec![
+            format!("{home}/.ssh"),
+            format!("{home}/.ssh/**"),
+            format!("{home}/.gnupg"),
+            format!("{home}/.gnupg/**"),
+            format!("{home}/.aws"),
+            format!("{home}/.aws/**"),
+            format!("{home}/.config"),
+            format!("{home}/.config/**"),
+            format!("{home}/.zshrc"),
+            format!("{home}/.bashrc"),
+            format!("{home}/.bash_profile"),
+            format!("{home}/.zprofile"),
+            format!("{home}/.gitconfig"),
+            format!("{home}/.npmrc"),
+            format!("{home}/.kube"),
+            format!("{home}/.kube/**"),
+            format!("{home}/.docker"),
+            format!("{home}/.docker/**"),
+        ],
+        block_traversal: false,
+        block_hidden: false,
+    })
+}
+
 /// Standard rule: Block path traversal in filesystem operations.
 fn path_traversal() -> GuardrailRule {
     GuardrailRule::Path(PathRule {
@@ -315,6 +412,8 @@ mod tests {
         assert!(is_core_rule("core.tron-db-protection"));
         assert!(is_core_rule("core.tron-auth-protection"));
         assert!(is_core_rule("core.synology-drive-protection"));
+        assert!(is_core_rule("core.system-protection"));
+        assert!(is_core_rule("core.dotfiles-protection"));
         assert!(!is_core_rule("path.traversal"));
         assert!(!is_core_rule("custom.my-rule"));
     }
@@ -322,7 +421,7 @@ mod tests {
     #[test]
     fn test_default_rules_count() {
         let rules = default_rules();
-        assert_eq!(rules.len(), 9); // 6 core + 3 standard
+        assert_eq!(rules.len(), 11); // 8 core + 3 standard
     }
 
     #[test]
@@ -367,5 +466,119 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── system-protection tests ──────────────────────────────────
+
+    use super::super::types::EvaluationContext;
+
+    fn make_ctx(tool: &str, args: serde_json::Value) -> EvaluationContext {
+        EvaluationContext {
+            tool_name: tool.to_string(),
+            tool_arguments: args,
+            session_id: None,
+            tool_call_id: None,
+        }
+    }
+
+    fn find_rule(id: &str) -> GuardrailRule {
+        default_rules()
+            .into_iter()
+            .find(|r| r.base().id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn system_protection_blocks_write_to_usr() {
+        let rule = find_rule("core.system-protection");
+        let ctx = make_ctx("Write", serde_json::json!({"file_path": "/usr/local/bin/test"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Write to /usr should be blocked");
+    }
+
+    #[test]
+    fn system_protection_blocks_write_to_etc() {
+        let rule = find_rule("core.system-protection");
+        let ctx = make_ctx("Edit", serde_json::json!({"file_path": "/etc/hosts"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Write to /etc should be blocked");
+    }
+
+    #[test]
+    fn system_protection_allows_tmp() {
+        let rule = find_rule("core.system-protection");
+        let ctx = make_ctx("Write", serde_json::json!({"file_path": "/tmp/scratch.txt"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Write to /tmp should be allowed");
+    }
+
+    #[test]
+    fn system_protection_blocks_bash_redirect_to_etc() {
+        let rule = find_rule("core.system-protection");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "echo test > /etc/hosts"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Bash redirect to /etc should be blocked");
+    }
+
+    // ── dotfiles-protection tests ────────────────────────────────
+
+    #[test]
+    fn dotfiles_blocks_write_to_ssh() {
+        let rule = find_rule("core.dotfiles-protection");
+        let home = homedir();
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": format!("{home}/.ssh/config")}),
+        );
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Write to ~/.ssh should be blocked");
+    }
+
+    #[test]
+    fn dotfiles_does_not_apply_to_read_tool() {
+        let rule = find_rule("core.dotfiles-protection");
+        assert!(
+            !rule.base().tools.contains(&"Read".to_string()),
+            "Dotfiles rule should not apply to Read tool"
+        );
+    }
+
+    #[test]
+    fn dotfiles_allows_write_to_workspace() {
+        let rule = find_rule("core.dotfiles-protection");
+        let home = homedir();
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": format!("{home}/Workspace/project/file.rs")}),
+        );
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Write to ~/Workspace should be allowed");
+    }
+
+    #[test]
+    fn dotfiles_allows_write_to_desktop() {
+        let rule = find_rule("core.dotfiles-protection");
+        let home = homedir();
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": format!("{home}/Desktop/file.txt")}),
+        );
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Write to ~/Desktop should be allowed");
+    }
+
+    #[test]
+    fn dotfiles_allows_write_to_tron_workspace() {
+        let rule = find_rule("core.dotfiles-protection");
+        let home = homedir();
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": format!("{home}/.tron/workspace/scratch/file.txt")}),
+        );
+        let result = rule.evaluate(&ctx, None);
+        assert!(
+            !result.triggered,
+            "Write to ~/.tron/workspace should be allowed"
+        );
     }
 }

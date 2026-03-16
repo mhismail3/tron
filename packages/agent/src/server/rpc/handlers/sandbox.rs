@@ -332,7 +332,7 @@ mod tests {
     // ── remove_container_metadata ────────────────────────────────
 
     fn write_containers_file(dir: &std::path::Path, content: &str) -> PathBuf {
-        let artifacts = dir.join(".tron").join("artifacts");
+        let artifacts = dir.join(".tron").join("workspace");
         std::fs::create_dir_all(&artifacts).unwrap();
         let path = artifacts.join("containers.json");
         std::fs::write(&path, content).unwrap();

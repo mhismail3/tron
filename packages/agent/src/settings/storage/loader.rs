@@ -34,9 +34,9 @@ pub fn auth_path() -> PathBuf {
     tron_home_dir().join("auth.json")
 }
 
-/// Resolve the deployment artifacts directory (`~/.tron/artifacts/deployment/`).
+/// Resolve the deployment directory (`~/.tron/workspace/deployment/`).
 pub fn deploy_dir() -> PathBuf {
-    tron_home_dir().join("artifacts").join("deployment")
+    tron_home_dir().join("workspace").join("deployment")
 }
 
 /// Load settings from the default path with env var overrides.

@@ -460,6 +460,19 @@ async fn main() -> Result<()> {
         }
     }
 
+    // One-time migration: artifacts/ → workspace/
+    {
+        let tron_home = tron::settings::tron_home_dir();
+        let old_artifacts = tron_home.join("artifacts");
+        let new_workspace = tron_home.join("workspace");
+        if old_artifacts.exists() && !new_workspace.exists() {
+            let _ = std::fs::rename(&old_artifacts, &new_workspace);
+        }
+        for subdir in &["scratch", "downloads", "cron", "canvases", "deployment"] {
+            let _ = std::fs::create_dir_all(new_workspace.join(subdir));
+        }
+    }
+
     // Database (events + tasks share one SQLite file) — set up before logging
     // so that tracing events are persisted from the start.
     let db_path = resolve_production_db_path(args.db_path)?;
@@ -780,7 +793,7 @@ async fn main() -> Result<()> {
     // Cron scheduler
     let cron_cancel = tokio_util::sync::CancellationToken::new();
     let cron_config_path = tron::settings::tron_home_dir()
-        .join("artifacts")
+        .join("workspace")
         .join("automations.json");
     let cron_backup_path = tron::settings::deploy_dir().join("automations.json.bak");
 

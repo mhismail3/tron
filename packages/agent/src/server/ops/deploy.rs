@@ -147,7 +147,7 @@ pub enum DeployError {
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
-/// Read the deployed commit from `artifacts/deployment/deployed-commit`.
+/// Read the deployed commit from `workspace/deployment/deployed-commit`.
 pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
     std::fs::read_to_string(artifacts_dir.join("deployed-commit"))
         .map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
@@ -194,7 +194,7 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
 
 /// Write `last-deployment.json` compatible with `scripts/tron` format.
 ///
-/// `artifacts_dir` should be `~/.tron/artifacts/deployment/`.
+/// `artifacts_dir` should be `~/.tron/workspace/deployment/`.
 pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
     write_last_deployment_inner(artifacts_dir, sentinel, None)
 }

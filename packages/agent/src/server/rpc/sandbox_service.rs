@@ -14,7 +14,7 @@ pub(crate) fn containers_json_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
         .join(".tron")
-        .join("artifacts")
+        .join("workspace")
         .join("containers.json")
 }
 
