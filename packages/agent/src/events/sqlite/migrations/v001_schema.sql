@@ -102,17 +102,11 @@ CREATE TABLE IF NOT EXISTS events (
   cost                 REAL
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_session_seq       ON events(session_id, sequence);
-CREATE INDEX IF NOT EXISTS idx_events_parent            ON events(parent_id);
-CREATE INDEX IF NOT EXISTS idx_events_type              ON events(type);
-CREATE INDEX IF NOT EXISTS idx_events_workspace         ON events(workspace_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_events_tool_call_id      ON events(tool_call_id) WHERE tool_call_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_events_message_preview   ON events(session_id, type, sequence DESC)
-  WHERE type IN ('message.user', 'message.assistant');
-CREATE INDEX IF NOT EXISTS idx_events_session_covering  ON events(session_id, sequence, type, timestamp, parent_id);
-CREATE INDEX IF NOT EXISTS idx_events_model             ON events(session_id, model) WHERE model IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_events_latency           ON events(session_id, latency_ms) WHERE latency_ms IS NOT NULL;
+-- Minimal indexes: only what's needed for correctness (unique constraint)
+-- and the primary access pattern (session event ordering).
+-- All other queries can scan/filter at our volumes.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence_unique ON events(session_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence);
 
 -- Blobs (content-addressable deduplicated storage)
 CREATE TABLE IF NOT EXISTS blobs (
@@ -169,15 +163,8 @@ CREATE TABLE IF NOT EXISTS logs (
   origin          TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_logs_session_time   ON logs(session_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_level_time     ON logs(level_num, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_trace_id       ON logs(trace_id);
-CREATE INDEX IF NOT EXISTS idx_logs_parent_trace   ON logs(parent_trace_id);
-CREATE INDEX IF NOT EXISTS idx_logs_origin         ON logs(origin);
-
--- Partial unique index: dedup iOS client logs
+-- No query indexes on logs — scan/filter is sufficient at our volumes.
+-- Only the dedup constraint for iOS client log replay.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_ios_client_dedup
   ON logs(timestamp, component, message)
   WHERE origin = 'ios-client';

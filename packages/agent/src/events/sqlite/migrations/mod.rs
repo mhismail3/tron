@@ -300,40 +300,45 @@ mod tests {
         // Spot-check key indexes
         let expected = [
             "idx_events_session_seq",
-            "idx_events_parent",
-            "idx_events_tool_call_id",
+            "idx_events_session_sequence_unique",
             "idx_sessions_workspace",
             "idx_sessions_created",
-            "idx_logs_trace_id",
             "idx_tasks_status",
             "idx_areas_workspace",
             "idx_blobs_hash",
             "idx_branches_session",
-            "idx_events_model",
-            "idx_events_latency",
-            "idx_events_session_sequence_unique",
             "idx_sessions_origin",
             "idx_sessions_source",
-            "idx_logs_origin",
             "idx_logs_ios_client_dedup",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
         }
 
-        // Verify removed indexes are gone
-        assert!(
-            !indexes.contains(&"idx_logs_timestamp".to_string()),
-            "idx_logs_timestamp should not exist"
-        );
-        assert!(
-            !indexes.contains(&"idx_events_timestamp".to_string()),
-            "idx_events_timestamp should not exist"
-        );
-        assert!(
-            !indexes.contains(&"idx_logs_event".to_string()),
-            "idx_logs_event should not exist"
-        );
+        // Verify removed indexes are gone (logs query indexes and most events indexes stripped)
+        let removed = [
+            "idx_logs_timestamp",
+            "idx_logs_trace_id",
+            "idx_logs_origin",
+            "idx_logs_session_time",
+            "idx_logs_level_time",
+            "idx_logs_component_time",
+            "idx_logs_workspace_time",
+            "idx_logs_parent_trace",
+            "idx_events_parent",
+            "idx_events_type",
+            "idx_events_tool_call_id",
+            "idx_events_model",
+            "idx_events_latency",
+            "idx_events_timestamp",
+            "idx_logs_event",
+        ];
+        for idx in &removed {
+            assert!(
+                !indexes.contains(&idx.to_string()),
+                "{idx} should not exist"
+            );
+        }
     }
 
     #[test]
