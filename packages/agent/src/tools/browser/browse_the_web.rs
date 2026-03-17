@@ -1,8 +1,9 @@
-//! `BrowseTheWeb` tool — CDP-based browser automation + fire-and-forget URL opening.
+//! `BrowseTheWeb` tool — browser automation + fire-and-forget URL opening.
 //!
-//! Routes browser actions to the [`BrowserDelegate`] trait. Supports 19 actions
-//! across navigation, observation, interaction, waiting, scrolling, export, and
-//! the `openURL` action (opens a URL in iOS Safari, fire-and-forget).
+//! Routes browser actions to the [`BrowserProvider`](super::provider::BrowserProvider)
+//! trait. Supports 19 actions across navigation, observation, interaction,
+//! waiting, scrolling, export, and the `openURL` action (opens a URL in iOS
+//! Safari, fire-and-forget).
 
 use std::sync::Arc;
 
@@ -11,7 +12,8 @@ use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
-use crate::tools::traits::{BrowserAction, BrowserDelegate, ExecutionMode, ToolContext, TronTool};
+use crate::tools::traits::{BrowserAction, ExecutionMode, ToolContext, TronTool};
+use super::provider::BrowserProvider;
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::validate_required_string;
 
@@ -37,15 +39,15 @@ const VALID_ACTIONS: &[&str] = &[
     "openURL",
 ];
 
-/// The `BrowseTheWeb` tool provides full browser automation via a delegate.
+/// The `BrowseTheWeb` tool provides full browser automation via a provider.
 pub struct BrowseTheWebTool {
-    delegate: Arc<dyn BrowserDelegate>,
+    provider: Arc<dyn BrowserProvider>,
 }
 
 impl BrowseTheWebTool {
-    /// Create a new `BrowseTheWeb` tool with the given browser delegate.
-    pub fn new(delegate: Arc<dyn BrowserDelegate>) -> Self {
-        Self { delegate }
+    /// Create a new `BrowseTheWeb` tool with the given browser provider.
+    pub fn new(provider: Arc<dyn BrowserProvider>) -> Self {
+        Self { provider }
     }
 }
 
@@ -128,7 +130,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
 
         // Handle close action specially — delegates to close_session
         if action_name == "close" {
-            return match self.delegate.close_session(&ctx.session_id).await {
+            return match self.provider.close_session(&ctx.session_id).await {
                 Ok(()) => Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         crate::core::content::ToolResultContent::text("Browser session closed"),
@@ -184,7 +186,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
         };
 
         match self
-            .delegate
+            .provider
             .execute_action(&ctx.session_id, &browser_action)
             .await
         {
@@ -204,9 +206,11 @@ Browser sessions are persistent — once created, you can perform multiple actio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::browser::types::{BrowserEvent, BrowserStatus};
     use crate::tools::testutil::{extract_text, make_ctx};
     use crate::tools::traits::{BrowserResult, ExecutionMode};
     use std::sync::Mutex;
+    use tokio::sync::broadcast;
 
     struct MockBrowser {
         last_action: Mutex<Option<String>>,
@@ -230,7 +234,11 @@ mod tests {
     }
 
     #[async_trait]
-    impl BrowserDelegate for MockBrowser {
+    impl BrowserProvider for MockBrowser {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
         async fn execute_action(
             &self,
             _session_id: &str,
@@ -257,6 +265,26 @@ mod tests {
             }
             Ok(())
         }
+
+        async fn start_stream(&self, _session_id: &str) -> Result<(), ToolError> {
+            Ok(())
+        }
+
+        async fn stop_stream(&self, _session_id: &str) -> Result<(), ToolError> {
+            Ok(())
+        }
+
+        fn get_status(&self, _session_id: &str) -> BrowserStatus {
+            BrowserStatus::default()
+        }
+
+        fn subscribe(&self) -> broadcast::Receiver<BrowserEvent> {
+            let (tx, rx) = broadcast::channel(1);
+            drop(tx);
+            rx
+        }
+
+        async fn close_all_sessions(&self) {}
     }
 
     #[test]

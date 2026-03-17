@@ -30,7 +30,6 @@
 pub(crate) mod testutil;
 
 pub mod backends;
-pub mod cdp;
 pub mod errors;
 pub mod registry;
 pub mod traits;

@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use crate::core::events::TronEvent;
 use crate::runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
-use crate::tools::cdp::types::BrowserEvent;
+use crate::tools::browser::types::BrowserEvent;
 
 use super::broadcast::BroadcastManager;
 use browser::browser_event_to_bridged;

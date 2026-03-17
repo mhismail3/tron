@@ -54,8 +54,8 @@ pub struct RpcContext {
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
-    /// Browser service for CDP-based browser automation (None = browser not available).
-    pub browser_service: Option<Arc<crate::tools::cdp::service::BrowserService>>,
+    /// Browser provider for browser automation (None = browser not available).
+    pub browser_provider: Option<Arc<dyn crate::tools::browser::provider::BrowserProvider>>,
     /// MLX transcription engine (lazily loaded via `OnceLock`).
     pub transcription_engine: Arc<OnceLock<Arc<MlxEngine>>>,
     /// Embedding controller for vector search (None = embeddings not loaded).

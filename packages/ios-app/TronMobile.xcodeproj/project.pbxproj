@@ -17,6 +17,7 @@
 		0461B194814BC161CFC7F12A /* ChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A31095A71425E246B49FD7EB /* ChatSheet.swift */; };
 		0469B9AB3EBA290338B09CAD /* GenericToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */; };
 		0475312820C4C6CA6AF0F899 /* NotifyAppResultParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 917B5933609A546EB749F872 /* NotifyAppResultParser.swift */; };
+		04B1C353C92F84068BE1E08B /* ToolsSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139398CA470E8C7ABA0A2A7C /* ToolsSettingsSection.swift */; };
 		0578B02D84D47EBD82E9FF19 /* RPCTypes+Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACBCFC7216A5D99C26BC004 /* RPCTypes+Agent.swift */; };
 		05D507CB3C67284103C9894D /* StatusPillBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86636B2253DF1CA2F0502BB7 /* StatusPillBar.swift */; };
 		06229F770247E91B4A5D6A43 /* ContextAuditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B7711CC73D857688322623 /* ContextAuditView.swift */; };
@@ -146,6 +147,7 @@
 		3A7F3EED85425108E1E8F048 /* ToolOutputPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DED44B4A59265FAC1C1E7EA /* ToolOutputPlugin.swift */; };
 		3AFA79F688F367716E2D157E /* GitHubURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44B7814F3EDCB211D6200FD /* GitHubURLParser.swift */; };
 		3BA0B87462C7B912147DE959 /* ThinkingIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0ED2A1D7582E1ECFC7FFDA /* ThinkingIndicatorTests.swift */; };
+		3C07311AF47383666171AC8F /* ToolsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C72B0C0630C373A8506930 /* ToolsSettingsPage.swift */; };
 		3C0CA6E0441C3A478F8B9661 /* NotificationPillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */; };
 		3C55103A264A8EBA05739CA8 /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F553247FBA864ECAD1C2B62 /* WebSocketService.swift */; };
 		3C69ADE0EE80669C6BB15291 /* InputHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6964BC2C78A1224344F88458 /* InputHistoryStore.swift */; };
@@ -705,6 +707,7 @@
 		12C06691E5608858E6401FBA /* WaitForAgentsTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitForAgentsTypes.swift; sourceTree = "<group>"; };
 		133CF7985DA0C485864FACFD /* ToolArgumentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolArgumentParser.swift; sourceTree = "<group>"; };
 		136BFCC70A4DF30E22612772 /* StreamingManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingManagerTests.swift; sourceTree = "<group>"; };
+		139398CA470E8C7ABA0A2A7C /* ToolsSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsSettingsSection.swift; sourceTree = "<group>"; };
 		139D63473EA8D93898D46617 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
 		13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenFormatter.swift; sourceTree = "<group>"; };
 		13C882175CD63CFDC25905E1 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
@@ -1060,6 +1063,7 @@
 		A86CDFE588E9C4A56E401D39 /* MultiLineTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextView.swift; sourceTree = "<group>"; };
 		A88530585935932D2156CF13 /* BrowserStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStateTests.swift; sourceTree = "<group>"; };
 		A8C31D16E298803B9F1827AB /* ChatViewModelLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelLifecycleTests.swift; sourceTree = "<group>"; };
+		A8C72B0C0630C373A8506930 /* ToolsSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsSettingsPage.swift; sourceTree = "<group>"; };
 		A8D8EA62B03448D7C891FC2B /* EventStoreManagerPollingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManagerPollingTests.swift; sourceTree = "<group>"; };
 		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
 		ABD345A78C7D80B1406300BF /* ThinkingDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingDetailSheet.swift; sourceTree = "<group>"; };
@@ -1655,6 +1659,7 @@
 				CC1C325D5E32EDF3D5B0CED0 /* ContextSettingsPage.swift */,
 				B1ECA0AA074F651472B78C05 /* IntegrationSettingsPage.swift */,
 				7A2E09443C4C5CEC0C5ACE45 /* SessionSettingsPage.swift */,
+				A8C72B0C0630C373A8506930 /* ToolsSettingsPage.swift */,
 			);
 			path = Pages;
 			sourceTree = "<group>";
@@ -1743,6 +1748,7 @@
 				4C350275A9F1CBDCF87D15E0 /* ReasoningLevelPicker.swift */,
 				06155F971588B32DA165D8CF /* ServerSettingsSection.swift */,
 				393C89DB821923F90B216AFE /* SettingsView.swift */,
+				139398CA470E8C7ABA0A2A7C /* ToolsSettingsSection.swift */,
 				0248F14D0E46BB22AF7EEF3B /* TronStepper.swift */,
 				39EB1B6E7D22187FC536F07E /* Pages */,
 			);
@@ -3529,6 +3535,8 @@
 				F850DCF9A45575BFA9800ED9 /* ToolSectionViews.swift in Sources */,
 				5E03418BCDA1C1FD816820AD /* ToolStartPlugin.swift in Sources */,
 				D9002F80F9B707AEA8505E11 /* ToolTypes.swift in Sources */,
+				3C07311AF47383666171AC8F /* ToolsSettingsPage.swift in Sources */,
+				04B1C353C92F84068BE1E08B /* ToolsSettingsSection.swift in Sources */,
 				A039C541B3E25BAF62E1C0B8 /* TranscriptionCoordinator.swift in Sources */,
 				93A7A2563B123E9690FEF50C /* TreeLoadingStates.swift in Sources */,
 				0C954830152A455E9CB1BCDC /* TreeRepository.swift in Sources */,

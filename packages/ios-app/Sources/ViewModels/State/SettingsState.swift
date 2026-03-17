@@ -49,6 +49,10 @@ final class SettingsState {
     var integrationLocationEnabled: Bool = false
     var integrationLocationPrecision: String = "city"
 
+    // MARK: - Tool Settings
+
+    var toolBrowserHeaded: Bool = false
+
     // MARK: - Account Settings
 
     var anthropicAccounts: [String] = []
@@ -112,6 +116,7 @@ final class SettingsState {
             integrationLocationEnabled = settings.integrations.location.enabled
             integrationLocationPrecision = settings.integrations.location.precision
 
+            toolBrowserHeaded = settings.tools.browser.headed
             anthropicAccounts = settings.anthropicAccounts ?? []
             selectedAnthropicAccount = settings.anthropicAccount
             if let workspace = settings.defaultWorkspace {
@@ -169,6 +174,7 @@ final class SettingsState {
         integrationHealthDataTypes = []
         integrationLocationEnabled = false
         integrationLocationPrecision = "city"
+        toolBrowserHeaded = false
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 
@@ -193,10 +199,13 @@ final class SettingsState {
                 rules: .init(discoverStandaloneFiles: true),
                 tasks: .init(autoInject: .init(enabled: false))
             ),
-            tools: .init(web: .init(
-                fetch: .init(timeoutMs: 30000),
-                cache: .init(ttlMs: 900000, maxEntries: 100)
-            )),
+            tools: .init(
+                web: .init(
+                    fetch: .init(timeoutMs: 30000),
+                    cache: .init(ttlMs: 900000, maxEntries: 100)
+                ),
+                browser: .init(headed: false)
+            ),
             integrations: .init(
                 deviceContext: .init(
                     enabled: false, battery: true, network: true, audioRoute: true,

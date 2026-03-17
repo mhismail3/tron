@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    BrowserAction, BrowserDelegate, BrowserResult, EventStoreQuery, MemoryEntry,
+    EventStoreQuery, MemoryEntry,
     Notification, NotifyDelegate, NotifyResult, SessionInfo, SubagentConfig,
     SubagentHandle, SubagentResult, SubagentSpawner, TaskManagerDelegate, WaitMode,
 };
@@ -37,25 +37,6 @@ impl SubagentSpawner for StubSubagentSpawner {
         _timeout_ms: u64,
     ) -> Result<Vec<SubagentResult>, ToolError> {
         Err(not_available("Subagent waiting"))
-    }
-}
-
-// ─── BrowserDelegate ─────────────────────────────────────────────────────────
-
-/// Stub browser delegate — browser automation isn't wired yet.
-pub struct StubBrowserDelegate;
-
-#[async_trait]
-impl BrowserDelegate for StubBrowserDelegate {
-    async fn execute_action(
-        &self,
-        _session_id: &str,
-        _action: &BrowserAction,
-    ) -> Result<BrowserResult, ToolError> {
-        Err(not_available("Browser automation"))
-    }
-    async fn close_session(&self, _session_id: &str) -> Result<(), ToolError> {
-        Err(not_available("Browser automation"))
     }
 }
 
@@ -177,17 +158,6 @@ mod tests {
             tool_call_id: None,
         };
         let err = spawner.spawn(config).await;
-        assert!(err.is_err());
-    }
-
-    #[tokio::test]
-    async fn stub_browser_delegate_returns_error() {
-        let delegate = StubBrowserDelegate;
-        let action = BrowserAction {
-            action: "navigate".into(),
-            params: serde_json::json!({"url": "https://example.com"}),
-        };
-        let err = delegate.execute_action("s1", &action).await;
         assert!(err.is_err());
     }
 

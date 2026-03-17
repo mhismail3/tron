@@ -114,7 +114,7 @@ struct PromptRunPlan {
     shutdown_coordinator: Option<Arc<crate::server::shutdown::ShutdownCoordinator>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
-    browser_service: Option<Arc<crate::tools::cdp::service::BrowserService>>,
+    browser_provider: Option<Arc<dyn crate::tools::browser::provider::BrowserProvider>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -211,7 +211,7 @@ pub fn spawn_prompt_run(
         shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
-        browser_service: ctx.browser_service.clone(),
+        browser_provider: ctx.browser_provider.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -247,7 +247,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         shutdown_coordinator,
         shutdown_token,
         worktree_coordinator,
-        browser_service,
+        browser_provider,
         server_origin,
         run_id,
         model,
@@ -597,14 +597,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         let _ = persister.flush().await;
     }
 
-    if let Some(ref browser_service) = browser_service
-        && let Err(error) = browser_service.close_session(&session_id).await
-    {
-        tracing::debug!(
-            session_id = %session_id,
-            error = %error,
-            "failed to close browser session after run"
-        );
+    if let Some(ref browser_provider) = browser_provider {
+        browser_provider.close_all_sessions().await;
     }
 
     if let Some(ref error_message) = result.error {

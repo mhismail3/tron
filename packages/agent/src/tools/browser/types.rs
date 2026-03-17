@@ -63,52 +63,6 @@ impl Default for FrameMetadata {
     }
 }
 
-/// Screencast configuration options.
-#[derive(Clone, Debug)]
-pub struct ScreencastOptions {
-    /// JPEG quality (0-100).
-    pub quality: u32,
-    /// Image format.
-    pub format: ScreencastFormat,
-    /// Maximum capture width.
-    pub max_width: u32,
-    /// Maximum capture height.
-    pub max_height: u32,
-    /// Capture every Nth frame (1 = every frame).
-    pub every_nth_frame: u32,
-}
-
-impl Default for ScreencastOptions {
-    fn default() -> Self {
-        Self {
-            quality: 60,
-            format: ScreencastFormat::Jpeg,
-            max_width: 1280,
-            max_height: 960,
-            every_nth_frame: 6,
-        }
-    }
-}
-
-/// Screencast image format.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ScreencastFormat {
-    /// JPEG format.
-    Jpeg,
-    /// PNG format.
-    Png,
-}
-
-impl ScreencastFormat {
-    /// CDP protocol string.
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Jpeg => "jpeg",
-            Self::Png => "png",
-        }
-    }
-}
-
 /// Events emitted by browser sessions on the broadcast channel.
 #[derive(Clone, Debug)]
 pub enum BrowserEvent {
@@ -243,32 +197,6 @@ mod tests {
     }
 
     #[test]
-    fn screencast_options_default() {
-        let opts = ScreencastOptions::default();
-        assert_eq!(opts.quality, 60);
-        assert_eq!(opts.format, ScreencastFormat::Jpeg);
-        assert_eq!(opts.max_width, 1280);
-        assert_eq!(opts.max_height, 960);
-        assert_eq!(opts.every_nth_frame, 6);
-    }
-
-    #[test]
-    fn screencast_options_custom() {
-        let opts = ScreencastOptions {
-            quality: 80,
-            format: ScreencastFormat::Png,
-            max_width: 1920,
-            max_height: 1080,
-            every_nth_frame: 2,
-        };
-        assert_eq!(opts.quality, 80);
-        assert_eq!(opts.format, ScreencastFormat::Png);
-        assert_eq!(opts.max_width, 1920);
-        assert_eq!(opts.max_height, 1080);
-        assert_eq!(opts.every_nth_frame, 2);
-    }
-
-    #[test]
     fn browser_event_frame_contains_session_id() {
         let event = BrowserEvent::Frame {
             session_id: "s1".into(),
@@ -303,12 +231,6 @@ mod tests {
         assert!(!status.has_browser);
         assert!(!status.is_streaming);
         assert!(status.current_url.is_none());
-    }
-
-    #[test]
-    fn screencast_format_as_str() {
-        assert_eq!(ScreencastFormat::Jpeg.as_str(), "jpeg");
-        assert_eq!(ScreencastFormat::Png.as_str(), "png");
     }
 
     #[test]

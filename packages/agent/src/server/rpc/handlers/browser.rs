@@ -17,12 +17,13 @@ impl MethodHandler for StartStreamHandler {
     #[instrument(skip(self, ctx), fields(method = "browser.startStream"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let Some(ref svc) = ctx.browser_service else {
+        let Some(ref provider) = ctx.browser_provider else {
             return Err(RpcError::NotAvailable {
-                message: "Browser streaming not available (Chrome not found)".into(),
+                message: "Browser streaming not available (no provider found)".into(),
             });
         };
-        svc.start_stream(&session_id)
+        provider
+            .start_stream(&session_id)
             .await
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -39,8 +40,9 @@ impl MethodHandler for StopStreamHandler {
     #[instrument(skip(self, ctx), fields(method = "browser.stopStream"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        if let Some(ref svc) = ctx.browser_service {
-            svc.stop_stream(&session_id)
+        if let Some(ref provider) = ctx.browser_provider {
+            provider
+                .stop_stream(&session_id)
                 .await
                 .map_err(|e| RpcError::Internal {
                     message: e.to_string(),
@@ -59,9 +61,9 @@ impl MethodHandler for GetStatusHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let status = ctx
-            .browser_service
+            .browser_provider
             .as_ref()
-            .map(|svc| svc.get_status(&session_id))
+            .map(|p| p.get_status(&session_id))
             .unwrap_or_default();
         Ok(serde_json::to_value(status).unwrap_or_default())
     }

@@ -242,19 +242,35 @@ struct ServerSettings: Decodable {
 
     struct ToolSettings: Decodable {
         let web: WebSettings
-        static let defaults = ToolSettings(web: .defaults)
+        let browser: BrowserSettings
+        static let defaults = ToolSettings(web: .defaults, browser: .defaults)
 
         private enum CodingKeys: String, CodingKey {
-            case web
+            case web, browser
         }
 
-        init(web: WebSettings) {
+        init(web: WebSettings, browser: BrowserSettings) {
             self.web = web
+            self.browser = browser
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             web = (try? container.decodeIfPresent(WebSettings.self, forKey: .web)) ?? .defaults
+            browser = (try? container.decodeIfPresent(BrowserSettings.self, forKey: .browser)) ?? .defaults
+        }
+
+        struct BrowserSettings: Decodable {
+            let headed: Bool
+            static let defaults = BrowserSettings(headed: false)
+
+            init(headed: Bool) { self.headed = headed }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                headed = (try? container.decodeIfPresent(Bool.self, forKey: .headed)) ?? false
+            }
+            private enum CodingKeys: String, CodingKey { case headed }
         }
 
         struct WebSettings: Decodable {
@@ -536,6 +552,11 @@ struct ServerSettingsUpdate: Encodable {
 
     struct ToolsUpdate: Encodable {
         var web: WebUpdate?
+        var browser: BrowserUpdate?
+
+        struct BrowserUpdate: Encodable {
+            var headed: Bool?
+        }
 
         struct WebUpdate: Encodable {
             var fetch: FetchUpdate?

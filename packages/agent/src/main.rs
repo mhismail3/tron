@@ -155,6 +155,12 @@ fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
+/// Find an available ephemeral port by binding to port 0.
+fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    listener.local_addr().expect("local_addr").port()
+}
+
 /// Embed unembedded `memory.ledger` events on startup (fire-and-forget).
 #[cfg(feature = "ort")]
 async fn startup_embed(
@@ -244,7 +250,7 @@ struct ToolRegistryConfig {
     event_store: Arc<tron::events::EventStore>,
     task_pool: tron::events::ConnectionPool,
     brave_api_key: Option<String>,
-    browser_delegate: Option<Arc<dyn tron::tools::traits::BrowserDelegate>>,
+    browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>>,
     #[cfg_attr(not(feature = "apns"), allow(dead_code))]
     apns_service: ApnsServiceOption,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
@@ -263,7 +269,7 @@ struct ToolRegistryConfig {
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
-        RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
+        RealFileSystem, ReqwestHttpClient,
         StubNotifyDelegate, TokioProcessRunner,
     };
 
@@ -307,13 +313,13 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 6: Find
     registry.register(Arc::new(tron::tools::fs::find::FindTool::new()));
 
-    // 7: BrowseTheWeb (real CDP delegate if Chrome found, otherwise stub)
-    let browser_delegate: Arc<dyn tron::tools::traits::BrowserDelegate> = config
-        .browser_delegate
+    // 7: BrowseTheWeb (real provider if found, otherwise stub)
+    let browser_provider: Arc<dyn tron::tools::browser::provider::BrowserProvider> = config
+        .browser_provider
         .clone()
-        .unwrap_or_else(|| Arc::new(StubBrowserDelegate));
+        .unwrap_or_else(|| Arc::new(tron::tools::browser::providers::stub::StubProvider));
     registry.register(Arc::new(
-        tron::tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
+        tron::tools::browser::browse_the_web::BrowseTheWebTool::new(browser_provider),
     ));
 
     // 8: AskUserQuestion
@@ -539,22 +545,21 @@ async fn main() -> Result<()> {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
-    // Browser service (optional — only if Chrome is found)
-    let browser_service = tron::tools::cdp::chrome::find_chrome().map(|chrome_path| {
-        tracing::info!(path = %chrome_path.display(), "Chrome found — browser streaming enabled");
-        Arc::new(tron::tools::cdp::service::BrowserService::new(chrome_path))
-    });
-    if browser_service.is_none() {
-        tracing::info!("Chrome not found — browser streaming disabled");
-    }
-
-    // Browser delegate for tool registry (real CDP if Chrome found)
-    let browser_delegate: Option<Arc<dyn tron::tools::traits::BrowserDelegate>> =
-        browser_service.as_ref().map(|svc| {
-            Arc::new(tron::tools::cdp::delegate::CdpBrowserDelegate::new(
-                svc.clone(),
-            )) as Arc<dyn tron::tools::traits::BrowserDelegate>
-        });
+    // Browser provider (optional — only if agent-browser is found)
+    let browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>> = {
+        let stream_port = find_free_port();
+        let provider = tron::tools::browser::providers::find_browser_provider(
+            stream_port,
+            settings.tools.browser.executable_path.as_deref(),
+            settings.tools.browser.headed,
+        );
+        if let Some(ref p) = provider {
+            tracing::info!(provider = p.name(), "browser provider found — browser tool enabled");
+        } else {
+            tracing::info!("no browser provider found — browser tool returns 'not available'");
+        }
+        provider
+    };
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
     let apns_service: ApnsServiceOption = {
@@ -678,7 +683,7 @@ async fn main() -> Result<()> {
         event_store: event_store.clone(),
         task_pool: task_pool.clone(),
         brave_api_key,
-        browser_delegate,
+        browser_provider: browser_provider.clone(),
         apns_service,
         embedding_controller: embedding_controller.clone(),
         http_client: shared_http_client,
@@ -870,7 +875,7 @@ async fn main() -> Result<()> {
         settings_path,
         agent_deps,
         server_start_time: std::time::Instant::now(),
-        browser_service: browser_service.clone(),
+        browser_provider: browser_provider.clone(),
         transcription_engine,
         embedding_controller,
         subagent_manager: shared_subagent_manager,
@@ -904,7 +909,7 @@ async fn main() -> Result<()> {
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
     // Event bridge: orchestrator events + browser frames → WebSocket clients
-    let browser_rx = browser_service.as_ref().map(|svc| svc.subscribe());
+    let browser_rx = browser_provider.as_ref().map(|p| p.subscribe());
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
@@ -1514,7 +1519,7 @@ mod tests {
             settings_path,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
-            browser_service: None,
+            browser_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
@@ -1608,7 +1613,7 @@ mod tests {
             event_store,
             task_pool: pool,
             brave_api_key: None,
-            browser_delegate: None,
+            browser_provider: None,
             apns_service: None,
             embedding_controller: None,
             http_client: reqwest::Client::new(),
@@ -1705,7 +1710,7 @@ mod tests {
             settings_path: dir.path().join("settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
-            browser_service: None,
+            browser_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,

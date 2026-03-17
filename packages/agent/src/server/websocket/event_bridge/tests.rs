@@ -148,12 +148,12 @@ fn session_saved_stays_session_scoped() {
 fn browser_frames_stay_session_scoped() {
     let event = BrowserEvent::Frame {
         session_id: "s1".into(),
-        frame: crate::tools::cdp::types::BrowserFrame {
+        frame: crate::tools::browser::types::BrowserFrame {
             session_id: "browser-1".into(),
             frame_id: 7,
             timestamp: 1_707_999_045_123,
             data: "payload".into(),
-            metadata: Some(crate::tools::cdp::types::FrameMetadata::default()),
+            metadata: Some(crate::tools::browser::types::FrameMetadata::default()),
         },
     };
     let bridged = browser_event_to_bridged(&event);
@@ -188,12 +188,12 @@ async fn bridge_routes_browser_frames_to_bound_session() {
     let _ = browser_tx
         .send(BrowserEvent::Frame {
             session_id: "s1".into(),
-            frame: crate::tools::cdp::types::BrowserFrame {
+            frame: crate::tools::browser::types::BrowserFrame {
                 session_id: "browser-1".into(),
                 frame_id: 7,
                 timestamp: 1_707_999_045_123,
                 data: "payload".into(),
-                metadata: Some(crate::tools::cdp::types::FrameMetadata::default()),
+                metadata: Some(crate::tools::browser::types::FrameMetadata::default()),
             },
         })
         .unwrap();

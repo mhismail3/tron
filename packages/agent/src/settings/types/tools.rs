@@ -18,6 +18,8 @@ pub struct ToolSettings {
     pub search: SearchToolSettings,
     /// Web fetch and cache settings.
     pub web: WebToolSettings,
+    /// Browser automation settings.
+    pub browser: BrowserSettings,
 }
 
 /// Bash tool settings.
@@ -204,6 +206,25 @@ impl Default for WebCacheSettings {
     }
 }
 
+/// Browser automation settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BrowserSettings {
+    /// Path to browser provider executable. Auto-detected from PATH if not set.
+    pub executable_path: Option<String>,
+    /// Run browser in headed mode (visible window). Default: false (headless).
+    pub headed: bool,
+}
+
+impl Default for BrowserSettings {
+    fn default() -> Self {
+        Self {
+            executable_path: None,
+            headed: false,
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,5 +292,47 @@ mod tests {
         assert_eq!(tools.bash.max_timeout_ms, 600_000);
         // Other tool sections should be defaults
         assert_eq!(tools.read.default_limit_lines, 2000);
+    }
+
+    #[test]
+    fn browser_settings_defaults() {
+        let b = BrowserSettings::default();
+        assert!(b.executable_path.is_none());
+        assert!(!b.headed);
+    }
+
+    #[test]
+    fn browser_settings_serde_roundtrip() {
+        let b = BrowserSettings {
+            executable_path: Some("/usr/local/bin/agent-browser".into()),
+            headed: true,
+        };
+        let json = serde_json::to_value(&b).unwrap();
+        assert_eq!(json["executablePath"], "/usr/local/bin/agent-browser");
+        assert_eq!(json["headed"], true);
+        let back: BrowserSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(back.executable_path.as_deref(), Some("/usr/local/bin/agent-browser"));
+        assert!(back.headed);
+    }
+
+    #[test]
+    fn browser_settings_partial_json() {
+        let json = serde_json::json!({"headed": true});
+        let b: BrowserSettings = serde_json::from_value(json).unwrap();
+        assert!(b.headed);
+        assert!(b.executable_path.is_none());
+    }
+
+    #[test]
+    fn tool_settings_with_browser_partial_json() {
+        let json = serde_json::json!({
+            "browser": {
+                "headed": true
+            }
+        });
+        let tools: ToolSettings = serde_json::from_value(json).unwrap();
+        assert!(tools.browser.headed);
+        // Other tool sections should still be defaults
+        assert_eq!(tools.bash.default_timeout_ms, 120_000);
     }
 }

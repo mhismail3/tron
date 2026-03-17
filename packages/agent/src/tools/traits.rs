@@ -405,19 +405,6 @@ pub trait SubagentSpawner: Send + Sync {
     ) -> Result<Vec<SubagentResult>, ToolError>;
 }
 
-/// Browser automation (`BrowseTheWeb`).
-#[async_trait]
-pub trait BrowserDelegate: Send + Sync {
-    /// Execute a browser action.
-    async fn execute_action(
-        &self,
-        session_id: &str,
-        action: &BrowserAction,
-    ) -> Result<BrowserResult, ToolError>;
-    /// Close a browser session.
-    async fn close_session(&self, session_id: &str) -> Result<(), ToolError>;
-}
-
 /// iOS app notifications (`NotifyApp`).
 #[async_trait]
 pub trait NotifyDelegate: Send + Sync {

@@ -1,6 +1,6 @@
 use crate::server::rpc::types::RpcEvent;
 use serde_json::json;
-use crate::tools::cdp::types::BrowserEvent;
+use crate::tools::browser::types::BrowserEvent;
 
 use super::routed::{BridgedEvent, BroadcastScope};
 
