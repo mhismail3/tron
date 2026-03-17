@@ -26,6 +26,7 @@ final class SettingsState {
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
     var taskAutoInjectEnabled: Bool = false
+    var isolationMode: String = "always"
 
     // MARK: - Integration Settings
 
@@ -90,6 +91,7 @@ final class SettingsState {
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
+            isolationMode = settings.isolationMode
             // Integration settings
             integrationDeviceContextEnabled = settings.integrations.deviceContext.enabled
             integrationDeviceContextBattery = settings.integrations.deviceContext.battery
@@ -148,6 +150,7 @@ final class SettingsState {
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
         taskAutoInjectEnabled = false
+        isolationMode = "always"
         integrationDeviceContextEnabled = false
         integrationDeviceContextBattery = true
         integrationDeviceContextNetwork = true
@@ -204,7 +207,8 @@ final class SettingsState {
                 contacts: .init(enabled: false),
                 health: .init(enabled: false, dataTypes: []),
                 location: .init(enabled: false, precision: "city")
-            )
+            ),
+            session: .init(isolation: .init(mode: "always"))
         )
     }
 }

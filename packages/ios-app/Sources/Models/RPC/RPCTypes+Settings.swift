@@ -20,9 +20,18 @@ struct ServerSettings: Decodable {
     let tasks: TaskSettings
     let tools: ToolSettings
     let integrations: IntegrationSettings
+    let isolationMode: String
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, tools, integrations
+        case models, server, context, tools, integrations, session
+    }
+
+    private enum SessionKeys: String, CodingKey {
+        case isolation
+    }
+
+    private enum IsolationKeys: String, CodingKey {
+        case mode
     }
 
     private enum ModelsKeys: String, CodingKey {
@@ -75,6 +84,14 @@ struct ServerSettings: Decodable {
 
         tools = (try? container.decodeIfPresent(ToolSettings.self, forKey: .tools)) ?? .defaults
         integrations = (try? container.decodeIfPresent(IntegrationSettings.self, forKey: .integrations)) ?? .defaults
+
+        // session.isolation.mode
+        if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session),
+           let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
+            isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
+        } else {
+            isolationMode = "always"
+        }
     }
 
     struct CompactionSettings: Decodable {
@@ -463,6 +480,7 @@ struct ServerSettingsUpdate: Encodable {
     var context: ContextUpdate?
     var tools: ToolsUpdate?
     var integrations: IntegrationsUpdate?
+    var session: SessionUpdate?
 
     struct ServerUpdate: Encodable {
         var defaultModel: String?
@@ -531,6 +549,14 @@ struct ServerSettingsUpdate: Encodable {
                 var ttlMs: Int?
                 var maxEntries: Int?
             }
+        }
+    }
+
+    struct SessionUpdate: Encodable {
+        var isolation: IsolationUpdate?
+
+        struct IsolationUpdate: Encodable {
+            var mode: String?
         }
     }
 

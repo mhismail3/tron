@@ -169,6 +169,20 @@ final class MiscClient {
         )
     }
 
+    /// Delete a single session branch
+    func deleteBranch(sessionId: String, branch: String) async throws -> DeleteBranchResult {
+        let ws = try transport.requireConnection()
+        let params = DeleteBranchParams(sessionId: sessionId, branch: branch)
+        return try await ws.send(method: "worktree.deleteBranch", params: params)
+    }
+
+    /// Prune all inactive session branches
+    func pruneBranches(sessionId: String) async throws -> PruneBranchesResult {
+        let ws = try transport.requireConnection()
+        let params = PruneBranchesParams(sessionId: sessionId)
+        return try await ws.send(method: "worktree.pruneBranches", params: params)
+    }
+
     // MARK: - Diff Methods
 
     /// Get diff of all uncommitted changes for a session's working directory

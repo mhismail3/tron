@@ -23,6 +23,10 @@ pub enum WorktreeError {
     #[error("branch already exists: {0}")]
     BranchExists(String),
 
+    /// Branch is currently active (has a worktree).
+    #[error("branch is active: {0}")]
+    BranchActive(String),
+
     /// Event store error.
     #[error("event store: {0}")]
     EventStore(String),

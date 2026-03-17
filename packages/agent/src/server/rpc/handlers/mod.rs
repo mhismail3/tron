@@ -191,6 +191,14 @@ fn register_platform(registry: &mut MethodRegistry) {
         "worktree.getCommittedDiff",
         worktree::GetCommittedDiffHandler,
     );
+    registry.register(
+        "worktree.deleteBranch",
+        worktree::DeleteBranchHandler,
+    );
+    registry.register(
+        "worktree.pruneBranches",
+        worktree::PruneBranchesHandler,
+    );
 
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
@@ -517,8 +525,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            111,
-            "expected 111 methods, got {}",
+            113,
+            "expected 113 methods, got {}",
             reg.methods().len()
         );
     }

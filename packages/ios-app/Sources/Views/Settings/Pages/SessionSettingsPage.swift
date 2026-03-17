@@ -8,6 +8,19 @@ struct SessionSettingsPage: View {
     let onModelTap: () -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
+    private var isolationDescription: String {
+        switch settingsState.isolationMode {
+        case "always":
+            return "Every session in a git repo gets its own worktree branch."
+        case "lazy":
+            return "Only create worktrees when multiple sessions target the same repo."
+        case "never":
+            return "Never create worktrees. All sessions work in the main working tree."
+        default:
+            return ""
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -19,6 +32,29 @@ struct SessionSettingsPage: View {
                         onModelTap: onModelTap
                     )
                 }
+
+                Section {
+                    Picker(selection: Bindable(settingsState).isolationMode) {
+                        Text("Always").tag("always")
+                        Text("Lazy").tag("lazy")
+                        Text("Never").tag("never")
+                    } label: {
+                        Label("Isolation Mode", systemImage: "arrow.triangle.branch")
+                            .font(TronTypography.subheadline)
+                    }
+                    .onChange(of: settingsState.isolationMode) { _, newValue in
+                        updateServerSetting {
+                            ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
+                        }
+                    }
+                } header: {
+                    Text("Git Isolation")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
+                } footer: {
+                    Text(isolationDescription)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                }
+                .listSectionSpacing(16)
 
                 Section {
                     HStack {

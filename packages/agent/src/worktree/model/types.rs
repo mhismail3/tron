@@ -232,6 +232,38 @@ pub struct DiffSummary {
     pub total_deletions: usize,
 }
 
+/// Result of deleting a single session branch.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBranchResult {
+    /// Branch name that was deleted.
+    pub branch: String,
+    /// Whether the branch had unmerged commits.
+    pub had_unmerged_commits: bool,
+    /// Number of unmerged commits.
+    pub unmerged_count: usize,
+}
+
+/// Result of pruning all inactive session branches.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneBranchesResult {
+    /// Branches that were successfully deleted.
+    pub deleted: Vec<String>,
+    /// Branches that failed to delete.
+    pub failed: Vec<PruneFailure>,
+}
+
+/// A branch that failed to be pruned.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneFailure {
+    /// Branch name.
+    pub branch: String,
+    /// Error message.
+    pub error: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

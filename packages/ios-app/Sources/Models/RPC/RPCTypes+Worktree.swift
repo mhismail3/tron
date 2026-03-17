@@ -159,3 +159,35 @@ struct CommittedDiffSummary: Decodable, Hashable {
     let totalAdditions: Int
     let totalDeletions: Int
 }
+
+// MARK: - Branch Management
+
+/// Params for deleting a single session branch
+struct DeleteBranchParams: Encodable {
+    let sessionId: String
+    let branch: String
+}
+
+/// Result of deleting a single session branch
+struct DeleteBranchResult: Decodable {
+    let branch: String
+    let hadUnmergedCommits: Bool
+    let unmergedCount: Int
+}
+
+/// Params for pruning all inactive session branches
+struct PruneBranchesParams: Encodable {
+    let sessionId: String
+}
+
+/// Result of pruning inactive session branches
+struct PruneBranchesResult: Decodable {
+    let deleted: [String]
+    let failed: [PruneFailure]
+}
+
+/// A branch that failed to be pruned
+struct PruneFailure: Decodable {
+    let branch: String
+    let error: String
+}

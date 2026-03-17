@@ -21,6 +21,8 @@ struct BranchDetailView: View {
     @State private var mergeError: String?
     @State private var mergeConflicts: [String] = []
     @State private var showConflictAlert = false
+    @State private var showDeleteBranchConfirmation = false
+    @State private var isDeleting = false
 
     private var targetBranch: String {
         branch.baseBranch ?? "main"
@@ -51,6 +53,17 @@ struct BranchDetailView: View {
             Button("Rebase") { performMerge(strategy: "rebase") }
             Button("Squash") { performMerge(strategy: "squash") }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete branch?",
+            isPresented: $showDeleteBranchConfirmation
+        ) {
+            Button("Delete (\(branch.commitCount) unmerged commit\(branch.commitCount == 1 ? "" : "s"))", role: .destructive) {
+                performDelete()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Branch \(branch.shortBranch) has \(branch.commitCount) unmerged commit\(branch.commitCount == 1 ? "" : "s"). This cannot be undone.")
         }
         .alert("Merge Conflicts", isPresented: $showConflictAlert) {
             Button("Ask Agent to Merge") {
@@ -209,12 +222,33 @@ struct BranchDetailView: View {
             }
             .buttonStyle(.plain)
 
-            if isMerging {
+            if isMerging || isDeleting {
                 ProgressView()
                     .controlSize(.small)
             }
 
             Spacer()
+
+            if !branch.isActive {
+                Button {
+                    if branch.commitCount > 0 {
+                        showDeleteBranchConfirmation = true
+                    } else {
+                        performDelete()
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronError)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .opacity(isDeleting ? 0.4 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+            }
         }
     }
 
@@ -340,6 +374,25 @@ struct BranchDetailView: View {
         }
 
         isLoading = false
+    }
+
+    // MARK: - Delete
+
+    private func performDelete() {
+        Task {
+            isDeleting = true
+            defer { isDeleting = false }
+
+            do {
+                let _ = try await rpcClient.misc.deleteBranch(
+                    sessionId: branch.sessionId ?? currentSessionId,
+                    branch: branch.branch
+                )
+                dismiss()
+            } catch {
+                mergeError = "Delete failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - Merge

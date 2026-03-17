@@ -28,6 +28,8 @@ struct SourceChangesSheet: View {
     @State private var expandedFiles: Set<String> = []
     @State private var expandedCommittedFiles: Set<String> = []
     @State private var selectedBranch: SessionBranchInfo?
+    @State private var isPruning = false
+    @State private var showPruneConfirmation = false
 
     enum SourceControlTab: String, CaseIterable {
         case thisSession = "This Session"
@@ -66,6 +68,23 @@ struct SourceChangesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if selectedTab == .allBranches && !branches.filter({ !$0.isActive }).isEmpty {
+                        Button {
+                            showPruneConfirmation = true
+                        } label: {
+                            if isPruning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Prune", systemImage: "trash")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                    .foregroundStyle(.tronError)
+                            }
+                        }
+                        .disabled(isPruning)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image("IconGit")
@@ -90,7 +109,9 @@ struct SourceChangesSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .task { await loadAll() }
-        .sheet(item: $selectedBranch) { branch in
+        .sheet(item: $selectedBranch, onDismiss: {
+            Task { await loadBranches() }
+        }) { branch in
             BranchDetailView(
                 branch: branch,
                 rpcClient: rpcClient,
@@ -103,6 +124,19 @@ struct SourceChangesSheet: View {
             )
             .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large])
+        }
+        .confirmationDialog(
+            "Prune all preserved branches?",
+            isPresented: $showPruneConfirmation
+        ) {
+            let count = branches.filter({ !$0.isActive }).count
+            Button("Delete all \(count) branches", role: .destructive) {
+                pruneAllBranches()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let count = branches.filter({ !$0.isActive }).count
+            Text("This will delete all \(count) preserved branches. This cannot be undone.")
         }
     }
 
@@ -281,6 +315,8 @@ struct SourceChangesSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            let preservedBranches = branches.filter { !$0.isActive }
+
             ScrollView {
                 LazyVStack(spacing: 0) {
                     // Active sessions (excluding current)
@@ -293,7 +329,6 @@ struct SourceChangesSheet: View {
                     }
 
                     // Preserved branches
-                    let preservedBranches = branches.filter { !$0.isActive }
                     if !preservedBranches.isEmpty {
                         sectionHeader("Preserved Branches")
                         ForEach(preservedBranches) { branch in
@@ -550,6 +585,20 @@ struct SourceChangesSheet: View {
                 }
             } catch {
                 errorMessage = "Commit failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func pruneAllBranches() {
+        Task {
+            isPruning = true
+            defer { isPruning = false }
+
+            do {
+                let _ = try await rpcClient.misc.pruneBranches(sessionId: sessionId)
+                await loadBranches()
+            } catch {
+                errorMessage = "Prune failed: \(error.localizedDescription)"
             }
         }
     }

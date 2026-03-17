@@ -118,6 +118,13 @@ pub async fn remove(
         }
     }
 
+    // Check if the branch has any commits over the base (used to decide branch deletion)
+    let has_commits = git
+        .commit_count_between(&info.repo_root, &info.base_commit, &info.branch)
+        .await
+        .unwrap_or(0)
+        > 0;
+
     // Remove worktree directory
     let deleted = if config.delete_on_release && info.worktree_path.exists() {
         match git
@@ -143,8 +150,8 @@ pub async fn remove(
         false
     };
 
-    // Delete branch if not preserving
-    let branch_preserved = if config.preserve_branches {
+    // Delete branch if not preserving, or if zero commits (no point keeping empty branches)
+    let branch_preserved = if config.preserve_branches && has_commits {
         true
     } else if let Err(e) = git.branch_delete(&info.repo_root, &info.branch, true).await {
         tracing::warn!(branch = %info.branch, error = %e, "failed to delete branch");
@@ -334,7 +341,8 @@ mod tests {
         let release = remove(&info, &config, &git).await.unwrap();
         assert!(release.final_commit.is_none());
         assert!(release.deleted);
-        assert!(release.branch_preserved);
+        // Zero-commit branches are auto-pruned even when preserve_branches is true
+        assert!(!release.branch_preserved);
     }
 
     #[tokio::test]
@@ -375,6 +383,64 @@ mod tests {
             info.repo_root.canonicalize().unwrap(),
             dir.path().canonicalize().unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn remove_deletes_zero_commit_branch_even_when_preserving() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig {
+            preserve_branches: true,
+            ..WorktreeConfig::default()
+        };
+
+        let info = create("sess-zerocommit", dir.path(), &config, &git)
+            .await
+            .unwrap();
+        let branch = info.branch.clone();
+
+        // No changes made — zero commits over base
+        let release = remove(&info, &config, &git).await.unwrap();
+        assert!(release.deleted);
+        assert!(!release.branch_preserved, "zero-commit branch should be deleted even when preserve_branches is true");
+
+        // Verify branch is actually gone
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
+        assert!(!branches.contains(&branch));
+    }
+
+    #[tokio::test]
+    async fn remove_preserves_branch_with_commits() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig {
+            preserve_branches: true,
+            ..WorktreeConfig::default()
+        };
+
+        let info = create("sess-withcommits", dir.path(), &config, &git)
+            .await
+            .unwrap();
+        let branch = info.branch.clone();
+
+        // Make a change and commit it
+        std::fs::write(info.worktree_path.join("change.txt"), "content").unwrap();
+        run_cmd(&info.worktree_path, &["git", "add", "-A"]).await;
+        run_cmd(&info.worktree_path, &["git", "commit", "-m", "real work"]).await;
+
+        let release = remove(&info, &config, &git).await.unwrap();
+        assert!(release.deleted);
+        assert!(release.branch_preserved, "branch with commits should be preserved");
+
+        // Verify branch still exists
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
+        assert!(branches.contains(&branch));
     }
 
     #[tokio::test]

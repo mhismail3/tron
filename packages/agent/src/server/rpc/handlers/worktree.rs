@@ -335,6 +335,74 @@ impl MethodHandler for GetCommittedDiffHandler {
     }
 }
 
+// ── DeleteBranch ────────────────────────────────────────────────────
+
+/// Delete a single session branch.
+pub struct DeleteBranchHandler;
+
+#[async_trait]
+impl MethodHandler for DeleteBranchHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.deleteBranch"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let branch = require_string_param(params.as_ref(), "branch")?;
+        let coord = require_coordinator(ctx)?;
+
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+        let dir_path = std::path::Path::new(&dir);
+        let repo_root_str = coord.resolve_repo_root(dir_path).await.map_err(|e| {
+            RpcError::Internal {
+                message: format!("Failed to resolve repo root: {e}"),
+            }
+        })?;
+        let repo_root = std::path::Path::new(&repo_root_str);
+
+        match coord.delete_session_branch(repo_root, &branch).await {
+            Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+                message: format!("Serialization failed: {e}"),
+            }),
+            Err(crate::worktree::WorktreeError::BranchActive(_)) => Err(RpcError::InvalidParams {
+                message: format!("Branch '{branch}' is active and cannot be deleted"),
+            }),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Failed to delete branch: {e}"),
+            }),
+        }
+    }
+}
+
+// ── PruneBranches ───────────────────────────────────────────────────
+
+/// Prune all inactive session branches.
+pub struct PruneBranchesHandler;
+
+#[async_trait]
+impl MethodHandler for PruneBranchesHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.pruneBranches"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
+
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+        let dir_path = std::path::Path::new(&dir);
+        let repo_root_str = coord.resolve_repo_root(dir_path).await.map_err(|e| {
+            RpcError::Internal {
+                message: format!("Failed to resolve repo root: {e}"),
+            }
+        })?;
+        let repo_root = std::path::Path::new(&repo_root_str);
+
+        match coord.prune_session_branches(repo_root).await {
+            Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+                message: format!("Serialization failed: {e}"),
+            }),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Failed to prune branches: {e}"),
+            }),
+        }
+    }
+}
+
 // ── GetDiff ─────────────────────────────────────────────────────────
 
 const MAX_DIFF_BYTES: usize = 1_024 * 1_024; // 1 MB
@@ -691,6 +759,61 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not enabled"));
+    }
+
+    // ── DeleteBranch handler tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn delete_branch_requires_coordinator() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+        let err = DeleteBranchHandler
+            .handle(
+                Some(json!({"sessionId": sid, "branch": "session/x"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn delete_branch_missing_branch_param() {
+        let ctx = make_test_context();
+        let err = DeleteBranchHandler
+            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    // ── PruneBranches handler tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn prune_branches_requires_coordinator() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+        let err = PruneBranchesHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn prune_branches_missing_session_id() {
+        let ctx = make_test_context();
+        let err = PruneBranchesHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     // ── GetCommittedDiff handler tests ──────────────────────────────
