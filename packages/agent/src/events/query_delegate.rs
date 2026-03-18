@@ -212,7 +212,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         event_type: Option<&str>,
         turn: Option<u32>,
         limit: u32,
-        _offset: u32,
+        offset: u32,
     ) -> Result<Vec<Value>, ToolError> {
         let rows = if let Some(et) = event_type {
             let types: Vec<&str> = vec![et];
@@ -222,7 +222,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         } else {
             let opts = ListEventsOptions {
                 limit: Some(i64::from(limit)),
-                offset: None,
+                offset: Some(i64::from(offset)),
             };
             self.store
                 .get_events_by_session(session_id, &opts)
@@ -570,5 +570,52 @@ mod tests {
         // Get events should find the session.start event
         let events = q.get_events(&sid, None, None, 10, 0).await.unwrap();
         assert!(!events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_events_offset_pagination() {
+        use crate::events::{AppendOptions, EventType};
+
+        let store = setup_store();
+        let result = store
+            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .unwrap();
+        let sid = result.root_event.session_id;
+
+        // Append extra events so we have enough to paginate.
+        // create_session already inserted 1 event (session.start).
+        for i in 0..4 {
+            store
+                .append(&AppendOptions {
+                    session_id: &sid,
+                    event_type: EventType::MessageUser,
+                    payload: json!({"text": format!("msg-{i}")}),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        let q = SqliteEventStoreQuery::new(store);
+
+        // Total: 5 events (1 session.start + 4 agent.message)
+        let all = q.get_events(&sid, None, None, 10, 0).await.unwrap();
+        assert_eq!(all.len(), 5);
+
+        // Page 1: first 2
+        let page1 = q.get_events(&sid, None, None, 2, 0).await.unwrap();
+        assert_eq!(page1.len(), 2);
+
+        // Page 2: next 2, offset=2
+        let page2 = q.get_events(&sid, None, None, 2, 2).await.unwrap();
+        assert_eq!(page2.len(), 2);
+        assert_ne!(page1, page2, "page 2 must differ from page 1");
+
+        // Page 3: last 1, offset=4
+        let page3 = q.get_events(&sid, None, None, 2, 4).await.unwrap();
+        assert_eq!(page3.len(), 1);
+
+        // Beyond end: empty
+        let empty = q.get_events(&sid, None, None, 2, 10).await.unwrap();
+        assert!(empty.is_empty());
     }
 }
