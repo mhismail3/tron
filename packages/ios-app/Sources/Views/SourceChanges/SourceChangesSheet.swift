@@ -99,9 +99,11 @@ struct SourceChangesSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
         }
