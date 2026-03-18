@@ -2,22 +2,22 @@
 //!
 //! Unified model registry for provider detection, model lookup, and capability queries.
 //! Each provider maintains its own detailed model registry (pricing, capabilities, etc.)
-//! in its respective crate. This module provides cross-provider utilities.
+//! in its respective module. This module provides cross-provider utilities.
+//!
+//! **Single source of truth**: provider type files (`anthropic/types.rs`, etc.) own all
+//! model metadata. This module derives lookups from those registries — no static arrays.
 
-use super::model_ids::{
-    ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_MINIMAX_MODEL_IDS, ALL_OPENAI_MODEL_IDS,
-};
-use crate::llm::anthropic::types::get_claude_model;
-use crate::llm::google::types::get_gemini_model;
-use crate::llm::minimax::types::get_minimax_model;
-use crate::llm::openai::types::get_openai_model;
+use crate::llm::anthropic::types::{all_claude_model_ids, get_claude_model};
+use crate::llm::google::types::{all_gemini_model_ids, get_gemini_model};
+use crate::llm::minimax::types::{all_minimax_model_ids, get_minimax_model};
+use crate::llm::openai::types::{all_openai_model_ids, get_openai_model};
 use crate::core::messages::Provider;
 
 /// Detect which provider serves a given model ID.
 ///
 /// Resolution order:
 /// 1. Explicit prefix (e.g., `"openai/gpt-5"` → `OpenAi`)
-/// 2. Registry lookup (exact match against known model IDs)
+/// 2. Registry lookup (exact match in provider HashMap — O(1))
 ///
 /// Unknown model IDs always return `None` (strict fail-fast behavior).
 pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
@@ -25,31 +25,29 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
     // bare model exists in that provider's registry.
     if let Some((prefix, bare_model)) = model_id.split_once('/') {
         return match prefix {
-            "anthropic" if ALL_ANTHROPIC_MODEL_IDS.contains(&bare_model) => {
-                Some(Provider::Anthropic)
-            }
-            "openai" | "openai-codex" if ALL_OPENAI_MODEL_IDS.contains(&bare_model) => {
+            "anthropic" if get_claude_model(bare_model).is_some() => Some(Provider::Anthropic),
+            "openai" | "openai-codex" if get_openai_model(bare_model).is_some() => {
                 Some(Provider::OpenAi)
             }
-            "google" | "gemini" if ALL_GOOGLE_MODEL_IDS.contains(&bare_model) => {
+            "google" | "gemini" if get_gemini_model(bare_model).is_some() => {
                 Some(Provider::Google)
             }
-            "minimax" if ALL_MINIMAX_MODEL_IDS.contains(&bare_model) => Some(Provider::MiniMax),
+            "minimax" if get_minimax_model(bare_model).is_some() => Some(Provider::MiniMax),
             _ => None,
         };
     }
 
-    // 2. Registry lookup (exact match)
-    if ALL_ANTHROPIC_MODEL_IDS.contains(&model_id) {
+    // 2. Registry lookup (O(1) HashMap lookups)
+    if get_claude_model(model_id).is_some() {
         return Some(Provider::Anthropic);
     }
-    if ALL_OPENAI_MODEL_IDS.contains(&model_id) {
+    if get_openai_model(model_id).is_some() {
         return Some(Provider::OpenAi);
     }
-    if ALL_GOOGLE_MODEL_IDS.contains(&model_id) {
+    if get_gemini_model(model_id).is_some() {
         return Some(Provider::Google);
     }
-    if ALL_MINIMAX_MODEL_IDS.contains(&model_id) {
+    if get_minimax_model(model_id).is_some() {
         return Some(Provider::MiniMax);
     }
 
@@ -70,10 +68,10 @@ pub fn strip_provider_prefix(model_id: &str) -> &str {
 /// Check if a model ID is recognized by any provider.
 pub fn is_model_supported(model_id: &str) -> bool {
     let bare = strip_provider_prefix(model_id);
-    ALL_ANTHROPIC_MODEL_IDS.contains(&bare)
-        || ALL_OPENAI_MODEL_IDS.contains(&bare)
-        || ALL_GOOGLE_MODEL_IDS.contains(&bare)
-        || ALL_MINIMAX_MODEL_IDS.contains(&bare)
+    get_claude_model(bare).is_some()
+        || get_openai_model(bare).is_some()
+        || get_gemini_model(bare).is_some()
+        || get_minimax_model(bare).is_some()
 }
 
 /// Check if a model supports image inputs.
@@ -119,16 +117,10 @@ pub fn model_context_window(model_id: &str) -> u64 {
 
 /// Get all known model IDs across all providers.
 pub fn all_model_ids() -> Vec<&'static str> {
-    let mut ids = Vec::with_capacity(
-        ALL_ANTHROPIC_MODEL_IDS.len()
-            + ALL_OPENAI_MODEL_IDS.len()
-            + ALL_GOOGLE_MODEL_IDS.len()
-            + ALL_MINIMAX_MODEL_IDS.len(),
-    );
-    ids.extend_from_slice(ALL_ANTHROPIC_MODEL_IDS);
-    ids.extend_from_slice(ALL_OPENAI_MODEL_IDS);
-    ids.extend_from_slice(ALL_GOOGLE_MODEL_IDS);
-    ids.extend_from_slice(ALL_MINIMAX_MODEL_IDS);
+    let mut ids = all_claude_model_ids();
+    ids.extend(all_openai_model_ids());
+    ids.extend(all_gemini_model_ids());
+    ids.extend(all_minimax_model_ids());
     ids
 }
 
@@ -217,6 +209,10 @@ mod tests {
         assert_eq!(detect_provider_from_model(GPT_5_4), Some(Provider::OpenAi));
         assert_eq!(
             detect_provider_from_model(GPT_5_4_PRO),
+            Some(Provider::OpenAi)
+        );
+        assert_eq!(
+            detect_provider_from_model(GPT_5_4_MINI),
             Some(Provider::OpenAi)
         );
     }
@@ -405,6 +401,16 @@ mod tests {
     }
 
     #[test]
+    fn context_window_gpt_54_mini() {
+        assert_eq!(model_context_window(GPT_5_4_MINI), 400_000);
+    }
+
+    #[test]
+    fn gpt_54_mini_supports_images() {
+        assert!(model_supports_images(GPT_5_4_MINI));
+    }
+
+    #[test]
     fn context_window_google() {
         assert_eq!(model_context_window(GEMINI_2_5_FLASH), 1_048_576);
     }
@@ -433,12 +439,7 @@ mod tests {
         assert!(ids.contains(&GPT_5_3_CODEX));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_5));
-        assert_eq!(
-            ids.len(),
-            ALL_ANTHROPIC_MODEL_IDS.len()
-                + ALL_OPENAI_MODEL_IDS.len()
-                + ALL_GOOGLE_MODEL_IDS.len()
-                + ALL_MINIMAX_MODEL_IDS.len()
-        );
+        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 5 MiniMax = 30
+        assert_eq!(ids.len(), 30);
     }
 }

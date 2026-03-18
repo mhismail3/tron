@@ -468,6 +468,22 @@ pub struct GeminiModelInfo {
     pub input_cost_per_million: f64,
     /// Output cost per million tokens (USD).
     pub output_cost_per_million: f64,
+    /// Model family (e.g., "Gemini 3", "Gemini 2.5").
+    pub family: &'static str,
+    /// Model description for the client UI.
+    pub description: &'static str,
+    /// Display sort order within the provider (lower = higher priority).
+    pub sort_order: u16,
+    /// Whether this model is recommended for new users.
+    pub recommended: bool,
+    /// Whether this is a legacy/older generation model.
+    pub is_legacy: bool,
+    /// Whether this model is deprecated.
+    pub is_deprecated: bool,
+    /// Deprecation date (ISO-8601), if deprecated.
+    pub deprecation_date: Option<&'static str>,
+    /// Supported thinking level names for the API response.
+    pub supported_thinking_levels: &'static [&'static str],
 }
 
 /// Model registry mapping model IDs to their metadata.
@@ -489,6 +505,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: Some(GeminiThinkingLevel::High),
             input_cost_per_million: 1.25,
             output_cost_per_million: 10.0,
+            family: "Gemini 3",
+            description: "Gemini 3.1 Pro (Preview) — optimized for software engineering and agentic workflows.",
+            sort_order: 0,
+            recommended: true,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &["low", "medium", "high"],
         },
     );
     m.insert(
@@ -506,6 +530,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: Some(GeminiThinkingLevel::High),
             input_cost_per_million: 1.25,
             output_cost_per_million: 5.0,
+            family: "Gemini 3",
+            description: "Gemini 3 Pro (Preview) — deprecated, replaced by Gemini 3.1 Pro.",
+            sort_order: 1,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: true,
+            deprecation_date: Some("2026-03-09"),
+            supported_thinking_levels: &["low", "medium", "high"],
         },
     );
     m.insert(
@@ -523,6 +555,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: None,
             input_cost_per_million: 0.25,
             output_cost_per_million: 1.50,
+            family: "Gemini 3",
+            description: "Gemini 3.1 Flash Lite (Preview) — cost-optimized for high-volume agentic tasks.",
+            sort_order: 3,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &[],
         },
     );
     m.insert(
@@ -540,6 +580,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: None,
             input_cost_per_million: 0.075,
             output_cost_per_million: 0.3,
+            family: "Gemini 3",
+            description: "Gemini 3 Flash (Preview) — flash tier (preview)",
+            sort_order: 2,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &[],
         },
     );
     m.insert(
@@ -557,6 +605,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: Some(GeminiThinkingLevel::High),
             input_cost_per_million: 1.25,
             output_cost_per_million: 5.0,
+            family: "Gemini 2.5",
+            description: "Gemini 2.5 Pro — pro tier",
+            sort_order: 4,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &["low", "medium", "high"],
         },
     );
     m.insert(
@@ -574,6 +630,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: Some(GeminiThinkingLevel::Low),
             input_cost_per_million: 0.075,
             output_cost_per_million: 0.3,
+            family: "Gemini 2.5",
+            description: "Gemini 2.5 Flash — flash tier",
+            sort_order: 5,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &["minimal", "low", "medium", "high"],
         },
     );
     m.insert(
@@ -591,6 +655,14 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             default_thinking_level: None,
             input_cost_per_million: 0.037_5,
             output_cost_per_million: 0.15,
+            family: "Gemini 2.5",
+            description: "Gemini 2.5 Flash Lite — flash-lite tier",
+            sort_order: 6,
+            recommended: false,
+            is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
+            supported_thinking_levels: &[],
         },
     );
     m
@@ -606,6 +678,54 @@ pub fn get_gemini_model(model_id: &str) -> Option<&'static GeminiModelInfo> {
 #[must_use]
 pub fn all_gemini_model_ids() -> Vec<&'static str> {
     GEMINI_MODELS.keys().copied().collect()
+}
+
+impl GeminiModelInfo {
+    /// Serialize this model to JSON for the `model.list` API response.
+    #[allow(unused_results)]
+    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+        let mut obj = serde_json::json!({
+            "id": id,
+            "name": self.short_name,
+            "provider": "google",
+            "contextWindow": self.context_window,
+            "maxOutput": self.max_output,
+            "supportsThinking": self.supports_thinking,
+            "supportsImages": self.supports_images,
+            "inputCostPerMillion": self.input_cost_per_million,
+            "outputCostPerMillion": self.output_cost_per_million,
+            "tier": self.tier,
+            "family": self.family,
+            "description": self.description,
+            "recommended": self.recommended,
+            "isLegacy": self.is_legacy,
+            "sortOrder": self.sort_order,
+        });
+        let map = obj.as_object_mut().unwrap();
+        if self.preview {
+            let _ = map.insert("isPreview".into(), serde_json::json!(true));
+        }
+        if let Some(ref level) = self.default_thinking_level {
+            let _ = map.insert("thinkingLevel".into(), serde_json::json!(level.to_api_string().to_lowercase()));
+        }
+        if !self.supported_thinking_levels.is_empty() {
+            let _ = map.insert("supportedThinkingLevels".into(), serde_json::json!(self.supported_thinking_levels));
+        }
+        if self.is_deprecated {
+            let _ = map.insert("isDeprecated".into(), serde_json::json!(true));
+        }
+        if let Some(date) = self.deprecation_date {
+            let _ = map.insert("deprecationDate".into(), serde_json::json!(date));
+        }
+        obj
+    }
+}
+
+/// All Gemini models serialized for the `model.list` API, sorted by `sort_order`.
+pub fn all_gemini_models_api_json() -> Vec<serde_json::Value> {
+    let mut entries: Vec<_> = GEMINI_MODELS.iter().collect();
+    entries.sort_by_key(|(_, info)| info.sort_order);
+    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
 }
 
 /// Check if a model ID is a Gemini 3 model (uses `thinkingLevel` instead of `thinkingBudget`).
@@ -1058,6 +1178,53 @@ mod tests {
     }
 
     // ── Generation config ────────────────────────────────────────────
+
+    // ── to_api_json ───────────────────────────────────────────────────
+
+    #[test]
+    fn to_api_json_gemini_31_pro() {
+        let m = get_gemini_model("gemini-3.1-pro-preview").unwrap();
+        let j = m.to_api_json("gemini-3.1-pro-preview");
+        assert_eq!(j["id"], "gemini-3.1-pro-preview");
+        assert_eq!(j["name"], "Gemini 3.1 Pro");
+        assert_eq!(j["provider"], "google");
+        assert_eq!(j["contextWindow"], 1_048_576);
+        assert_eq!(j["tier"], "pro");
+        assert_eq!(j["family"], "Gemini 3");
+        assert_eq!(j["supportsThinking"], true);
+        assert_eq!(j["isPreview"], true);
+        assert_eq!(j["thinkingLevel"], "high");
+        assert!(j["supportedThinkingLevels"].is_array());
+        assert_eq!(j["recommended"], true);
+        assert_eq!(j["isLegacy"], false);
+        assert!(j.get("isDeprecated").is_none());
+    }
+
+    #[test]
+    fn to_api_json_gemini_deprecated() {
+        let m = get_gemini_model("gemini-3-pro-preview").unwrap();
+        let j = m.to_api_json("gemini-3-pro-preview");
+        assert_eq!(j["isDeprecated"], true);
+        assert_eq!(j["deprecationDate"], "2026-03-09");
+    }
+
+    #[test]
+    fn to_api_json_no_thinking() {
+        let m = get_gemini_model("gemini-2.5-flash-lite").unwrap();
+        let j = m.to_api_json("gemini-2.5-flash-lite");
+        assert_eq!(j["supportsThinking"], false);
+        assert!(j.get("thinkingLevel").is_none());
+        assert!(j.get("supportedThinkingLevels").is_none());
+        assert!(j.get("isPreview").is_none());
+    }
+
+    #[test]
+    fn all_gemini_models_api_json_sorted() {
+        let models = all_gemini_models_api_json();
+        assert_eq!(models.len(), 7);
+        assert_eq!(models[0]["id"], "gemini-3.1-pro-preview");
+        assert_eq!(models[0]["sortOrder"], 0);
+    }
 
     #[test]
     fn generation_config_serde_skips_none() {

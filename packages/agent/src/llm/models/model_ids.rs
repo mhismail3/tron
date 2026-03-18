@@ -2,6 +2,10 @@
 //!
 //! Centralized string constants for all supported model IDs across all providers.
 //! Using constants prevents typos and enables compile-time verification.
+//!
+//! **Note**: Model ID *arrays* are no longer defined here. The provider registries
+//! (e.g., `OPENAI_MODELS` in `openai/types.rs`) are the single source of truth.
+//! Use `all_openai_model_ids()`, `all_claude_model_ids()`, etc. for runtime lookups.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Anthropic / Claude
@@ -46,6 +50,9 @@ pub const GPT_5_4: &str = "gpt-5.4";
 
 /// GPT 5.4 Pro — highest capability tier with 272K context (1M with extended context opt-in) and tool search.
 pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
+
+/// GPT 5.4 Mini — smaller, faster variant of GPT-5.4 for high-volume agentic workloads.
+pub const GPT_5_4_MINI: &str = "gpt-5.4-mini";
 
 /// GPT 5.3 Codex — `OpenAI` flagship.
 pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
@@ -106,15 +113,6 @@ pub const MINIMAX_M2_1_HIGHSPEED: &str = "MiniMax-M2.1-highspeed";
 /// `MiniMax` M2.
 pub const MINIMAX_M2: &str = "MiniMax-M2";
 
-/// All `MiniMax` model IDs.
-pub const ALL_MINIMAX_MODEL_IDS: &[&str] = &[
-    MINIMAX_M2_5,
-    MINIMAX_M2_5_HIGHSPEED,
-    MINIMAX_M2_1,
-    MINIMAX_M2_1_HIGHSPEED,
-    MINIMAX_M2,
-];
-
 /// Default `MiniMax` model.
 pub const DEFAULT_MINIMAX_MODEL: &str = MINIMAX_M2_5;
 
@@ -134,42 +132,6 @@ pub const DEFAULT_SERVER_MODEL: &str = CLAUDE_SONNET_4;
 /// Default Google model.
 pub const DEFAULT_GOOGLE_MODEL: &str = GEMINI_2_5_FLASH;
 
-/// All Anthropic model IDs.
-pub const ALL_ANTHROPIC_MODEL_IDS: &[&str] = &[
-    CLAUDE_OPUS_4_6,
-    CLAUDE_SONNET_4_6,
-    CLAUDE_OPUS_4_5,
-    CLAUDE_SONNET_4_5,
-    CLAUDE_HAIKU_4_5,
-    CLAUDE_OPUS_4_1,
-    CLAUDE_OPUS_4,
-    CLAUDE_SONNET_4,
-    CLAUDE_3_7_SONNET,
-    CLAUDE_3_HAIKU,
-];
-
-/// All `OpenAI` model IDs.
-pub const ALL_OPENAI_MODEL_IDS: &[&str] = &[
-    GPT_5_4,
-    GPT_5_4_PRO,
-    GPT_5_3_CODEX,
-    GPT_5_3_CODEX_SPARK,
-    GPT_5_2_CODEX,
-    GPT_5_1_CODEX_MAX,
-    GPT_5_1_CODEX_MINI,
-];
-
-/// All Google model IDs.
-pub const ALL_GOOGLE_MODEL_IDS: &[&str] = &[
-    GEMINI_3_1_PRO_PREVIEW,
-    GEMINI_3_1_FLASH_LITE_PREVIEW,
-    GEMINI_3_PRO_PREVIEW,
-    GEMINI_3_FLASH_PREVIEW,
-    GEMINI_2_5_PRO,
-    GEMINI_2_5_FLASH,
-    GEMINI_2_5_FLASH_LITE,
-];
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,55 +139,68 @@ pub const ALL_GOOGLE_MODEL_IDS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::anthropic::types::all_claude_model_ids;
+    use crate::llm::google::types::all_gemini_model_ids;
+    use crate::llm::minimax::types::all_minimax_model_ids;
+    use crate::llm::openai::types::all_openai_model_ids;
 
     #[test]
     fn anthropic_ids_not_empty() {
-        assert!(!ALL_ANTHROPIC_MODEL_IDS.is_empty());
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_OPUS_4_6));
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_SONNET_4_6));
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_HAIKU_4_5));
+        let ids = all_claude_model_ids();
+        assert!(!ids.is_empty());
+        assert!(ids.contains(&CLAUDE_OPUS_4_6));
+        assert!(ids.contains(&CLAUDE_SONNET_4_6));
+        assert!(ids.contains(&CLAUDE_HAIKU_4_5));
     }
 
     #[test]
     fn openai_ids_not_empty() {
-        assert!(!ALL_OPENAI_MODEL_IDS.is_empty());
-        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_3_CODEX));
+        let ids = all_openai_model_ids();
+        assert!(!ids.is_empty());
+        assert!(ids.contains(&GPT_5_3_CODEX));
     }
 
     #[test]
     fn openai_ids_contains_gpt_54() {
-        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_4));
-        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_4_PRO));
+        let ids = all_openai_model_ids();
+        assert!(ids.contains(&GPT_5_4));
+        assert!(ids.contains(&GPT_5_4_PRO));
+        assert!(ids.contains(&GPT_5_4_MINI));
     }
 
     #[test]
     fn openai_ids_contains_spark() {
-        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_3_CODEX_SPARK));
+        let ids = all_openai_model_ids();
+        assert!(ids.contains(&GPT_5_3_CODEX_SPARK));
     }
 
     #[test]
     fn google_ids_not_empty() {
-        assert!(!ALL_GOOGLE_MODEL_IDS.is_empty());
-        assert!(ALL_GOOGLE_MODEL_IDS.contains(&GEMINI_2_5_FLASH));
+        let ids = all_gemini_model_ids();
+        assert!(!ids.is_empty());
+        assert!(ids.contains(&GEMINI_2_5_FLASH));
     }
 
     #[test]
     fn role_aliases_point_to_valid_models() {
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&SUBAGENT_MODEL));
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&DEFAULT_API_MODEL));
-        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&DEFAULT_SERVER_MODEL));
-        assert!(ALL_GOOGLE_MODEL_IDS.contains(&DEFAULT_GOOGLE_MODEL));
+        let anthropic = all_claude_model_ids();
+        let google = all_gemini_model_ids();
+        assert!(anthropic.contains(&SUBAGENT_MODEL));
+        assert!(anthropic.contains(&DEFAULT_API_MODEL));
+        assert!(anthropic.contains(&DEFAULT_SERVER_MODEL));
+        assert!(google.contains(&DEFAULT_GOOGLE_MODEL));
     }
 
     #[test]
     fn minimax_ids_not_empty() {
-        assert!(!ALL_MINIMAX_MODEL_IDS.is_empty());
-        assert!(ALL_MINIMAX_MODEL_IDS.contains(&MINIMAX_M2_5));
+        let ids = all_minimax_model_ids();
+        assert!(!ids.is_empty());
+        assert!(ids.contains(&MINIMAX_M2_5));
     }
 
     #[test]
     fn minimax_id_format() {
-        for id in ALL_MINIMAX_MODEL_IDS {
+        for id in all_minimax_model_ids() {
             assert!(
                 id.starts_with("MiniMax-"),
                 "MiniMax model ID should start with 'MiniMax-': {id}"
@@ -236,10 +211,10 @@ mod tests {
     #[test]
     fn no_duplicate_ids() {
         let mut all: Vec<&str> = Vec::new();
-        all.extend_from_slice(ALL_ANTHROPIC_MODEL_IDS);
-        all.extend_from_slice(ALL_OPENAI_MODEL_IDS);
-        all.extend_from_slice(ALL_GOOGLE_MODEL_IDS);
-        all.extend_from_slice(ALL_MINIMAX_MODEL_IDS);
+        all.extend(all_claude_model_ids());
+        all.extend(all_openai_model_ids());
+        all.extend(all_gemini_model_ids());
+        all.extend(all_minimax_model_ids());
 
         let unique: std::collections::HashSet<&&str> = all.iter().collect();
         assert_eq!(all.len(), unique.len(), "duplicate model IDs found");
@@ -247,7 +222,7 @@ mod tests {
 
     #[test]
     fn claude_id_format() {
-        for id in ALL_ANTHROPIC_MODEL_IDS {
+        for id in all_claude_model_ids() {
             assert!(
                 id.starts_with("claude-"),
                 "Anthropic model ID should start with 'claude-': {id}"
@@ -257,7 +232,7 @@ mod tests {
 
     #[test]
     fn openai_id_format() {
-        for id in ALL_OPENAI_MODEL_IDS {
+        for id in all_openai_model_ids() {
             assert!(
                 id.starts_with("gpt-"),
                 "OpenAI model ID should start with 'gpt-': {id}"
@@ -267,7 +242,7 @@ mod tests {
 
     #[test]
     fn google_id_format() {
-        for id in ALL_GOOGLE_MODEL_IDS {
+        for id in all_gemini_model_ids() {
             assert!(
                 id.starts_with("gemini-"),
                 "Google model ID should start with 'gemini-': {id}"

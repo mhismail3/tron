@@ -181,6 +181,16 @@ pub struct OpenAIModelInfo {
     pub output_cost_per_million: f64,
     /// Cache read cost per million tokens (USD).
     pub cache_read_cost_per_million: f64,
+    /// Model description for the client UI.
+    pub description: &'static str,
+    /// Display sort order within the provider (lower = higher priority).
+    pub sort_order: u16,
+    /// Whether this model is recommended for new users.
+    pub recommended: bool,
+    /// Whether this is a legacy/older generation model.
+    pub is_legacy: bool,
+    /// Knowledge cutoff date (ISO-8601), if known.
+    pub knowledge_cutoff: Option<&'static str>,
 }
 
 /// Static model registry.
@@ -208,6 +218,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 2.0,
             output_cost_per_million: 16.0,
             cache_read_cost_per_million: 0.2,
+            description: "Latest OpenAI flagship — 272K context (1M with extended context opt-in), tool search, computer use, and expanded reasoning.",
+            sort_order: 0,
+            recommended: true,
+            is_legacy: false,
+            knowledge_cutoff: None,
         },
     );
 
@@ -231,8 +246,45 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 4.0,
             output_cost_per_million: 32.0,
             cache_read_cost_per_million: 0.4,
+            description: "Highest capability tier — 272K context (1M with extended context opt-in), tool search, computer use, and maximum reasoning.",
+            sort_order: 1,
+            recommended: false,
+            is_legacy: false,
+            knowledge_cutoff: None,
         },
     );
+
+    m.insert(
+        "gpt-5.4-mini",
+        OpenAIModelInfo {
+            name: "GPT-5.4 Mini",
+            short_name: "GPT-5.4 Mini",
+            family: "GPT-5.4",
+            tier: "standard",
+            api_endpoint: ApiEndpoint::Platform,
+            context_window: 400_000,
+            max_output: 128_000,
+            supports_tools: true,
+            supports_images: true,
+            supports_reasoning: true,
+            supports_tool_search: true,
+            supports_computer_use: true,
+            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
+            default_reasoning_level: "low",
+            input_cost_per_million: 0.75,
+            output_cost_per_million: 4.5,
+            cache_read_cost_per_million: 0.075,
+            description: "Smaller, faster GPT-5.4 — 400K context, tool search, computer use, and full reasoning levels.",
+            sort_order: 2,
+            recommended: false,
+            is_legacy: false,
+            knowledge_cutoff: None,
+        },
+    );
+
+    // GPT-5.4 Nano: NOT registered — requires the Platform API but Tron uses
+    // ChatGPT OAuth (Codex-only scopes). The Codex backend explicitly rejects it:
+    // "The 'gpt-5.4-nano' model is not supported when using Codex with a ChatGPT account."
 
     m.insert(
         "gpt-5.3-codex",
@@ -254,6 +306,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 1.75,
             output_cost_per_million: 14.0,
             cache_read_cost_per_million: 0.175,
+            description: "Agentic coding model — 400K context, reasoning, vision, and structured outputs.",
+            sort_order: 0,
+            recommended: false,
+            is_legacy: true,
+            knowledge_cutoff: Some("2025-08-31"),
         },
     );
 
@@ -277,6 +334,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 1.75,
             output_cost_per_million: 14.0,
             cache_read_cost_per_million: 0.175,
+            description: "Fast distilled coding model optimized for ultra-fast inference.",
+            sort_order: 1,
+            recommended: false,
+            is_legacy: true,
+            knowledge_cutoff: None,
         },
     );
 
@@ -300,6 +362,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 1.75,
             output_cost_per_million: 14.0,
             cache_read_cost_per_million: 0.175,
+            description: "GPT-5.2 Codex — proven agentic coding model with 400K context.",
+            sort_order: 2,
+            recommended: false,
+            is_legacy: false,
+            knowledge_cutoff: None,
         },
     );
 
@@ -323,6 +390,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 1.25,
             output_cost_per_million: 10.0,
             cache_read_cost_per_million: 0.125,
+            description: "GPT-5.1 Codex Max — deep reasoning capabilities with 400K context.",
+            sort_order: 3,
+            recommended: false,
+            is_legacy: false,
+            knowledge_cutoff: None,
         },
     );
 
@@ -346,6 +418,11 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             input_cost_per_million: 0.25,
             output_cost_per_million: 2.0,
             cache_read_cost_per_million: 0.025,
+            description: "GPT-5.1 Codex Mini — fast and cost-efficient coding model.",
+            sort_order: 4,
+            recommended: false,
+            is_legacy: false,
+            knowledge_cutoff: None,
         },
     );
 
@@ -362,6 +439,44 @@ pub fn get_openai_model(model_id: &str) -> Option<&'static OpenAIModelInfo> {
 #[must_use]
 pub fn all_openai_model_ids() -> Vec<&'static str> {
     OPENAI_MODELS.keys().copied().collect()
+}
+
+impl OpenAIModelInfo {
+    /// Serialize this model to JSON for the `model.list` API response.
+    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+        let mut obj = serde_json::json!({
+            "id": id,
+            "name": self.name,
+            "provider": "openai-codex",
+            "contextWindow": self.context_window,
+            "maxOutput": self.max_output,
+            "supportsThinking": false,
+            "supportsImages": self.supports_images,
+            "inputCostPerMillion": self.input_cost_per_million,
+            "outputCostPerMillion": self.output_cost_per_million,
+            "cacheReadCostPerMillion": self.cache_read_cost_per_million,
+            "tier": self.tier,
+            "family": self.family,
+            "description": self.description,
+            "supportsReasoning": self.supports_reasoning,
+            "reasoningLevels": self.reasoning_levels,
+            "defaultReasoningLevel": self.default_reasoning_level,
+            "recommended": self.recommended,
+            "isLegacy": self.is_legacy,
+            "sortOrder": self.sort_order,
+        });
+        if let Some(cutoff) = self.knowledge_cutoff {
+            let _ = obj.as_object_mut().unwrap().insert("knowledgeCutoff".into(), serde_json::json!(cutoff));
+        }
+        obj
+    }
+}
+
+/// All OpenAI models serialized for the `model.list` API, sorted by `sort_order`.
+pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
+    let mut entries: Vec<_> = OPENAI_MODELS.iter().collect();
+    entries.sort_by_key(|(_, info)| info.sort_order);
+    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -722,6 +837,33 @@ mod tests {
     }
 
     #[test]
+    fn model_gpt_54_mini() {
+        let m = get_openai_model("gpt-5.4-mini").unwrap();
+        assert_eq!(m.context_window, 400_000);
+        assert_eq!(m.max_output, 128_000);
+        assert!(m.supports_tools);
+        assert!(m.supports_images);
+        assert!(m.supports_reasoning);
+        assert!(m.supports_tool_search);
+        assert!(m.supports_computer_use);
+        assert_eq!(
+            m.reasoning_levels,
+            &["none", "low", "medium", "high", "xhigh"]
+        );
+        assert_eq!(m.default_reasoning_level, "low");
+        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
+        assert_float_eq(m.input_cost_per_million, 0.75);
+        assert_float_eq(m.output_cost_per_million, 4.5);
+        assert_float_eq(m.cache_read_cost_per_million, 0.075);
+    }
+
+    #[test]
+    fn model_gpt_54_nano_not_registered() {
+        // Nano requires Platform API — not available via ChatGPT OAuth (Codex only).
+        assert!(get_openai_model("gpt-5.4-nano").is_none());
+    }
+
+    #[test]
     fn model_gpt_53_no_tool_search() {
         let m = get_openai_model("gpt-5.3-codex").unwrap();
         assert!(!m.supports_tool_search);
@@ -780,6 +922,63 @@ mod tests {
         assert_float_eq(m.input_cost_per_million, 1.25);
         assert_float_eq(m.output_cost_per_million, 10.0);
         assert_float_eq(m.cache_read_cost_per_million, 0.125);
+    }
+
+    // ── to_api_json ───────────────────────────────────────────────────
+
+    #[test]
+    fn to_api_json_has_required_fields() {
+        let m = get_openai_model("gpt-5.4").unwrap();
+        let j = m.to_api_json("gpt-5.4");
+        assert_eq!(j["id"], "gpt-5.4");
+        assert_eq!(j["name"], "GPT-5.4");
+        assert_eq!(j["provider"], "openai-codex");
+        assert_eq!(j["contextWindow"], 272_000);
+        assert_eq!(j["maxOutput"], 128_000);
+        assert_eq!(j["supportsThinking"], false);
+        assert_eq!(j["supportsImages"], true);
+        assert!(j["inputCostPerMillion"].is_number());
+        assert!(j["outputCostPerMillion"].is_number());
+        assert!(j["cacheReadCostPerMillion"].is_number());
+        assert_eq!(j["tier"], "flagship");
+        assert_eq!(j["family"], "GPT-5.4");
+        assert!(j["description"].is_string());
+        assert_eq!(j["supportsReasoning"], true);
+        assert!(j["reasoningLevels"].is_array());
+        assert!(j["defaultReasoningLevel"].is_string());
+        assert_eq!(j["recommended"], true);
+        assert_eq!(j["isLegacy"], false);
+        assert!(j["sortOrder"].is_number());
+    }
+
+    #[test]
+    fn to_api_json_knowledge_cutoff_present() {
+        let m = get_openai_model("gpt-5.3-codex").unwrap();
+        let j = m.to_api_json("gpt-5.3-codex");
+        assert_eq!(j["knowledgeCutoff"], "2025-08-31");
+    }
+
+    #[test]
+    fn to_api_json_knowledge_cutoff_absent() {
+        let m = get_openai_model("gpt-5.4").unwrap();
+        let j = m.to_api_json("gpt-5.4");
+        assert!(j.get("knowledgeCutoff").is_none());
+    }
+
+    #[test]
+    fn all_openai_models_api_json_sorted() {
+        let models = all_openai_models_api_json();
+        assert_eq!(models.len(), OPENAI_MODELS.len());
+        // First model in each family should have lowest sort_order
+        assert_eq!(models[0]["id"], "gpt-5.4");
+        assert_eq!(models[0]["sortOrder"], 0);
+    }
+
+    #[test]
+    fn to_api_json_legacy_model() {
+        let m = get_openai_model("gpt-5.3-codex").unwrap();
+        let j = m.to_api_json("gpt-5.3-codex");
+        assert_eq!(j["isLegacy"], true);
     }
 
     #[test]

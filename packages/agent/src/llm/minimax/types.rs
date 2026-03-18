@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::llm::models::model_ids::{
-    ALL_MINIMAX_MODEL_IDS, MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5,
-    MINIMAX_M2_5_HIGHSPEED,
+    MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
 };
 use crate::llm::retry::StreamRetryConfig;
 
@@ -68,6 +67,14 @@ pub struct MiniMaxModelInfo {
     pub input_cost_per_million: f64,
     /// Output cost per million tokens (USD).
     pub output_cost_per_million: f64,
+    /// Model description for the client UI.
+    pub description: &'static str,
+    /// Display sort order within the provider (lower = higher priority).
+    pub sort_order: u16,
+    /// Whether this model is recommended for new users.
+    pub recommended: bool,
+    /// Whether this is a legacy/older generation model.
+    pub is_legacy: bool,
 }
 
 static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyLock::new(|| {
@@ -86,6 +93,10 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
+            description: "MiniMax M2.5 — latest and most capable MiniMax model.",
+            sort_order: 0,
+            recommended: true,
+            is_legacy: false,
         },
     );
     let _ = m.insert(
@@ -102,6 +113,10 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
+            description: "MiniMax M2.5 Highspeed — optimized for faster inference.",
+            sort_order: 1,
+            recommended: false,
+            is_legacy: false,
         },
     );
     let _ = m.insert(
@@ -118,6 +133,10 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
+            description: "MiniMax M2.1 — capable general-purpose model.",
+            sort_order: 2,
+            recommended: false,
+            is_legacy: false,
         },
     );
     let _ = m.insert(
@@ -134,6 +153,10 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
+            description: "MiniMax M2.1 Highspeed — optimized for faster inference.",
+            sort_order: 3,
+            recommended: false,
+            is_legacy: false,
         },
     );
     let _ = m.insert(
@@ -150,6 +173,10 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
+            description: "MiniMax M2 — foundation model.",
+            sort_order: 4,
+            recommended: false,
+            is_legacy: false,
         },
     );
     m
@@ -162,7 +189,38 @@ pub fn get_minimax_model(id: &str) -> Option<&'static MiniMaxModelInfo> {
 
 /// All known `MiniMax` model IDs.
 pub fn all_minimax_model_ids() -> Vec<&'static str> {
-    ALL_MINIMAX_MODEL_IDS.to_vec()
+    MINIMAX_MODELS.keys().copied().collect()
+}
+
+impl MiniMaxModelInfo {
+    /// Serialize this model to JSON for the `model.list` API response.
+    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "name": self.name,
+            "provider": "minimax",
+            "contextWindow": self.context_window,
+            "maxOutput": self.max_output,
+            "supportsThinking": self.supports_thinking,
+            "supportsImages": self.supports_images,
+            "inputCostPerMillion": self.input_cost_per_million,
+            "outputCostPerMillion": self.output_cost_per_million,
+            "tier": "flagship",
+            "family": self.family,
+            "description": self.description,
+            "supportsReasoning": false,
+            "recommended": self.recommended,
+            "isLegacy": self.is_legacy,
+            "sortOrder": self.sort_order,
+        })
+    }
+}
+
+/// All MiniMax models serialized for the `model.list` API, sorted by `sort_order`.
+pub fn all_minimax_models_api_json() -> Vec<serde_json::Value> {
+    let mut entries: Vec<_> = MINIMAX_MODELS.iter().collect();
+    entries.sort_by_key(|(_, info)| info.sort_order);
+    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,7 +282,7 @@ mod tests {
 
     #[test]
     fn minimax_no_image_support() {
-        for id in ALL_MINIMAX_MODEL_IDS {
+        for id in all_minimax_model_ids() {
             let m = get_minimax_model(id).unwrap();
             assert!(!m.supports_images, "{id} should not support images");
         }
@@ -232,7 +290,7 @@ mod tests {
 
     #[test]
     fn minimax_thinking_support() {
-        for id in ALL_MINIMAX_MODEL_IDS {
+        for id in all_minimax_model_ids() {
             let m = get_minimax_model(id).unwrap();
             assert!(m.supports_thinking, "{id} should support thinking");
         }
@@ -240,7 +298,7 @@ mod tests {
 
     #[test]
     fn minimax_tool_support() {
-        for id in ALL_MINIMAX_MODEL_IDS {
+        for id in all_minimax_model_ids() {
             let m = get_minimax_model(id).unwrap();
             assert!(m.supports_tools, "{id} should support tools");
         }
@@ -251,5 +309,37 @@ mod tests {
         let m = get_minimax_model("MiniMax-M2.5").unwrap();
         assert!((m.input_cost_per_million - 0.3).abs() < f64::EPSILON);
         assert!((m.output_cost_per_million - 1.2).abs() < f64::EPSILON);
+    }
+
+    // ── to_api_json ───────────────────────────────────────────────────
+
+    #[test]
+    fn to_api_json_m2_5() {
+        let m = get_minimax_model("MiniMax-M2.5").unwrap();
+        let j = m.to_api_json("MiniMax-M2.5");
+        assert_eq!(j["id"], "MiniMax-M2.5");
+        assert_eq!(j["name"], "MiniMax M2.5");
+        assert_eq!(j["provider"], "minimax");
+        assert_eq!(j["contextWindow"], 204_800);
+        assert_eq!(j["maxOutput"], 128_000);
+        assert_eq!(j["supportsThinking"], true);
+        assert_eq!(j["supportsImages"], false);
+        assert_eq!(j["tier"], "flagship");
+        assert_eq!(j["family"], "MiniMax M2");
+        assert!(j["description"].is_string());
+        assert_eq!(j["supportsReasoning"], false);
+        assert_eq!(j["recommended"], true);
+        assert_eq!(j["isLegacy"], false);
+        assert_eq!(j["sortOrder"], 0);
+    }
+
+    #[test]
+    fn all_minimax_models_api_json_sorted() {
+        let models = all_minimax_models_api_json();
+        assert_eq!(models.len(), 5);
+        assert_eq!(models[0]["id"], "MiniMax-M2.5");
+        assert_eq!(models[0]["sortOrder"], 0);
+        assert_eq!(models[4]["id"], "MiniMax-M2");
+        assert_eq!(models[4]["sortOrder"], 4);
     }
 }
