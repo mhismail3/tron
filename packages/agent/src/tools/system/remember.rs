@@ -193,10 +193,10 @@ Available actions:\n\
 the most relevant past work even when exact keywords don't match. ALWAYS provide a query.\n\
 - sessions: List recent sessions (title, tokens, cost)\n\
 - session: Get details for a specific session\n\
-- events: Get raw events (filter by session_id, type, turn)\n\
+- events: Get raw events (filter by session_id, type, turn). Note: errors are in logs, not events.\n\
 - messages: Get conversation messages for a session\n\
 - tools: Get tool calls and results for a session\n\
-- logs: Get application logs\n\
+- logs: Get application logs (errors, warnings, provider failures). Use level=\"error\" to find API errors and failures.\n\
 - stats: Get database statistics\n\
 - schema: List database tables and columns\n\
 - read_blob: Read stored content from blob storage\n\n\

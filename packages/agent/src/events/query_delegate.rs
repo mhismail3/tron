@@ -13,6 +13,8 @@ use crate::embeddings::{HybridSearchOptions, apply_temporal_decay};
 use crate::events::EventStore;
 use crate::events::sqlite::repositories::event::ListEventsOptions;
 use crate::tools::errors::ToolError;
+use crate::core::logging::store::LogStore;
+use crate::core::logging::types::{LogLevel, LogQueryOptions, SortOrder};
 use crate::tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
 
 /// Real event store query backed by `SQLite` via `EventStore`.
@@ -300,14 +302,60 @@ impl EventStoreQuery for SqliteEventStoreQuery {
 
     async fn get_logs(
         &self,
-        _session_id: &str,
-        _level: Option<&str>,
-        _limit: u32,
-        _offset: u32,
+        session_id: &str,
+        level: Option<&str>,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<Value>, ToolError> {
-        // Logs table may not exist in the Rust event store schema.
-        // Return empty rather than error — log querying is secondary.
-        Ok(Vec::new())
+        let conn = self.store.pool().get().map_err(tool_err)?;
+        let log_store = LogStore::new(&conn);
+
+        let min_level = level.map(|l| LogLevel::from_str_lossy(l).as_num());
+
+        let opts = LogQueryOptions {
+            session_id: if session_id.is_empty() {
+                None
+            } else {
+                Some(session_id.to_string())
+            },
+            min_level,
+            limit: Some(limit as usize),
+            offset: if offset > 0 {
+                Some(offset as usize)
+            } else {
+                None
+            },
+            order: Some(SortOrder::Desc),
+            ..Default::default()
+        };
+
+        let entries = log_store.query(&opts);
+
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                let mut obj = json!({
+                    "timestamp": e.timestamp,
+                    "level": e.level.to_string(),
+                    "component": e.component,
+                    "message": e.message,
+                });
+                let map = obj.as_object_mut().unwrap();
+                if let Some(ref sid) = e.session_id {
+                    let _ = map.insert("sessionId".into(), json!(sid));
+                }
+                if let Some(ref err) = e.error_message {
+                    let _ = map.insert("errorMessage".into(), json!(err));
+                }
+                if let Some(ref data) = e.data {
+                    let _ = map.insert("data".into(), data.clone());
+                }
+                if let Some(turn) = e.turn {
+                    let _ = map.insert("turn".into(), json!(turn));
+                }
+                obj
+            })
+            .collect())
     }
 
     async fn get_stats(&self) -> Result<Value, ToolError> {
@@ -422,11 +470,80 @@ mod tests {
         assert!(r.is_err());
     }
 
+    fn insert_test_log(
+        store: &Arc<EventStore>,
+        level: &str,
+        level_num: i32,
+        component: &str,
+        msg: &str,
+        session_id: Option<&str>,
+        error_message: Option<&str>,
+    ) {
+        let conn = store.pool().get().unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id, error_message) \
+             VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![level, level_num, component, msg, session_id, error_message],
+        )
+        .unwrap();
+    }
+
     #[tokio::test]
-    async fn get_logs_returns_empty() {
+    async fn get_logs_empty_db() {
         let q = SqliteEventStoreQuery::new(setup_store());
         let r = q.get_logs("s1", None, 10, 0).await.unwrap();
         assert!(r.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_logs_by_session() {
+        let store = setup_store();
+        insert_test_log(&store, "error", 50, "llm", "API failed", Some("sess_1"), Some("401 Unauthorized"));
+        insert_test_log(&store, "info", 30, "llm", "request ok", Some("sess_2"), None);
+        insert_test_log(&store, "warn", 40, "llm", "rate limited", Some("sess_1"), None);
+
+        let q = SqliteEventStoreQuery::new(store);
+        let r = q.get_logs("sess_1", None, 10, 0).await.unwrap();
+        assert_eq!(r.len(), 2);
+        assert!(r.iter().all(|v| v["sessionId"] == "sess_1"));
+    }
+
+    #[tokio::test]
+    async fn get_logs_level_filter() {
+        let store = setup_store();
+        insert_test_log(&store, "info", 30, "agent", "started", Some("s1"), None);
+        insert_test_log(&store, "warn", 40, "agent", "slow", Some("s1"), None);
+        insert_test_log(&store, "error", 50, "llm", "API 401", Some("s1"), Some("Unauthorized"));
+
+        let q = SqliteEventStoreQuery::new(store);
+        let r = q.get_logs("s1", Some("error"), 10, 0).await.unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0]["level"], "error");
+        assert_eq!(r[0]["errorMessage"], "Unauthorized");
+    }
+
+    #[tokio::test]
+    async fn get_logs_no_session_returns_all() {
+        let store = setup_store();
+        insert_test_log(&store, "info", 30, "a", "m1", Some("s1"), None);
+        insert_test_log(&store, "info", 30, "a", "m2", Some("s2"), None);
+
+        let q = SqliteEventStoreQuery::new(store);
+        let r = q.get_logs("", None, 10, 0).await.unwrap();
+        assert_eq!(r.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_logs_trace_level_returns_all() {
+        let store = setup_store();
+        insert_test_log(&store, "trace", 10, "a", "t", None, None);
+        insert_test_log(&store, "debug", 20, "a", "d", None, None);
+        insert_test_log(&store, "info", 30, "a", "i", None, None);
+        insert_test_log(&store, "error", 50, "a", "e", None, None);
+
+        let q = SqliteEventStoreQuery::new(store);
+        let r = q.get_logs("", Some("trace"), 10, 0).await.unwrap();
+        assert_eq!(r.len(), 4);
     }
 
     #[tokio::test]
