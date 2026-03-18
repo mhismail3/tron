@@ -924,9 +924,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_run_without_persister_still_works() {
+    async fn agent_run_without_persister() {
         let mut agent = make_agent(MockProvider::text_only("Hello"));
-        // persister is None by default — backward compat
         let result = agent.run("Hi", RunContext::default()).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert_eq!(result.turns_executed, 1);

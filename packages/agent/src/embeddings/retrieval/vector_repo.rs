@@ -90,12 +90,7 @@ impl VectorRepository {
     }
 
     /// Create the `memory_vectors` table if it doesn't exist.
-    ///
-    /// If an old schema is detected (no `chunk_type` column), drops and recreates.
     pub fn ensure_table(&self) -> Result<()> {
-        if self.has_table() && !self.has_new_schema() {
-            self.conn.execute_batch("DROP TABLE memory_vectors")?;
-        }
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS memory_vectors (
                 id TEXT PRIMARY KEY,
@@ -131,13 +126,6 @@ impl VectorRepository {
                 |row| row.get::<_, i64>(0),
             )
             .is_ok_and(|c| c > 0)
-    }
-
-    /// Check if the table uses the new multi-vector schema.
-    fn has_new_schema(&self) -> bool {
-        self.conn
-            .prepare("SELECT chunk_type FROM memory_vectors LIMIT 0")
-            .is_ok()
     }
 
     /// Store an embedding vector.
@@ -371,28 +359,6 @@ mod tests {
         let repo = make_repo(4);
         repo.ensure_table().unwrap();
         assert!(repo.has_table());
-    }
-
-    #[test]
-    fn ensure_table_migrates_old_schema() {
-        let conn = open_db();
-        // Create old schema (event_id PK, no chunk_type)
-        conn.execute_batch(
-            "CREATE TABLE memory_vectors (
-                event_id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                embedding BLOB NOT NULL
-            )",
-        )
-        .unwrap();
-        let repo = VectorRepository::new(conn, 4);
-        assert!(repo.has_table());
-        assert!(!repo.has_new_schema());
-
-        // ensure_table should drop and recreate
-        repo.ensure_table().unwrap();
-        assert!(repo.has_table());
-        assert!(repo.has_new_schema());
     }
 
     #[test]

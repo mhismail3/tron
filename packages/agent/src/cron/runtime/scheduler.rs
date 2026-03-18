@@ -665,7 +665,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-            crate::cron::migrations::run_migrations(&conn).unwrap();
+            crate::events::run_migrations(&conn).unwrap();
         }
         let clock = Arc::new(FakeClock::new(
             DateTime::parse_from_rfc3339("2026-02-23T12:00:00Z")

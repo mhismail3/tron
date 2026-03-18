@@ -27,13 +27,12 @@ pub struct TaskService;
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use crate::runtime::tasks::migrations::run_migrations;
     use crate::runtime::tasks::types::*;
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        run_migrations(&conn).unwrap();
+        crate::events::run_migrations(&conn).unwrap();
         conn
     }
 

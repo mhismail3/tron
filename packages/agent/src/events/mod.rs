@@ -20,7 +20,6 @@
 
 #![deny(unsafe_code)]
 
-pub mod blob_delegate;
 #[path = "event/envelope.rs"]
 pub mod envelope;
 pub mod errors;

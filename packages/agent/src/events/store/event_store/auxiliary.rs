@@ -89,3 +89,43 @@ impl EventStore {
         })
     }
 }
+
+#[async_trait::async_trait]
+impl crate::tools::traits::BlobStore for EventStore {
+    async fn store(
+        &self,
+        content: &[u8],
+        mime_type: &str,
+    ) -> std::result::Result<String, crate::tools::errors::ToolError> {
+        let pool = self.pool().clone();
+        let content = content.to_vec();
+        let mime = mime_type.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get().map_err(|e| {
+                crate::tools::errors::ToolError::Internal {
+                    message: format!("blob store connection error: {e}"),
+                }
+            })?;
+            BlobRepo::store(&conn, &content, &mime).map_err(|e| {
+                crate::tools::errors::ToolError::Internal {
+                    message: format!("blob store write error: {e}"),
+                }
+            })
+        })
+        .await
+        .map_err(|e| crate::tools::errors::ToolError::Internal {
+            message: format!("blob store task join error: {e}"),
+        })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_store_implements_blob_store() {
+        fn _assert<T: crate::tools::traits::BlobStore>() {}
+        _assert::<EventStore>();
+    }
+}

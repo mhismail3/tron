@@ -970,17 +970,4 @@ mod tests {
         assert_eq!(tr.denied_tools, Some(vec!["Bash".to_string()]));
     }
 
-    #[test]
-    fn cron_job_without_tool_restrictions_backward_compat() {
-        let json = r#"{
-            "id": "cron_old",
-            "name": "Old Job",
-            "schedule": {"type": "every", "intervalSecs": 60},
-            "payload": {"type": "shellCommand", "command": "echo ok"},
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z"
-        }"#;
-        let job: CronJob = serde_json::from_str(json).unwrap();
-        assert!(job.tool_restrictions.is_none());
-    }
 }

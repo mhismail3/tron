@@ -26,7 +26,6 @@ pub enum ReasoningLevel {
     /// High reasoning effort.
     High,
     /// Extra-high reasoning effort (Anthropic only, maps to High for other providers).
-    #[serde(alias = "xhigh", alias = "x_high")]
     XHigh,
     /// Maximum reasoning effort (Anthropic only, maps to High for other providers).
     Max,
@@ -443,19 +442,6 @@ mod tests {
     }
 
     #[test]
-    fn turn_result_backward_compat() {
-        let tr = TurnResult {
-            success: true,
-            tool_calls_executed: 3,
-            ..Default::default()
-        };
-        assert!(tr.success);
-        assert_eq!(tr.tool_calls_executed, 3);
-        assert!(tr.model.is_none());
-        assert_eq!(tr.latency_ms, 0);
-    }
-
-    #[test]
     fn turn_result_with_metadata() {
         let tr = TurnResult {
             success: true,
@@ -582,13 +568,15 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_level_serde_xhigh_aliases() {
-        // "xhigh" alias
-        let level: ReasoningLevel = serde_json::from_str("\"xhigh\"").unwrap();
-        assert_eq!(level, ReasoningLevel::XHigh);
-        // "x_high" canonical
+    fn reasoning_level_xhigh_canonical_form() {
         let level: ReasoningLevel = serde_json::from_str("\"x_high\"").unwrap();
         assert_eq!(level, ReasoningLevel::XHigh);
+    }
+
+    #[test]
+    fn reasoning_level_xhigh_alias_rejected() {
+        let result = serde_json::from_str::<ReasoningLevel>("\"xhigh\"");
+        assert!(result.is_err());
     }
 
     #[test]

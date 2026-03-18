@@ -11,7 +11,7 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{
     EventStoreQuery, MemoryEntry,
     Notification, NotifyDelegate, NotifyResult, SessionInfo, SubagentConfig,
-    SubagentHandle, SubagentResult, SubagentSpawner, TaskManagerDelegate, WaitMode,
+    SubagentHandle, SubagentResult, SubagentSpawner, WaitMode,
 };
 
 fn not_available(feature: &str) -> ToolError {
@@ -120,18 +120,6 @@ impl EventStoreQuery for StubEventStoreQuery {
     }
 }
 
-// ─── TaskManagerDelegate ─────────────────────────────────────────────────────
-
-/// Stub task manager — task execution isn't wired yet.
-pub struct StubTaskManagerDelegate;
-
-#[async_trait]
-impl TaskManagerDelegate for StubTaskManagerDelegate {
-    async fn execute_action(&self, _action: &str, _params: Value) -> Result<Value, ToolError> {
-        Err(not_available("Task management"))
-    }
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -183,12 +171,4 @@ mod tests {
         assert!(err.is_err());
     }
 
-    #[tokio::test]
-    async fn stub_task_manager_returns_error() {
-        let delegate = StubTaskManagerDelegate;
-        let err = delegate
-            .execute_action("create", serde_json::json!({"title": "test"}))
-            .await;
-        assert!(err.is_err());
-    }
 }

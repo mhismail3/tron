@@ -285,9 +285,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
     }
     let store_query: Arc<dyn tron::tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
-    let task_mgr: Arc<dyn tron::tools::traits::TaskManagerDelegate> = Arc::new(
-        tron::runtime::tasks::delegate::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
-    );
+    let task_pool = Arc::new(config.task_pool.clone());
 
     let mut registry = ToolRegistry::new();
 
@@ -298,8 +296,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     registry.register(Arc::new(tron::tools::fs::edit::EditTool::new(fs.clone())));
 
     // 4: Bash (with blob store for large output storage)
-    let blob_store: Arc<dyn tron::tools::traits::BlobStore> =
-        Arc::new(tron::events::blob_delegate::SqliteBlobStore::new(config.event_store.clone()));
+    let blob_store: Arc<dyn tron::tools::traits::BlobStore> = config.event_store.clone();
     registry.register(Arc::new(tron::tools::system::bash::BashTool::new(
         runner.clone(),
         Some(blob_store),
@@ -334,7 +331,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     // 11: TaskManager
     registry.register(Arc::new(
-        tron::tools::ui::task_manager::TaskManagerTool::new(task_mgr),
+        tron::tools::ui::task_manager::TaskManagerTool::new(task_pool),
     ));
 
     // 12: Remember
@@ -362,8 +359,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     // 14–16: Device-querying tools (conditional on device request broker)
     if let Some(broker) = config.device_request_broker.get() {
-        let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> =
-            Arc::new(tron::server::device_delegate::BrokerDeviceDelegate::new(broker.clone()));
+        let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> = broker.clone();
 
         let settings =
             tron::settings::loader::load_settings_from_path(&tron::settings::loader::settings_path())
@@ -477,20 +473,7 @@ async fn main() -> Result<()> {
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
-        let migration_result =
-            tron::events::run_migrations(&conn).context("Failed to run event migrations")?;
-        tron::runtime::tasks::migrations::run_migrations(&conn)
-            .context("Failed to run task migrations")?;
-        tron::cron::migrations::run_migrations(&conn).context("Failed to run cron migrations")?;
-
-        // v4 purges ~1.55M ort::logging rows. VACUUM reclaims the freed space.
-        // VACUUM cannot run inside a transaction, so it runs here after migrations commit.
-        if migration_result.max_version_applied >= 4 {
-            eprintln!("Reclaiming disk space after ort log purge (VACUUM)...");
-            conn.execute_batch("VACUUM;")
-                .context("Post-migration VACUUM failed")?;
-            eprintln!("VACUUM complete.");
-        }
+        let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
 
     // Load settings early (needed for log level before logging init)
@@ -1501,7 +1484,6 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
-            tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let event_store = Arc::new(EventStore::new(pool));
@@ -1606,7 +1588,6 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
-            tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let event_store = Arc::new(EventStore::new(pool.clone()));
         ToolRegistryConfig {

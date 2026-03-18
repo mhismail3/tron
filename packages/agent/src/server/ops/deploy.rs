@@ -37,8 +37,7 @@ pub struct RestartSentinel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
     /// Who initiated the deploy (session ID or "cli").
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub initiated_by: Option<String>,
+    pub initiated_by: String,
     /// Self-test results (populated after startup self-test runs).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub self_test: Option<SelfTestResult>,
@@ -671,7 +670,7 @@ mod tests {
             previous_commit: "def456".into(),
             status: "restarting".into(),
             completed_at: None,
-            initiated_by: None,
+            initiated_by: "test".into(),
             self_test: None,
         }
     }
@@ -1370,7 +1369,7 @@ mod tests {
             sentinel.previous_commit,
             response["previousCommit"].as_str().unwrap()
         );
-        assert_eq!(sentinel.initiated_by.as_deref(), Some("sess-123"));
+        assert_eq!(sentinel.initiated_by, "sess-123");
 
         server.shutdown().shutdown();
     }
@@ -1514,7 +1513,7 @@ mod tests {
             previous_commit: "def456".into(),
             status: "completed".into(),
             completed_at: Some("2026-03-09T10:01:00.000Z".into()),
-            initiated_by: Some("session-123".into()),
+            initiated_by: "session-123".into(),
             self_test: Some(SelfTestResult {
                 passed: true,
                 checks: vec![SelfTestCheck {
@@ -1527,13 +1526,12 @@ mod tests {
         };
         let json = serde_json::to_string_pretty(&s).unwrap();
         let back: RestartSentinel = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.initiated_by.as_deref(), Some("session-123"));
+        assert_eq!(back.initiated_by, "session-123");
         assert!(back.self_test.unwrap().passed);
     }
 
     #[test]
-    fn sentinel_backward_compatible_without_new_fields() {
-        // Old sentinel JSON without initiatedBy or selfTest
+    fn sentinel_initiated_by_required() {
         let json = r#"{
             "action": "deploy",
             "timestamp": "2026-02-23T10:00:00.000Z",
@@ -1541,9 +1539,15 @@ mod tests {
             "previousCommit": "def456",
             "status": "completed"
         }"#;
-        let s: RestartSentinel = serde_json::from_str(json).unwrap();
-        assert!(s.initiated_by.is_none());
-        assert!(s.self_test.is_none());
+        assert!(serde_json::from_str::<RestartSentinel>(json).is_err());
+    }
+
+    #[test]
+    fn sentinel_initiated_by_always_serialized() {
+        let s = sample_sentinel();
+        let json = serde_json::to_string(&s).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("initiatedBy").is_some());
     }
 
     #[test]
@@ -1569,7 +1573,7 @@ mod tests {
             previous_commit: "def456".into(),
             status: "rolled_back".into(),
             completed_at: Some("2026-03-09T10:01:00.000Z".into()),
-            initiated_by: Some("api".into()),
+            initiated_by: "api".into(),
             self_test: None,
         };
         write_last_deployment_with_error(dir.path(), &s, "self-test failed: database").unwrap();

@@ -696,7 +696,6 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
-            crate::cron::migrations::run_migrations(&conn).unwrap();
         }
 
         let dir = tempfile::tempdir().unwrap();

@@ -472,7 +472,6 @@ pub(crate) mod test_helpers {
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
-            crate::runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let store = Arc::new(EventStore::new(pool));

@@ -5,9 +5,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
-
+use crate::events::ConnectionPool;
+use crate::runtime::tasks::service::TaskService;
+use crate::runtime::tasks::types::{TaskCreateParams, TaskFilter, TaskUpdateParams, TaskStatus};
 use crate::tools::errors::ToolError;
-use crate::tools::traits::{TaskManagerDelegate, ToolContext, TronTool};
+use crate::tools::traits::{ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::validate_required_string;
 
@@ -25,13 +27,143 @@ const VALID_ACTIONS: &[&str] = &[
 
 /// The `TaskManager` tool manages persistent tasks.
 pub struct TaskManagerTool {
-    delegate: Arc<dyn TaskManagerDelegate>,
+    pool: Arc<ConnectionPool>,
 }
 
 impl TaskManagerTool {
-    /// Create a new `TaskManager` tool with the given delegate.
-    pub fn new(delegate: Arc<dyn TaskManagerDelegate>) -> Self {
-        Self { delegate }
+    /// Create a new `TaskManager` tool with the given connection pool.
+    pub fn new(pool: Arc<ConnectionPool>) -> Self {
+        Self { pool }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn handle_action(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        let conn = self.pool.get().map_err(ToolError::internal)?;
+
+        match action {
+            "create" => {
+                let cp: TaskCreateParams =
+                    serde_json::from_value(params).map_err(ToolError::internal)?;
+                if cp.title.is_empty() {
+                    return Err(ToolError::internal("title is required for create"));
+                }
+                let task = TaskService::create_task(&conn, &cp).map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
+            }
+            "update" => {
+                let task_id = params
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for update"))?
+                    .to_string();
+                let get_str =
+                    |key: &str| params.get(key).and_then(Value::as_str).map(String::from);
+                let up = TaskUpdateParams {
+                    title: get_str("title"),
+                    description: get_str("description"),
+                    status: get_str("status")
+                        .and_then(|s| serde_json::from_value(Value::String(s)).ok()),
+                    add_note: get_str("note"),
+                    ..Default::default()
+                };
+                let task = TaskService::update_task(&conn, &task_id, &up, None)
+                    .map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
+            }
+            "get" => {
+                let task_id = params
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for get"))?;
+                let details =
+                    TaskService::get_task(&conn, task_id).map_err(ToolError::internal)?;
+                serde_json::to_value(&details).map_err(ToolError::internal)
+            }
+            "list" => {
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let filter = TaskFilter {
+                    status: params
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .and_then(|s| serde_json::from_value(Value::String(s.to_string())).ok()),
+                    include_completed: params
+                        .get("includeCompleted")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
+                    ..Default::default()
+                };
+                let result = TaskService::list_tasks(&conn, &filter, limit, offset)
+                    .map_err(ToolError::internal)?;
+                Ok(
+                    json!({ "tasks": serde_json::to_value(&result.tasks).map_err(ToolError::internal)?, "count": result.total }),
+                )
+            }
+            "search" => {
+                let query = params
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let tasks =
+                    TaskService::search_tasks(&conn, query, limit).map_err(ToolError::internal)?;
+                Ok(
+                    json!({ "tasks": serde_json::to_value(&tasks).map_err(ToolError::internal)?, "count": tasks.len() }),
+                )
+            }
+            "done" => {
+                let task_id = params
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for done"))?
+                    .to_string();
+                let up = TaskUpdateParams {
+                    status: Some(TaskStatus::Completed),
+                    ..Default::default()
+                };
+                let task = TaskService::update_task(&conn, &task_id, &up, None)
+                    .map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
+            }
+            "delete" => {
+                let task_id = params
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for delete"))?;
+                let deleted =
+                    TaskService::delete_task(&conn, task_id, None).map_err(ToolError::internal)?;
+                Ok(json!({ "success": deleted, "taskId": task_id }))
+            }
+            "add_note" => {
+                let task_id = params
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for add_note"))?
+                    .to_string();
+                let note = params
+                    .get("note")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("note is required for add_note"))?;
+                if note.is_empty() {
+                    return Err(ToolError::internal("note cannot be empty"));
+                }
+                let up = TaskUpdateParams {
+                    add_note: Some(note.to_string()),
+                    ..Default::default()
+                };
+                let task = TaskService::update_task(&conn, &task_id, &up, None)
+                    .map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
+            }
+            "batch_create" => {
+                let items: Vec<TaskCreateParams> = params
+                    .get("items")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                TaskService::batch_create_tasks(&conn, &items, None).map_err(ToolError::internal)
+            }
+            _ => Err(ToolError::internal(format!("Unknown action: {action}"))),
+        }
     }
 }
 
@@ -110,7 +242,7 @@ Stale tasks are from previous sessions — resume (set in_progress) or close the
             )));
         }
 
-        match self.delegate.execute_action(&action, params.clone()).await {
+        match self.handle_action(&action, params.clone()) {
             Ok(result) => {
                 let output =
                     serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
@@ -131,61 +263,176 @@ Stale tasks are from previous sessions — resume (set in_progress) or close the
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::ConnectionConfig;
     use crate::tools::testutil::{extract_text, make_ctx};
 
-    struct MockDelegate;
-
-    #[async_trait]
-    impl TaskManagerDelegate for MockDelegate {
-        async fn execute_action(&self, action: &str, _params: Value) -> Result<Value, ToolError> {
-            Ok(json!({"action": action, "success": true}))
+    fn setup_pool() -> Arc<ConnectionPool> {
+        let pool = crate::events::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
         }
-    }
-
-    struct ErrorDelegate;
-
-    #[async_trait]
-    impl TaskManagerDelegate for ErrorDelegate {
-        async fn execute_action(&self, _action: &str, _params: Value) -> Result<Value, ToolError> {
-            Err(ToolError::Internal {
-                message: "delegate error".into(),
-            })
-        }
+        Arc::new(pool)
     }
 
     #[tokio::test]
-    async fn create_action() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
+    async fn task_manager_create_action() {
+        let tool = TaskManagerTool::new(setup_pool());
         let r = tool
             .execute(json!({"action": "create", "title": "Test"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("create"));
+        assert!(extract_text(&r).contains("Test"));
+    }
+
+    #[tokio::test]
+    async fn task_manager_list_action() {
+        let tool = TaskManagerTool::new(setup_pool());
+        let r = tool
+            .execute(json!({"action": "list"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("count"));
+    }
+
+    #[tokio::test]
+    async fn task_manager_update_action() {
+        let pool = setup_pool();
+        let tool = TaskManagerTool::new(pool);
+        let create_r = tool
+            .execute(json!({"action": "create", "title": "Original"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&create_r);
+        let created: Value = serde_json::from_str(&text).unwrap();
+        let task_id = created["id"].as_str().unwrap();
+
+        let r = tool
+            .execute(
+                json!({"action": "update", "taskId": task_id, "title": "Updated"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Updated"));
+    }
+
+    #[tokio::test]
+    async fn task_manager_delete_action() {
+        let pool = setup_pool();
+        let tool = TaskManagerTool::new(pool);
+        let create_r = tool
+            .execute(json!({"action": "create", "title": "To Delete"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&create_r);
+        let created: Value = serde_json::from_str(&text).unwrap();
+        let task_id = created["id"].as_str().unwrap();
+
+        let r = tool
+            .execute(json!({"action": "delete", "taskId": task_id}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("success"));
+    }
+
+    #[tokio::test]
+    async fn task_manager_get_action() {
+        let pool = setup_pool();
+        let tool = TaskManagerTool::new(pool);
+        let create_r = tool
+            .execute(json!({"action": "create", "title": "Get Me"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&create_r);
+        let created: Value = serde_json::from_str(&text).unwrap();
+        let task_id = created["id"].as_str().unwrap();
+
+        let r = tool
+            .execute(json!({"action": "get", "taskId": task_id}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Get Me"));
+    }
+
+    #[tokio::test]
+    async fn task_manager_search_action() {
+        let pool = setup_pool();
+        let tool = TaskManagerTool::new(pool);
+        let _ = tool
+            .execute(json!({"action": "create", "title": "Authentication bug"}), &make_ctx())
+            .await
+            .unwrap();
+
+        let r = tool
+            .execute(json!({"action": "search", "query": "authentication"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn task_manager_unknown_action_errors() {
+        let tool = TaskManagerTool::new(setup_pool());
+        let r = tool
+            .execute(json!({"action": "unknown"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn task_manager_missing_required_field_errors() {
+        let tool = TaskManagerTool::new(setup_pool());
+        let r = tool
+            .execute(json!({"action": "get"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn all_actions_dispatch() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        for action in VALID_ACTIONS {
-            let r = tool
-                .execute(json!({"action": action}), &make_ctx())
-                .await
-                .unwrap();
+        let pool = setup_pool();
+        let tool = TaskManagerTool::new(pool.clone());
+        // Create a task for actions that need one
+        let create_r = tool
+            .execute(json!({"action": "create", "title": "Test"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&create_r);
+        let created: Value = serde_json::from_str(&text).unwrap();
+        let task_id = created["id"].as_str().unwrap();
+
+        // Most actions need at least some params
+        for (action, extra) in [
+            ("list", json!({})),
+            ("get", json!({"taskId": task_id})),
+            ("done", json!({"taskId": task_id})),
+            ("search", json!({"query": "test"})),
+        ] {
+            let mut params = extra;
+            params.as_object_mut().unwrap().insert("action".into(), json!(action));
+            let r = tool.execute(params, &make_ctx()).await.unwrap();
             assert!(r.is_error.is_none(), "Action {action} failed");
         }
     }
 
     #[tokio::test]
     async fn missing_action_error() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
+        let tool = TaskManagerTool::new(setup_pool());
         let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn invalid_action_error() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
+        let tool = TaskManagerTool::new(setup_pool());
         let r = tool
             .execute(json!({"action": "invalid"}), &make_ctx())
             .await
@@ -196,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn removed_actions_rejected() {
-        let tool = TaskManagerTool::new(Arc::new(MockDelegate));
+        let tool = TaskManagerTool::new(setup_pool());
         for action in ["create_project", "log_time", "batch_delete", "list_areas"] {
             let r = tool
                 .execute(json!({"action": action}), &make_ctx())
@@ -204,15 +451,5 @@ mod tests {
                 .unwrap();
             assert_eq!(r.is_error, Some(true), "Action {action} should be invalid");
         }
-    }
-
-    #[tokio::test]
-    async fn delegate_error() {
-        let tool = TaskManagerTool::new(Arc::new(ErrorDelegate));
-        let r = tool
-            .execute(json!({"action": "create"}), &make_ctx())
-            .await
-            .unwrap();
-        assert_eq!(r.is_error, Some(true));
     }
 }

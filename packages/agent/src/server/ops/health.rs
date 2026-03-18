@@ -376,7 +376,7 @@ mod tests {
             previous_commit: "def456".into(),
             status: status.into(),
             completed_at: None,
-            initiated_by: Some("api".into()),
+            initiated_by: "api".into(),
             self_test: None,
         }
     }

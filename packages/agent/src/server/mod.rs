@@ -18,7 +18,6 @@ pub mod config;
 #[path = "ops/deploy.rs"]
 pub mod deploy;
 pub mod device;
-pub mod device_delegate;
 #[path = "ops/disk.rs"]
 pub mod disk;
 #[path = "ops/health.rs"]

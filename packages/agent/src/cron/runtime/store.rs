@@ -651,7 +651,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-            migrations::run_migrations(&conn).unwrap();
+            crate::events::run_migrations(&conn).unwrap();
         }
         pool
     }
@@ -1086,16 +1086,6 @@ mod tests {
             Some(vec!["Bash".to_string(), "Write".to_string()])
         );
         assert!(tr.allowed_tools.is_none());
-    }
-
-    #[test]
-    fn upsert_job_without_tool_restrictions_backward_compat() {
-        let pool = setup_pool();
-        let job = make_job("cron_no_tr", "No Restrictions");
-        upsert_job(&pool, &job).unwrap();
-
-        let loaded = get_job(&pool, "cron_no_tr").unwrap().unwrap();
-        assert!(loaded.tool_restrictions.is_none());
     }
 
     #[test]

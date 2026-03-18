@@ -188,19 +188,19 @@ mod tests {
             .collect();
 
         let expected = [
-            "areas",
             "blobs",
             "branches",
+            "cron_jobs",
+            "cron_runs",
             "device_tokens",
             "events",
             "logs",
+            "memory_vectors",
             "notification_read_state",
-            "projects",
             "schema_version",
             "sessions",
             "task_activity",
             "task_backlog",
-            "task_dependencies",
             "tasks",
             "workspaces",
         ];
@@ -234,7 +234,10 @@ mod tests {
             "logs_fts should not exist"
         );
         assert!(tables.contains(&"tasks_fts".to_string()));
-        assert!(tables.contains(&"areas_fts".to_string()));
+        assert!(
+            !tables.contains(&"areas_fts".to_string()),
+            "areas_fts should not exist"
+        );
     }
 
     #[test]
@@ -304,12 +307,18 @@ mod tests {
             "idx_sessions_workspace",
             "idx_sessions_created",
             "idx_tasks_status",
-            "idx_areas_workspace",
             "idx_blobs_hash",
             "idx_branches_session",
             "idx_sessions_origin",
             "idx_sessions_source",
             "idx_logs_ios_client_dedup",
+            "idx_cron_jobs_enabled_next",
+            "idx_cron_runs_job_started",
+            "idx_cron_runs_status",
+            "idx_cron_runs_created",
+            "idx_mv_event",
+            "idx_mv_workspace",
+            "idx_mv_type",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -358,9 +367,6 @@ mod tests {
             "tasks_fts_insert",
             "tasks_fts_update",
             "tasks_fts_delete",
-            "areas_fts_insert",
-            "areas_fts_update",
-            "areas_fts_delete",
         ];
         for trigger in &expected {
             assert!(
@@ -369,15 +375,20 @@ mod tests {
             );
         }
 
-        // Verify events_fts triggers are gone
-        assert!(
-            !triggers.contains(&"events_fts_insert".to_string()),
-            "events_fts_insert should not exist"
-        );
-        assert!(
-            !triggers.contains(&"events_fts_delete".to_string()),
-            "events_fts_delete should not exist"
-        );
+        // Verify removed triggers are gone
+        let removed = [
+            "events_fts_insert",
+            "events_fts_delete",
+            "areas_fts_insert",
+            "areas_fts_update",
+            "areas_fts_delete",
+        ];
+        for trigger in &removed {
+            assert!(
+                !triggers.contains(&trigger.to_string()),
+                "{trigger} should not exist"
+            );
+        }
     }
 
     #[test]
@@ -612,31 +623,379 @@ mod tests {
         assert!((cost - 0.015).abs() < f64::EPSILON);
     }
 
+    // ── Consolidated schema tests ──────────────────────────────────────
+
     #[test]
-    fn task_self_dependency_rejected() {
+    fn consolidated_schema_no_v1_tables() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for removed in &["projects", "areas", "task_dependencies"] {
+            assert!(
+                !tables.contains(&removed.to_string()),
+                "{removed} should not exist"
+            );
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_v2_columns() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(tasks)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        let expected = [
+            "id", "title", "description", "active_form", "notes", "status",
+            "parent_task_id", "started_at", "completed_at", "created_at",
+            "updated_at", "created_by_session_id", "last_session_id",
+            "last_session_at", "metadata",
+        ];
+        for col in &expected {
+            assert!(columns.contains(&col.to_string()), "missing column: {col}");
+        }
+
+        let removed = [
+            "project_id", "workspace_id", "area_id", "priority", "source",
+            "tags", "due_date", "deferred_until", "estimated_minutes",
+            "actual_minutes", "sort_order",
+        ];
+        for col in &removed {
+            assert!(!columns.contains(&col.to_string()), "{col} should not exist");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_stale_status() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, status) VALUES ('t_stale', 'Test', 'stale')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_backlog_status_rejected() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        let result = conn.execute(
+            "INSERT INTO tasks (id, title, status) VALUES ('t_bl', 'Test', 'backlog')",
+            [],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn consolidated_schema_task_activity_v2() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(task_activity)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(!columns.contains(&"minutes_logged".to_string()));
+
+        // Insert a task for FK
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('t1', 'Test')",
+            [],
+        )
+        .unwrap();
+
+        // Positive: valid actions
+        for action in &["created", "status_changed", "updated", "note_added", "deleted"] {
+            conn.execute(
+                &format!(
+                    "INSERT INTO task_activity (task_id, action) VALUES ('t1', '{action}')"
+                ),
+                [],
+            )
+            .unwrap();
+        }
+
+        // Negative: v1-only actions
+        for action in &["time_logged", "dependency_added", "moved"] {
+            let result = conn.execute(
+                &format!(
+                    "INSERT INTO task_activity (task_id, action) VALUES ('t1', '{action}')"
+                ),
+                [],
+            );
+            assert!(result.is_err(), "action {action} should be rejected");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_cron_tables_exist() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cron_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(tables.contains(&"cron_jobs".to_string()));
+        assert!(tables.contains(&"cron_runs".to_string()));
+    }
+
+    #[test]
+    fn consolidated_schema_cron_has_tool_restrictions() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(cron_jobs)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(columns.contains(&"tool_restrictions_json".to_string()));
+    }
+
+    #[test]
+    fn consolidated_schema_cron_indexes() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_cron_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for idx in &[
+            "idx_cron_jobs_enabled_next",
+            "idx_cron_runs_job_started",
+            "idx_cron_runs_status",
+            "idx_cron_runs_created",
+        ] {
+            assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_cron_constraints() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Positive: valid values
+        conn.execute(
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, overlap_policy, misfire_policy)
+             VALUES ('j1', 'x', '{}', '{}', 'skip', 'run_once')",
+            [],
+        )
+        .unwrap();
+
+        // Negative: invalid overlap_policy
+        let r = conn.execute(
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, overlap_policy)
+             VALUES ('j2', 'x', '{}', '{}', 'invalid')",
+            [],
+        );
+        assert!(r.is_err());
+
+        // Negative: invalid misfire_policy
+        let r = conn.execute(
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, misfire_policy)
+             VALUES ('j3', 'x', '{}', '{}', 'invalid')",
+            [],
+        );
+        assert!(r.is_err());
+
+        // Negative: invalid run status
+        let r = conn.execute(
+            "INSERT INTO cron_runs (id, job_name, status) VALUES ('r1', 'x', 'invalid')",
+            [],
+        );
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn consolidated_schema_cron_on_delete_set_null() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
         conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json)
+             VALUES ('job1', 'Test', '{}', '{}')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-             VALUES ('t_1', 'ws_1', 'Test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            "INSERT INTO cron_runs (id, job_id, job_name) VALUES ('run1', 'job1', 'Test')",
             [],
         )
         .unwrap();
+        conn.execute("DELETE FROM cron_jobs WHERE id = 'job1'", [])
+            .unwrap();
 
-        // Self-dependency should fail via CHECK constraint
-        let result = conn.execute(
-            "INSERT INTO task_dependencies (blocker_task_id, blocked_task_id, created_at)
-             VALUES ('t_1', 't_1', '2025-01-01T00:00:00Z')",
+        let job_id: Option<String> = conn
+            .query_row(
+                "SELECT job_id FROM cron_runs WHERE id = 'run1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(job_id.is_none());
+    }
+
+    #[test]
+    fn consolidated_schema_memory_vectors_exists() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(memory_vectors)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for col in &[
+            "id", "event_id", "workspace_id", "chunk_type",
+            "chunk_index", "entry_type", "created_at", "embedding",
+        ] {
+            assert!(columns.contains(&col.to_string()), "missing column: {col}");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_memory_vectors_indexes() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_mv_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for idx in &["idx_mv_event", "idx_mv_workspace", "idx_mv_type"] {
+            assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_fts_only() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(tables.contains(&"tasks_fts".to_string()));
+        assert!(!tables.contains(&"areas_fts".to_string()));
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_fts_triggers() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let triggers: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for t in &["tasks_fts_insert", "tasks_fts_update", "tasks_fts_delete"] {
+            assert!(triggers.contains(&t.to_string()), "missing trigger: {t}");
+        }
+        for t in &["areas_fts_insert", "areas_fts_update", "areas_fts_delete"] {
+            assert!(!triggers.contains(&t.to_string()), "{t} should not exist");
+        }
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_parent_fk() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('parent', 'Parent')",
             [],
-        );
-        assert!(result.is_err());
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, parent_task_id) VALUES ('child', 'Child', 'parent')",
+            [],
+        )
+        .unwrap();
+        let parent: String = conn
+            .query_row(
+                "SELECT parent_task_id FROM tasks WHERE id = 'child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent, "parent");
+    }
+
+    #[test]
+    fn consolidated_schema_tasks_parent_cascade_delete() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('parent', 'Parent')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, parent_task_id) VALUES ('child', 'Child', 'parent')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM tasks WHERE id = 'parent'", [])
+            .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE id = 'child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

@@ -43,7 +43,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     {
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
-        tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
     }
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
@@ -322,7 +321,6 @@ async fn boot_server_with_provider_and_handles(
     {
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
-        tron::runtime::tasks::migrations::run_migrations(&conn).unwrap();
     }
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));

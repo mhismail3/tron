@@ -559,7 +559,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-            crate::cron::migrations::run_migrations(&conn).unwrap();
+            crate::events::run_migrations(&conn).unwrap();
         }
         ExecutorDeps {
             agent_executor: None,

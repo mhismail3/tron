@@ -472,13 +472,6 @@ pub trait BlobStore: Send + Sync {
     ) -> Result<String, crate::tools::errors::ToolError>;
 }
 
-/// Task management (`TaskManager` tool).
-#[async_trait]
-pub trait TaskManagerDelegate: Send + Sync {
-    /// Execute a task management action.
-    async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError>;
-}
-
 /// iOS device request/response (`ManageCalendar`, `SearchContacts`, `ReadHealth`).
 #[async_trait]
 pub trait DeviceDelegate: Send + Sync {

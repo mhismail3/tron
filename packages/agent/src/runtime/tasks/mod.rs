@@ -1,7 +1,6 @@
 //! Task CRUD with `SQLite` persistence.
 
 pub mod context;
-pub mod delegate;
 pub mod errors;
 pub mod migrations;
 mod repository;

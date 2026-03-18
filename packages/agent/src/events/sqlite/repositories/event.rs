@@ -34,9 +34,6 @@ pub struct ListEventsOptions {
     pub offset: Option<i64>,
 }
 
-/// Re-export for backward compatibility with callers using `TokenUsageSummary`.
-pub type TokenUsageSummary = TokenTotals;
-
 /// Event repository — stateless, every method takes `&Connection`.
 pub struct EventRepo;
 
@@ -283,7 +280,7 @@ impl EventRepo {
     pub fn get_token_usage_summary(
         conn: &Connection,
         session_id: &str,
-    ) -> Result<TokenUsageSummary> {
+    ) -> Result<TokenTotals> {
         let summary = conn.query_row(
             "SELECT COALESCE(SUM(input_tokens), 0),
                     COALESCE(SUM(output_tokens), 0),
@@ -292,7 +289,7 @@ impl EventRepo {
              FROM events WHERE session_id = ?1",
             params![session_id],
             |row| {
-                Ok(TokenUsageSummary {
+                Ok(TokenTotals {
                     input_tokens: row.get(0)?,
                     output_tokens: row.get(1)?,
                     cache_read_tokens: row.get(2)?,

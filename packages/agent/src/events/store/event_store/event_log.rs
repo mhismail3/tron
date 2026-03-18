@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use crate::events::errors::{EventStoreError, Result};
 use crate::events::sqlite::repositories::branch::BranchRepo;
-use crate::events::sqlite::repositories::event::{EventRepo, ListEventsOptions, TokenUsageSummary};
+use crate::events::sqlite::repositories::event::{EventRepo, ListEventsOptions};
+use crate::events::types::TokenTotals;
 use crate::events::sqlite::repositories::session::{IncrementCounters, SessionRepo};
 use crate::events::sqlite::row_types::EventRow;
 use crate::events::types::EventType;
@@ -192,7 +193,7 @@ impl EventStore {
     }
 
     /// Get token usage summary for a session.
-    pub fn get_token_usage_summary(&self, session_id: &str) -> Result<TokenUsageSummary> {
+    pub fn get_token_usage_summary(&self, session_id: &str) -> Result<TokenTotals> {
         let conn = self.conn()?;
         EventRepo::get_token_usage_summary(&conn, session_id)
     }

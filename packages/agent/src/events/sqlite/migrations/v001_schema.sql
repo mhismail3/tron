@@ -1,9 +1,9 @@
--- v001: Complete schema — fresh from first principles
+-- v001: Consolidated schema — single source of truth
 --
 -- Tables: workspaces, sessions, events, blobs, branches,
---         logs, device_tokens, projects, tasks, task_dependencies,
---         task_activity, task_backlog, areas, notification_read_state
--- FTS:    tasks_fts, areas_fts
+--         logs, device_tokens, tasks, task_activity, task_backlog,
+--         notification_read_state, cron_jobs, cron_runs, memory_vectors
+-- FTS:    tasks_fts
 -- Meta:   schema_version
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -191,114 +191,49 @@ CREATE INDEX IF NOT EXISTS idx_device_tokens_workspace ON device_tokens(workspac
 CREATE INDEX IF NOT EXISTS idx_device_tokens_token     ON device_tokens(device_token);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Task Management (PARA: Projects, Areas, Tasks)
+-- Task Management (simplified v2)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- Areas (ongoing responsibilities)
-CREATE TABLE IF NOT EXISTS areas (
-  id           TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL DEFAULT 'default',
-  title        TEXT NOT NULL,
-  description  TEXT,
-  status       TEXT NOT NULL DEFAULT 'active',
-  tags         TEXT NOT NULL DEFAULT '[]',
-  sort_order   REAL NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  metadata     TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_areas_workspace ON areas(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_areas_status    ON areas(status);
-
--- Projects (time-bound initiatives under areas)
-CREATE TABLE IF NOT EXISTS projects (
-  id           TEXT PRIMARY KEY,
-  workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
-  area_id      TEXT REFERENCES areas(id)      ON DELETE SET NULL,
-  title        TEXT NOT NULL,
-  description  TEXT,
-  status       TEXT NOT NULL DEFAULT 'active',
-  tags         TEXT NOT NULL DEFAULT '[]',
-  created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL,
-  completed_at TEXT,
-  metadata     TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id, status);
-CREATE INDEX IF NOT EXISTS idx_projects_status    ON projects(status, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projects_area      ON projects(area_id);
-
--- Tasks (actionable items)
 CREATE TABLE IF NOT EXISTS tasks (
-  id                    TEXT    PRIMARY KEY,
-  project_id            TEXT    REFERENCES projects(id) ON DELETE SET NULL,
-  parent_task_id        TEXT    REFERENCES tasks(id)    ON DELETE CASCADE,
-  workspace_id          TEXT    REFERENCES workspaces(id) ON DELETE SET NULL,
-  area_id               TEXT    REFERENCES areas(id)    ON DELETE SET NULL,
-  title                 TEXT    NOT NULL,
+  id                    TEXT PRIMARY KEY NOT NULL,
+  title                 TEXT NOT NULL,
   description           TEXT,
   active_form           TEXT,
   notes                 TEXT,
-  status                TEXT    NOT NULL DEFAULT 'pending',
-  priority              TEXT    NOT NULL DEFAULT 'medium',
-  source                TEXT    NOT NULL DEFAULT 'agent',
-  tags                  TEXT    NOT NULL DEFAULT '[]',
-  due_date              TEXT,
-  deferred_until        TEXT,
+  status                TEXT NOT NULL DEFAULT 'pending'
+      CHECK(status IN ('pending','in_progress','completed','cancelled','stale')),
+  parent_task_id        TEXT REFERENCES tasks(id) ON DELETE CASCADE,
   started_at            TEXT,
   completed_at          TEXT,
-  created_at            TEXT    NOT NULL,
-  updated_at            TEXT    NOT NULL,
-  estimated_minutes     INTEGER,
-  actual_minutes        INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
   created_by_session_id TEXT,
   last_session_id       TEXT,
   last_session_at       TEXT,
-  sort_order            INTEGER NOT NULL DEFAULT 0,
   metadata              TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_project      ON tasks(project_id, status, sort_order);
-CREATE INDEX IF NOT EXISTS idx_tasks_parent       ON tasks(parent_task_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_tasks_workspace    ON tasks(workspace_id, status, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tasks_status       ON tasks(status, priority DESC, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tasks_due          ON tasks(due_date, status);
-CREATE INDEX IF NOT EXISTS idx_tasks_deferred     ON tasks(deferred_until);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent       ON tasks(parent_task_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status       ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_session      ON tasks(created_by_session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_last_session ON tasks(last_session_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_area         ON tasks(area_id);
 
--- Task dependencies (blocking relationships)
-CREATE TABLE IF NOT EXISTS task_dependencies (
-  blocker_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  blocked_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  relationship    TEXT NOT NULL DEFAULT 'blocks',
-  created_at      TEXT NOT NULL,
-  PRIMARY KEY (blocker_task_id, blocked_task_id),
-  CHECK (blocker_task_id != blocked_task_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_deps_blocked ON task_dependencies(blocked_task_id);
-
--- Task activity (append-only audit trail)
+-- Task activity (audit trail)
 CREATE TABLE IF NOT EXISTS task_activity (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id        TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  session_id     TEXT,
-  event_id       TEXT,
-  action         TEXT    NOT NULL,
-  old_value      TEXT,
-  new_value      TEXT,
-  detail         TEXT,
-  minutes_logged INTEGER,
-  timestamp      TEXT    NOT NULL
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  session_id TEXT,
+  event_id   TEXT,
+  action     TEXT    NOT NULL
+      CHECK(action IN ('created', 'status_changed', 'updated', 'note_added', 'deleted')),
+  old_value  TEXT,
+  new_value  TEXT,
+  detail     TEXT,
+  timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_activity_task      ON task_activity(task_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_session   ON task_activity(session_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON task_activity(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_task_activity_task
+    ON task_activity(task_id, id DESC);
 
 -- Task backlog (persisted incomplete tasks across sessions)
 CREATE TABLE IF NOT EXISTS task_backlog (
@@ -332,28 +267,27 @@ CREATE TABLE IF NOT EXISTS notification_read_state (
 );
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Full-Text Search (tasks and areas only)
+-- Full-Text Search (tasks only)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- Tasks FTS
 CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
-  task_id UNINDEXED, title, description, notes, tags,
+  task_id UNINDEXED, title, description, notes,
   tokenize='porter unicode61'
 );
 
 CREATE TRIGGER IF NOT EXISTS tasks_fts_insert
 AFTER INSERT ON tasks
 BEGIN
-  INSERT INTO tasks_fts (task_id, title, description, notes, tags)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''), NEW.tags);
+  INSERT INTO tasks_fts (task_id, title, description, notes)
+  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''));
 END;
 
 CREATE TRIGGER IF NOT EXISTS tasks_fts_update
 AFTER UPDATE ON tasks
 BEGIN
   DELETE FROM tasks_fts WHERE task_id = OLD.id;
-  INSERT INTO tasks_fts (task_id, title, description, notes, tags)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''), NEW.tags);
+  INSERT INTO tasks_fts (task_id, title, description, notes)
+  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''));
 END;
 
 CREATE TRIGGER IF NOT EXISTS tasks_fts_delete
@@ -362,29 +296,82 @@ BEGIN
   DELETE FROM tasks_fts WHERE task_id = OLD.id;
 END;
 
--- Areas FTS
-CREATE VIRTUAL TABLE IF NOT EXISTS areas_fts USING fts5(
-  area_id UNINDEXED, title, description, tags,
-  tokenize='porter unicode61'
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Cron Scheduling
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS cron_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    schedule_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    delivery_json TEXT NOT NULL DEFAULT '[]',
+    overlap_policy TEXT NOT NULL DEFAULT 'skip'
+        CHECK(overlap_policy IN ('skip', 'allow')),
+    misfire_policy TEXT NOT NULL DEFAULT 'skip'
+        CHECK(misfire_policy IN ('skip', 'run_once')),
+    max_retries INTEGER NOT NULL DEFAULT 0,
+    auto_disable_after INTEGER NOT NULL DEFAULT 0,
+    stuck_timeout_secs INTEGER NOT NULL DEFAULT 7200,
+    tags TEXT NOT NULL DEFAULT '[]',
+    workspace_id TEXT,
+    tool_restrictions_json TEXT,
+    -- Runtime state (scheduler-managed, NOT from config file)
+    next_run_at TEXT,
+    last_run_at TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    running_since TEXT,
+    -- Timestamps
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TRIGGER IF NOT EXISTS areas_fts_insert
-AFTER INSERT ON areas
-BEGIN
-  INSERT INTO areas_fts (area_id, title, description, tags)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.tags, '[]'));
-END;
+CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled_next
+    ON cron_jobs(enabled, next_run_at) WHERE enabled = 1;
 
-CREATE TRIGGER IF NOT EXISTS areas_fts_update
-AFTER UPDATE ON areas
-BEGIN
-  DELETE FROM areas_fts WHERE area_id = OLD.id;
-  INSERT INTO areas_fts (area_id, title, description, tags)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.tags, '[]'));
-END;
+CREATE TABLE IF NOT EXISTS cron_runs (
+    id TEXT PRIMARY KEY,
+    job_id TEXT REFERENCES cron_jobs(id) ON DELETE SET NULL,
+    job_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running'
+        CHECK(status IN ('running', 'completed', 'failed', 'timed_out', 'skipped', 'cancelled')),
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    duration_ms INTEGER,
+    output TEXT,
+    output_truncated INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    exit_code INTEGER,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    session_id TEXT,
+    delivery_status TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
-CREATE TRIGGER IF NOT EXISTS areas_fts_delete
-AFTER DELETE ON areas
-BEGIN
-  DELETE FROM areas_fts WHERE area_id = OLD.id;
-END;
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job_started
+    ON cron_runs(job_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_status
+    ON cron_runs(status) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_cron_runs_created
+    ON cron_runs(created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Semantic Memory (vector embeddings)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS memory_vectors (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    chunk_type TEXT NOT NULL DEFAULT 'summary',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    entry_type TEXT,
+    created_at TEXT,
+    embedding BLOB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mv_event ON memory_vectors(event_id);
+CREATE INDEX IF NOT EXISTS idx_mv_workspace ON memory_vectors(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_mv_type ON memory_vectors(entry_type);

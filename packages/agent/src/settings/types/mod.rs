@@ -215,19 +215,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_models_key_silently_ignored() {
-        let json = serde_json::json!({
-            "models": {
-                "default": "claude-opus-4-6",
-                "subagent": "claude-haiku-4-5-20251001"
-            }
-        });
-        let settings: TronSettings = serde_json::from_value(json).unwrap();
-        // Should deserialize without error, models key ignored
-        assert_eq!(settings.version, "0.1.0");
-    }
-
-    #[test]
     fn empty_json_produces_defaults() {
         let settings: TronSettings = serde_json::from_str("{}").unwrap();
         let defaults = TronSettings::default();

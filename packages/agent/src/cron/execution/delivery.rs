@@ -173,7 +173,7 @@ mod tests {
         let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            crate::cron::migrations::run_migrations(&conn).unwrap();
+            crate::events::run_migrations(&conn).unwrap();
         }
         ExecutorDeps {
             agent_executor: None,
@@ -237,7 +237,7 @@ mod tests {
         let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            crate::cron::migrations::run_migrations(&conn).unwrap();
+            crate::events::run_migrations(&conn).unwrap();
         }
         ExecutorDeps {
             agent_executor: None,

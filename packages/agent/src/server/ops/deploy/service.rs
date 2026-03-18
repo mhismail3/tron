@@ -163,7 +163,7 @@ impl DeployService {
             previous_commit: previous_commit.to_string(),
             status: "restarting".to_string(),
             completed_at: None,
-            initiated_by: req.session_id.clone().or_else(|| Some("api".to_string())),
+            initiated_by: req.session_id.clone().unwrap_or_else(|| "api".to_string()),
             self_test: None,
         };
         let deploy_dir = self.deploy_dir.clone();
