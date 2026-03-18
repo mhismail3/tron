@@ -70,11 +70,11 @@ struct ToolDetailSheetContainer<Content: View>: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
                     }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(accent)
                     .accessibilityLabel("Close")
                 }
             }

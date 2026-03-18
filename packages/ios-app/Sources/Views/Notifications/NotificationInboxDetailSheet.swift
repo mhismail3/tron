@@ -5,8 +5,8 @@ import SwiftUI
 /// Reuses the visual pattern from `NotifyAppDetailSheet` (title, body, markdown
 /// sheetContent via `MarkdownBlockParser` + `MarkdownBlockView`).
 ///
-/// Toolbar buttons modeled after `ContextAuditView`:
-/// - Leading: "Go to Session" (only for user sessions)
+/// Toolbar buttons:
+/// - Leading: session icon (only for user sessions)
 /// - Trailing: "Mark Read" (only when unread)
 @available(iOS 26.0, *)
 struct NotificationInboxDetailSheet: View {
@@ -33,13 +33,9 @@ struct NotificationInboxDetailSheet: View {
                             Button {
                                 onGoToSession?(notification.sessionId)
                             } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.right.circle")
-                                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                                    Text("Go to Session")
-                                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                                }
-                                .foregroundStyle(.tronEmerald)
+                                Image(systemName: "bubble.left.and.text.bubble.right")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(.tronEmerald)
                             }
                         }
                     }
