@@ -533,6 +533,7 @@ async fn main() -> Result<()> {
         let stream_port = find_free_port();
         let provider = tron::tools::browser::providers::find_browser_provider(
             stream_port,
+            settings.tools.browser.provider.as_deref(),
             settings.tools.browser.executable_path.as_deref(),
             settings.tools.browser.headed,
         );

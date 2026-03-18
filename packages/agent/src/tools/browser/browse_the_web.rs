@@ -49,6 +49,43 @@ impl BrowseTheWebTool {
     pub fn new(provider: Arc<dyn BrowserProvider>) -> Self {
         Self { provider }
     }
+
+    /// Build a screenshot result with image block (always) and optional persistence.
+    async fn build_screenshot_result(
+        &self,
+        result: crate::tools::traits::BrowserResult,
+        params: &Value,
+        session_id: &str,
+    ) -> TronToolResult {
+        let mut blocks = vec![crate::core::content::ToolResultContent::text(&result.content)];
+        let mut details = result.details.unwrap_or_else(|| json!({}));
+
+        // Extract base64 screenshot data from details
+        if let Some(b64) = details.get("screenshot").and_then(|v| v.as_str()) {
+            let format = details
+                .get("format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("png");
+            let mime = format!("image/{format}");
+
+            // Always add image block so LLM can see the screenshot
+            blocks.push(crate::core::content::ToolResultContent::image(b64, &mime));
+
+            // Optionally save to disk
+            if params.get("save").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if let Some(path) = super::screenshots::save_screenshot(session_id, b64, format).await {
+                    details["savedPath"] = json!(path.display().to_string());
+                }
+            }
+        }
+
+        TronToolResult {
+            content: ToolResultBody::Blocks(blocks),
+            details: Some(details),
+            is_error: None,
+            stop_turn: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -112,6 +149,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
         .property("key", json!({"type": "string", "description": "Key name for pressKey (e.g., Enter, Tab)"}))
         .property("attribute", json!({"type": "string", "description": "Attribute name for getAttribute"}))
         .property("path", json!({"type": "string", "description": "File path for pdf action"}))
+        .property("save", json!({"type": "boolean", "description": "Save screenshot to ~/.tron/workspace/screenshots/ for later reference"}))
         .build()
     }
 
@@ -190,14 +228,20 @@ Browser sessions are persistent — once created, you can perform multiple actio
             .execute_action(&ctx.session_id, &browser_action)
             .await
         {
-            Ok(result) => Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
-                    &result.content,
-                )]),
-                details: result.details,
-                is_error: None,
-                stop_turn: None,
-            }),
+            Ok(result) => {
+                // Screenshot actions: always return image block so LLM can see it
+                if action_name == "screenshot" {
+                    return Ok(self.build_screenshot_result(result, &params, &ctx.session_id).await);
+                }
+                Ok(TronToolResult {
+                    content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                        &result.content,
+                    )]),
+                    details: result.details,
+                    is_error: None,
+                    stop_turn: None,
+                })
+            }
             Err(e) => Ok(error_result(format!("Browser action failed: {e}"))),
         }
     }
@@ -206,6 +250,8 @@ Browser sessions are persistent — once created, you can perform multiple actio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+    use crate::core::content::ToolResultContent;
     use crate::tools::browser::types::{BrowserEvent, BrowserStatus};
     use crate::tools::testutil::{extract_text, make_ctx};
     use crate::tools::traits::{BrowserResult, ExecutionMode};
@@ -248,6 +294,17 @@ mod tests {
             if self.should_fail {
                 return Err(ToolError::Internal {
                     message: "browser error".into(),
+                });
+            }
+            // Return screenshot data for screenshot actions (matches real provider)
+            if action.action == "screenshot" {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(b"fake png");
+                return Ok(BrowserResult {
+                    content: "Screenshot taken".into(),
+                    details: Some(json!({
+                        "screenshot": b64,
+                        "format": "png",
+                    })),
                 });
             }
             Ok(BrowserResult {
@@ -673,5 +730,84 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         assert_eq!(r.details.unwrap()["url"], "https://example.com");
+    }
+
+    // --- Screenshot image block + persistence tests ---
+
+    fn extract_blocks(result: &TronToolResult) -> &[ToolResultContent] {
+        match &result.content {
+            ToolResultBody::Blocks(b) => b,
+            _ => panic!("expected Blocks variant"),
+        }
+    }
+
+    fn has_image_block(result: &TronToolResult) -> bool {
+        extract_blocks(result)
+            .iter()
+            .any(|b| matches!(b, ToolResultContent::Image { .. }))
+    }
+
+    #[tokio::test]
+    async fn screenshot_action_returns_image_block() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(json!({"action": "screenshot"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(has_image_block(&r), "screenshot should return an image block");
+        // Verify the image data is valid base64-encoded "fake png"
+        let img = extract_blocks(&r).iter().find_map(|b| match b {
+            ToolResultContent::Image { data, mime_type } => Some((data.clone(), mime_type.clone())),
+            _ => None,
+        }).unwrap();
+        assert_eq!(img.1, "image/png");
+        let decoded = base64::engine::general_purpose::STANDARD.decode(&img.0).unwrap();
+        assert_eq!(decoded, b"fake png");
+    }
+
+    #[tokio::test]
+    async fn screenshot_save_false_no_persistence() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(json!({"action": "screenshot"}), &make_ctx())
+            .await
+            .unwrap();
+        let details = r.details.unwrap();
+        assert!(details.get("savedPath").is_none(), "no savedPath when save not set");
+    }
+
+    #[tokio::test]
+    async fn screenshot_save_true_includes_saved_path() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(json!({"action": "screenshot", "save": true}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(has_image_block(&r), "should still have image block");
+        let details = r.details.unwrap();
+        // savedPath should be present (pointing to ~/.tron/workspace/screenshots/...)
+        assert!(
+            details.get("savedPath").is_some(),
+            "savedPath should be present when save=true"
+        );
+        let saved = details["savedPath"].as_str().unwrap();
+        assert!(saved.contains("screenshots"), "path should contain 'screenshots': {saved}");
+        // Clean up the saved file
+        let _ = tokio::fs::remove_file(saved).await;
+    }
+
+    #[tokio::test]
+    async fn non_screenshot_action_no_image_block() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        let r = tool
+            .execute(
+                json!({"action": "navigate", "url": "https://example.com"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(!has_image_block(&r), "navigate should not have image block");
     }
 }

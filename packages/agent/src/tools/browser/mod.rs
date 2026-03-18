@@ -3,4 +3,5 @@
 pub mod browse_the_web;
 pub mod provider;
 pub mod providers;
+pub mod screenshots;
 pub mod types;

@@ -39,6 +39,11 @@ pub fn deploy_dir() -> PathBuf {
     tron_home_dir().join("workspace").join("deployment")
 }
 
+/// Resolve the screenshots directory (`~/.tron/workspace/screenshots/`).
+pub fn screenshots_dir() -> PathBuf {
+    tron_home_dir().join("workspace").join("screenshots")
+}
+
 /// Load settings from the default path with env var overrides.
 pub fn load_settings() -> Result<TronSettings> {
     load_settings_from_path(&settings_path())

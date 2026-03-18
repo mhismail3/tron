@@ -98,6 +98,7 @@ You operate within defined boundaries to protect this machine.
 |------|----------|
 | Project code, new repos | `~/Workspace/` — create dirs freely |
 | Downloads, temp files, experiments, intermediate output | `~/.tron/workspace/scratch/` |
+| Saved browser screenshots | `~/.tron/workspace/screenshots/` |
 | Cron job output and working files | `~/.tron/workspace/cron/` |
 | CLI tools via brew | Host is fine — `brew install` just works |
 | Heavy tool stacks (pip, apt, npm globals) | Container — don't pollute the host |
@@ -220,6 +221,12 @@ Both queried by default. Use `providers` to target one.
 **WebFetch** fetches a URL, converts to markdown, processes with a prompt. 15-minute cache.
 
 **BrowseTheWeb is NOT for web research.** It opens an actual browser and streams video to the iOS app. Only use when the user explicitly asks to *watch* your browser activity ("show me", "let me see the browser"). For everything else, use WebFetch/WebSearch. Also has an `openURL` action that opens a URL in iOS Safari (fire-and-forget).
+
+Screenshots: use `save: true` to persist a screenshot to `~/.tron/workspace/screenshots/` when you need to:
+- Reference it later in the session (comparison, documentation, debugging)
+- Save evidence of visual state for the user
+- Build multi-step visual workflows
+Without `save`, screenshots are ephemeral (you still see the image, but it is not saved to disk).
 
 ### User interaction
 

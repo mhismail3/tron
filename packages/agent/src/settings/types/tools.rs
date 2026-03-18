@@ -210,6 +210,8 @@ impl Default for WebCacheSettings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BrowserSettings {
+    /// Browser provider name. Auto-detects agent-browser if not set.
+    pub provider: Option<String>,
     /// Path to browser provider executable. Auto-detected from PATH if not set.
     pub executable_path: Option<String>,
     /// Run browser in headed mode (visible window). Default: false (headless).
@@ -219,6 +221,7 @@ pub struct BrowserSettings {
 impl Default for BrowserSettings {
     fn default() -> Self {
         Self {
+            provider: None,
             executable_path: None,
             headed: false,
         }
@@ -297,6 +300,7 @@ mod tests {
     #[test]
     fn browser_settings_defaults() {
         let b = BrowserSettings::default();
+        assert!(b.provider.is_none());
         assert!(b.executable_path.is_none());
         assert!(!b.headed);
     }
@@ -304,13 +308,16 @@ mod tests {
     #[test]
     fn browser_settings_serde_roundtrip() {
         let b = BrowserSettings {
+            provider: Some("agent-browser".into()),
             executable_path: Some("/usr/local/bin/agent-browser".into()),
             headed: true,
         };
         let json = serde_json::to_value(&b).unwrap();
+        assert_eq!(json["provider"], "agent-browser");
         assert_eq!(json["executablePath"], "/usr/local/bin/agent-browser");
         assert_eq!(json["headed"], true);
         let back: BrowserSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(back.provider.as_deref(), Some("agent-browser"));
         assert_eq!(back.executable_path.as_deref(), Some("/usr/local/bin/agent-browser"));
         assert!(back.headed);
     }
@@ -320,7 +327,22 @@ mod tests {
         let json = serde_json::json!({"headed": true});
         let b: BrowserSettings = serde_json::from_value(json).unwrap();
         assert!(b.headed);
+        assert!(b.provider.is_none());
         assert!(b.executable_path.is_none());
+    }
+
+    #[test]
+    fn browser_settings_provider_serde_roundtrip() {
+        let json = serde_json::json!({"provider": "agent-browser"});
+        let b: BrowserSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(b.provider.as_deref(), Some("agent-browser"));
+    }
+
+    #[test]
+    fn browser_settings_without_provider_defaults_to_none() {
+        let json = serde_json::json!({});
+        let b: BrowserSettings = serde_json::from_value(json).unwrap();
+        assert!(b.provider.is_none());
     }
 
     #[test]
