@@ -348,6 +348,14 @@ mod tests {
     }
 
     #[test]
+    fn detect_registry_lookup_minimax_m2_7() {
+        assert_eq!(
+            detect_provider_from_model(MINIMAX_M2_7),
+            Some(Provider::MiniMax)
+        );
+    }
+
+    #[test]
     fn detect_registry_lookup_minimax_m2() {
         assert_eq!(
             detect_provider_from_model(MINIMAX_M2),
@@ -438,8 +446,9 @@ mod tests {
         assert!(ids.contains(&CLAUDE_OPUS_4_6));
         assert!(ids.contains(&GPT_5_3_CODEX));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
+        assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
-        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 5 MiniMax = 30
-        assert_eq!(ids.len(), 30);
+        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax = 32
+        assert_eq!(ids.len(), 32);
     }
 }

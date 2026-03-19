@@ -325,13 +325,15 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.7"));
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.7-highspeed"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.5"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.5-highspeed"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1-highspeed"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2"));
         let minimax_count = models.iter().filter(|m| m["provider"] == "minimax").count();
-        assert_eq!(minimax_count, 5);
+        assert_eq!(minimax_count, 7);
     }
 
     #[tokio::test]

@@ -98,7 +98,13 @@ pub const GEMINI_2_5_FLASH_LITE: &str = "gemini-2.5-flash-lite";
 // MiniMax
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `MiniMax` M2.5 — latest `MiniMax` model.
+/// `MiniMax` M2.7 — latest `MiniMax` model.
+pub const MINIMAX_M2_7: &str = "MiniMax-M2.7";
+
+/// `MiniMax` M2.7 Highspeed.
+pub const MINIMAX_M2_7_HIGHSPEED: &str = "MiniMax-M2.7-highspeed";
+
+/// `MiniMax` M2.5.
 pub const MINIMAX_M2_5: &str = "MiniMax-M2.5";
 
 /// `MiniMax` M2.5 Highspeed.
@@ -114,7 +120,7 @@ pub const MINIMAX_M2_1_HIGHSPEED: &str = "MiniMax-M2.1-highspeed";
 pub const MINIMAX_M2: &str = "MiniMax-M2";
 
 /// Default `MiniMax` model.
-pub const DEFAULT_MINIMAX_MODEL: &str = MINIMAX_M2_5;
+pub const DEFAULT_MINIMAX_MODEL: &str = MINIMAX_M2_7;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Role-Based Aliases
@@ -195,6 +201,7 @@ mod tests {
     fn minimax_ids_not_empty() {
         let ids = all_minimax_model_ids();
         assert!(!ids.is_empty());
+        assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
     }
 

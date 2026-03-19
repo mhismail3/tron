@@ -1,6 +1,6 @@
 //! `MiniMax` model registry, auth, and config types.
 //!
-//! `MiniMax` exposes an Anthropic-compatible endpoint. Models: M2.5, M2.1, M2
+//! `MiniMax` exposes an Anthropic-compatible endpoint. Models: M2.7, M2.5, M2.1, M2
 //! (plus highspeed variants). 204,800 context window, no image support.
 
 use std::collections::HashMap;
@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 
 use crate::llm::models::model_ids::{
     MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
+    MINIMAX_M2_7, MINIMAX_M2_7_HIGHSPEED,
 };
 use crate::llm::retry::StreamRetryConfig;
 
@@ -80,6 +81,46 @@ pub struct MiniMaxModelInfo {
 static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     let _ = m.insert(
+        MINIMAX_M2_7,
+        MiniMaxModelInfo {
+            id: MINIMAX_M2_7,
+            name: "MiniMax M2.7",
+            short_name: "M2.7",
+            family: "MiniMax M2",
+            context_window: 204_800,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_tools: true,
+            supports_images: false,
+            input_cost_per_million: 0.3,
+            output_cost_per_million: 1.2,
+            description: "MiniMax M2.7 — latest and most capable MiniMax model.",
+            sort_order: 0,
+            recommended: true,
+            is_legacy: false,
+        },
+    );
+    let _ = m.insert(
+        MINIMAX_M2_7_HIGHSPEED,
+        MiniMaxModelInfo {
+            id: MINIMAX_M2_7_HIGHSPEED,
+            name: "MiniMax M2.7 Highspeed",
+            short_name: "M2.7 HS",
+            family: "MiniMax M2",
+            context_window: 204_800,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_tools: true,
+            supports_images: false,
+            input_cost_per_million: 0.3,
+            output_cost_per_million: 1.2,
+            description: "MiniMax M2.7 Highspeed — optimized for faster inference.",
+            sort_order: 1,
+            recommended: false,
+            is_legacy: false,
+        },
+    );
+    let _ = m.insert(
         MINIMAX_M2_5,
         MiniMaxModelInfo {
             id: MINIMAX_M2_5,
@@ -93,9 +134,9 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
-            description: "MiniMax M2.5 — latest and most capable MiniMax model.",
-            sort_order: 0,
-            recommended: true,
+            description: "MiniMax M2.5 — capable general-purpose model.",
+            sort_order: 2,
+            recommended: false,
             is_legacy: false,
         },
     );
@@ -114,7 +155,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
             description: "MiniMax M2.5 Highspeed — optimized for faster inference.",
-            sort_order: 1,
+            sort_order: 3,
             recommended: false,
             is_legacy: false,
         },
@@ -134,7 +175,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
             description: "MiniMax M2.1 — capable general-purpose model.",
-            sort_order: 2,
+            sort_order: 4,
             recommended: false,
             is_legacy: false,
         },
@@ -154,7 +195,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
             description: "MiniMax M2.1 Highspeed — optimized for faster inference.",
-            sort_order: 3,
+            sort_order: 5,
             recommended: false,
             is_legacy: false,
         },
@@ -174,7 +215,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
             description: "MiniMax M2 — foundation model.",
-            sort_order: 4,
+            sort_order: 6,
             recommended: false,
             is_legacy: false,
         },
@@ -232,6 +273,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn get_minimax_model_m2_7() {
+        let m = get_minimax_model("MiniMax-M2.7").unwrap();
+        assert_eq!(m.name, "MiniMax M2.7");
+        assert_eq!(m.context_window, 204_800);
+        assert!(m.supports_thinking);
+        assert!(!m.supports_images);
+        assert!(m.recommended);
+    }
+
+    #[test]
+    fn get_minimax_model_m2_7_highspeed() {
+        let m = get_minimax_model("MiniMax-M2.7-highspeed").unwrap();
+        assert_eq!(m.short_name, "M2.7 HS");
+        assert_eq!(m.context_window, 204_800);
+    }
+
+    #[test]
     fn get_minimax_model_m2_5() {
         let m = get_minimax_model("MiniMax-M2.5").unwrap();
         assert_eq!(m.name, "MiniMax M2.5");
@@ -275,7 +333,8 @@ mod tests {
     #[test]
     fn all_minimax_model_ids_contains_expected() {
         let ids = all_minimax_model_ids();
-        assert_eq!(ids.len(), 5);
+        assert_eq!(ids.len(), 7);
+        assert!(ids.contains(&"MiniMax-M2.7"));
         assert!(ids.contains(&"MiniMax-M2.5"));
         assert!(ids.contains(&"MiniMax-M2"));
     }
@@ -328,18 +387,18 @@ mod tests {
         assert_eq!(j["family"], "MiniMax M2");
         assert!(j["description"].is_string());
         assert_eq!(j["supportsReasoning"], false);
-        assert_eq!(j["recommended"], true);
+        assert_eq!(j["recommended"], false);
         assert_eq!(j["isLegacy"], false);
-        assert_eq!(j["sortOrder"], 0);
+        assert_eq!(j["sortOrder"], 2);
     }
 
     #[test]
     fn all_minimax_models_api_json_sorted() {
         let models = all_minimax_models_api_json();
-        assert_eq!(models.len(), 5);
-        assert_eq!(models[0]["id"], "MiniMax-M2.5");
+        assert_eq!(models.len(), 7);
+        assert_eq!(models[0]["id"], "MiniMax-M2.7");
         assert_eq!(models[0]["sortOrder"], 0);
-        assert_eq!(models[4]["id"], "MiniMax-M2");
-        assert_eq!(models[4]["sortOrder"], 4);
+        assert_eq!(models[6]["id"], "MiniMax-M2");
+        assert_eq!(models[6]["sortOrder"], 6);
     }
 }
