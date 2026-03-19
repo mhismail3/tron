@@ -44,6 +44,9 @@ pub struct DefaultProviderFactory {
     minimax_base_url: Option<String>,
     /// Shared HTTP client — connection pool reused across all providers.
     http_client: reqwest::Client,
+    /// When true, skip env-var fallbacks for auth (used in tests).
+    #[cfg(test)]
+    disable_env_fallback: bool,
 }
 
 impl DefaultProviderFactory {
@@ -73,6 +76,8 @@ impl DefaultProviderFactory {
             },
             minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
             http_client,
+            #[cfg(test)]
+            disable_env_fallback: false,
         }
     }
 
@@ -81,6 +86,23 @@ impl DefaultProviderFactory {
     pub fn with_auth_path(mut self, path: PathBuf) -> Self {
         self.auth_path = path;
         self
+    }
+
+    /// Disable env-var auth fallbacks (for testing).
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_no_env_fallback(mut self) -> Self {
+        self.disable_env_fallback = true;
+        self
+    }
+
+    /// Read an env var, returning `None` when env fallbacks are disabled.
+    fn env_var(&self, name: &str) -> Option<String> {
+        #[cfg(test)]
+        if self.disable_env_fallback {
+            return None;
+        }
+        std::env::var(name).ok()
     }
 
     /// Get a clone of the shared HTTP client.
@@ -95,7 +117,7 @@ impl DefaultProviderFactory {
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
-        let env_token = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
+        let env_token = self.env_var("CLAUDE_CODE_OAUTH_TOKEN");
         let preferred = self.anthropic.preferred_account.as_deref();
 
         let server_auth = match crate::llm::auth::anthropic::load_server_auth_with_client(
@@ -108,23 +130,23 @@ impl DefaultProviderFactory {
         .await
         {
             Ok(Some(auth)) => auth,
-            Ok(None) => match std::env::var("ANTHROPIC_API_KEY") {
-                Ok(key) => {
+            Ok(None) => match self.env_var("ANTHROPIC_API_KEY") {
+                Some(key) => {
                     info!("using ANTHROPIC_API_KEY env var (no OAuth tokens found)");
                     crate::llm::auth::ServerAuth::from_api_key(key)
                 }
-                Err(_) => {
+                None => {
                     return Err(ProviderError::Auth {
                         message: "no Anthropic auth available (OAuth or API key)".into(),
                     });
                 }
             },
-            Err(e) => match std::env::var("ANTHROPIC_API_KEY") {
-                Ok(key) => {
+            Err(e) => match self.env_var("ANTHROPIC_API_KEY") {
+                Some(key) => {
                     warn!(error = %e, "Anthropic OAuth failed, falling back to API key");
                     crate::llm::auth::ServerAuth::from_api_key(key)
                 }
-                Err(_) => {
+                None => {
                     if e.is_transient() {
                         return Err(ProviderError::Api {
                             status: match &e {
@@ -195,8 +217,8 @@ impl DefaultProviderFactory {
     }
 
     async fn create_openai(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let env_token = std::env::var("OPENAI_OAUTH_TOKEN").ok();
-        let env_api_key = std::env::var("OPENAI_API_KEY").ok();
+        let env_token = self.env_var("OPENAI_OAUTH_TOKEN");
+        let env_api_key = self.env_var("OPENAI_API_KEY");
 
         let server_auth = match crate::llm::auth::openai::load_server_auth_with_client(
             &self.auth_path,
@@ -255,8 +277,8 @@ impl DefaultProviderFactory {
     }
 
     async fn create_google(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let env_token = std::env::var("GOOGLE_OAUTH_TOKEN").ok();
-        let env_api_key = std::env::var("GOOGLE_API_KEY").ok();
+        let env_token = self.env_var("GOOGLE_OAUTH_TOKEN");
+        let env_api_key = self.env_var("GOOGLE_API_KEY");
 
         let google_auth = match crate::llm::auth::google::load_server_auth_with_client(
             &self.auth_path,
@@ -332,7 +354,7 @@ impl DefaultProviderFactory {
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         // Priority: env var > auth.json
-        let api_key = if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
+        let api_key = if let Some(key) = self.env_var("MINIMAX_API_KEY") {
             info!("using MINIMAX_API_KEY env var");
             key
         } else if let Some(pa) =
@@ -419,6 +441,7 @@ mod tests {
         let settings = crate::settings::TronSettings::default();
         DefaultProviderFactory::new(&settings)
             .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"))
+            .with_no_env_fallback()
     }
 
     #[test]
