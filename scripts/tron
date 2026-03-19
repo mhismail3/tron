@@ -18,6 +18,7 @@
 #   install         Initial setup (launchd + CLI)
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service (preserves data)
+#   auto-deploy     Remote auto-deploy watcher (install|uninstall|status|pause|resume|logs)
 #
 # Auth:
 #   login           Authenticate with Claude (--label for multi-account)
@@ -1863,6 +1864,174 @@ cmd_bench() {
     esac
 }
 
+#=============================================================================
+# SECTION 6b: AUTO-DEPLOY
+#=============================================================================
+
+AUTO_DEPLOY_PLIST_NAME="com.tron.auto-deploy"
+AUTO_DEPLOY_PLIST_PATH="$HOME/Library/LaunchAgents/$AUTO_DEPLOY_PLIST_NAME.plist"
+AUTO_DEPLOY_PAUSE_FILE="$TRON_HOME/auto-deploy.pause"
+AUTO_DEPLOY_LOG="$DEPLOY_DIR/auto-deploy.log"
+AUTO_DEPLOY_LAUNCHD_LOG="$DEPLOY_DIR/auto-deploy-launchd.log"
+AUTO_DEPLOY_SCRIPT="$SCRIPT_DIR/auto-deploy"
+
+cmd_auto_deploy() {
+    local subcmd="${1:-status}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        install)  auto_deploy_install ;;
+        uninstall) auto_deploy_uninstall ;;
+        status)   auto_deploy_status ;;
+        pause)    auto_deploy_pause ;;
+        resume)   auto_deploy_resume ;;
+        logs)     auto_deploy_logs "$@" ;;
+        *)        echo "Usage: tron auto-deploy {install|uninstall|status|pause|resume|logs}"; exit 1 ;;
+    esac
+}
+
+auto_deploy_install() {
+    require_project_dir
+
+    print_header "Installing Auto-Deploy Watcher"
+
+    mkdir -p "$DEPLOY_DIR"
+
+    cat > "$AUTO_DEPLOY_PLIST_PATH" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$AUTO_DEPLOY_PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$AUTO_DEPLOY_SCRIPT</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin</string>
+        <key>TRON_DATA_DIR</key>
+        <string>$TRON_HOME</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>$AUTO_DEPLOY_LAUNCHD_LOG</string>
+
+    <key>StandardErrorPath</key>
+    <string>$AUTO_DEPLOY_LAUNCHD_LOG</string>
+</dict>
+</plist>
+PLIST
+
+    print_success "Created: $AUTO_DEPLOY_PLIST_PATH"
+
+    launchctl load "$AUTO_DEPLOY_PLIST_PATH"
+    print_success "Loaded launchd job (polling every 60s)"
+
+    rm -f "$AUTO_DEPLOY_PAUSE_FILE"
+    echo ""
+    echo "Auto-deploy is now active. Commands:"
+    echo "  tron auto-deploy status  — check current state"
+    echo "  tron auto-deploy pause   — temporarily disable"
+    echo "  tron auto-deploy logs    — view deploy log"
+}
+
+auto_deploy_uninstall() {
+    print_header "Uninstalling Auto-Deploy Watcher"
+
+    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
+        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+        rm -f "$AUTO_DEPLOY_PLIST_PATH"
+        print_success "Removed launchd job"
+    else
+        print_warning "No launchd job found"
+    fi
+
+    rm -f "$AUTO_DEPLOY_PAUSE_FILE"
+    rm -f "$TRON_HOME/auto-deploy.lock"
+    print_success "Auto-deploy uninstalled"
+}
+
+auto_deploy_status() {
+    print_header "Auto-Deploy Status"
+
+    # Job loaded?
+    if launchctl list 2>/dev/null | grep -q "$AUTO_DEPLOY_PLIST_NAME"; then
+        print_success "launchd job: loaded"
+    else
+        print_error "launchd job: not loaded"
+        echo "  Run: tron auto-deploy install"
+        return
+    fi
+
+    # Paused?
+    if [ -f "$AUTO_DEPLOY_PAUSE_FILE" ]; then
+        print_warning "State: PAUSED"
+        echo "  Run: tron auto-deploy resume"
+    else
+        print_success "State: active"
+    fi
+
+    # Last activity from log
+    if [ -f "$AUTO_DEPLOY_LOG" ]; then
+        local last_line
+        last_line=$(tail -1 "$AUTO_DEPLOY_LOG" 2>/dev/null || echo "")
+        if [ -n "$last_line" ]; then
+            echo ""
+            echo -e "${DIM}Last log entry:${NC}"
+            echo "  $last_line"
+        fi
+
+        local last_deploy
+        last_deploy=$(grep -E "Deploy (SUCCEEDED|FAILED)" "$AUTO_DEPLOY_LOG" 2>/dev/null | tail -1 || echo "")
+        if [ -n "$last_deploy" ]; then
+            echo ""
+            echo -e "${DIM}Last deploy:${NC}"
+            echo "  $last_deploy"
+        fi
+    else
+        echo ""
+        echo -e "${DIM}No log file yet (no polls have run)${NC}"
+    fi
+}
+
+auto_deploy_pause() {
+    touch "$AUTO_DEPLOY_PAUSE_FILE"
+    print_success "Auto-deploy paused"
+    echo "  Polls will silently exit until resumed."
+    echo "  Resume with: tron auto-deploy resume"
+}
+
+auto_deploy_resume() {
+    if [ -f "$AUTO_DEPLOY_PAUSE_FILE" ]; then
+        rm -f "$AUTO_DEPLOY_PAUSE_FILE"
+        print_success "Auto-deploy resumed"
+    else
+        print_warning "Auto-deploy was not paused"
+    fi
+}
+
+auto_deploy_logs() {
+    local lines="${1:-50}"
+    if [ -f "$AUTO_DEPLOY_LOG" ]; then
+        tail -n "$lines" "$AUTO_DEPLOY_LOG"
+    else
+        echo "No auto-deploy log found yet."
+    fi
+}
+
 cmd_help() {
     echo ""
     echo -e "${CYAN}Tron - Persistent AI Coding Agent${NC}"
@@ -1880,6 +2049,7 @@ cmd_help() {
     echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
     echo "  install         Initial setup (launchd + CLI)"
     echo "  uninstall       Remove service (preserves data)"
+    echo "  auto-deploy     Remote auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
     echo ""
     echo -e "${BOLD}Runtime (available globally via tron-cli):${NC}"
     echo "  start           Start launchd service"
@@ -1938,5 +2108,6 @@ case "$1" in
     login)     shift; cmd_login "$@" ;;
     backfill-ledger) shift; "$INSTALLED_BINARY" backfill-ledger "$@" ;;
     uninstall) cmd_uninstall ;;
+    auto-deploy) shift; cmd_auto_deploy "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac
