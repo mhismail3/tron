@@ -20,8 +20,7 @@ use crate::settings::types::TronSettings;
 
 /// Resolve the `~/.tron` directory.
 pub fn tron_home_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".tron")
+    crate::core::paths::tron_home()
 }
 
 /// Resolve the path to the settings file (`~/.tron/settings.json`).

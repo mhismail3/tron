@@ -125,6 +125,20 @@ impl DefaultProviderFactory {
                     crate::llm::auth::ServerAuth::from_api_key(key)
                 }
                 Err(_) => {
+                    if e.is_transient() {
+                        return Err(ProviderError::Api {
+                            status: match &e {
+                                crate::llm::auth::errors::AuthError::OAuth { status, .. } => *status,
+                                crate::llm::auth::errors::AuthError::Http(he) => {
+                                    he.status().map_or(503, |s| s.as_u16())
+                                }
+                                _ => 503,
+                            },
+                            message: format!("Anthropic auth failed (transient): {e}"),
+                            code: None,
+                            retryable: true,
+                        });
+                    }
                     return Err(ProviderError::Auth {
                         message: format!("Anthropic auth failed: {e}"),
                     });

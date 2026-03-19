@@ -67,7 +67,7 @@ struct LedgerBody {
 // ─── Database helpers ────────────────────────────────────────────────────────
 
 fn default_db_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = crate::core::paths::home_dir();
     PathBuf::from(home)
         .join(".tron")
         .join("database")

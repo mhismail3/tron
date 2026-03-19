@@ -24,6 +24,8 @@
 pub mod ask_user_question;
 #[path = "foundation/constants.rs"]
 pub mod constants;
+#[path = "foundation/paths.rs"]
+pub mod paths;
 #[path = "protocol/content.rs"]
 pub mod content;
 pub mod errors;

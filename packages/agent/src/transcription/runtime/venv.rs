@@ -13,7 +13,7 @@ use crate::transcription::types::TranscriptionError;
 
 /// Base directory for the transcription sidecar.
 pub fn sidecar_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let home = crate::core::paths::home_dir();
     PathBuf::from(format!("{home}/.tron/mods/transcribe"))
 }
 

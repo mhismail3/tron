@@ -17,7 +17,7 @@ pub struct ListDirHandler;
 impl MethodHandler for ListDirHandler {
     #[instrument(skip(self, ctx), fields(method = "filesystem.listDir"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+        let home = crate::core::paths::home_dir();
         let path = opt_string(params.as_ref(), "path").unwrap_or(home);
         let show_hidden = opt_bool(params.as_ref(), "showHidden").unwrap_or(false);
 
@@ -35,7 +35,7 @@ pub struct GetHomeHandler;
 impl MethodHandler for GetHomeHandler {
     #[instrument(skip(self, ctx), fields(method = "filesystem.getHome"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+        let home = crate::core::paths::home_dir();
         ctx.run_blocking("filesystem.getHome", move || {
             Ok(filesystem_service::get_home(&home))
         })

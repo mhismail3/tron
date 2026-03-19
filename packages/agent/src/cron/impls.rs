@@ -127,19 +127,34 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 })
             })
             .or_else(|| {
-                let home = std::env::var("HOME").ok()?;
+                let home = crate::core::paths::home_dir();
                 let cron_dir = format!("{home}/.tron/workspace/cron");
                 let _ = std::fs::create_dir_all(&cron_dir);
                 Some(cron_dir)
             })
             .unwrap_or_else(|| "/tmp".into());
 
-        // 1. Create provider
-        let provider = self
-            .provider_factory
-            .create_for_model(model)
-            .await
-            .map_err(|e| CronError::Execution(format!("create provider: {e}")))?;
+        // 1. Create provider (with retry for transient errors)
+        let provider = {
+            let mut attempt = 0u32;
+            loop {
+                match self.provider_factory.create_for_model(model).await {
+                    Ok(p) => break p,
+                    Err(e) if attempt < 3 && e.is_retryable() => {
+                        attempt += 1;
+                        let delay = std::time::Duration::from_secs(2u64.pow(attempt).min(30));
+                        tracing::warn!(
+                            attempt,
+                            error = %e,
+                            "transient error creating provider, retrying in {}s",
+                            delay.as_secs()
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                    Err(e) => return Err(CronError::Execution(format!("create provider: {e}"))),
+                }
+            }
+        };
 
         // 2. Create session
         let title = format!("Cron: {}", prompt.chars().take(80).collect::<String>());
@@ -478,6 +493,7 @@ impl crate::cron::executor::SystemEventInjector for CronSystemEventInjector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cron::executor::AgentTurnExecutor;
 
     fn make_test_store_and_manager() -> (
         Arc<crate::events::EventStore>,
@@ -670,5 +686,166 @@ mod tests {
         assert_eq!(events.len(), 1, "should have exactly 1 ledger event");
         let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["source"], "cron");
+    }
+
+    // ── Provider retry tests ──────────────────────────────────────────
+
+    /// Mock factory that fails N times with a retryable error, then succeeds.
+    struct RetryMockProviderFactory {
+        failures_remaining: std::sync::atomic::AtomicU32,
+        retryable: bool,
+    }
+
+    impl RetryMockProviderFactory {
+        fn new(failures: u32, retryable: bool) -> Self {
+            Self {
+                failures_remaining: std::sync::atomic::AtomicU32::new(failures),
+                retryable,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ProviderFactory for RetryMockProviderFactory {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+            let remaining = self.failures_remaining.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            if remaining > 0 {
+                if self.retryable {
+                    Err(ProviderError::Api {
+                        status: 503,
+                        message: "transient OAuth failure".into(),
+                        code: None,
+                        retryable: true,
+                    })
+                } else {
+                    Err(ProviderError::Auth {
+                        message: "permanent auth failure".into(),
+                    })
+                }
+            } else {
+                Ok(Arc::new(LedgerMockProvider))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cron_retries_transient_provider_error() {
+        // Fails twice with retryable error, succeeds on 3rd attempt
+        let (store, mgr) = make_test_store_and_manager();
+        let factory: Arc<dyn ProviderFactory> = Arc::new(RetryMockProviderFactory::new(2, true));
+        let executor = CronAgentTurnExecutor::new(
+            store.clone(),
+            mgr.clone(),
+            factory,
+            Arc::new(crate::tools::registry::ToolRegistry::new),
+            "http://localhost:0".into(),
+            None,
+            None,
+        );
+
+        // The execute call will retry provider creation. It will succeed on 3rd attempt,
+        // but then fail at the agent run stage (no real LLM). We just verify it gets past
+        // provider creation.
+        let result = executor
+            .execute(
+                "test prompt",
+                Some("mock-ledger"),
+                None,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+        // Should get past provider creation (error will be from agent run, not "create provider")
+        match result {
+            Err(CronError::Execution(msg)) => {
+                assert!(
+                    !msg.starts_with("create provider:"),
+                    "should have retried past provider creation, got: {msg}"
+                );
+            }
+            Ok(_) => {} // Unexpected but not a test failure
+            Err(e) => {
+                // Any non-provider error is fine — means retry worked
+                assert!(
+                    !e.to_string().contains("create provider"),
+                    "should have retried past provider creation, got: {e}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cron_fails_immediately_on_permanent_error() {
+        let (store, mgr) = make_test_store_and_manager();
+        let factory: Arc<dyn ProviderFactory> = Arc::new(RetryMockProviderFactory::new(1, false));
+        let executor = CronAgentTurnExecutor::new(
+            store.clone(),
+            mgr.clone(),
+            factory,
+            Arc::new(crate::tools::registry::ToolRegistry::new),
+            "http://localhost:0".into(),
+            None,
+            None,
+        );
+
+        let result = executor
+            .execute(
+                "test prompt",
+                Some("mock-ledger"),
+                None,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+        // Should fail immediately with provider error, not retry
+        match result {
+            Err(CronError::Execution(msg)) => {
+                assert!(
+                    msg.starts_with("create provider:"),
+                    "should fail at provider creation: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected Execution error from provider, got Ok"),
+            Err(e) => panic!("expected Execution error from provider, got: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cron_fails_after_max_retries() {
+        let (store, mgr) = make_test_store_and_manager();
+        // Always fail with retryable error — should exhaust 3 retries then fail
+        let factory: Arc<dyn ProviderFactory> = Arc::new(RetryMockProviderFactory::new(100, true));
+        let executor = CronAgentTurnExecutor::new(
+            store.clone(),
+            mgr.clone(),
+            factory,
+            Arc::new(crate::tools::registry::ToolRegistry::new),
+            "http://localhost:0".into(),
+            None,
+            None,
+        );
+
+        let result = executor
+            .execute(
+                "test prompt",
+                Some("mock-ledger"),
+                None,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+        match result {
+            Err(CronError::Execution(msg)) => {
+                assert!(
+                    msg.starts_with("create provider:"),
+                    "should fail at provider creation after retries: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected Execution error after retries, got Ok"),
+            Err(e) => panic!("expected Execution error after retries, got: {e}"),
+        }
     }
 }

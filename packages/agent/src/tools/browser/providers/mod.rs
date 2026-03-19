@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::provider::BrowserProvider;
 
 pub mod agent_browser;
+pub mod lazy;
 pub mod stub;
 
 /// Discover the best available browser provider, installing prerequisites if needed.
@@ -98,20 +99,21 @@ fn find_agent_browser(
     None
 }
 
-/// Find `agent-browser` on PATH.
+/// Find `agent-browser` on PATH by searching directories directly.
 fn which_agent_browser() -> Option<PathBuf> {
-    let output = std::process::Command::new("which")
-        .arg("agent-browser")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    let path_env = std::env::var("PATH").ok()?;
+    find_in_path("agent-browser", &path_env)
+}
+
+/// Search for a binary name in the given PATH string.
+fn find_in_path(name: &str, path_env: &str) -> Option<PathBuf> {
+    for dir in std::env::split_paths(path_env) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(path))
+    None
 }
 
 /// Install agent-browser via Homebrew. Returns the binary path on success.
@@ -218,5 +220,43 @@ mod tests {
         let result = find_browser_provider(0, Some("nonexistent-provider"), None, false);
         // Result depends on whether agent-browser is installed; just verify no panic.
         let _ = result;
+    }
+
+    #[test]
+    fn find_in_path_finds_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("agent-browser");
+        std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+        let path_str = dir.path().to_str().unwrap();
+        assert_eq!(find_in_path("agent-browser", path_str), Some(binary));
+    }
+
+    #[test]
+    fn find_in_path_returns_none_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path_str = dir.path().to_str().unwrap();
+        assert!(find_in_path("agent-browser", path_str).is_none());
+    }
+
+    #[test]
+    fn find_in_path_searches_multiple_dirs() {
+        let dir1 = tempfile::tempdir().unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        let binary = dir2.path().join("agent-browser");
+        std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+        let path_str = format!(
+            "{}:{}",
+            dir1.path().display(),
+            dir2.path().display()
+        );
+        assert_eq!(find_in_path("agent-browser", &path_str), Some(binary));
+    }
+
+    #[test]
+    fn find_in_path_skips_directories_with_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("agent-browser")).unwrap();
+        let path_str = dir.path().to_str().unwrap();
+        assert!(find_in_path("agent-browser", path_str).is_none());
     }
 }

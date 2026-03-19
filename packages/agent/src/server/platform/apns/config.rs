@@ -30,7 +30,7 @@ impl ApnsConfig {
     pub fn resolved_key_path(&self) -> PathBuf {
         if let Some(ref path) = self.key_path {
             let expanded = if path.starts_with('~') {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+                let home = crate::core::paths::home_dir();
                 PathBuf::from(home).join(path.trim_start_matches("~/"))
             } else {
                 PathBuf::from(path)
@@ -38,7 +38,7 @@ impl ApnsConfig {
             return expanded;
         }
         // Default: ~/.tron/mods/apns/AuthKey_{keyId}.p8
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let home = crate::core::paths::home_dir();
         PathBuf::from(home)
             .join(".tron")
             .join("mods")
@@ -69,7 +69,7 @@ pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
     let config_path = if let Some(base) = base {
         base.join("config.json")
     } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let home = crate::core::paths::home_dir();
         PathBuf::from(home)
             .join(".tron")
             .join("mods")

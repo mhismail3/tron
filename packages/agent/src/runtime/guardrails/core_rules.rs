@@ -46,7 +46,7 @@ pub fn is_core_rule(rule_id: &str) -> bool {
 
 /// Get the home directory for rule path construction.
 fn homedir() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
+    crate::core::paths::home_dir()
 }
 
 /// Escape special regex characters in a string.

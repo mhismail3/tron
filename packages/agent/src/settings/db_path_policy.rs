@@ -25,7 +25,7 @@ pub fn default_production_db_path_for_home(home: &Path) -> PathBuf {
 /// Default production database path from `$HOME`.
 #[must_use]
 pub fn default_production_db_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = crate::core::paths::home_dir();
     default_production_db_path_for_home(&PathBuf::from(home))
 }
 
@@ -33,7 +33,7 @@ pub fn default_production_db_path() -> PathBuf {
 ///
 /// Returns the canonical allowed path (`~/.tron/database/tron.db`) when valid.
 pub fn resolve_production_db_path(cli_db_path: Option<PathBuf>) -> Result<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = crate::core::paths::home_dir();
     resolve_production_db_path_for_home(cli_db_path, &PathBuf::from(home))
 }
 

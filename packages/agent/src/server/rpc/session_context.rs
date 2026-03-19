@@ -209,7 +209,7 @@ impl ContextArtifactsService {
     /// Create a new context-artifacts cache rooted at the current user's home directory.
     pub fn new() -> Self {
         Self {
-            home_dir: std::env::var("HOME").ok().map(PathBuf::from),
+            home_dir: Some(PathBuf::from(crate::core::paths::home_dir())),
             state: Mutex::new(ContextArtifactsState::default()),
             #[cfg(test)]
             rules_index_builds: std::sync::atomic::AtomicUsize::new(0),

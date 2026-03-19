@@ -57,9 +57,8 @@ impl EmbeddingConfig {
 
     /// Resolve the cache directory, expanding `~/` to the home directory.
     pub fn resolved_cache_dir(&self) -> String {
-        if self.cache_dir.starts_with("~/")
-            && let Ok(home) = std::env::var("HOME")
-        {
+        if self.cache_dir.starts_with("~/") {
+            let home = crate::core::paths::home_dir();
             return format!("{}{}", home, &self.cache_dir[1..]);
         }
         self.cache_dir.clone()

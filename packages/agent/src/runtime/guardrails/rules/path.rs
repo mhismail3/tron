@@ -250,7 +250,7 @@ fn normalize_path(path: &str) -> String {
 
 /// Get the home directory.
 fn home_dir() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
+    crate::core::paths::home_dir()
 }
 
 #[cfg(test)]

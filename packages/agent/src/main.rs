@@ -310,7 +310,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 6: Find
     registry.register(Arc::new(tron::tools::fs::find::FindTool::new()));
 
-    // 7: BrowseTheWeb (real provider if found, otherwise stub)
+    // 7: BrowseTheWeb (lazy re-discovery if stub at startup)
     let browser_provider: Arc<dyn tron::tools::browser::provider::BrowserProvider> = config
         .browser_provider
         .clone()
@@ -528,22 +528,29 @@ async fn main() -> Result<()> {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
-    // Browser provider (optional — only if agent-browser is found)
-    let browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>> = {
+    // Browser provider (lazy re-discovery if not found at startup)
+    let browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>> = Some({
         let stream_port = find_free_port();
-        let provider = tron::tools::browser::providers::find_browser_provider(
+        let params = tron::tools::browser::providers::lazy::DiscoveryParams {
+            stream_port,
+            provider_name: settings.tools.browser.provider.clone(),
+            executable_path: settings.tools.browser.executable_path.clone(),
+            headed: settings.tools.browser.headed,
+        };
+        let initial = tron::tools::browser::providers::find_browser_provider(
             stream_port,
             settings.tools.browser.provider.as_deref(),
             settings.tools.browser.executable_path.as_deref(),
             settings.tools.browser.headed,
-        );
-        if let Some(ref p) = provider {
-            tracing::info!(provider = p.name(), "browser provider found — browser tool enabled");
+        )
+        .unwrap_or_else(|| Arc::new(tron::tools::browser::providers::stub::StubProvider));
+        if initial.name() != "stub" {
+            tracing::info!(provider = initial.name(), "browser provider found — browser tool enabled");
         } else {
-            tracing::info!("no browser provider found — browser tool returns 'not available'");
+            tracing::info!("no browser provider found at startup — will retry on first use");
         }
-        provider
-    };
+        Arc::new(tron::tools::browser::providers::lazy::LazyBrowserProvider::new(initial, params))
+    });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
     let apns_service: ApnsServiceOption = {

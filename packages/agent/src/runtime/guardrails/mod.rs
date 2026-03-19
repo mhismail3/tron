@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn path_write_to_tron_app_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/app/server.js")));
         assert!(eval.blocked);
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn path_edit_tron_database_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/database/prod.db")));
         assert!(eval.blocked);
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn path_write_tron_auth_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/auth.json")));
         assert!(eval.blocked);
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn path_bash_tee_to_tron_app_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let cmd = format!("echo test | tee {home}/.tron/app/file.txt");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn path_bash_cp_to_tron_db_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let cmd = format!("cp foo.db {home}/.tron/database/prod.db");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn path_bash_redirect_to_tron_auth_blocked() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let cmd = format!("echo '{{}}' > {home}/.tron/auth.json");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
@@ -1666,7 +1666,7 @@ mod tests {
 
     #[test]
     fn integration_write_to_tron_skills_allowed() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!(
             "{home}/.tron/skills/test/SKILL.md"
@@ -1676,7 +1676,7 @@ mod tests {
 
     #[test]
     fn integration_read_tool_not_affected_by_path_protection() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_read_ctx(&format!("{home}/.tron/app/server.js")));
         assert!(!eval.blocked);

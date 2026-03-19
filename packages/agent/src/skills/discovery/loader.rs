@@ -15,7 +15,7 @@ use crate::skills::types::{SkillMetadata, SkillScanError, SkillScanResult, Skill
 
 /// Get the global skills directory path (`~/.tron/skills`).
 pub fn global_skills_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let home = crate::core::paths::home_dir();
     PathBuf::from(home).join(GLOBAL_SKILLS_DIR)
 }
 

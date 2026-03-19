@@ -638,9 +638,35 @@ async fn execute_job(
         let _ = store::disable_job(pool, &job.id);
         tracing::warn!(
             job_id = %job.id,
+            job_name = %job.name,
             failures,
-            "auto-disabled after consecutive failures"
+            "auto-disabled job after consecutive failures"
         );
+        // Notify via push if available
+        if let Some(ref notifier) = deps.push_notifier {
+            let _ = notifier
+                .notify(
+                    &format!("Cron job '{}' auto-disabled", job.name),
+                    &format!(
+                        "Disabled after {} consecutive failures. Re-enable manually.",
+                        failures
+                    ),
+                )
+                .await;
+        }
+        // Broadcast event for WebSocket clients
+        if let Some(broadcaster) = deps.broadcaster.get() {
+            broadcaster
+                .broadcast_cron_event(
+                    "cron.jobAutoDisabled",
+                    serde_json::json!({
+                        "jobId": job.id,
+                        "jobName": job.name,
+                        "consecutiveFailures": failures,
+                    }),
+                )
+                .await;
+        }
     }
 
     // Deliver results
@@ -1370,5 +1396,208 @@ mod tests {
         let result = scheduler.get_job("cron_gj");
         assert!(result.is_some());
         assert_eq!(result.unwrap().name, "GetJob");
+    }
+
+    // ── Auto-disable notification tests ───────────────────────────────
+
+    /// Mock push notifier that records calls.
+    struct MockPushNotifier {
+        calls: parking_lot::Mutex<Vec<(String, String)>>,
+    }
+
+    impl MockPushNotifier {
+        fn new() -> Self {
+            Self {
+                calls: parking_lot::Mutex::new(vec![]),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl executor::PushNotifier for MockPushNotifier {
+        async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {
+            self.calls
+                .lock()
+                .push((title.to_owned(), body.to_owned()));
+            Ok(())
+        }
+    }
+
+    /// Mock event broadcaster that records calls.
+    struct MockEventBroadcaster {
+        events: parking_lot::Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl MockEventBroadcaster {
+        fn new() -> Self {
+            Self {
+                events: parking_lot::Mutex::new(vec![]),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl executor::EventBroadcaster for MockEventBroadcaster {
+        async fn broadcast_cron_result(&self, _job: &CronJob, _run: &crate::cron::types::CronRun) {}
+        async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
+            self.events
+                .lock()
+                .push((event_type.to_owned(), payload));
+        }
+    }
+
+    fn make_failing_job(auto_disable_after: u32) -> CronJob {
+        CronJob {
+            id: "cron_fail".into(),
+            name: "FailJob".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "exit 1".into(),
+                working_directory: Some("/tmp".into()),
+                timeout_secs: 5,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            tool_restrictions: None,
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_disable_sends_push_notification() {
+        let (pool, clock, _, _, _, _dir) = setup();
+        let notifier = Arc::new(MockPushNotifier::new());
+        let broadcaster = Arc::new(MockEventBroadcaster::new());
+
+        let deps = ExecutorDeps {
+            agent_executor: None,
+            broadcaster: {
+                let lock = std::sync::OnceLock::new();
+                let _ = lock.set(broadcaster.clone() as Arc<dyn executor::EventBroadcaster>);
+                lock
+            },
+            push_notifier: Some(notifier.clone()),
+            event_injector: None,
+            http_client: reqwest::Client::new(),
+            pool: pool.clone(),
+        };
+
+        let job = make_failing_job(1); // auto-disable after 1 failure
+        // Insert job in DB so store operations work
+        store::upsert_job(&pool, &job).unwrap();
+
+        let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+        runtime
+            .write()
+            .insert(job.id.clone(), JobRuntimeState {
+                job_id: job.id.clone(),
+                next_run_at: None,
+                last_run_at: None,
+                consecutive_failures: 0,
+                running_since: None,
+            });
+
+        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+
+        // Verify push notification was sent
+        let calls = notifier.calls.lock();
+        assert_eq!(calls.len(), 1, "should have sent exactly 1 push notification");
+        assert!(
+            calls[0].0.contains("FailJob"),
+            "notification title should contain job name"
+        );
+        assert!(
+            calls[0].1.contains("1"),
+            "notification body should contain failure count"
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_disable_broadcasts_event() {
+        let (pool, clock, _, _, _, _dir) = setup();
+        let broadcaster = Arc::new(MockEventBroadcaster::new());
+
+        let deps = ExecutorDeps {
+            agent_executor: None,
+            broadcaster: {
+                let lock = std::sync::OnceLock::new();
+                let _ = lock.set(broadcaster.clone() as Arc<dyn executor::EventBroadcaster>);
+                lock
+            },
+            push_notifier: None,
+            event_injector: None,
+            http_client: reqwest::Client::new(),
+            pool: pool.clone(),
+        };
+
+        let job = make_failing_job(1);
+        store::upsert_job(&pool, &job).unwrap();
+
+        let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+        runtime
+            .write()
+            .insert(job.id.clone(), JobRuntimeState {
+                job_id: job.id.clone(),
+                next_run_at: None,
+                last_run_at: None,
+                consecutive_failures: 0,
+                running_since: None,
+            });
+
+        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+
+        // Verify broadcast event
+        let events = broadcaster.events.lock();
+        assert_eq!(events.len(), 1, "should have broadcast exactly 1 event");
+        assert_eq!(events[0].0, "cron.jobAutoDisabled");
+        assert_eq!(events[0].1["jobName"], "FailJob");
+        assert_eq!(events[0].1["jobId"], "cron_fail");
+    }
+
+    #[tokio::test]
+    async fn auto_disable_works_without_notifier() {
+        let (pool, clock, _, _, _, _dir) = setup();
+
+        let deps = make_deps(&pool); // No notifier, no broadcaster
+
+        let job = make_failing_job(1);
+        store::upsert_job(&pool, &job).unwrap();
+
+        let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+        runtime
+            .write()
+            .insert(job.id.clone(), JobRuntimeState {
+                job_id: job.id.clone(),
+                next_run_at: None,
+                last_run_at: None,
+                consecutive_failures: 0,
+                running_since: None,
+            });
+
+        // Should not panic even without notifier or broadcaster
+        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+
+        // Verify job was disabled in DB
+        let conn = pool.get().unwrap();
+        let enabled: bool = conn
+            .query_row(
+                "SELECT enabled FROM cron_jobs WHERE id = 'cron_fail'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!enabled, "job should be disabled after auto_disable_after failures");
     }
 }

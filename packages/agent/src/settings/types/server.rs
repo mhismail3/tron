@@ -239,7 +239,7 @@ pub struct ChatSettings {
 
 impl Default for ChatSettings {
     fn default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let home = crate::core::paths::home_dir();
         Self {
             enabled: true,
             working_directory: format!("{home}/Workspace"),

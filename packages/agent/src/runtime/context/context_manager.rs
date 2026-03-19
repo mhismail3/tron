@@ -57,9 +57,8 @@ impl ContextManager {
     /// Create a new context manager with the given configuration.
     pub fn new(mut config: ContextManagerConfig) -> Self {
         // Default working_directory to $HOME/Workspace/ rather than /tmp
-        if config.working_directory.is_none()
-            && let Ok(home) = std::env::var("HOME")
-        {
+        if config.working_directory.is_none() {
+            let home = crate::core::paths::home_dir();
             config.working_directory = Some(format!("{home}/Workspace"));
         }
 
@@ -730,7 +729,7 @@ mod tests {
         };
         let cm = ContextManager::new(config);
         let wd = cm.get_working_directory();
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::core::paths::home_dir();
         assert_eq!(wd, format!("{home}/Workspace"));
     }
 

@@ -11,7 +11,7 @@ const CONTAINER_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const CONTAINER_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) fn containers_json_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let home = crate::core::paths::home_dir();
     PathBuf::from(home)
         .join(".tron")
         .join("workspace")

@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::server::rpc::errors::RpcError;
 
 pub(crate) fn notes_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let home = crate::core::paths::home_dir();
     format!("{home}/.tron/knowledge/voice-notes")
 }
 
