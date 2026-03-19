@@ -13,6 +13,21 @@ struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 
     private class InteractivePopGestureController: UIViewController {
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            // Set hidesBackButton at the UIKit level before the push animation
+            // renders. SwiftUI's .navigationBarBackButtonHidden(true) lags by
+            // 1-2 frames, causing a brief flash of the default back button.
+            var candidate = parent
+            while let vc = candidate {
+                if vc.navigationController != nil {
+                    vc.navigationItem.hidesBackButton = true
+                    break
+                }
+                candidate = vc.parent
+            }
+        }
+
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             // Re-enable the interactive pop gesture
