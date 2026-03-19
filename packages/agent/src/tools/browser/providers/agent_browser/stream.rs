@@ -125,6 +125,24 @@ impl StreamBridge {
     }
 }
 
+/// Compute the next reconnect delay based on whether a session is actively waiting.
+fn next_reconnect_delay(
+    has_active_session: bool,
+    backoff: &mut Duration,
+    max_backoff: Duration,
+) -> Duration {
+    if has_active_session {
+        // A client is waiting for frames — poll aggressively.
+        // 50ms means we detect agent-browser within ~50ms of it starting.
+        Duration::from_millis(50)
+    } else {
+        // No one is watching — exponential backoff to save CPU.
+        let delay = *backoff;
+        *backoff = (*backoff * 2).min(max_backoff);
+        delay
+    }
+}
+
 async fn ws_client_loop(
     port: u16,
     tx: broadcast::Sender<BrowserEvent>,
@@ -132,7 +150,7 @@ async fn ws_client_loop(
     counter: Arc<AtomicU64>,
     cancel: CancellationToken,
 ) {
-    let mut backoff = Duration::from_millis(100);
+    let mut backoff = Duration::from_millis(500);
     let max_backoff = Duration::from_secs(5);
 
     loop {
@@ -143,7 +161,7 @@ async fn ws_client_loop(
         let url = format!("ws://127.0.0.1:{port}");
         match tokio_tungstenite::connect_async(&url).await {
             Ok((ws_stream, _)) => {
-                backoff = Duration::from_millis(100); // reset on success
+                backoff = Duration::from_millis(500);
                 handle_ws_stream(ws_stream, &tx, &session, &counter, &cancel).await;
             }
             Err(e) => {
@@ -155,12 +173,14 @@ async fn ws_client_loop(
             break;
         }
 
+        let has_session = session.read().is_some();
+        let delay = next_reconnect_delay(has_session, &mut backoff, max_backoff);
+
         tokio::select! {
             () = cancel.cancelled() => break,
-            () = tokio::time::sleep(backoff) => {}
+            () = tokio::time::sleep(delay) => {}
         }
 
-        backoff = (backoff * 2).min(max_backoff);
         metrics::counter!("browser_stream_reconnects").increment(1);
     }
 }
@@ -395,6 +415,37 @@ mod tests {
             }
             _ => panic!("expected Frame"),
         }
+    }
+
+    #[test]
+    fn next_delay_fast_polls_with_active_session() {
+        let mut backoff = Duration::from_millis(500);
+        let max = Duration::from_secs(5);
+        let delay = next_reconnect_delay(true, &mut backoff, max);
+        assert_eq!(delay, Duration::from_millis(50));
+        assert_eq!(backoff, Duration::from_millis(500)); // unchanged
+    }
+
+    #[test]
+    fn next_delay_exponential_backoff_without_session() {
+        let mut backoff = Duration::from_millis(500);
+        let max = Duration::from_secs(5);
+
+        let expected = [500, 1000, 2000, 4000, 5000, 5000];
+        for ms in expected {
+            let delay = next_reconnect_delay(false, &mut backoff, max);
+            assert_eq!(delay, Duration::from_millis(ms));
+        }
+    }
+
+    #[test]
+    fn next_delay_backoff_not_mutated_during_fast_poll() {
+        let mut backoff = Duration::from_millis(500);
+        let max = Duration::from_secs(5);
+        for _ in 0..10 {
+            let _ = next_reconnect_delay(true, &mut backoff, max);
+        }
+        assert_eq!(backoff, Duration::from_millis(500));
     }
 
     #[test]
