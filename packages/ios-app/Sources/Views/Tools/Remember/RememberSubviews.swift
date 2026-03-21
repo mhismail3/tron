@@ -18,13 +18,7 @@ extension RememberToolDetailSheet {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = result
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: result, accent: .purple)
             }
 
             if entries.isEmpty {
@@ -178,13 +172,7 @@ extension RememberToolDetailSheet {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = result
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: result, accent: .purple)
             }
 
             if entries.isEmpty {
@@ -277,13 +265,7 @@ extension RememberToolDetailSheet {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = result
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: result, accent: .purple)
             }
 
             HStack(alignment: .top, spacing: 0) {

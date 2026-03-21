@@ -137,15 +137,7 @@ struct EditToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    if let result = data.result {
-                        UIPasteboard.general.string = result
-                    }
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(accentColor.opacity(0.6))
-                }
+                ToolCopyButton(content: data.result ?? "", accent: accentColor)
             }
 
             VStack(alignment: .leading, spacing: 0) {
