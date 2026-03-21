@@ -65,6 +65,18 @@ final class SettingsState {
     var isLoadingModels = false
     var loadError: String?
 
+    // MARK: - Chat Settings
+
+    var chatWorkspace: String = ""
+
+    var displayChatWorkspace: String {
+        chatWorkspace.replacingOccurrences(
+            of: "^/Users/[^/]+/",
+            with: "~/",
+            options: .regularExpression
+        )
+    }
+
     // MARK: - Display Helpers
 
     var displayQuickSessionWorkspace: String {
@@ -122,10 +134,18 @@ final class SettingsState {
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
+            chatWorkspace = settings.chatWorkingDirectory ?? ""
             isLoaded = true
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    func reload(using rpcClient: RPCClient) async {
+        isLoaded = false
+        loadError = nil
+        await load(using: rpcClient)
+        await loadModels(using: rpcClient)
     }
 
     func loadModels(using rpcClient: RPCClient) async {
@@ -176,6 +196,7 @@ final class SettingsState {
         integrationLocationPrecision = "city"
         toolBrowserHeaded = false
         quickSessionWorkspace = AppConstants.defaultWorkspace
+        chatWorkspace = ""
     }
 
     // MARK: - Server Update Builder
@@ -217,7 +238,7 @@ final class SettingsState {
                 health: .init(enabled: false, dataTypes: []),
                 location: .init(enabled: false, precision: "city")
             ),
-            session: .init(isolation: .init(mode: "always"))
+            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))
         )
     }
 }

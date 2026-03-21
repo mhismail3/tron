@@ -21,13 +21,18 @@ struct ServerSettings: Decodable {
     let tools: ToolSettings
     let integrations: IntegrationSettings
     let isolationMode: String
+    let chatWorkingDirectory: String?
 
     private enum CodingKeys: String, CodingKey {
         case models, server, context, tools, integrations, session
     }
 
     private enum SessionKeys: String, CodingKey {
-        case isolation
+        case isolation, chat
+    }
+
+    private enum ChatKeys: String, CodingKey {
+        case workingDirectory
     }
 
     private enum IsolationKeys: String, CodingKey {
@@ -85,12 +90,21 @@ struct ServerSettings: Decodable {
         tools = (try? container.decodeIfPresent(ToolSettings.self, forKey: .tools)) ?? .defaults
         integrations = (try? container.decodeIfPresent(IntegrationSettings.self, forKey: .integrations)) ?? .defaults
 
-        // session.isolation.mode
-        if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session),
-           let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
-            isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
+        // session.isolation.mode + session.chat.workingDirectory
+        if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session) {
+            if let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
+                isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
+            } else {
+                isolationMode = "always"
+            }
+            if let chatContainer = try? sessionContainer.nestedContainer(keyedBy: ChatKeys.self, forKey: .chat) {
+                chatWorkingDirectory = try? chatContainer.decodeIfPresent(String.self, forKey: .workingDirectory)
+            } else {
+                chatWorkingDirectory = nil
+            }
         } else {
             isolationMode = "always"
+            chatWorkingDirectory = nil
         }
     }
 
@@ -575,9 +589,14 @@ struct ServerSettingsUpdate: Encodable {
 
     struct SessionUpdate: Encodable {
         var isolation: IsolationUpdate?
+        var chat: ChatUpdate?
 
         struct IsolationUpdate: Encodable {
             var mode: String?
+        }
+
+        struct ChatUpdate: Encodable {
+            var workingDirectory: String?
         }
     }
 

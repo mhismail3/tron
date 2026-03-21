@@ -5,10 +5,10 @@ import Foundation
 @Observable
 @MainActor
 final class ContentViewCoordinator {
-    private let rpcClient: RPCClient
-    private let eventStoreManager: EventStoreManager
-    private let quickSessionWorkspaceSetting: String
-    private let defaultModel: String
+    private let dependencies: DependencyContainer
+
+    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
     // MARK: - State
 
@@ -16,16 +16,8 @@ final class ContentViewCoordinator {
     var workspaceDeletedForSession: [String: Bool] = [:]
     var isValidatingWorkspace = false
 
-    init(
-        rpcClient: RPCClient,
-        eventStoreManager: EventStoreManager,
-        quickSessionWorkspaceSetting: String,
-        defaultModel: String
-    ) {
-        self.rpcClient = rpcClient
-        self.eventStoreManager = eventStoreManager
-        self.quickSessionWorkspaceSetting = quickSessionWorkspaceSetting
-        self.defaultModel = defaultModel
+    init(dependencies: DependencyContainer) {
+        self.dependencies = dependencies
     }
 
     // MARK: - Connection State Handling
@@ -113,7 +105,7 @@ final class ContentViewCoordinator {
         onCreated: @escaping (String) -> Void
     ) {
         let workspace = resolveQuickSessionWorkspace(
-            setting: quickSessionWorkspaceSetting,
+            setting: dependencies.quickSessionWorkspace,
             defaultWorkspace: AppConstants.defaultWorkspace,
             selectedSessionId: selectedSessionId,
             sessions: eventStoreManager.sessions,
@@ -124,7 +116,7 @@ final class ContentViewCoordinator {
             do {
                 let result = try await rpcClient.session.create(
                     workingDirectory: workspace,
-                    model: defaultModel
+                    model: dependencies.defaultModel
                 )
 
                 try eventStoreManager.cacheNewSession(

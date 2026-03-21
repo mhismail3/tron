@@ -56,10 +56,7 @@ struct ContentView: View {
                 // Initialize coordinator on first appear
                 if coordinator == nil {
                     coordinator = ContentViewCoordinator(
-                        rpcClient: rpcClient,
-                        eventStoreManager: eventStoreManager,
-                        quickSessionWorkspaceSetting: quickSessionWorkspace,
-                        defaultModel: defaultModel
+                        dependencies: dependencies
                     )
                 }
 

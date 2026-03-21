@@ -231,9 +231,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Post notification for views that can't directly observe
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 
-        // Connect to new server
+        // Connect to new server and reload settings
         Task {
             await newClient.connect()
+            await reloadServerSettings()
         }
 
         TronLogger.shared.info("Server settings updated, new origin: \(newClient.serverOrigin)", category: .general)
@@ -270,6 +271,25 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Manual retry triggered from UI
     func manualRetry() async {
         await rpcClient.manualRetry()
+    }
+
+    // MARK: - Settings Reload
+
+    /// Fetches settings from the current server and updates @AppStorage values.
+    /// Called after server switch to ensure quickSessionWorkspace and defaultModel
+    /// reflect the new server's configuration.
+    func reloadServerSettings() async {
+        do {
+            let settings = try await rpcClient.settings.get()
+            if let workspace = settings.defaultWorkspace {
+                quickSessionWorkspace = workspace
+            }
+            if !settings.defaultModel.isEmpty {
+                defaultModel = settings.defaultModel
+            }
+        } catch {
+            TronLogger.shared.error("Failed to reload settings after server switch: \(error)", category: .general)
+        }
     }
 
     // MARK: - Private Helpers

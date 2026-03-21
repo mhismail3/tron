@@ -6,6 +6,7 @@ struct SessionSettingsPage: View {
     let selectedModelDisplayName: String
     let onWorkspaceTap: () -> Void
     let onModelTap: () -> Void
+    let onChatWorkspaceTap: () -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     private var isolationDescription: String {
@@ -32,6 +33,30 @@ struct SessionSettingsPage: View {
                         onModelTap: onModelTap
                     )
                 }
+
+                Section {
+                    Button(action: onChatWorkspaceTap) {
+                        HStack {
+                            Label("Workspace", systemImage: "folder")
+                                .font(TronTypography.subheadline)
+                                .foregroundStyle(.tronTextPrimary)
+                            Spacer()
+                            Text(settingsState.displayChatWorkspace.isEmpty
+                                 ? "Default"
+                                 : settingsState.displayChatWorkspace)
+                                .font(TronTypography.subheadline)
+                                .foregroundStyle(.tronEmerald)
+                                .lineLimit(1)
+                        }
+                    }
+                } header: {
+                    Text("Chat")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
+                } footer: {
+                    Text("Changing the workspace will archive the current chat and start a fresh one.")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                }
+                .listSectionSpacing(16)
 
                 Section {
                     Picker(selection: Bindable(settingsState).isolationMode) {

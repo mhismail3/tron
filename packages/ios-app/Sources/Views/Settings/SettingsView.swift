@@ -29,6 +29,7 @@ struct SettingsView: View {
     @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
     @State private var showQuickSessionWorkspaceSelector = false
+    @State private var showChatWorkspaceSelector = false
     @State private var showModelPicker = false
     @State private var showConnectionPage = false
     @State private var showSessionPage = false
@@ -93,6 +94,11 @@ struct SettingsView: View {
             .task {
                 await settingsState.load(using: rpcClient)
                 await settingsState.loadModels(using: rpcClient)
+            }
+            .onChange(of: dependencies.serverSettingsVersion) {
+                Task {
+                    await settingsState.reload(using: rpcClient)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -212,6 +218,27 @@ struct SettingsView: View {
                 )
             )
         }
+        .sheet(isPresented: $showChatWorkspaceSelector) {
+            WorkspaceSelector(
+                rpcClient: rpcClient,
+                selectedPath: Binding(
+                    get: { settingsState.chatWorkspace },
+                    set: { newValue in
+                        let previousValue = settingsState.chatWorkspace
+                        settingsState.chatWorkspace = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
+                        }
+                        if newValue != previousValue {
+                            Task {
+                                _ = try? await rpcClient.session.resetChat()
+                                await eventStoreManager.refreshSessionList()
+                            }
+                        }
+                    }
+                )
+            )
+        }
         .sheet(isPresented: $showModelPicker) {
             if #available(iOS 26.0, *) {
                 ModelPickerSheet(
@@ -249,6 +276,7 @@ struct SettingsView: View {
                 selectedModelDisplayName: selectedModelDisplayName,
                 onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
                 onModelTap: { showModelPicker = true },
+                onChatWorkspaceTap: { showChatWorkspaceSelector = true },
                 updateServerSetting: updateServerSetting
             )
             .adaptivePresentationDetents([.medium, .large])
