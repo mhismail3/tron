@@ -26,9 +26,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.askUserQuestionCalledInTurn = true
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 1)
-        let result = TurnStartResult(turnNumber: 1, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertFalse(mockContext.askUserQuestionCalledInTurn)
@@ -40,9 +39,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.streamingText = "Some text"
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 1)
-        let result = TurnStartResult(turnNumber: 1, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertTrue(mockContext.flushPendingTextUpdatesCalled)
@@ -54,9 +52,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.thinkingMessageId = UUID()
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 1)
-        let result = TurnStartResult(turnNumber: 1, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertNil(mockContext.thinkingMessageId)
@@ -67,9 +64,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentModel = "claude-3-opus"
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 3)
-        let result = TurnStartResult(turnNumber: 3, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 3)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertEqual(mockContext.thinkingStateStartTurnCalled, 3)
@@ -84,9 +80,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 2)
-        let result = TurnStartResult(turnNumber: 2, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 2)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertTrue(mockContext.currentTurnToolCalls.isEmpty)
@@ -95,9 +90,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartEnqueuesTurnBoundary() {
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 5)
-        let result = TurnStartResult(turnNumber: 5, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 5)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertEqual(mockContext.enqueuedTurnBoundary?.turnNumber, 5)
@@ -106,9 +100,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartResetsAnimationCoordinatorToolState() {
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 1)
-        let result = TurnStartResult(turnNumber: 1, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertTrue(mockContext.animationCoordinatorResetToolStateCalled)
@@ -122,9 +115,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = TurnStartPlugin.Result(turnNumber: 1)
-        let result = TurnStartResult(turnNumber: 1, stateReset: false)
-        coordinator.handleTurnStart(event, result: result, context: mockContext)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
         XCTAssertEqual(mockContext.turnStartMessageIndex, 2) // Count of existing messages
@@ -142,16 +134,12 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
             tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50),
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
+            duration: 1000
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         if case .thinking(_, _, let isStreaming) = mockContext.messages[0].content {
@@ -171,16 +159,12 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 2)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 2,
-            stopReason: "end_turn",
             tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 2),
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1500
+            duration: 1500
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         let msg = mockContext.messages[0]
@@ -203,16 +187,12 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
             tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50),
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
+            duration: 1000
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then - should find message via firstTextMessageIdForTurn
         XCTAssertEqual(mockContext.messages[0].turnNumber, 1)
@@ -227,22 +207,18 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
         let tokenRecord = makeTokenRecord(
             inputTokens: 1500,
             outputTokens: 200,
             contextWindow: 1000,
             newInput: 500
         )
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
+            duration: 1000
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         let record = mockContext.messages[0].tokenRecord
@@ -262,16 +238,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
-            turnNumber: 1,
-            stopReason: "end_turn",
-            tokenRecord: nil,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
-        )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        let pluginResult = makeTurnEndPluginResult(turnNumber: 1, duration: 1000)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -288,16 +256,12 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
+            duration: 1000
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         XCTAssertTrue(mockContext.contextStateUpdateFromTokenRecordCalled)
@@ -305,16 +269,12 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnEndUpdatesContextLimit() {
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
-            tokenRecord: nil,
             contextLimit: 200000,
-            cost: nil,
-            durationMs: 1000
+            duration: 1000
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         XCTAssertEqual(mockContext.contextStateCurrentContextWindow, 200000)
@@ -340,17 +300,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [toolUseMessage]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
         let tokenRecord = makeTokenRecord(inputTokens: 100, outputTokens: 50)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
             stopReason: "tool_use",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 500
+            duration: 500
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then - should find the toolUse message via last-message search
         XCTAssertNotNil(mockContext.messages[0].tokenRecord)
@@ -378,17 +335,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [toolUseMessage, textMessage]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
         let tokenRecord = makeTokenRecord(inputTokens: 200, outputTokens: 100)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "end_turn",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 800
+            duration: 800
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then - stats go on the last message (text at index 1)
         XCTAssertNil(mockContext.messages[0].tokenRecord)
@@ -416,17 +369,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [textMessage, tool1, tool2, tool3]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
         let tokenRecord = makeTokenRecord(inputTokens: 500, outputTokens: 200)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
             stopReason: "tool_use",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1200
+            duration: 1200
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then - stats must go on the LAST tool (index 3), not text or first tool
         XCTAssertNil(mockContext.messages[0].tokenRecord)  // text — no stats
@@ -453,17 +403,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [tool1, tool2]
 
         // When
-        let event = makeTurnEndResult(turnNumber: 2)
         let tokenRecord = makeTokenRecord(inputTokens: 300, outputTokens: 100)
-        let result = TurnEndResult(
+        let pluginResult = makeTurnEndPluginResult(
             turnNumber: 2,
             stopReason: "tool_use",
             tokenRecord: tokenRecord,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 600
+            duration: 600
         )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then - stats go on the last tool (index 1)
         XCTAssertNil(mockContext.messages[0].tokenRecord)
@@ -477,16 +424,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.firstTextMessageIdForTurn = UUID()
 
         // When
-        let event = makeTurnEndResult(turnNumber: 1)
-        let result = TurnEndResult(
-            turnNumber: 1,
-            stopReason: "end_turn",
-            tokenRecord: nil,
-            contextLimit: nil,
-            cost: nil,
-            durationMs: 1000
-        )
-        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+        let pluginResult = makeTurnEndPluginResult(turnNumber: 1, duration: 1000)
+        coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
         XCTAssertNil(mockContext.turnStartMessageIndex)
@@ -584,14 +523,21 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeTurnEndResult(turnNumber: Int) -> TurnEndPlugin.Result {
+    private func makeTurnEndPluginResult(
+        turnNumber: Int,
+        stopReason: String = "end_turn",
+        tokenRecord: TokenRecord? = nil,
+        contextLimit: Int? = nil,
+        cost: Double? = nil,
+        duration: Int? = nil
+    ) -> TurnEndPlugin.Result {
         TurnEndPlugin.Result(
             turnNumber: turnNumber,
-            duration: nil,
-            tokenRecord: nil,
-            stopReason: "end_turn",
-            cost: nil,
-            contextLimit: nil
+            duration: duration,
+            tokenRecord: tokenRecord,
+            stopReason: stopReason,
+            cost: cost,
+            contextLimit: contextLimit
         )
     }
 

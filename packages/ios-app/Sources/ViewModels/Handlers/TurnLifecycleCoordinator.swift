@@ -29,10 +29,9 @@ final class TurnLifecycleCoordinator {
     ///   - context: The context providing access to state and dependencies
     func handleTurnStart(
         _ pluginResult: TurnStartPlugin.Result,
-        result: TurnStartResult,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Turn \(result.turnNumber) started")
+        context.logInfo("Turn \(pluginResult.turnNumber) started")
 
         // Reset AskUserQuestion tracking for the new turn
         context.askUserQuestionCalledInTurn = false
@@ -47,11 +46,11 @@ final class TurnLifecycleCoordinator {
         context.thinkingMessageId = nil
 
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
-        context.startThinkingTurn(result.turnNumber, model: context.currentModel)
+        context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
         // Clear tool tracking for the new turn
         if !context.currentTurnToolCalls.isEmpty {
-            context.logDebug("Starting Turn \(result.turnNumber), clearing \(context.currentTurnToolCalls.count) completed tool records from previous turn")
+            context.logDebug("Starting Turn \(pluginResult.turnNumber), clearing \(context.currentTurnToolCalls.count) completed tool records from previous turn")
             context.currentTurnToolCalls.removeAll()
         }
         if !context.currentToolMessages.isEmpty {
@@ -61,7 +60,7 @@ final class TurnLifecycleCoordinator {
 
         // Notify UIUpdateQueue of turn boundary (resets tool ordering)
         context.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
-            turnNumber: result.turnNumber,
+            turnNumber: pluginResult.turnNumber,
             isStart: true
         ))
 
@@ -71,7 +70,7 @@ final class TurnLifecycleCoordinator {
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
         context.firstTextMessageIdForTurn = nil
-        context.logDebug("Turn \(result.turnNumber) boundary set at message index \(context.turnStartMessageIndex ?? -1)")
+        context.logDebug("Turn \(pluginResult.turnNumber) boundary set at message index \(context.turnStartMessageIndex ?? -1)")
     }
 
     // MARK: - Turn End Handling
@@ -84,18 +83,17 @@ final class TurnLifecycleCoordinator {
     ///   - context: The context providing access to state and dependencies
     func handleTurnEnd(
         _ pluginResult: TurnEndPlugin.Result,
-        result: TurnEndResult,
         context: TurnLifecycleContext
     ) {
         // Log token record for debugging
-        let hasTokenRecord = result.tokenRecord != nil
-        context.logInfo("Turn \(result.turnNumber) ended, hasTokenRecord=\(hasTokenRecord)")
+        let hasTokenRecord = pluginResult.tokenRecord != nil
+        context.logInfo("Turn \(pluginResult.turnNumber) ended, hasTokenRecord=\(hasTokenRecord)")
 
         // Log token values if available
-        if let record = result.tokenRecord {
+        if let record = pluginResult.tokenRecord {
             context.logDebug("TokenRecord: newInput=\(record.computed.newInputTokens) contextWindow=\(record.computed.contextWindowTokens) rawIn=\(record.source.rawInputTokens) rawOut=\(record.source.rawOutputTokens)")
         } else {
-            context.logError("[TOKEN-FLOW] iOS: turn_end MISSING tokenRecord (turn=\(result.turnNumber))")
+            context.logError("[TOKEN-FLOW] iOS: turn_end MISSING tokenRecord (turn=\(pluginResult.turnNumber))")
         }
 
         // Persist thinking content for this turn (before clearing state)
@@ -142,7 +140,7 @@ final class TurnLifecycleCoordinator {
                 }
             }
             if let idx = targetIndex {
-                context.logDebug("Using last assistant message for turn metadata at index \(idx) (turn=\(result.turnNumber))")
+                context.logDebug("Using last assistant message for turn metadata at index \(idx) (turn=\(pluginResult.turnNumber))")
             }
         } else if let firstTextId = context.firstTextMessageIdForTurn,
                   let index = MessageFinder.indexById(firstTextId, in: context.messages) {
@@ -152,28 +150,28 @@ final class TurnLifecycleCoordinator {
 
         // Update the target message with metadata
         if let index = targetIndex {
-            context.messages[index].tokenRecord = result.tokenRecord
+            context.messages[index].tokenRecord = pluginResult.tokenRecord
             context.messages[index].model = context.currentModel
-            context.messages[index].latencyMs = result.durationMs
-            context.messages[index].stopReason = result.stopReason
-            context.messages[index].turnNumber = result.turnNumber
+            context.messages[index].latencyMs = pluginResult.duration
+            context.messages[index].stopReason = pluginResult.stopReason
+            context.messages[index].turnNumber = pluginResult.turnNumber
 
             // Log token record assignment
-            if let record = result.tokenRecord {
+            if let record = pluginResult.tokenRecord {
                 context.logDebug("[TOKEN-FLOW] iOS: stream.turn_end received")
-                context.logDebug("  turn=\(result.turnNumber), newInput=\(record.computed.newInputTokens), contextWindow=\(record.computed.contextWindowTokens), output=\(record.source.rawOutputTokens)")
+                context.logDebug("  turn=\(pluginResult.turnNumber), newInput=\(record.computed.newInputTokens), contextWindow=\(record.computed.contextWindowTokens), output=\(record.source.rawOutputTokens)")
             } else {
-                context.logError("[TOKEN-FLOW] iOS: stream.turn_end MISSING tokenRecord (turn=\(result.turnNumber))")
+                context.logError("[TOKEN-FLOW] iOS: stream.turn_end MISSING tokenRecord (turn=\(pluginResult.turnNumber))")
             }
         } else {
-            context.logWarning("Could not find message to update with turn metadata (turn=\(result.turnNumber))")
+            context.logWarning("Could not find message to update with turn metadata (turn=\(pluginResult.turnNumber))")
         }
 
         // Update all assistant messages from this turn with turn number
         if let startIndex = context.turnStartMessageIndex,
            startIndex < context.messages.count {
             for i in startIndex..<context.messages.count where context.messages[i].role == .assistant {
-                context.messages[i].turnNumber = result.turnNumber
+                context.messages[i].turnNumber = pluginResult.turnNumber
             }
         }
 
@@ -191,13 +189,13 @@ final class TurnLifecycleCoordinator {
         }
 
         // Update context window if server provides it (ensures iOS stays in sync after model switch)
-        if let contextLimit = result.contextLimit {
+        if let contextLimit = pluginResult.contextLimit {
             context.setContextStateCurrentContextWindow(contextLimit)
             context.logDebug("Updated context window from turn_end: \(contextLimit)")
         }
 
         // Server MUST provide tokenRecord for context tracking
-        if let record = result.tokenRecord {
+        if let record = pluginResult.tokenRecord {
             context.updateContextStateFromTokenRecord(record)
             context.logDebug("[TOKEN-FLOW] iOS: Context state updated from stream.turn_end")
         } else {
@@ -205,7 +203,7 @@ final class TurnLifecycleCoordinator {
         }
 
         // Update token tracking and accumulation
-        if let record = result.tokenRecord {
+        if let record = pluginResult.tokenRecord {
             let contextSize = record.computed.contextWindowTokens
             context.logInfo("LIVE handleTurnEnd: contextSize=\(contextSize)")
 
@@ -215,7 +213,7 @@ final class TurnLifecycleCoordinator {
                 output: record.source.rawOutputTokens,
                 cacheRead: record.source.rawCacheReadTokens,
                 cacheCreation: record.source.rawCacheCreationTokens,
-                cost: result.cost ?? 0
+                cost: pluginResult.cost ?? 0
             )
 
             // Update session tokens in database
@@ -226,7 +224,7 @@ final class TurnLifecycleCoordinator {
                     lastTurnInputTokens: contextSize,
                     cacheReadTokens: record.source.rawCacheReadTokens,
                     cacheCreationTokens: record.source.rawCacheCreationTokens,
-                    cost: result.cost ?? 0
+                    cost: pluginResult.cost ?? 0
                 )
             } catch {
                 context.logError("Failed to update session tokens: \(error.localizedDescription)")

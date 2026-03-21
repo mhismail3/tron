@@ -8,7 +8,7 @@ import UIKit
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatEventContext {
+final class ChatViewModel {
 
     // MARK: - Observable State
 
@@ -85,24 +85,21 @@ final class ChatViewModel: ChatEventContext {
     /// Cached haptics settings — populated from server settings, avoids RPC per haptic event
     var cachedHapticsSettings: ServerSettings.IntegrationSettings.HapticsSettings?
 
-    // MARK: - Protocol Conformance (ChatEventContext)
-    // These are thin wrappers for protocol conformance only
+    // MARK: - Protocol Conformance (Context Protocols)
 
-    /// Whether AskUserQuestion was called in the current turn (ChatEventContext)
+    /// Whether AskUserQuestion was called in the current turn (ToolEventContext, TurnLifecycleContext)
     var askUserQuestionCalledInTurn: Bool {
         get { askUserQuestionState.calledInTurn }
         set { askUserQuestionState.calledInTurn = newValue }
     }
 
-    /// Current browser status (ChatEventContext)
+    /// Current browser status (ToolEventContext)
     var browserStatus: BrowserGetStatusResult? {
         get { browserState.browserStatus }
         set { browserState.browserStatus = newValue }
     }
 
-    // appendMessage is defined in ChatViewModel+Pagination.swift
-
-    /// Make a tool visible for rendering (ChatEventContext)
+    /// Make a tool visible for rendering (ToolEventContext)
     func makeToolVisible(_ toolCallId: String) {
         animationCoordinator.makeToolVisible(toolCallId)
     }
@@ -171,8 +168,6 @@ final class ChatViewModel: ChatEventContext {
     let messageWindowManager = MessageWindowManager()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
-    /// Extracts and processes event data from agent streaming (stateless handler)
-    let eventHandler = ChatEventHandler()
     /// Coordinates tool event handling (start/end) for tool messages and UI updates
     let toolEventCoordinator = ToolEventCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)

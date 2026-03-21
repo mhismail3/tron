@@ -130,7 +130,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         coordinator.handleToolGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
-        // When: tool_start arrives with real params
+        // When: tool_start arrives with real params encoded in formattedArguments
         let params = AskUserQuestionParams(
             questions: [
                 AskUserQuestion(
@@ -147,26 +147,14 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ],
             context: nil
         )
+        let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
         let event = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "gen_ask_update",
             arguments: nil,
-            formattedArguments: "{}"
+            formattedArguments: paramsJson
         )
-        let startResult = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "AskUserQuestion",
-                toolCallId: "gen_ask_update",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: true,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: params,
-            openURL: nil
-        )
-        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: No duplicate message (still just 1)
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -205,20 +193,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: ["file_path": AnyCodable("/test.txt")],
             formattedArguments: "{\"file_path\":\"/test.txt\"}"
         )
-        let startResult = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Write",
-                toolCallId: "gen_first",
-                arguments: "{\"file_path\":\"/test.txt\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
-        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: No duplicate message (still just 1)
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -253,14 +228,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 150,
             details: nil
         )
-        let endResult = ToolEndResult(
-            toolCallId: "gen_end",
-            status: .success,
-            result: "File written",
-            durationMs: 150,
-            isAskUserQuestion: false
-        )
-        coordinator.handleToolEnd(endEvent, result: endResult, context: mockContext)
+        coordinator.handleToolEnd(endEvent, context: mockContext)
 
         // Then: Tool call record is updated
         XCTAssertEqual(mockContext.currentTurnToolCalls[0].result, "File written")
@@ -309,20 +277,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: ["action": AnyCodable("navigate"), "url": AnyCodable("https://example.com")],
             formattedArguments: "{\"action\":\"navigate\",\"url\":\"https://example.com\"}"
         )
-        let startResult = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "BrowseTheWeb",
-                toolCallId: "browser_dup",
-                arguments: "{\"action\":\"navigate\",\"url\":\"https://example.com\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: true,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
-        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: No duplicate message
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -341,29 +296,16 @@ final class ToolEventCoordinatorTests: XCTestCase {
     // MARK: - Tool Start Tests
 
     func testToolStartCreatesToolMessage() async throws {
-        // Given: A tool start event and result
+        // Given: A tool start event
         let event = ToolStartPlugin.Result(
             toolName: "Bash",
             toolCallId: "tool_123",
             arguments: nil,
             formattedArguments: "{\"command\": \"ls -la\"}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Bash",
-                toolCallId: "tool_123",
-                arguments: "{\"command\": \"ls -la\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: A tool message should be created
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -385,22 +327,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Read",
-                toolCallId: "tool_456",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Streaming text should be flushed first
         XCTAssertTrue(mockContext.flushPendingTextUpdatesCalled)
@@ -415,22 +344,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Read",
-                toolCallId: "tool_thinking_start",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Thinking should be finalized
         XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
@@ -444,22 +360,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{\"pattern\": \"TODO\"}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Grep",
-                toolCallId: "tool_789",
-                arguments: "{\"pattern\": \"TODO\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Tool call should be tracked
         XCTAssertEqual(mockContext.currentTurnToolCalls.count, 1)
@@ -475,22 +378,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Edit",
-                toolCallId: "tool_visible",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Tool should be made visible for animation
         XCTAssertTrue(mockContext.visibleToolCallIds.contains("tool_visible"))
@@ -504,22 +394,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "Write",
-                toolCallId: "tool_queue",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should be enqueued for ordered processing
         XCTAssertEqual(mockContext.enqueuedToolStarts.count, 1)
@@ -529,7 +406,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
     // MARK: - AskUserQuestion Tool Tests
 
     func testAskUserQuestionToolStart() async throws {
-        // Given: An AskUserQuestion tool start
+        // Given: An AskUserQuestion tool start with params encoded in formattedArguments
         let params = AskUserQuestionParams(
             questions: [
                 AskUserQuestion(
@@ -546,28 +423,16 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ],
             context: nil
         )
+        let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
         let event = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "ask_123",
             arguments: nil,
-            formattedArguments: "{}"
-        )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "AskUserQuestion",
-                toolCallId: "ask_123",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: true,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: params,
-            openURL: nil
+            formattedArguments: paramsJson
         )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should create AskUserQuestion message
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -584,29 +449,16 @@ final class ToolEventCoordinatorTests: XCTestCase {
     }
 
     func testAskUserQuestionToolStartFallsBackOnParseFailure() async throws {
-        // Given: An AskUserQuestion tool start WITHOUT params (parse failed)
+        // Given: An AskUserQuestion tool start with invalid JSON (parse will fail)
         let event = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "ask_fail",
             arguments: nil,
             formattedArguments: "invalid json"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "AskUserQuestion",
-                toolCallId: "ask_fail",
-                arguments: "invalid json",
-                status: .running
-            ),
-            isAskUserQuestion: true,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil, // Parse failed
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should fall back to regular tool display
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -621,32 +473,18 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testBrowseTheWebOpenURLAction() async throws {
         // Given: A BrowseTheWeb tool start with openURL action
-        let url = URL(string: "https://example.com")!
         let event = ToolStartPlugin.Result(
             toolName: "BrowseTheWeb",
             toolCallId: "browser_123",
             arguments: ["action": AnyCodable("openURL"), "url": AnyCodable("https://example.com")],
             formattedArguments: "{\"action\": \"openURL\", \"url\": \"https://example.com\"}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "BrowseTheWeb",
-                toolCallId: "browser_123",
-                arguments: "{\"action\": \"openURL\", \"url\": \"https://example.com\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: true,
-            isOpenURL: true,
-            askUserQuestionParams: nil,
-            openURL: url
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should set Safari URL
-        XCTAssertEqual(mockContext.safariURL, url)
+        XCTAssertEqual(mockContext.safariURL, URL(string: "https://example.com")!)
 
         // Then: Should ALSO create regular tool message (don't return early)
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -667,24 +505,11 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "BrowseTheWeb",
-                toolCallId: "browser_snap",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: true,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start (browserStatus is initially nil)
         XCTAssertNil(mockContext.browserStatus)
         XCTAssertFalse(mockContext.showBrowserWindow)
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Browser status should be set
         XCTAssertNotNil(mockContext.browserStatus)
@@ -708,22 +533,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: nil,
             formattedArguments: "{}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "BrowseTheWeb",
-                toolCallId: "browser_dismissed",
-                arguments: "{}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: true,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Browser status should still be set
         XCTAssertNotNil(mockContext.browserStatus)
@@ -745,22 +557,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: ["canvasId": AnyCodable("canvas_abc"), "title": AnyCodable("My App")],
             formattedArguments: "{\"canvasId\": \"canvas_abc\", \"title\": \"My App\"}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "RenderAppUI",
-                toolCallId: "render_123",
-                arguments: "{\"canvasId\": \"canvas_abc\", \"title\": \"My App\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start (no prior chunk)
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should create RenderAppUI chip message
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -805,22 +604,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             arguments: ["canvasId": AnyCodable("canvas_xyz"), "title": AnyCodable("My App")],
             formattedArguments: "{\"canvasId\": \"canvas_xyz\", \"title\": \"My App\"}"
         )
-        let result = ToolStartResult(
-            tool: ToolUseData(
-                toolName: "RenderAppUI",
-                toolCallId: "render_real_456",
-                arguments: "{\"canvasId\": \"canvas_xyz\", \"title\": \"My App\"}",
-                status: .running
-            ),
-            isAskUserQuestion: false,
-            isBrowserTool: false,
-            isOpenURL: false,
-            askUserQuestionParams: nil,
-            openURL: nil
-        )
 
         // When: Handling tool start
-        coordinator.handleToolStart(event, result: result, context: mockContext)
+        coordinator.handleToolStart(event, context: mockContext)
 
         // Then: Should NOT create new message (update existing)
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -844,16 +630,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 150,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "tool_end_123",
-            status: .success,
-            result: "Success!",
-            durationMs: 150,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Should enqueue for ordered processing
         XCTAssertEqual(mockContext.enqueuedToolEnds.count, 1)
@@ -877,16 +656,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 50,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "tool_track_123",
-            status: .error,
-            result: "Command failed",
-            durationMs: 50,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Tool call record should be updated
         XCTAssertEqual(mockContext.currentTurnToolCalls[0].result, "Command failed")
@@ -929,16 +701,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 100,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "ask_sheet_123",
-            status: .success,
-            result: "",
-            durationMs: 100,
-            isAskUserQuestion: false // Coordinator determines this from message content
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Sheet should be opened
         XCTAssertTrue(mockContext.askUserQuestionSheetOpened)
@@ -955,16 +720,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 100,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "tool_thinking_reset",
-            status: .success,
-            result: "Done",
-            durationMs: 100,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Thinking state should be reset for new block
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
@@ -979,16 +737,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 100,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "tool_thinking_finalize",
-            status: .success,
-            result: "Done",
-            durationMs: 100,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Thinking should be finalized and then reset
         XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
@@ -1031,16 +782,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 100,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "ask_thinking_reset",
-            status: .success,
-            result: "",
-            durationMs: 100,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end (AskUserQuestion returns early, but should still reset)
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Thinking state should still be reset (called at start of handleToolEnd)
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
@@ -1082,16 +826,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             durationMs: 100,
             details: nil
         )
-        let result = ToolEndResult(
-            toolCallId: "ask_no_enqueue",
-            status: .success,
-            result: "",
-            durationMs: 100,
-            isAskUserQuestion: false
-        )
 
         // When: Handling tool end
-        coordinator.handleToolEnd(event, result: result, context: mockContext)
+        coordinator.handleToolEnd(event, context: mockContext)
 
         // Then: Should NOT enqueue (AskUserQuestion returns early)
         XCTAssertEqual(mockContext.enqueuedToolEnds.count, 0)

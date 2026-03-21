@@ -414,7 +414,7 @@ extension ChatViewModel {
 
     /// Append a new message to the display (streaming messages during active session)
     /// Also syncs to MessageWindowManager and MessageIndex for virtual scrolling
-    /// Required by ChatEventContext protocol
+    /// Required by context protocols
     func appendMessage(_ message: ChatMessage) {
         appendToMessages(message)
         messageWindowManager.appendMessage(message)

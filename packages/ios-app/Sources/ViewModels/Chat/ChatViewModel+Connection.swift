@@ -75,7 +75,6 @@ extension ChatViewModel: ConnectionContext {
         catchUpMessageIds.removeAll()
         // Reset thinking accumulators so stale content from previous catch-up
         // doesn't bleed into the next catch-up or future thinking deltas
-        eventHandler.seedThinkingText("")
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }
 
@@ -174,8 +173,7 @@ extension ChatViewModel {
                 let isThinkingStillStreaming = (index == sequence.count - 1)
                 accumulatedThinking += thinkingText
 
-                // Seed accumulators so future deltas append correctly
-                eventHandler.seedThinkingText(accumulatedThinking)
+                // Seed accumulator so future deltas append correctly
                 thinkingState.seedCatchUpThinking(accumulatedThinking, isStreaming: isThinkingStillStreaming)
 
                 if thinkingMessageId == nil {

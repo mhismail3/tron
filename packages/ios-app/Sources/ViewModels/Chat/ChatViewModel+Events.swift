@@ -36,14 +36,15 @@ extension ChatViewModel {
     }
 
     func handleThinkingDelta(_ delta: String) {
-        // Process through handler (accumulates thinking text)
-        let result = eventHandler.handleThinkingDelta(delta)
+        // Route to ThinkingState for accumulation and sheet/history functionality
+        thinkingState.handleThinkingDelta(delta)
+        let accumulatedText = thinkingState.currentText
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
         // With adaptive thinking, text deltas may arrive before thinking deltas,
         // so we insert before any existing streaming message to maintain visual order.
         if thinkingMessageId == nil {
-            let thinkingMessage = ChatMessage.thinking(result.thinkingText, isStreaming: true)
+            let thinkingMessage = ChatMessage.thinking(accumulatedText, isStreaming: true)
 
             if let streamingId = streamingManager.streamingMessageId,
                let streamingIndex = messageIndex.index(for: streamingId) {
@@ -61,13 +62,10 @@ extension ChatViewModel {
         } else if let id = thinkingMessageId,
                   let index = messageIndex.index(for: id) {
             // Update existing thinking message with accumulated content
-            messages[index].content = .thinking(visible: result.thinkingText, isExpanded: false, isStreaming: true)
+            messages[index].content = .thinking(visible: accumulatedText, isExpanded: false, isStreaming: true)
         }
 
-        // Also route to ThinkingState for sheet/history functionality
-        thinkingState.handleThinkingDelta(delta)
-
-        logger.verbose("Thinking delta: +\(delta.count) chars, total: \(result.thinkingText.count)", category: .events)
+        logger.verbose("Thinking delta: +\(delta.count) chars, total: \(accumulatedText.count)", category: .events)
     }
 
     func handleToolGenerating(_ pluginResult: ToolGeneratingPlugin.Result) {
@@ -75,11 +73,8 @@ extension ChatViewModel {
     }
 
     func handleToolStart(_ pluginResult: ToolStartPlugin.Result) {
-        // Process through handler (classifies tool type, parses params)
-        let result = eventHandler.handleToolStart(pluginResult, context: self)
-
-        // Delegate to coordinator for all tool start handling
-        toolEventCoordinator.handleToolStart(pluginResult, result: result, context: self)
+        // Delegate directly to coordinator (tool classification absorbed)
+        toolEventCoordinator.handleToolStart(pluginResult, context: self)
     }
 
     func handleToolOutput(_ result: ToolOutputPlugin.Result) {
@@ -96,13 +91,10 @@ extension ChatViewModel {
     }
 
     func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
-        // Process through handler (extracts status and result)
-        let result = eventHandler.handleToolEnd(pluginResult)
-
         // Check if this is a browser tool result with screenshot data
         // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
-        if let index = messageIndex.index(forToolCallId: result.toolCallId)
-            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
+        if let index = messageIndex.index(forToolCallId: pluginResult.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
                 if ToolKind(toolName: tool.toolName) == .browseTheWeb {
                     // Pass plugin result for screenshot extraction (needs result.details)
@@ -111,8 +103,8 @@ extension ChatViewModel {
             }
         }
 
-        // Delegate to coordinator for all tool end handling
-        toolEventCoordinator.handleToolEnd(pluginResult, result: result, context: self)
+        // Delegate directly to coordinator
+        toolEventCoordinator.handleToolEnd(pluginResult, context: self)
     }
 
     /// Extract screenshot from browser tool result and display it.
@@ -142,27 +134,25 @@ extension ChatViewModel {
             compactionInProgressMessageId = nil
         }
 
-        // Process through handler (resets handler streaming state)
-        let result = eventHandler.handleTurnStart(pluginResult)
+        // StreamingManager is the single source of truth for streaming state
+        // (eventHandler.resetStreamingState was only resetting duplicate state)
 
         // Delegate to coordinator for all turn start handling
-        turnLifecycleCoordinator.handleTurnStart(pluginResult, result: result, context: self)
+        turnLifecycleCoordinator.handleTurnStart(pluginResult, context: self)
     }
 
     func handleTurnEnd(_ pluginResult: TurnEndPlugin.Result) {
-        // Process through handler (extracts normalized values)
-        let result = eventHandler.handleTurnEnd(pluginResult)
-
-        // Delegate to coordinator for all turn end handling
-        turnLifecycleCoordinator.handleTurnEnd(pluginResult, result: result, context: self)
+        // Delegate directly to coordinator — plugin result fields match
+        turnLifecycleCoordinator.handleTurnEnd(pluginResult, context: self)
     }
 
     func handleComplete() {
         // Capture streaming text before finalization clears it
         let finalStreamingText = streamingManager.streamingText
 
-        // Process through handler (resets handler state)
-        _ = eventHandler.handleComplete()
+        // Reset streaming and thinking state
+        streamingManager.reset()
+        thinkingState.clearCurrentStreaming()
 
         // Auto-dismiss browser sheet when agent completes
         if browserState.showBrowserWindow {
@@ -239,9 +229,8 @@ extension ChatViewModel {
     }
 
     func handleCompaction(_ pluginResult: CompactionPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handleCompaction(pluginResult)
-        logger.info("Context compacted: \(result.tokensBefore) -> \(result.tokensAfter) tokens (saved \(result.tokensSaved), reason: \(result.reason))", category: .events)
+        let tokensSaved = pluginResult.tokensBefore - pluginResult.tokensAfter
+        logger.info("Context compacted: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (saved \(tokensSaved), reason: \(pluginResult.reason))", category: .events)
 
         // Clear compaction blocking state
         isCompacting = false
@@ -252,7 +241,7 @@ extension ChatViewModel {
 
         // Update context tracking — prefer estimatedContextTokens (total context including
         // system prompt, tools, rules) over tokensAfter (messages-only) for accurate pill display
-        let postCompactionTokens = result.estimatedContextTokens ?? result.tokensAfter
+        let postCompactionTokens = pluginResult.estimatedContextTokens ?? pluginResult.tokensAfter
         contextState.lastTurnInputTokens = postCompactionTokens
         logger.debug("Updated lastTurnInputTokens to \(postCompactionTokens) after compaction", category: .events)
 
@@ -261,24 +250,24 @@ extension ChatViewModel {
            let index = messageIndex.index(for: inProgressId) {
             withAnimation(.smooth(duration: 0.35)) {
                 messages[index].content = .compaction(
-                    tokensBefore: result.tokensBefore,
-                    tokensAfter: result.tokensAfter,
-                    reason: result.reason,
-                    summary: result.summary,
-                    preservedTurns: result.preservedTurns,
-                    summarizedTurns: result.summarizedTurns
+                    tokensBefore: pluginResult.tokensBefore,
+                    tokensAfter: pluginResult.tokensAfter,
+                    reason: pluginResult.reason,
+                    summary: pluginResult.summary,
+                    preservedTurns: pluginResult.preservedTurns,
+                    summarizedTurns: pluginResult.summarizedTurns
                 )
             }
             compactionInProgressMessageId = nil
         } else {
             // No in-progress pill found (e.g. reconstruction) — just append
             let compactionMessage = ChatMessage.compaction(
-                tokensBefore: result.tokensBefore,
-                tokensAfter: result.tokensAfter,
-                reason: result.reason,
-                summary: result.summary,
-                preservedTurns: result.preservedTurns,
-                summarizedTurns: result.summarizedTurns
+                tokensBefore: pluginResult.tokensBefore,
+                tokensAfter: pluginResult.tokensAfter,
+                reason: pluginResult.reason,
+                summary: pluginResult.summary,
+                preservedTurns: pluginResult.preservedTurns,
+                summarizedTurns: pluginResult.summarizedTurns
             )
             appendToMessages(compactionMessage)
         }
@@ -390,22 +379,21 @@ extension ChatViewModel {
     }
 
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handleContextCleared(pluginResult)
-        logger.info("Context cleared: \(result.tokensBefore) -> \(result.tokensAfter) tokens (freed \(result.tokensFreed))", category: .events)
+        let tokensFreed = pluginResult.tokensBefore - pluginResult.tokensAfter
+        logger.info("Context cleared: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
 
         // Finalize any current streaming before adding notification
         flushPendingTextUpdates()
         finalizeStreamingMessage()
 
         // Update context tracking - the new context size is tokensAfter
-        contextState.lastTurnInputTokens = result.tokensAfter
-        logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after context clear", category: .events)
+        contextState.lastTurnInputTokens = pluginResult.tokensAfter
+        logger.debug("Updated lastTurnInputTokens to \(pluginResult.tokensAfter) after context clear", category: .events)
 
         // Add context cleared notification pill to chat
         let clearedMessage = ChatMessage.contextCleared(
-            tokensBefore: result.tokensBefore,
-            tokensAfter: result.tokensAfter
+            tokensBefore: pluginResult.tokensBefore,
+            tokensAfter: pluginResult.tokensAfter
         )
         appendToMessages(clearedMessage)
 
@@ -416,22 +404,18 @@ extension ChatViewModel {
     }
 
     func handleMessageDeleted(_ pluginResult: MessageDeletedPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handleMessageDeleted(pluginResult)
-        logger.info("Message deleted: targetType=\(result.targetType), eventId=\(result.targetEventId)", category: .events)
+        logger.info("Message deleted: targetType=\(pluginResult.targetType), eventId=\(pluginResult.targetEventId)", category: .events)
 
         // Add message deleted notification pill to chat
-        let deletedMessage = ChatMessage.messageDeleted(targetType: result.targetType)
+        let deletedMessage = ChatMessage.messageDeleted(targetType: pluginResult.targetType)
         appendToMessages(deletedMessage)
     }
 
     func handleSkillRemoved(_ pluginResult: SkillRemovedPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handleSkillRemoved(pluginResult)
-        logger.info("Skill removed: \(result.skillName)", category: .events)
+        logger.info("Skill removed: \(pluginResult.skillName)", category: .events)
 
         // Add skill removed notification pill to chat
-        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: result.skillName)
+        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: pluginResult.skillName)
         appendToMessages(skillRemovedMessage)
 
         // Refresh context from server - skill removal changes context size
@@ -506,9 +490,7 @@ extension ChatViewModel {
 
     /// Handle errors from the agent streaming (shows error in chat)
     func handleAgentError(_ message: String) {
-        // Process through handler (resets handler state)
-        let result = eventHandler.handleAgentError(message)
-        logger.error("Agent error: \(result.message)", category: .events)
+        logger.error("Agent error: \(message)", category: .events)
 
         // Flush and reset all manager states on error
         uiUpdateQueue.flush()
@@ -525,10 +507,10 @@ extension ChatViewModel {
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
-            lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
+            lastAssistantResponse: "Error: \(String(message.prefix(100)))"
         )
         finalizeStreamingMessage()
-        appendToMessages(.error(result.message))
+        appendToMessages(.error(message))
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)

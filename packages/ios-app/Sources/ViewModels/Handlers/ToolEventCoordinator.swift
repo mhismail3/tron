@@ -27,7 +27,7 @@ final class ToolEventCoordinator {
         _ pluginResult: ToolGeneratingPlugin.Result,
         context: ToolEventContext
     ) {
-        // Skip tools with custom UI flows or side-effects that require full ToolStartResult
+        // Skip tools with custom UI flows that need full tool_start data
         let kind = ToolKind(toolName: pluginResult.toolName)
         if kind == .renderAppUI { return }
 
@@ -108,9 +108,46 @@ final class ToolEventCoordinator {
     ///   - context: The context providing access to state and dependencies
     func handleToolStart(
         _ pluginResult: ToolStartPlugin.Result,
-        result: ToolStartResult,
         context: ToolEventContext
     ) {
+        // Classify tool type (absorbed from ChatEventHandler)
+        let kind = ToolKind(toolName: pluginResult.toolName)
+        let isAskUserQuestion = kind == .askUserQuestion
+        let isBrowserTool = kind == .browseTheWeb
+
+        // Detect BrowseTheWeb openURL action
+        let isOpenURL: Bool
+        var openURL: URL?
+        if kind == .browseTheWeb,
+           let args = pluginResult.arguments,
+           let actionValue = args["action"],
+           let actionStr = actionValue.value as? String,
+           actionStr == "openURL" {
+            isOpenURL = true
+            if let urlValue = args["url"], let urlString = urlValue.value as? String {
+                openURL = URL(string: urlString)
+            }
+        } else {
+            isOpenURL = false
+        }
+
+        // Parse AskUserQuestion params if applicable
+        var askUserQuestionParams: AskUserQuestionParams?
+        if isAskUserQuestion {
+            if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
+                askUserQuestionParams = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData)
+            }
+        }
+
+        // Create tool data
+        let tool = ToolUseData(
+            toolName: pluginResult.toolName,
+            toolCallId: pluginResult.toolCallId,
+            arguments: pluginResult.formattedArguments,
+            status: .running
+        )
+
+        context.logInfo("Tool started: \(pluginResult.toolName) [\(pluginResult.toolCallId)]")
         context.logDebug("Tool args: \(pluginResult.formattedArguments.prefix(200))")
 
         // Finalize any active thinking message before tools begin
@@ -146,7 +183,7 @@ final class ToolEventCoordinator {
                 }
 
                 // Still handle browser tool detection for pre-existing chips
-                if result.isBrowserTool {
+                if isBrowserTool {
                     let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
                     if shouldStartStreaming {
                         context.startBrowserStreamIfNeeded()
@@ -154,7 +191,7 @@ final class ToolEventCoordinator {
                 }
 
                 // Handle side-effects even when updating existing chip
-                handleToolStartSideEffects(pluginResult, result: result, context: context)
+                handleToolStartSideEffects(isOpenURL: isOpenURL, openURL: openURL, context: context)
                 return
             }
         }
@@ -164,16 +201,16 @@ final class ToolEventCoordinator {
         context.finalizeStreamingMessage()
 
         // Handle AskUserQuestion specially
-        if result.isAskUserQuestion {
-            handleAskUserQuestionToolStart(pluginResult, params: result.askUserQuestionParams, context: context)
+        if isAskUserQuestion {
+            handleAskUserQuestionToolStart(pluginResult, params: askUserQuestionParams, context: context)
             return
         }
 
-        // Handle side-effects (clipboard, URL opening, etc.)
-        handleToolStartSideEffects(pluginResult, result: result, context: context)
+        // Handle side-effects (URL opening, etc.)
+        handleToolStartSideEffects(isOpenURL: isOpenURL, openURL: openURL, context: context)
 
         // Create the tool message
-        var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
+        var message = ChatMessage(role: .assistant, content: .toolUse(tool))
 
         // Special handling for RenderAppUI
         if ToolKind(toolName: pluginResult.toolName) == .renderAppUI {
@@ -223,7 +260,7 @@ final class ToolEventCoordinator {
         context.currentTurnToolCalls.append(record)
 
         // Update browser status for browser tools
-        if result.isBrowserTool {
+        if isBrowserTool {
             context.logInfo("Browser tool detected")
             let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
             if shouldStartStreaming {
@@ -251,11 +288,11 @@ final class ToolEventCoordinator {
     ///   - context: The context providing access to state and dependencies
     func handleToolEnd(
         _ pluginResult: ToolEndPlugin.Result,
-        result: ToolEndResult,
         context: ToolEventContext
     ) {
-        context.logInfo("Tool ended: \(result.toolCallId) status=\(result.status) duration=\(result.durationMs ?? 0)ms")
-        context.logDebug("Tool result: \(result.result.prefix(300))")
+        let statusLabel = pluginResult.success ? "success" : "error"
+        context.logInfo("Tool ended: \(pluginResult.toolCallId) status=\(statusLabel) duration=\(pluginResult.duration ?? 0)ms")
+        context.logDebug("Tool result: \(pluginResult.displayResult.prefix(300))")
 
         // Finalize the current thinking message before starting a new block
         context.finalizeThinkingMessageIfNeeded()
@@ -265,7 +302,7 @@ final class ToolEventCoordinator {
         context.resetThinkingForNewBlock()
 
         // Check if this is an AskUserQuestion tool end
-        if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: result.toolCallId, in: context.messages) {
+        if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: pluginResult.toolCallId, in: context.messages) {
             if case .askUserQuestion(let data) = context.messages[index].content {
                 // In async mode, tool.end means questions are ready for user
                 // Status is already .pending, now auto-open the sheet
@@ -276,7 +313,7 @@ final class ToolEventCoordinator {
         }
 
         // Check if this is a browser tool result with screenshot data
-        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: context.messages) {
+        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
             if case .toolUse(let tool) = context.messages[index].content {
                 if ToolKind(toolName: tool.toolName) == .browseTheWeb {
                     // Browser screenshot extraction is handled by ChatViewModel
@@ -288,17 +325,17 @@ final class ToolEventCoordinator {
         }
 
         // Update tracked tool call with result
-        if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == result.toolCallId }) {
-            context.currentTurnToolCalls[idx].result = result.result
-            context.currentTurnToolCalls[idx].isError = (result.status == .error)
+        if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
+            context.currentTurnToolCalls[idx].result = pluginResult.displayResult
+            context.currentTurnToolCalls[idx].isError = !pluginResult.success
         }
 
         // Enqueue tool end for ordered processing
         let toolEndData = UIUpdateQueue.ToolEndData(
-            toolCallId: result.toolCallId,
-            success: (result.status == .success),
-            result: result.result,
-            durationMs: result.durationMs,
+            toolCallId: pluginResult.toolCallId,
+            success: pluginResult.success,
+            result: pluginResult.displayResult,
+            durationMs: pluginResult.duration,
             details: pluginResult.rawDetails
         )
         context.enqueueToolEnd(toolEndData)
@@ -382,13 +419,13 @@ final class ToolEventCoordinator {
     /// Handle tool start side-effects that must run regardless of whether the chip
     /// was pre-created by tool_generating. URL opening via BrowseTheWeb openURL action.
     private func handleToolStartSideEffects(
-        _ pluginResult: ToolStartPlugin.Result,
-        result: ToolStartResult,
+        isOpenURL: Bool,
+        openURL: URL?,
         context: ToolEventContext
     ) {
         // Handle BrowseTheWeb openURL action - opens Safari in-app
-        if result.isOpenURL {
-            if let url = result.openURL {
+        if isOpenURL {
+            if let url = openURL {
                 context.logInfo("Opening Safari with URL: \(url.absoluteString)")
                 context.safariURL = url
             } else {

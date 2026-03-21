@@ -74,7 +74,7 @@ extension ChatViewModel: ToolEventContext {
     /// Reset thinking state for a new thinking block (ToolEventContext)
     /// Called after tool completion so subsequent thinking starts fresh
     func resetThinkingForNewBlock() {
-        eventHandler.resetThinkingState()
+        thinkingState.clearCurrentStreaming()
         thinkingMessageId = nil
     }
 
