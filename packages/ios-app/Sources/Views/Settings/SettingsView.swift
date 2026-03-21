@@ -28,9 +28,6 @@ struct SettingsView: View {
     @State private var showArchiveAllConfirmation = false
     @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
-    @State private var showQuickSessionWorkspaceSelector = false
-    @State private var showChatWorkspaceSelector = false
-    @State private var showModelPicker = false
     @State private var showConnectionPage = false
     @State private var showSessionPage = false
     @State private var showContextPage = false
@@ -203,56 +200,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showLogViewer) {
             LogViewer()
         }
-        .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
-            WorkspaceSelector(
-                rpcClient: rpcClient,
-                selectedPath: Binding(
-                    get: { settingsState.quickSessionWorkspace },
-                    set: { newValue in
-                        settingsState.quickSessionWorkspace = newValue
-                        dependencies.quickSessionWorkspace = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
-                        }
-                    }
-                )
-            )
-        }
-        .sheet(isPresented: $showChatWorkspaceSelector) {
-            WorkspaceSelector(
-                rpcClient: rpcClient,
-                selectedPath: Binding(
-                    get: { settingsState.chatWorkspace },
-                    set: { newValue in
-                        let previousValue = settingsState.chatWorkspace
-                        settingsState.chatWorkspace = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
-                        }
-                        if newValue != previousValue {
-                            Task {
-                                _ = try? await rpcClient.session.resetChat()
-                                await eventStoreManager.refreshSessionList()
-                            }
-                        }
-                    }
-                )
-            )
-        }
-        .sheet(isPresented: $showModelPicker) {
-            if #available(iOS 26.0, *) {
-                ModelPickerSheet(
-                    models: settingsState.availableModels,
-                    currentModelId: defaultModelValue,
-                    onSelect: { model in
-                        defaultModelBinding.wrappedValue = model.id
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultModel: model.id))
-                        }
-                    }
-                )
-            }
-        }
         .sheet(isPresented: $showConnectionPage) {
             ConnectionSettingsPage(
                 serverHost: $serverHost,
@@ -274,9 +221,6 @@ struct SettingsView: View {
                 settingsState: settingsState,
                 confirmArchive: $confirmArchive,
                 selectedModelDisplayName: selectedModelDisplayName,
-                onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
-                onModelTap: { showModelPicker = true },
-                onChatWorkspaceTap: { showChatWorkspaceSelector = true },
                 updateServerSetting: updateServerSetting
             )
             .adaptivePresentationDetents([.medium, .large])

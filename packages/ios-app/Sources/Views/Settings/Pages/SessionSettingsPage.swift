@@ -1,13 +1,25 @@
 import SwiftUI
 
 struct SessionSettingsPage: View {
+    @Environment(\.dependencies) var dependencies
     let settingsState: SettingsState
     @Binding var confirmArchive: Bool
     let selectedModelDisplayName: String
-    let onWorkspaceTap: () -> Void
-    let onModelTap: () -> Void
-    let onChatWorkspaceTap: () -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+
+    @State private var showQuickSessionWorkspaceSelector = false
+    @State private var showChatWorkspaceSelector = false
+    @State private var showModelPicker = false
+
+    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
+    private var defaultModelValue: String { dependencies.defaultModel }
+    private var defaultModelBinding: Binding<String> {
+        Binding(
+            get: { dependencies.defaultModel },
+            set: { dependencies.defaultModel = $0 }
+        )
+    }
 
     private var isolationDescription: String {
         switch settingsState.isolationMode {
@@ -29,17 +41,22 @@ struct SessionSettingsPage: View {
                     QuickSessionSection(
                         displayWorkspace: settingsState.displayQuickSessionWorkspace,
                         selectedModelDisplayName: selectedModelDisplayName,
-                        onWorkspaceTap: onWorkspaceTap,
-                        onModelTap: onModelTap
+                        onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
+                        onModelTap: { showModelPicker = true }
                     )
                 }
 
                 Section {
-                    Button(action: onChatWorkspaceTap) {
+                    Button(action: { showChatWorkspaceSelector = true }) {
                         HStack {
-                            Label("Workspace", systemImage: "folder")
-                                .font(TronTypography.subheadline)
-                                .foregroundStyle(.tronTextPrimary)
+                            Label {
+                                Text("Workspace")
+                                    .foregroundStyle(.tronTextPrimary)
+                            } icon: {
+                                Image(systemName: "folder")
+                                    .foregroundStyle(.tronEmerald)
+                            }
+                            .font(TronTypography.subheadline)
                             Spacer()
                             Text(settingsState.displayChatWorkspace.isEmpty
                                  ? "Default"
@@ -120,6 +137,56 @@ struct SessionSettingsPage: View {
                     Text("Session")
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
+                }
+            }
+            .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
+                WorkspaceSelector(
+                    rpcClient: rpcClient,
+                    selectedPath: Binding(
+                        get: { settingsState.quickSessionWorkspace },
+                        set: { newValue in
+                            settingsState.quickSessionWorkspace = newValue
+                            dependencies.quickSessionWorkspace = newValue
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
+                            }
+                        }
+                    )
+                )
+            }
+            .sheet(isPresented: $showChatWorkspaceSelector) {
+                WorkspaceSelector(
+                    rpcClient: rpcClient,
+                    selectedPath: Binding(
+                        get: { settingsState.chatWorkspace },
+                        set: { newValue in
+                            let previousValue = settingsState.chatWorkspace
+                            settingsState.chatWorkspace = newValue
+                            updateServerSetting {
+                                ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
+                            }
+                            if newValue != previousValue {
+                                Task {
+                                    _ = try? await rpcClient.session.resetChat()
+                                    await eventStoreManager.refreshSessionList()
+                                }
+                            }
+                        }
+                    )
+                )
+            }
+            .sheet(isPresented: $showModelPicker) {
+                if #available(iOS 26.0, *) {
+                    ModelPickerSheet(
+                        models: settingsState.availableModels,
+                        currentModelId: defaultModelValue,
+                        onSelect: { model in
+                            defaultModelBinding.wrappedValue = model.id
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(defaultModel: model.id))
+                            }
+                        }
+                    )
                 }
             }
         }
