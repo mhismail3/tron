@@ -150,8 +150,7 @@ extension ChatViewModel {
         // Capture streaming text before finalization clears it
         let finalStreamingText = streamingManager.streamingText
 
-        // Reset streaming and thinking state
-        streamingManager.reset()
+        // Clear thinking accumulation (streaming finalization handled by coordinator)
         thinkingState.clearCurrentStreaming()
 
         // Auto-dismiss browser sheet when agent completes
