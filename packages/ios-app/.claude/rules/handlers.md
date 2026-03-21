@@ -36,7 +36,6 @@ extension ChatViewModel: FeatureContext {
 - `EventDispatchCoordinator` - Delegates to self-dispatching plugin boxes via `EventRegistry`
 - `ToolEventCoordinator` - Handles tool start/end events
 - `TurnLifecycleCoordinator` - Manages turn state transitions
-- `PaginationCoordinator` - Handles event loading and pagination
 - `MessagingCoordinator` - Sends messages and handles responses
 
 ## Event Dispatch

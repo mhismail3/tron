@@ -14,7 +14,7 @@ Split across extension files. Extensions conform to context protocols, which del
 | +ToolEventContext | ToolEventContext | ToolEventCoordinator |
 | +TurnLifecycleContext | TurnLifecycleContext | TurnLifecycleCoordinator |
 | +EventDispatchContext | EventDispatchTarget | EventDispatchCoordinator |
-| +Pagination | PaginationContext | PaginationCoordinator |
+| +Pagination | — | — (logic lives directly in extension) |
 | +UICanvasContext | UICanvasContext | UICanvasCoordinator |
 
 ## Adding Features

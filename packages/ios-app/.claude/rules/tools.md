@@ -22,6 +22,12 @@ Use these from `Views/Tools/Shared/`:
 - **`ToolStatusRow`** — Horizontal scroll of status/duration badges + `@ViewBuilder` additional pills
 - **`ToolClassifiedErrorSection`** — Error display using `ErrorClassification` struct
 - **`ToolErrorView`** — File-write-specific structured error display
+- **`FileInfoProperties`** — Shared file path/name/extension extraction from tool arguments
+- **`ToolFileInfoSection`** — File info UI (icon + name + extension capsule + path)
+- **`ToolCodeBlock`** — Line-numbered code display with accent border and optional copy button
+- **`ToolCopyButton`** — Reusable icon-only copy-to-clipboard button
+- **`ToolEmptyState`** — Empty/no-results state with icon, message, and optional subtitle
+- **`ToolResultNote`** — Success note with checkmark icon (used by Write, Edit)
 
 ## Error Classification
 
@@ -36,6 +42,10 @@ For tools that need structured error display:
 - Use `ToolClassifiedErrorSection` instead of hand-rolling error display VStacks
 - Use `ToolStatusRow` for status rows (wraps ToolStatusBadge + ToolDurationBadge + additional pills)
 - Use `ToolRunningSpinner` for running-state spinners instead of hand-rolling ProgressView + Text
+- Use `FileInfoProperties` + `ToolFileInfoSection` for file-based tools (Read, Write, Edit)
+- Use `ToolCodeBlock` for line-numbered content display (Read content, Write preview, Bash output)
+- Use `ToolEmptyState` for no-results states instead of hand-rolling VStack + Image + Text
+- Use `ToolCopyButton` for section copy buttons instead of inline Button + Image
 - Keep detail sheets under 500 LOC; extract nested subviews for large sheets
 
 ---
