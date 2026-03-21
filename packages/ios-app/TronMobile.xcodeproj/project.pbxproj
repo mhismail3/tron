@@ -617,6 +617,9 @@
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		FEF77052D6956E5B6AE05BDB /* RPCTypes+Task.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5F4C1CCA13C7C459D7D82 /* RPCTypes+Task.swift */; };
 		FEFEB6F2F6B479F5D422E56A /* EventIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */; };
+		F2F2F2A1B2C3D4E5F6A7B8C9 /* FileInfoProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F1F1A1B2C3D4E5F6A7B8C9 /* FileInfoProperties.swift */; };
+		F2F2F2D4E5F6A7B8C9D0E1F2 /* ToolCodeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F1F1D4E5F6A7B8C9D0E1F2 /* ToolCodeBlock.swift */; };
+		F2F2F2E2F3A4B5C6D7E8F9A0 /* ToolFileInfoSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F1F1E2F3A4B5C6D7E8F9A0 /* ToolFileInfoSection.swift */; };
 		FF1A0457E4CC2CFBF9B77CD0 /* UICanvasSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF52F3FB3022561565CEA58 /* UICanvasSheet.swift */; };
 		FF8C318A0C7392CCCBF83DAD /* ToolDetailComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D819B74E3A0C9DA17D6384E /* ToolDetailComponents.swift */; };
 		FF8D119251FA0B28A271346A /* BrowserCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85764F1A4E487CD20657EAF6 /* BrowserCoordinatorTests.swift */; };
@@ -1237,6 +1240,9 @@
 		F1833211CA2FD795125F527C /* WebFetchToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchToolDetailSheet.swift; sourceTree = "<group>"; };
 		F1C3717ED891C0CEA74C73E7 /* BashToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		F1D4057C20D31DB761BB86A2 /* ThinkingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingContentView.swift; sourceTree = "<group>"; };
+		F1F1F1A1B2C3D4E5F6A7B8C9 /* FileInfoProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInfoProperties.swift; sourceTree = "<group>"; };
+		F1F1F1D4E5F6A7B8C9D0E1F2 /* ToolCodeBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCodeBlock.swift; sourceTree = "<group>"; };
+		F1F1F1E2F3A4B5C6D7E8F9A0 /* ToolFileInfoSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolFileInfoSection.swift; sourceTree = "<group>"; };
 		F1F8D60CEFD0E621EB2D564D /* SubagentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentDetailSheet.swift; sourceTree = "<group>"; };
 		F25EA9767ADB2C8628135491 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1872,8 +1878,11 @@
 			isa = PBXGroup;
 			children = (
 				56ADB169A3DA31C3C0C99520 /* DiffFormatting.swift */,
+				F1F1F1A1B2C3D4E5F6A7B8C9 /* FileInfoProperties.swift */,
+				F1F1F1D4E5F6A7B8C9D0E1F2 /* ToolCodeBlock.swift */,
 				4D819B74E3A0C9DA17D6384E /* ToolDetailComponents.swift */,
 				54EA3DF47D59857662A8A250 /* ToolDetailSheetContainer.swift */,
+				F1F1F1E2F3A4B5C6D7E8F9A0 /* ToolFileInfoSection.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -3266,6 +3275,7 @@
 				FC953333FC62CCAA403424CE /* DeviceRequestPlugin.swift in Sources */,
 				24C57C2D891D6630081B8143 /* DiffFileRow.swift in Sources */,
 				546575181F368951CF5417D8 /* DiffFormatting.swift in Sources */,
+				F2F2F2A1B2C3D4E5F6A7B8C9 /* FileInfoProperties.swift in Sources */,
 				09F9A7B4A25538D0AC14131A /* DocumentPicker.swift in Sources */,
 				5967F0DA19AE3C23CBEAB018 /* DurationFormatter.swift in Sources */,
 				5E1EDE22C8347D9DB7F9D69D /* EditToolDetailSheet.swift in Sources */,
@@ -3518,12 +3528,14 @@
 				0C9EDF94CE66476F1AF38DE8 /* TokenRecord.swift in Sources */,
 				9E228A4BE7C33552B78B4945 /* TokenStateManager.swift in Sources */,
 				2A98B9392CCE33CCC89CF6DB /* ToolArgumentParser.swift in Sources */,
+				F2F2F2D4E5F6A7B8C9D0E1F2 /* ToolCodeBlock.swift in Sources */,
 				58BA74AF2F2E446BD6B5C309 /* ToolDescriptor.swift in Sources */,
 				FF8C318A0C7392CCCBF83DAD /* ToolDetailComponents.swift in Sources */,
 				62508AF90641F103E8B890BA /* ToolDetailSheetContainer.swift in Sources */,
 				7EE42C93DD3772DA20EFD61E /* ToolEndPlugin.swift in Sources */,
 				CE58B70611975E8E46695749 /* ToolEventContext.swift in Sources */,
 				8D04A163F49EA655DFAEEC5B /* ToolEventCoordinator.swift in Sources */,
+				F2F2F2E2F3A4B5C6D7E8F9A0 /* ToolFileInfoSection.swift in Sources */,
 				E18EF9EE27B4F57CA4C1656E /* ToolGeneratingPlugin.swift in Sources */,
 				1D7F9424F20DDFA46E34FE80 /* ToolHandlers.swift in Sources */,
 				B5E89668A89E30FFD5CC1472 /* ToolKind.swift in Sources */,
