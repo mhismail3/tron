@@ -179,7 +179,8 @@ struct ChatSheetContent: View {
             RememberToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
                     sheetCoordinator?.showSafari(url)
                 }
             })

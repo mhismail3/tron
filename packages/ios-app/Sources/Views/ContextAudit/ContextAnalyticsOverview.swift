@@ -73,7 +73,8 @@ struct SessionIdRow: View {
         .onTapGesture {
             UIPasteboard.general.string = sessionId
             showCopied = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1500))
                 showCopied = false
             }
         }

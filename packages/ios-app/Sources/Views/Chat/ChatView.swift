@@ -224,14 +224,14 @@ struct ChatView: View {
         }
         // iOS 26 Menu workaround: Handle menu actions via NotificationCenter
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
-            guard let action = notification.object as? String else { return }
+            guard let raw = notification.object as? String,
+                  let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
-            case "history": sheetCoordinator.showSessionHistory()
-            case "context": sheetCoordinator.showContextAudit()
-            case "tasks": sheetCoordinator.showTaskList()
-            case "settings": sheetCoordinator.showSettings()
-            case "changes": sheetCoordinator.showSourceChanges()
-            default: break
+            case .history: sheetCoordinator.showSessionHistory()
+            case .context: sheetCoordinator.showContextAudit()
+            case .tasks: sheetCoordinator.showTaskList()
+            case .settings: sheetCoordinator.showSettings()
+            case .changes: sheetCoordinator.showSourceChanges()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
@@ -461,35 +461,9 @@ struct ChatView: View {
                                     case .commandTool(let data):
                                         sheetCoordinator.showCommandToolDetail(data)
                                     case .queryAgent(let data):
-                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(
-                                            id: data.toolCallId,
-                                            toolName: "QueryAgent",
-                                            normalizedName: "queryagent",
-                                            icon: data.queryType.icon,
-                                            iconColor: .tronIndigo,
-                                            displayName: "Query Agent (\(data.queryType.displayName))",
-                                            summary: data.resultPreview ?? "",
-                                            status: data.status == .error ? .error : .success,
-                                            durationMs: data.durationMs,
-                                            arguments: "",
-                                            result: data.fullResult,
-                                            isResultTruncated: false
-                                        ))
+                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
                                     case .waitForAgents(let data):
-                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(
-                                            id: data.toolCallId,
-                                            toolName: "WaitForAgents",
-                                            normalizedName: "waitforagents",
-                                            icon: "hourglass",
-                                            iconColor: .tronTeal,
-                                            displayName: "Wait For Agents",
-                                            summary: data.resultPreview ?? "",
-                                            status: data.status == .error ? .error : .success,
-                                            durationMs: data.durationMs,
-                                            arguments: "",
-                                            result: data.fullResult,
-                                            isResultTruncated: false
-                                        ))
+                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
                                     case .memoryUpdated(let title, let entryType, let eventId):
                                         sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)
                                     case .subagentResult(let sid):
@@ -738,6 +712,10 @@ struct ChatView: View {
 // MARK: - iOS 26 Menu Workaround
 // Menu button actions that mutate @State break gesture handling in iOS 26
 // Workaround: Post notification, handle via onReceive
+
+enum ChatMenuAction: String, CaseIterable {
+    case history, context, tasks, settings, changes
+}
 
 extension Notification.Name {
     static let chatMenuAction = Notification.Name("chatMenuAction")

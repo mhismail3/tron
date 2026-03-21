@@ -253,82 +253,53 @@ final class ChatViewModel {
 
     private var observationTasks: [Task<Void, Never>] = []
 
+    /// Reusable observation loop: watches a value via `withObservationTracking`
+    /// and invokes `onChange` each time it changes. Cancelled via the returned Task.
+    static func observeLoop<T: Equatable>(
+        _ read: @escaping @MainActor () -> T,
+        onChange: @escaping @MainActor (T) -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            while !Task.isCancelled {
+                await withCheckedContinuation { cont in
+                    withObservationTracking { _ = read() } onChange: { cont.resume() }
+                }
+                guard !Task.isCancelled else { return }
+                onChange(read())
+            }
+        }
+    }
+
     private func setupBindings() {
-        observationTasks.append(observeConnectionState())
-        observationTasks.append(observeAudioRecorderState())
-        observationTasks.append(observeSelectedImages())
-    }
+        observationTasks.append(Self.observeLoop({ self.rpcClient.connectionState }) { [self] state in
+            self.connectionState = state
 
-    /// Continuation-based loop that reacts to rpcClient.connectionState changes.
-    /// Cancelled in deinit — no weak self needed.
-    private func observeConnectionState() -> Task<Void, Never> {
-        Task {
-            while !Task.isCancelled {
-                await withCheckedContinuation { cont in
-                    withObservationTracking {
-                        _ = self.rpcClient.connectionState
-                    } onChange: {
-                        cont.resume()
-                    }
+            // Clear stale processing state on disconnect — server may have
+            // crashed during post-processing, so agent_ready will never arrive.
+            if case .disconnected = state {
+                if self.agentPhase != .idle {
+                    self.agentPhase = .idle
                 }
-                guard !Task.isCancelled else { return }
-                self.connectionState = self.rpcClient.connectionState
-
-                // Clear stale processing state on disconnect — server may have
-                // crashed during post-processing, so agent_ready will never arrive.
-                if case .disconnected = self.connectionState {
-                    if self.agentPhase != .idle {
-                        self.agentPhase = .idle
-                    }
-                    self.streamingManager.reset()
-                    self.isCompacting = false
-                    self.compactionInProgressMessageId = nil
-                    self.runningToolCount = 0
-                    DeviceRequestDispatcher.clearDeduplicationState()
-                }
+                self.streamingManager.reset()
+                self.isCompacting = false
+                self.compactionInProgressMessageId = nil
+                self.runningToolCount = 0
+                DeviceRequestDispatcher.clearDeduplicationState()
             }
-        }
-    }
+        })
 
-    /// Continuation-based loop that reacts to audioRecorder.isRecording changes.
-    /// Cancelled in deinit — no weak self needed.
-    private func observeAudioRecorderState() -> Task<Void, Never> {
-        Task {
-            while !Task.isCancelled {
-                await withCheckedContinuation { cont in
-                    withObservationTracking {
-                        _ = self.audioRecorder.isRecording
-                    } onChange: {
-                        cont.resume()
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                self.isRecording = self.audioRecorder.isRecording
-            }
-        }
+        observationTasks.append(Self.observeLoop({ self.audioRecorder.isRecording }) { [self] recording in
+            self.isRecording = recording
+        })
+
+        observationTasks.append(Self.observeLoop({ self.inputBarState.selectedImages }) { [self] images in
+            Task { await self.processSelectedImages(images) }
+        })
     }
 
     private func setupAudioRecorder() {
         audioRecorder.onFinish = { [weak self] url, success in
             Task { await self?.handleRecordingFinished(url: url, success: success) }
-        }
-    }
-
-    /// Continuation-based loop that reacts to inputBarState.selectedImages changes.
-    /// Cancelled in deinit — no weak self needed.
-    private func observeSelectedImages() -> Task<Void, Never> {
-        Task {
-            while !Task.isCancelled {
-                await withCheckedContinuation { cont in
-                    withObservationTracking {
-                        _ = self.inputBarState.selectedImages
-                    } onChange: {
-                        cont.resume()
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                await self.processSelectedImages(self.inputBarState.selectedImages)
-            }
         }
     }
 

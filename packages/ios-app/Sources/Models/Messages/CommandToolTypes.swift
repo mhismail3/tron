@@ -108,6 +108,41 @@ struct CommandToolChipData: Equatable, Identifiable {
             return String(format: "%.1fs", Double(ms) / 1000.0)
         }
     }
+
+}
+
+extension CommandToolChipData {
+    /// Create from QueryAgentChipData for detail sheet display
+    init(from data: QueryAgentChipData) {
+        self.id = data.toolCallId
+        self.toolName = "QueryAgent"
+        self.normalizedName = "queryagent"
+        self.icon = data.queryType.icon
+        self.iconColor = .tronIndigo
+        self.displayName = "Query Agent (\(data.queryType.displayName))"
+        self.summary = data.resultPreview ?? ""
+        self.status = data.status == .error ? .error : .success
+        self.durationMs = data.durationMs
+        self.arguments = ""
+        self.result = data.fullResult
+        self.isResultTruncated = false
+    }
+
+    /// Create from WaitForAgentsChipData for detail sheet display
+    init(from data: WaitForAgentsChipData) {
+        self.id = data.toolCallId
+        self.toolName = "WaitForAgents"
+        self.normalizedName = "waitforagents"
+        self.icon = "hourglass"
+        self.iconColor = .tronTeal
+        self.displayName = "Wait For Agents"
+        self.summary = data.resultPreview ?? ""
+        self.status = data.status == .error ? .error : .success
+        self.durationMs = data.durationMs
+        self.arguments = ""
+        self.result = data.fullResult
+        self.isResultTruncated = false
+    }
 }
 
 // MARK: - Command Tool Registry

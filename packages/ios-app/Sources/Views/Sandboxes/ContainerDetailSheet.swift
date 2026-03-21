@@ -43,7 +43,8 @@ struct ContainerDetailSheet: View {
                     if let url = openURL, let onOpenURL {
                         Button {
                             dismiss()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(300))
                                 onOpenURL(url)
                             }
                         } label: {

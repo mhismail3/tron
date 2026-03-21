@@ -462,7 +462,8 @@ struct ContentView: View {
 
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
             selectedSessionId = newId
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(500))
                 NotificationCenter.default.post(
                     name: .pendingShareMessage,
                     object: payload

@@ -68,18 +68,18 @@ extension ChatView {
                 }
             }
             Menu {
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.history.rawValue) } label: {
                     Label("Session History", systemImage: "clock.arrow.circlepath")
                 }
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.context.rawValue) } label: {
                     Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
                 }
                 if viewModel.taskState.hasTasks {
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.tasks.rawValue) } label: {
                         Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
                     }
                 }
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "changes") } label: {
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.changes.rawValue) } label: {
                     Label {
                         Text("Source Control")
                     } icon: {
@@ -88,7 +88,7 @@ extension ChatView {
                     }
                 }
                 Divider()
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue) } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
             } label: {
