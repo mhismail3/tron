@@ -157,13 +157,7 @@ struct BashToolDetailSheet: View {
     }
 
     private var commandCopyButton: some View {
-        Button {
-            UIPasteboard.general.string = command
-        } label: {
-            Image(systemName: "doc.on.doc")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(Color.tronEmerald.opacity(0.6))
-        }
+        ToolCopyButton(content: command, accent: .tronEmerald)
     }
 
     // MARK: - Status Row
@@ -195,13 +189,7 @@ struct BashToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = data.result ?? ""
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronEmerald.opacity(0.6))
-                }
+                ToolCopyButton(content: data.result ?? "", accent: .tronEmerald)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -267,18 +255,7 @@ struct BashToolDetailSheet: View {
     // MARK: - Empty Output Section
 
     private var emptyOutputSection: some View {
-        ToolDetailSection(title: "Output", accent: .tronEmerald, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "text.page.slash")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No output")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
     }
 
     // MARK: - Blocked Section

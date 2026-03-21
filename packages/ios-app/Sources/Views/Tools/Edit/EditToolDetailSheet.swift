@@ -14,22 +14,8 @@ struct EditToolDetailSheet: View {
         TintedColors(accent: .orange, colorScheme: colorScheme)
     }
 
-    private var filePath: String {
-        ToolArgumentParser.filePath(from: data.arguments)
-    }
-
-    private var fileName: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).lastPathComponent
-    }
-
-    private var fileExtension: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).pathExtension.lowercased()
-    }
-
-    private var langColor: Color {
-        FileDisplayHelpers.languageColor(for: fileExtension)
+    private var fileInfo: FileInfoProperties {
+        FileInfoProperties(arguments: data.arguments)
     }
 
     private var isReplaceAll: Bool {
@@ -64,7 +50,7 @@ struct EditToolDetailSheet: View {
             toolName: "Edit",
             iconName: "pencil.line",
             accent: .orange,
-            copyContent: filePath
+            copyContent: fileInfo.filePath
         ) {
             contentBody
         }
@@ -112,41 +98,7 @@ struct EditToolDetailSheet: View {
     // MARK: - File Info Section
 
     private var fileInfoSection: some View {
-        ToolDetailSection(title: "File", accent: .orange, tint: tint) {
-            HStack(spacing: 8) {
-                Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                    .foregroundStyle(langColor)
-
-                Text(fileName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(tint.name)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if !fileExtension.isEmpty {
-                    Text(fileExtension.uppercased())
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextPrimary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background {
-                            Capsule()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(langColor.opacity(0.25)), in: Capsule())
-                        }
-                }
-            }
-
-            if !filePath.isEmpty {
-                Text(filePath)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 6)
-            }
-        }
+        ToolFileInfoSection(fileInfo: fileInfo, accent: .orange, tint: tint)
     }
 
     // MARK: - Status Row
@@ -168,24 +120,7 @@ struct EditToolDetailSheet: View {
     // MARK: - Result Note
 
     private func resultNote(_ result: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                .foregroundStyle(.tronSuccess)
-
-            Text(result)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(tint.secondary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronSuccess.opacity(0.12)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
+        ToolResultNote(text: result, tint: tint)
     }
 
     // MARK: - Diff Section
@@ -226,7 +161,7 @@ struct EditToolDetailSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(alignment: .leading) {
                 Rectangle()
-                    .fill(langColor)
+                    .fill(fileInfo.langColor)
                     .frame(width: 3)
             }
             .padding(14)
@@ -299,7 +234,7 @@ struct EditToolDetailSheet: View {
             ToolErrorView(
                 icon: error.icon,
                 title: error.title,
-                path: filePath,
+                path: fileInfo.filePath,
                 errorCode: error.errorCode,
                 suggestion: error.suggestion,
                 tint: errorTint

@@ -242,23 +242,7 @@ struct RememberToolDetailSheet: View {
     // MARK: - No Results
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "brain.fill")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No results found")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-                if !query.isEmpty {
-                    Text("Query: \"\(query)\"")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(tint.subtle.opacity(0.7))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Results", icon: "brain.fill", message: "No results found", accent: .purple, tint: tint, subtitle: query.isEmpty ? nil : "Query: \"\(query)\"")
     }
 
     // MARK: - Error Section

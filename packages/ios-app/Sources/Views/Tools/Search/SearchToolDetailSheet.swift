@@ -176,13 +176,7 @@ struct SearchToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = data.result ?? ""
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: data.result ?? "", accent: .purple)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -280,13 +274,7 @@ struct SearchToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = files.joined(separator: "\n")
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: files.joined(separator: "\n"), accent: .purple)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -337,13 +325,7 @@ struct SearchToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = result
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.purple.opacity(0.6))
-                }
+                ToolCopyButton(content: result, accent: .purple)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -372,21 +354,7 @@ struct SearchToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No matches found")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-                Text("Pattern: \(pattern)")
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.subtle.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Results", icon: "magnifyingglass", message: "No matches found", accent: .purple, tint: tint, subtitle: "Pattern: \(pattern)")
     }
 
     // MARK: - Error Section

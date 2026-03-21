@@ -14,22 +14,8 @@ struct WriteToolDetailSheet: View {
         TintedColors(accent: .tronPink, colorScheme: colorScheme)
     }
 
-    private var filePath: String {
-        ToolArgumentParser.filePath(from: data.arguments)
-    }
-
-    private var fileName: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).lastPathComponent
-    }
-
-    private var fileExtension: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).pathExtension.lowercased()
-    }
-
-    private var langColor: Color {
-        FileDisplayHelpers.languageColor(for: fileExtension)
+    private var fileInfo: FileInfoProperties {
+        FileInfoProperties(arguments: data.arguments)
     }
 
     private var writtenContent: String {
@@ -53,7 +39,7 @@ struct WriteToolDetailSheet: View {
             toolName: "Write",
             iconName: "square.and.pencil",
             accent: .tronPink,
-            copyContent: filePath
+            copyContent: fileInfo.filePath
         ) {
             contentBody
         }
@@ -98,41 +84,7 @@ struct WriteToolDetailSheet: View {
     // MARK: - File Info Section
 
     private var fileInfoSection: some View {
-        ToolDetailSection(title: "File", accent: .tronPink, tint: tint) {
-            HStack(spacing: 8) {
-                Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                    .foregroundStyle(langColor)
-
-                Text(fileName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(tint.name)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if !fileExtension.isEmpty {
-                    Text(fileExtension.uppercased())
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextPrimary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background {
-                            Capsule()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(langColor.opacity(0.25)), in: Capsule())
-                        }
-                }
-            }
-
-            if !filePath.isEmpty {
-                Text(filePath)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 6)
-            }
-        }
+        ToolFileInfoSection(fileInfo: fileInfo, accent: .tronPink, tint: tint)
     }
 
     // MARK: - Status Row
@@ -151,78 +103,21 @@ struct WriteToolDetailSheet: View {
     // MARK: - Result Note
 
     private func resultNote(_ result: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                .foregroundStyle(.tronSuccess)
-
-            Text(result)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(tint.secondary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronSuccess.opacity(0.12)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
+        ToolResultNote(text: result, tint: tint)
     }
 
     // MARK: - Content Preview Section
 
     private var contentPreviewSection: some View {
-        let lineNumWidth = FileDisplayHelpers.lineNumberWidth(lineCount: lineCount)
-        let accentColor: Color = .tronPink
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Content Written")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                Button {
-                    UIPasteboard.general.string = writtenContent
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(accentColor.opacity(0.6))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(contentLines.enumerated()), id: \.offset) { index, line in
-                        HStack(alignment: .top, spacing: 0) {
-                            Text("\(index + 1)")
-                                .font(TronTypography.pill)
-                                .foregroundStyle(.tronTextMuted.opacity(0.4))
-                                .frame(width: lineNumWidth, alignment: .trailing)
-                                .padding(.leading, 4)
-                                .padding(.trailing, 8)
-
-                            Text(line.isEmpty ? " " : line)
-                                .font(TronTypography.codeCaption)
-                                .foregroundStyle(tint.body)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(minHeight: 16)
-                    }
-                }
-                .padding(.vertical, 3)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(langColor)
-                        .frame(width: 3)
-                }
-            }
-            .padding(14)
-            .sectionFill(accentColor)
-        }
+        ToolCodeBlock(
+            title: "Content Written",
+            lines: contentLines.enumerated().map { (index, line) in (index + 1, line) },
+            accent: .tronPink,
+            tint: tint,
+            borderColor: fileInfo.langColor,
+            copyContent: writtenContent,
+            wrapsContent: true
+        )
     }
 
     // MARK: - Error Section
@@ -235,7 +130,7 @@ struct WriteToolDetailSheet: View {
             ToolErrorView(
                 icon: error.icon,
                 title: error.title,
-                path: filePath,
+                path: fileInfo.filePath,
                 errorCode: error.errorCode,
                 suggestion: error.suggestion,
                 tint: errorTint

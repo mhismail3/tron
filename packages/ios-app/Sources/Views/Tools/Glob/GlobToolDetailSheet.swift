@@ -145,13 +145,7 @@ struct GlobToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = parsedFiles.map(\.path).joined(separator: "\n")
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.cyan.opacity(0.6))
-                }
+                ToolCopyButton(content: parsedFiles.map(\.path).joined(separator: "\n"), accent: .cyan)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -223,21 +217,7 @@ struct GlobToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .cyan, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No files found")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-                Text("Pattern: \(pattern)")
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.subtle.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Results", icon: "doc.text.magnifyingglass", message: "No files found", accent: .cyan, tint: tint, subtitle: "Pattern: \(pattern)")
     }
 
     // MARK: - Error Section

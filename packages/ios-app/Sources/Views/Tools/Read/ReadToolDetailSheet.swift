@@ -14,22 +14,8 @@ struct ReadToolDetailSheet: View {
         TintedColors(accent: .tronSlate, colorScheme: colorScheme)
     }
 
-    private var filePath: String {
-        ToolArgumentParser.filePath(from: data.arguments)
-    }
-
-    private var fileName: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).lastPathComponent
-    }
-
-    private var fileExtension: String {
-        guard !filePath.isEmpty else { return "" }
-        return URL(fileURLWithPath: filePath).pathExtension.lowercased()
-    }
-
-    private var langColor: Color {
-        FileDisplayHelpers.languageColor(for: fileExtension)
+    private var fileInfo: FileInfoProperties {
+        FileInfoProperties(arguments: data.arguments)
     }
 
     var body: some View {
@@ -37,7 +23,7 @@ struct ReadToolDetailSheet: View {
             toolName: "Read",
             iconName: "doc.text",
             accent: .tronSlate,
-            copyContent: filePath
+            copyContent: fileInfo.filePath
         ) {
             contentBody
         }
@@ -81,41 +67,7 @@ struct ReadToolDetailSheet: View {
     // MARK: - A. File Info Section
 
     private var fileInfoSection: some View {
-        ToolDetailSection(title: "File", accent: .tronSlate, tint: tint) {
-            HStack(spacing: 8) {
-                Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                    .foregroundStyle(langColor)
-
-                Text(fileName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(tint.name)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if !fileExtension.isEmpty {
-                    Text(fileExtension.uppercased())
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextPrimary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background {
-                            Capsule()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(langColor.opacity(0.25)), in: Capsule())
-                        }
-                }
-            }
-
-            if !filePath.isEmpty {
-                Text(filePath)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 6)
-            }
-        }
+        ToolFileInfoSection(fileInfo: fileInfo, accent: .tronSlate, tint: tint)
     }
 
     // MARK: - B. Status Row
@@ -141,82 +93,23 @@ struct ReadToolDetailSheet: View {
 
     private func contentSection(_ result: String) -> some View {
         let parsedLines = ContentLineParser.parse(result)
-        let lineNumWidth = FileDisplayHelpers.lineNumberWidth(for: parsedLines)
-        let accentColor: Color = .tronSlate
+        let rangeNote = lineRangeText.map { "Showing \($0.lowercased())" }
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Content")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                Button {
-                    UIPasteboard.general.string = parsedLines.map(\.content).joined(separator: "\n")
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(accentColor.opacity(0.6))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                if let rangeText = lineRangeText {
-                    Text("Showing \(rangeText.lowercased())")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(tint.subtle)
-                        .padding(.bottom, 6)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 14)
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(parsedLines) { line in
-                            HStack(spacing: 0) {
-                                Text("\(line.lineNum)")
-                                    .font(TronTypography.pill)
-                                    .foregroundStyle(.tronTextMuted.opacity(0.4))
-                                    .frame(width: lineNumWidth, alignment: .trailing)
-                                    .padding(.leading, 4)
-                                    .padding(.trailing, 8)
-
-                                Text(line.content.isEmpty ? " " : line.content)
-                                    .font(TronTypography.codeCaption)
-                                    .foregroundStyle(tint.body)
-                            }
-                            .frame(minHeight: 16)
-                        }
-                    }
-                    .padding(.vertical, 3)
-                }
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(langColor)
-                        .frame(width: 3)
-                }
-            }
-            .padding(14)
-            .sectionFill(accentColor)
-        }
+        return ToolCodeBlock(
+            title: "Content",
+            lines: parsedLines.map { ($0.lineNum, $0.content) },
+            accent: .tronSlate,
+            tint: tint,
+            borderColor: fileInfo.langColor,
+            copyContent: parsedLines.map(\.content).joined(separator: "\n"),
+            headerNote: rangeNote
+        )
     }
 
     // MARK: - D. Empty File State
 
     private var emptyFileSection: some View {
-        ToolDetailSection(title: "Content", accent: .tronSlate, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "doc")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("File is empty")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Content", icon: "doc", message: "File is empty", accent: .tronSlate, tint: tint)
     }
 
     // MARK: - E. Error Section
@@ -229,7 +122,7 @@ struct ReadToolDetailSheet: View {
             ToolErrorView(
                 icon: error.icon,
                 title: error.title,
-                path: filePath,
+                path: fileInfo.filePath,
                 errorCode: error.errorCode,
                 suggestion: error.suggestion,
                 tint: errorTint

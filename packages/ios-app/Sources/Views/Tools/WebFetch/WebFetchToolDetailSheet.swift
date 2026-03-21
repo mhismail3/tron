@@ -162,13 +162,7 @@ struct WebFetchToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = parsed.answer
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronInfo.opacity(0.6))
-                }
+                ToolCopyButton(content: parsed.answer, accent: .tronInfo)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -187,18 +181,7 @@ struct WebFetchToolDetailSheet: View {
     // MARK: - Empty Result Section
 
     private var emptyResultSection: some View {
-        ToolDetailSection(title: "Answer", accent: .tronInfo, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "doc.text")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No content returned")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Answer", icon: "doc.text", message: "No content returned", accent: .tronInfo, tint: tint)
     }
 
     // MARK: - Error Section

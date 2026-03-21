@@ -164,13 +164,7 @@ struct WebSearchToolDetailSheet: View {
 
                 Spacer()
 
-                Button {
-                    UIPasteboard.general.string = data.result ?? ""
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronInfo.opacity(0.6))
-                }
+                ToolCopyButton(content: data.result ?? "", accent: .tronInfo)
             }
 
             HStack(alignment: .top, spacing: 0) {
@@ -248,21 +242,7 @@ struct WebSearchToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronInfo, tint: tint) {
-            VStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(TronTypography.sans(size: 28))
-                    .foregroundStyle(tint.subtle)
-                Text("No results found")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-                Text("Query: \"\(query)\"")
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(tint.subtle.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolEmptyState(title: "Results", icon: "magnifyingglass", message: "No results found", accent: .tronInfo, tint: tint, subtitle: "Query: \"\(query)\"")
     }
 
     // MARK: - Error Section
