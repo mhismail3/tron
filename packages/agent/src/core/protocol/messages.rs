@@ -126,6 +126,9 @@ pub enum Provider {
     /// `MiniMax` (M2 series).
     #[serde(rename = "minimax")]
     MiniMax,
+    /// Kimi (Moonshot AI).
+    #[serde(rename = "kimi")]
+    Kimi,
     /// Unrecognized provider (defensive deserialization).
     #[serde(other, rename = "unknown")]
     Unknown,
@@ -141,6 +144,7 @@ impl Provider {
             Self::OpenAiCodex => "openai-codex",
             Self::Google => "google",
             Self::MiniMax => "minimax",
+            Self::Kimi => "kimi",
             Self::Unknown => "unknown",
         }
     }
@@ -161,6 +165,7 @@ impl std::str::FromStr for Provider {
             "openai-codex" => Ok(Self::OpenAiCodex),
             "google" => Ok(Self::Google),
             "minimax" => Ok(Self::MiniMax),
+            "kimi" => Ok(Self::Kimi),
             _ => Err(format!("unknown provider: {s}")),
         }
     }
@@ -590,6 +595,15 @@ mod tests {
     }
 
     #[test]
+    fn provider_kimi_serde_roundtrip() {
+        let pt = Provider::Kimi;
+        let json = serde_json::to_string(&pt).unwrap();
+        assert_eq!(json, "\"kimi\"");
+        let back: Provider = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, Provider::Kimi);
+    }
+
+    #[test]
     fn token_usage_with_minimax_provider() {
         let usage = TokenUsage {
             input_tokens: 200,
@@ -833,6 +847,10 @@ mod tests {
             "\"minimax\""
         );
         assert_eq!(
+            serde_json::to_string(&Provider::Kimi).unwrap(),
+            "\"kimi\""
+        );
+        assert_eq!(
             serde_json::to_string(&Provider::Unknown).unwrap(),
             "\"unknown\""
         );
@@ -851,6 +869,7 @@ mod tests {
         assert_eq!(Provider::OpenAi.to_string(), "openai");
         assert_eq!(Provider::OpenAiCodex.to_string(), "openai-codex");
         assert_eq!(Provider::MiniMax.to_string(), "minimax");
+        assert_eq!(Provider::Kimi.to_string(), "kimi");
         assert_eq!(Provider::Unknown.to_string(), "unknown");
     }
 
@@ -867,6 +886,7 @@ mod tests {
         );
         assert_eq!("google".parse::<Provider>().unwrap(), Provider::Google);
         assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::MiniMax);
+        assert_eq!("kimi".parse::<Provider>().unwrap(), Provider::Kimi);
         assert!("nonexistent".parse::<Provider>().is_err());
     }
 

@@ -123,6 +123,40 @@ pub const MINIMAX_M2: &str = "MiniMax-M2";
 pub const DEFAULT_MINIMAX_MODEL: &str = MINIMAX_M2_7;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Kimi (Moonshot AI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Kimi K2.5 — flagship model with vision and thinking.
+pub const KIMI_K2_5: &str = "kimi-k2.5";
+
+/// Kimi K2 0905 Preview.
+pub const KIMI_K2_0905_PREVIEW: &str = "kimi-k2-0905-preview";
+
+/// Kimi K2 0711 Preview.
+pub const KIMI_K2_0711_PREVIEW: &str = "kimi-k2-0711-preview";
+
+/// Kimi K2 Turbo Preview — high-speed variant.
+pub const KIMI_K2_TURBO_PREVIEW: &str = "kimi-k2-turbo-preview";
+
+/// Kimi K2 Thinking — dedicated thinking model.
+pub const KIMI_K2_THINKING: &str = "kimi-k2-thinking";
+
+/// Kimi K2 Thinking Turbo — high-speed thinking model.
+pub const KIMI_K2_THINKING_TURBO: &str = "kimi-k2-thinking-turbo";
+
+/// Moonshot V1 8K (legacy).
+pub const MOONSHOT_V1_8K: &str = "moonshot-v1-8k";
+
+/// Moonshot V1 32K (legacy).
+pub const MOONSHOT_V1_32K: &str = "moonshot-v1-32k";
+
+/// Moonshot V1 128K (legacy).
+pub const MOONSHOT_V1_128K: &str = "moonshot-v1-128k";
+
+/// Default Kimi model.
+pub const DEFAULT_KIMI_MODEL: &str = KIMI_K2_5;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Role-Based Aliases
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -147,6 +181,7 @@ mod tests {
     use super::*;
     use crate::llm::anthropic::types::all_claude_model_ids;
     use crate::llm::google::types::all_gemini_model_ids;
+    use crate::llm::kimi::types::all_kimi_model_ids;
     use crate::llm::minimax::types::all_minimax_model_ids;
     use crate::llm::openai::types::all_openai_model_ids;
 
@@ -216,12 +251,32 @@ mod tests {
     }
 
     #[test]
+    fn kimi_ids_not_empty() {
+        let ids = all_kimi_model_ids();
+        assert_eq!(ids.len(), 9);
+        assert!(ids.contains(&KIMI_K2_5));
+        assert!(ids.contains(&KIMI_K2_THINKING));
+        assert!(ids.contains(&MOONSHOT_V1_128K));
+    }
+
+    #[test]
+    fn kimi_id_format() {
+        for id in all_kimi_model_ids() {
+            assert!(
+                id.starts_with("kimi-") || id.starts_with("moonshot-"),
+                "Kimi model ID should start with 'kimi-' or 'moonshot-': {id}"
+            );
+        }
+    }
+
+    #[test]
     fn no_duplicate_ids() {
         let mut all: Vec<&str> = Vec::new();
         all.extend(all_claude_model_ids());
         all.extend(all_openai_model_ids());
         all.extend(all_gemini_model_ids());
         all.extend(all_minimax_model_ids());
+        all.extend(all_kimi_model_ids());
 
         let unique: std::collections::HashSet<&&str> = all.iter().collect();
         assert_eq!(all.len(), unique.len(), "duplicate model IDs found");

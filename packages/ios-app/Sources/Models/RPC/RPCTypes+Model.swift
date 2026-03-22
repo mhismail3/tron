@@ -196,6 +196,11 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         provider == "minimax"
     }
 
+    /// Whether this is a Kimi model
+    var isKimi: Bool {
+        provider == "kimi"
+    }
+
     /// Whether this is a Gemini 3 model (latest Google models)
     var isGemini3: Bool {
         isGemini && (family ?? "").hasPrefix("Gemini 3")

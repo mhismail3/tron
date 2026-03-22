@@ -42,6 +42,8 @@ pub struct DefaultProviderFactory {
     retry: CapturedRetrySettings,
     /// `MiniMax` base URL override from settings.
     minimax_base_url: Option<String>,
+    /// Kimi base URL override from settings.
+    kimi_base_url: Option<String>,
     /// Shared HTTP client — connection pool reused across all providers.
     http_client: reqwest::Client,
     /// When true, skip env-var fallbacks for auth (used in tests).
@@ -75,6 +77,7 @@ impl DefaultProviderFactory {
                 jitter_factor: settings.retry.jitter_factor,
             },
             minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
+            kimi_base_url: settings.api.kimi.as_ref().map(|k| k.base_url.clone()),
             http_client,
             #[cfg(test)]
             disable_env_fallback: false,
@@ -398,6 +401,53 @@ impl DefaultProviderFactory {
             ),
         ))
     }
+
+    fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+        // Priority: env var > auth.json
+        let api_key = if let Some(key) = self.env_var("MOONSHOT_API_KEY") {
+            info!("using MOONSHOT_API_KEY env var");
+            key
+        } else if let Some(pa) =
+            crate::llm::auth::storage::get_provider_auth(&self.auth_path, "kimi")
+        {
+            if let Some(key) = pa.api_key {
+                info!("using Kimi API key from auth.json");
+                key
+            } else {
+                return Err(ProviderError::Auth {
+                    message: "Kimi entry in auth.json has no apiKey".into(),
+                });
+            }
+        } else {
+            return Err(ProviderError::Auth {
+                message: "no Kimi auth available (set MOONSHOT_API_KEY or add to auth.json)"
+                    .into(),
+            });
+        };
+
+        let config = crate::llm::kimi::types::KimiConfig {
+            model: model.to_string(),
+            auth: crate::llm::kimi::types::KimiAuth::ApiKey { api_key },
+            max_tokens: None,
+            base_url: self.kimi_base_url.clone(),
+            retry: Some(crate::llm::StreamRetryConfig {
+                retry: crate::core::retry::RetryConfig {
+                    max_retries: self.retry.max_retries,
+                    base_delay_ms: self.retry.base_delay_ms,
+                    max_delay_ms: self.retry.max_delay_ms,
+                    jitter_factor: self.retry.jitter_factor,
+                },
+                emit_retry_events: true,
+                cancel_token: None,
+            }),
+        };
+        Ok(Arc::new(
+            crate::llm::kimi::provider::KimiProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
+        ))
+    }
 }
 
 #[async_trait]
@@ -420,6 +470,7 @@ impl ProviderFactory for DefaultProviderFactory {
             }
             ProviderKind::Google => self.create_google(bare_model).await,
             ProviderKind::MiniMax => self.create_minimax(bare_model),
+            ProviderKind::Kimi => self.create_kimi(bare_model),
             ProviderKind::Unknown => Err(ProviderError::UnsupportedModel {
                 model: bare_model.to_string(),
             }),
@@ -557,6 +608,86 @@ mod tests {
         let err = expect_auth_error(&factory, "minimax/MiniMax-M2.5").await;
         assert_eq!(err.category(), "auth");
         assert!(err.to_string().contains("MiniMax"));
+    }
+
+    #[tokio::test]
+    async fn factory_rejects_kimi_without_auth() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "kimi-k2.5").await;
+        assert_eq!(err.category(), "auth");
+        assert!(err.to_string().contains("Kimi"));
+    }
+
+    #[tokio::test]
+    async fn factory_detects_kimi_from_model_id() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "kimi-k2.5").await;
+        assert_eq!(err.category(), "auth");
+    }
+
+    #[tokio::test]
+    async fn factory_detects_moonshot_from_model_id() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "moonshot-v1-128k").await;
+        assert_eq!(err.category(), "auth");
+        assert!(err.to_string().contains("Kimi"));
+    }
+
+    #[tokio::test]
+    async fn factory_strips_kimi_prefix() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "kimi/kimi-k2.5").await;
+        assert_eq!(err.category(), "auth");
+        assert!(err.to_string().contains("Kimi"));
+    }
+
+    #[tokio::test]
+    async fn factory_uses_api_key_when_no_oauth_exists() {
+        // When auth.json has no OAuth tokens, API key env var should work
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        // Write empty auth.json (no OAuth tokens, no API key in file)
+        std::fs::write(&path, "{}").unwrap();
+
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings)
+            .with_auth_path(path)
+            .with_no_env_fallback();
+
+        // No OAuth, no env var → should fail with auth error
+        let err = expect_auth_error(&factory, "claude-opus-4-6").await;
+        assert_eq!(err.category(), "auth");
+        assert!(
+            err.to_string().contains("Anthropic"),
+            "should be Anthropic auth error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn factory_errors_when_oauth_fails_and_no_api_key() {
+        // Set up auth.json with expired OAuth tokens (refresh will fail without network)
+        // and NO API key available — should error
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        let expired_tokens = crate::llm::auth::OAuthTokens {
+            access_token: "expired-tok".into(),
+            refresh_token: "old-ref".into(),
+            expires_at: 0, // long expired
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &expired_tokens)
+            .unwrap();
+
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings)
+            .with_auth_path(path)
+            .with_no_env_fallback();
+
+        // Should fail — OAuth exists but refresh fails, no API key to fall back to
+        let err = expect_auth_error(&factory, "claude-opus-4-6").await;
+        assert!(
+            err.to_string().contains("auth") || err.to_string().contains("Auth"),
+            "should report auth failure: {err}"
+        );
     }
 
     #[tokio::test]

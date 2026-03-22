@@ -132,6 +132,8 @@ pub fn detect_provider(model: &str) -> crate::core::messages::Provider {
         Provider::Google
     } else if m.contains("minimax") {
         Provider::MiniMax
+    } else if m.contains("kimi") || m.contains("moonshot") {
+        Provider::Kimi
     } else {
         // Default to Anthropic
         Provider::Anthropic
@@ -224,12 +226,40 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         | "MiniMax-M2.1-highspeed"
         | "MiniMax-M2" => minimax_tier(0.3, 1.2),
 
+        // Kimi — K2.5 ($0.60/$3.00)
+        "kimi-k2.5" => kimi_tier(0.60, 3.00),
+
+        // Kimi — K2 standard ($0.60/$2.50)
+        "kimi-k2-0905-preview"
+        | "kimi-k2-0711-preview"
+        | "kimi-k2-thinking" => kimi_tier(0.60, 2.50),
+
+        // Kimi — K2 turbo ($1.15/$8.00)
+        "kimi-k2-turbo-preview"
+        | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00),
+
+        // Kimi — Moonshot V1 legacy
+        "moonshot-v1-8k" => kimi_tier(0.20, 2.00),
+        "moonshot-v1-32k" => kimi_tier(1.00, 3.00),
+        "moonshot-v1-128k" => kimi_tier(2.00, 5.00),
+
         _ => return None,
     })
 }
 
 /// Create a `MiniMax` pricing tier (no separate cache pricing).
 fn minimax_tier(input: f64, output: f64) -> PricingTier {
+    PricingTier {
+        input_per_million: input,
+        output_per_million: output,
+        cache_write_5m_multiplier: 1.0,
+        cache_write_1h_multiplier: 1.0,
+        cache_read_multiplier: 1.0,
+    }
+}
+
+/// Create a Kimi pricing tier (cache read handled server-side).
+fn kimi_tier(input: f64, output: f64) -> PricingTier {
     PricingTier {
         input_per_million: input,
         output_per_million: output,
@@ -288,6 +318,20 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
     // MiniMax family patterns
     if m.contains("minimax") {
         return Some(minimax_tier(0.3, 1.2));
+    }
+
+    // Kimi family patterns
+    if m.contains("kimi-k2.5") {
+        return Some(kimi_tier(0.60, 3.00));
+    }
+    if m.contains("kimi-k2") && m.contains("turbo") {
+        return Some(kimi_tier(1.15, 8.00));
+    }
+    if m.contains("kimi-k2") {
+        return Some(kimi_tier(0.60, 2.50));
+    }
+    if m.contains("moonshot") {
+        return Some(kimi_tier(1.00, 3.00));
     }
 
     None

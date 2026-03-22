@@ -20,6 +20,9 @@ pub struct ApiSettings {
     /// `MiniMax` API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimax: Option<MiniMaxApiSettings>,
+    /// Kimi API settings (optional — absent if not configured).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kimi: Option<KimiApiSettings>,
 }
 
 /// Anthropic API and OAuth settings.
@@ -187,6 +190,22 @@ impl Default for MiniMaxApiSettings {
     }
 }
 
+/// Kimi (Moonshot AI) API settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KimiApiSettings {
+    /// Base URL for the Kimi API.
+    pub base_url: String,
+}
+
+impl Default for KimiApiSettings {
+    fn default() -> Self {
+        Self {
+            base_url: "https://api.moonshot.ai/v1".to_string(),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,6 +302,34 @@ mod tests {
     fn minimax_defaults() {
         let m = MiniMaxApiSettings::default();
         assert!(m.base_url.starts_with("https://api.minimax.io"));
+    }
+
+    #[test]
+    fn api_settings_kimi_optional() {
+        let api = ApiSettings::default();
+        assert!(api.kimi.is_none());
+    }
+
+    #[test]
+    fn api_settings_kimi_serde() {
+        let json = serde_json::json!({
+            "anthropic": {},
+            "kimi": {
+                "baseUrl": "https://custom.moonshot.ai/v1"
+            }
+        });
+        let api: ApiSettings = serde_json::from_value(json).unwrap();
+        assert!(api.kimi.is_some());
+        assert_eq!(
+            api.kimi.unwrap().base_url,
+            "https://custom.moonshot.ai/v1"
+        );
+    }
+
+    #[test]
+    fn kimi_defaults() {
+        let k = KimiApiSettings::default();
+        assert!(k.base_url.starts_with("https://api.moonshot.ai"));
     }
 
     #[test]

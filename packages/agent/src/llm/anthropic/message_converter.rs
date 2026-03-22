@@ -5,13 +5,13 @@
 //! - User/assistant/tool-result message conversion
 //! - Thinking block signature handling (only include with signature)
 //! - Tool call ID remapping for cross-provider compatibility
-//! - System prompt construction with OAuth cache breakpoints
+//! - System prompt construction with cache breakpoints (all auth types)
 //! - Tool definitions with cache control
 
 use std::collections::HashMap;
 
 use crate::llm::{
-    IdFormat, build_tool_call_id_mapping, compose_context_parts, compose_context_parts_grouped,
+    IdFormat, build_tool_call_id_mapping, compose_context_parts_grouped,
     remap_tool_call_id,
 };
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ use crate::core::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::core::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
 
 use super::types::{
-    AnthropicMessageParam, AnthropicTool, CacheControl, OAUTH_SYSTEM_PROMPT_PREFIX,
+    AnthropicMessageParam, AnthropicTool, CacheControl,
     SystemPromptBlock,
 };
 
@@ -30,12 +30,15 @@ use super::types::{
 /// Convert a [`Context`] into Anthropic Messages API parameters.
 ///
 /// Returns `(system, messages, tools)` where:
-/// - `system` is the system prompt (string for API key, array of blocks for OAuth)
+/// - `system` is the system prompt as an array of blocks with cache breakpoints
 /// - `messages` is the list of Anthropic message params
 /// - `tools` is the optional tool list
+///
+/// `prefix` is an optional system prompt prefix block (e.g. OAuth identification).
+/// Caching is always applied regardless of auth type.
 pub fn convert_context(
     context: &Context,
-    is_oauth: bool,
+    prefix: Option<&str>,
 ) -> (
     Option<Value>,
     Vec<AnthropicMessageParam>,
@@ -48,10 +51,10 @@ pub fn convert_context(
     let messages = convert_messages_impl(&context.messages, &id_mapping);
 
     // Convert tools
-    let tools = context.tools.as_ref().map(|t| convert_tools(t, is_oauth));
+    let tools = context.tools.as_ref().map(|t| convert_tools(t));
 
     // Build system prompt
-    let system = build_system_prompt(context, is_oauth);
+    let system = build_system_prompt(context, prefix);
 
     (system, messages, tools)
 }
@@ -325,30 +328,34 @@ fn convert_tool_result_content(content: &ToolResultContent) -> Value {
 // System prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build the system prompt value.
+/// Build the system prompt for use by the provider.
 ///
-/// For OAuth: returns an array of [`SystemPromptBlock`]s with cache breakpoints.
-/// For API key: returns a plain concatenated string.
-fn build_system_prompt(context: &Context, is_oauth: bool) -> Option<Value> {
-    if is_oauth {
-        Some(build_system_prompt_oauth(context))
-    } else {
-        build_system_prompt_plain(context)
-    }
+/// This is the public entry point for `provider.rs` to call.
+pub fn build_system_prompt_for_provider(context: &Context, prefix: Option<&str>) -> Option<Value> {
+    build_system_prompt(context, prefix)
 }
 
-/// Build system prompt for OAuth connections with cache breakpoints.
+/// Build the system prompt value with cache breakpoints.
 ///
-/// Cache breakpoints (4-tier):
+/// Returns an array of [`SystemPromptBlock`]s with cache breakpoints for all auth types.
+/// When `prefix` is `Some`, it is prepended as the first block (e.g. OAuth identification).
+/// When `prefix` is `None` and there is no content, returns `None`.
+///
+/// Cache breakpoints:
 /// - Breakpoint 2: Last stable block (rules, system prompt) → 1h TTL
 /// - Breakpoint 3: Last volatile block (memory) → 5m TTL (default)
-fn build_system_prompt_oauth(context: &Context) -> Value {
+fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value> {
     let grouped = compose_context_parts_grouped(context);
 
     let mut blocks: Vec<SystemPromptBlock> = Vec::new();
 
-    // OAuth prefix (always first)
-    blocks.push(SystemPromptBlock::text(OAUTH_SYSTEM_PROMPT_PREFIX));
+    // Optional prefix (first block)
+    let prefix_offset = if let Some(pfx) = prefix {
+        blocks.push(SystemPromptBlock::text(pfx));
+        1
+    } else {
+        0
+    };
 
     // Stable parts (system prompt, rules — cache at 1h)
     for part in &grouped.stable {
@@ -360,16 +367,20 @@ fn build_system_prompt_oauth(context: &Context) -> Value {
         blocks.push(SystemPromptBlock::text(part));
     }
 
-    if blocks.len() <= 1 && blocks[0].text == OAUTH_SYSTEM_PROMPT_PREFIX {
-        // Only prefix — apply 5m cache to it
+    if blocks.is_empty() {
+        return None;
+    }
+
+    // Only prefix, no content
+    if blocks.len() == prefix_offset && prefix.is_some() {
         blocks[0].cache_control = Some(CacheControl {
             cache_type: "ephemeral".into(),
             ttl: None,
         });
     } else if !grouped.volatile.is_empty() {
         // Has volatile content — 1h on last stable, 5m on last volatile
-        let last_stable_idx = 1 + grouped.stable.len(); // offset by 1 for prefix
-        if last_stable_idx > 1 && last_stable_idx <= blocks.len() {
+        let last_stable_idx = prefix_offset + grouped.stable.len();
+        if last_stable_idx > prefix_offset && last_stable_idx <= blocks.len() {
             blocks[last_stable_idx - 1].cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
@@ -392,27 +403,17 @@ fn build_system_prompt_oauth(context: &Context) -> Value {
         }
     }
 
-    serde_json::to_value(&blocks).expect("SystemPromptBlock serialization")
-}
-
-/// Build system prompt for API key connections (plain string).
-fn build_system_prompt_plain(context: &Context) -> Option<Value> {
-    let parts = compose_context_parts(context);
-    if parts.is_empty() {
-        None
-    } else {
-        Some(Value::String(parts.join("\n\n")))
-    }
+    Some(serde_json::to_value(&blocks).expect("SystemPromptBlock serialization"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool conversion
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Convert context tools to Anthropic format with optional cache control.
+/// Convert context tools to Anthropic format with cache control.
 ///
-/// For OAuth: the last tool gets a 1h cache control breakpoint.
-fn convert_tools(tools: &[crate::core::tools::Tool], is_oauth: bool) -> Vec<AnthropicTool> {
+/// The last tool always gets a 1h cache control breakpoint (Breakpoint 1).
+fn convert_tools(tools: &[crate::core::tools::Tool]) -> Vec<AnthropicTool> {
     let mut result: Vec<AnthropicTool> = tools
         .iter()
         .map(|t| AnthropicTool {
@@ -423,8 +424,8 @@ fn convert_tools(tools: &[crate::core::tools::Tool], is_oauth: bool) -> Vec<Anth
         })
         .collect();
 
-    // Breakpoint 1: Last tool gets 1h cache (OAuth only)
-    if is_oauth && let Some(last) = result.last_mut() {
+    // Breakpoint 1: Last tool gets 1h cache
+    if let Some(last) = result.last_mut() {
         last.cache_control = Some(CacheControl {
             cache_type: "ephemeral".into(),
             ttl: Some("1h".into()),
@@ -441,6 +442,7 @@ fn convert_tools(tools: &[crate::core::tools::Tool], is_oauth: bool) -> Vec<Anth
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::OAUTH_SYSTEM_PROMPT_PREFIX;
     use serde_json::Map;
     use crate::core::content::AssistantContent;
     use crate::core::messages::{Context, Message, UserMessageContent};
@@ -635,24 +637,60 @@ mod tests {
     // ── System prompt ────────────────────────────────────────────────────
 
     #[test]
-    fn system_prompt_api_key_plain_string() {
+    fn system_prompt_no_prefix_returns_cached_blocks() {
         let ctx = simple_context();
-        let system = build_system_prompt(&ctx, false);
+        let system = build_system_prompt(&ctx, None);
         assert!(system.is_some());
-        assert!(system.unwrap().is_string());
+        let arr = system.unwrap();
+        assert!(arr.is_array(), "should return array, not string");
+        let blocks = arr.as_array().unwrap();
+        // No OAuth prefix block
+        assert_ne!(blocks[0]["text"], OAUTH_SYSTEM_PROMPT_PREFIX);
+        // Last block has cache_control
+        let last = blocks.last().unwrap();
+        assert!(last.get("cache_control").is_some());
     }
 
     #[test]
-    fn system_prompt_api_key_none_when_empty() {
+    fn system_prompt_no_prefix_none_when_empty() {
         let ctx = Context::default();
-        let system = build_system_prompt(&ctx, false);
+        let system = build_system_prompt(&ctx, None);
         assert!(system.is_none());
     }
 
     #[test]
-    fn system_prompt_oauth_returns_array() {
+    fn system_prompt_no_prefix_with_volatile_has_two_tiers() {
+        let ctx = Context {
+            system_prompt: Some("You are helpful.".into()),
+            rules_content: Some("Rule 1".into()),
+            skill_context: Some("Available skill: /commit".into()),
+            ..Default::default()
+        };
+        let system = build_system_prompt(&ctx, None).unwrap();
+        let blocks = system.as_array().unwrap();
+
+        // No OAuth prefix block
+        assert_ne!(blocks[0]["text"], OAUTH_SYSTEM_PROMPT_PREFIX);
+
+        // Should have cache_control with 1h on last stable, 5m on last volatile
+        let has_1h = blocks
+            .iter()
+            .any(|b| b["cache_control"]["ttl"].as_str() == Some("1h"));
+        let has_default = blocks.iter().any(|b| {
+            b.get("cache_control").is_some()
+                && (b["cache_control"].get("ttl").is_none() || b["cache_control"]["ttl"].is_null())
+        });
+        assert!(has_1h, "Should have 1h cache on stable content");
+        assert!(
+            has_default,
+            "Should have default (5m) cache on volatile content"
+        );
+    }
+
+    #[test]
+    fn system_prompt_with_prefix_returns_array() {
         let ctx = simple_context();
-        let system = build_system_prompt(&ctx, true);
+        let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX));
         assert!(system.is_some());
         let arr = system.unwrap();
         assert!(arr.is_array());
@@ -662,13 +700,13 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_oauth_has_cache_control() {
+    fn system_prompt_with_prefix_has_cache_control() {
         let ctx = Context {
             system_prompt: Some("You are helpful.".into()),
             rules_content: Some("Rule 1".into()),
             ..Default::default()
         };
-        let system = build_system_prompt(&ctx, true).unwrap();
+        let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX)).unwrap();
         let blocks = system.as_array().unwrap();
         // Last block should have cache_control
         let last = blocks.last().unwrap();
@@ -676,15 +714,14 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_oauth_with_volatile_has_two_cache_tiers() {
+    fn system_prompt_with_prefix_volatile_has_two_cache_tiers() {
         let ctx = Context {
             system_prompt: Some("You are helpful.".into()),
             rules_content: Some("Rule 1".into()),
-            // memory_content is stable — need volatile content for two tiers
             skill_context: Some("Available skill: /commit".into()),
             ..Default::default()
         };
-        let system = build_system_prompt(&ctx, true).unwrap();
+        let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX)).unwrap();
         let blocks = system.as_array().unwrap();
 
         // Should have cache_control with 1h on last stable, 5m on last volatile
@@ -705,20 +742,12 @@ mod tests {
     // ── Tool conversion ──────────────────────────────────────────────────
 
     #[test]
-    fn convert_tools_basic() {
+    fn convert_tools_always_caches_last() {
         let tools = vec![make_tool("bash"), make_tool("read")];
-        let result = convert_tools(&tools, false);
+        let result = convert_tools(&tools);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "bash");
         assert_eq!(result[1].name, "read");
-        assert!(result[0].cache_control.is_none());
-        assert!(result[1].cache_control.is_none());
-    }
-
-    #[test]
-    fn convert_tools_oauth_last_has_cache() {
-        let tools = vec![make_tool("bash"), make_tool("read")];
-        let result = convert_tools(&tools, true);
         assert!(result[0].cache_control.is_none());
         assert!(result[1].cache_control.is_some());
         assert_eq!(
@@ -730,7 +759,7 @@ mod tests {
     #[test]
     fn convert_tools_empty() {
         let tools: Vec<Tool> = vec![];
-        let result = convert_tools(&tools, true);
+        let result = convert_tools(&tools);
         assert!(result.is_empty());
     }
 
@@ -755,7 +784,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (system, messages, tools) = convert_context(&ctx, true);
+        let (system, messages, tools) = convert_context(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX));
         assert!(system.is_some());
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "user");

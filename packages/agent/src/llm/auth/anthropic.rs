@@ -214,20 +214,12 @@ pub async fn load_server_auth_with_client(
 
     // 3. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
-        match maybe_refresh_tokens(oauth, config, client).await {
-            Ok((tokens, refreshed)) => {
-                if refreshed {
-                    tracing::info!("persisting refreshed provider tokens");
-                    let _ =
-                        super::storage::save_provider_oauth_tokens(auth_path, "anthropic", &tokens);
-                }
-                return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
-            }
-            Err(e) => {
-                tracing::warn!("Anthropic OAuth refresh failed: {e}");
-                // Fall through to API key
-            }
+        let (tokens, refreshed) = maybe_refresh_tokens(oauth, config, client).await?;
+        if refreshed {
+            tracing::info!("persisting refreshed provider tokens");
+            let _ = super::storage::save_provider_oauth_tokens(auth_path, "anthropic", &tokens);
         }
+        return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
     }
 
     // 4. API key
@@ -380,6 +372,34 @@ mod tests {
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_oauth_failure_does_not_fallback_to_api_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Save expired OAuth tokens (will fail to refresh without network)
+        let expired_tokens = OAuthTokens {
+            access_token: "expired-tok".to_string(),
+            refresh_token: "old-ref".to_string(),
+            expires_at: 0, // long expired
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &expired_tokens)
+            .unwrap();
+        // Also save an API key (should NOT be used as fallback)
+        crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-should-not-use")
+            .unwrap();
+
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, None).await;
+
+        // Should return Err (OAuth refresh failed), NOT Ok(Some(ApiKey))
+        assert!(
+            result.is_err(),
+            "expected Err when OAuth refresh fails, got: {:?}",
+            result
+        );
     }
 
     #[tokio::test]

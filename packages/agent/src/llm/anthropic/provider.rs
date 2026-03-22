@@ -13,7 +13,6 @@ use tracing::{debug, error, info, instrument};
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::llm::{compose_context_parts, compose_context_parts_grouped};
 use crate::core::messages::Context;
 
 use super::cache_pruning::{
@@ -25,7 +24,7 @@ use super::stream_handler::{create_stream_state, process_sse_event};
 use super::types::{
     AnthropicAuth, AnthropicConfig, AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent,
     AnthropicTool, CacheControl, DEFAULT_MAX_OUTPUT_TOKENS, OAUTH_SYSTEM_PROMPT_PREFIX,
-    SystemPromptBlock, get_claude_model,
+    get_claude_model,
 };
 
 /// Default base URL for the Anthropic API.
@@ -142,91 +141,21 @@ impl AnthropicProvider {
 
     /// Build the system prompt parameter.
     ///
-    /// For API key auth: returns a single string.
-    /// For OAuth auth: returns an array of `SystemPromptBlock`s with cache breakpoints.
+    /// Returns an array of `SystemPromptBlock`s with cache breakpoints for all auth types.
+    /// OAuth auth gets a prefix block; API key auth does not.
     fn build_system_param(&self, context: &Context) -> Option<Value> {
-        if self.is_oauth() {
-            self.build_oauth_system_param(context)
+        let prefix = if self.is_oauth() {
+            Some(
+                self.config
+                    .provider_settings
+                    .system_prompt_prefix
+                    .as_deref()
+                    .unwrap_or(OAUTH_SYSTEM_PROMPT_PREFIX),
+            )
         } else {
-            Self::build_simple_system_param(context)
-        }
-    }
-
-    /// Build a simple string system prompt (API key mode).
-    fn build_simple_system_param(context: &Context) -> Option<Value> {
-        let parts = compose_context_parts(context);
-        if parts.is_empty() {
-            return None;
-        }
-        Some(json!(parts.join("\n\n")))
-    }
-
-    /// Build multi-block system prompt with cache breakpoints (OAuth mode).
-    fn build_oauth_system_param(&self, context: &Context) -> Option<Value> {
-        let grouped = compose_context_parts_grouped(context);
-
-        let prefix = self
-            .config
-            .provider_settings
-            .system_prompt_prefix
-            .as_deref()
-            .unwrap_or(OAUTH_SYSTEM_PROMPT_PREFIX);
-
-        let mut blocks: Vec<SystemPromptBlock> = Vec::new();
-
-        // OAuth prefix block
-        blocks.push(SystemPromptBlock::text(prefix));
-
-        // Stable blocks (system prompt, rules, memory)
-        for part in &grouped.stable {
-            blocks.push(SystemPromptBlock::text(part));
-        }
-
-        // Volatile blocks (dynamic rules, skills, subagent results, tasks)
-        for part in &grouped.volatile {
-            blocks.push(SystemPromptBlock::text(part));
-        }
-
-        if blocks.is_empty() {
-            return None;
-        }
-
-        // Apply cache breakpoints
-        if !grouped.volatile.is_empty() {
-            // Breakpoint 2: Last stable block → 1h TTL
-            let last_stable_idx = 1 + grouped.stable.len(); // +1 for prefix
-            if last_stable_idx > 0 && last_stable_idx <= blocks.len() {
-                blocks[last_stable_idx - 1].cache_control = Some(CacheControl {
-                    cache_type: "ephemeral".into(),
-                    ttl: Some("1h".into()),
-                });
-            }
-            // Breakpoint 3: Last volatile block → 5m default
-            if let Some(last) = blocks.last_mut() {
-                last.cache_control = Some(CacheControl {
-                    cache_type: "ephemeral".into(),
-                    ttl: None,
-                });
-            }
-        } else if !grouped.stable.is_empty() {
-            // Only stable: last stable block → 1h TTL
-            if let Some(last) = blocks.last_mut() {
-                last.cache_control = Some(CacheControl {
-                    cache_type: "ephemeral".into(),
-                    ttl: Some("1h".into()),
-                });
-            }
-        } else {
-            // Only prefix → 5m default
-            if let Some(last) = blocks.last_mut() {
-                last.cache_control = Some(CacheControl {
-                    cache_type: "ephemeral".into(),
-                    ttl: None,
-                });
-            }
-        }
-
-        Some(serde_json::to_value(&blocks).unwrap_or_default())
+            None
+        };
+        super::message_converter::build_system_prompt_for_provider(context, prefix)
     }
 
     /// Build tool definitions with cache breakpoints.
@@ -246,10 +175,8 @@ impl AnthropicProvider {
             })
             .collect();
 
-        // Breakpoint 1: Last tool → 1h TTL (OAuth only)
-        if self.is_oauth()
-            && let Some(last) = anthropic_tools.last_mut()
-        {
+        // Breakpoint 1: Last tool → 1h TTL
+        if let Some(last) = anthropic_tools.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
@@ -349,8 +276,8 @@ impl AnthropicProvider {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
 
-        // Cache cold detection and pruning (OAuth only)
-        if self.is_oauth() && self.last_api_call_ms > 0 {
+        // Cache cold detection and pruning
+        if self.last_api_call_ms > 0 {
             if is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
                 let msg_count = messages.len();
                 messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
@@ -367,10 +294,8 @@ impl AnthropicProvider {
             }
         }
 
-        // Breakpoint 4: cache last user message (OAuth only)
-        if self.is_oauth() {
-            Self::apply_cache_to_last_user_message(&mut messages);
-        }
+        // Breakpoint 4: cache last user message
+        Self::apply_cache_to_last_user_message(&mut messages);
 
         let request = self.build_request(context, options, messages);
 
@@ -661,11 +586,18 @@ mod tests {
     // ── System prompt ───────────────────────────────────────────────────
 
     #[test]
-    fn system_param_simple_api_key() {
+    fn system_param_api_key_returns_cached_blocks() {
         let provider = AnthropicProvider::new(api_key_config());
         let ctx = context_with_system("You are helpful.");
         let param = provider.build_system_param(&ctx).unwrap();
-        assert_eq!(param.as_str().unwrap(), "You are helpful.");
+        // API key now returns array with cache breakpoints, not a plain string
+        assert!(param.is_array(), "should return array, not string");
+        let blocks = param.as_array().unwrap();
+        // No OAuth prefix block
+        assert_ne!(blocks[0]["text"], OAUTH_SYSTEM_PROMPT_PREFIX);
+        // Last block has cache_control
+        let last = blocks.last().unwrap();
+        assert!(last.get("cache_control").is_some());
     }
 
     #[test]
@@ -738,7 +670,7 @@ mod tests {
     }
 
     #[test]
-    fn build_tools_api_key_no_cache() {
+    fn build_tools_api_key_has_cache() {
         let provider = AnthropicProvider::new(api_key_config());
         let ctx = Context {
             tools: Some(vec![crate::core::tools::Tool {
@@ -757,7 +689,12 @@ mod tests {
         let tools = provider.build_tools(&ctx).unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "bash");
-        assert!(tools[0].cache_control.is_none()); // No cache for API key
+        // API key now gets cache too
+        assert!(tools[0].cache_control.is_some());
+        assert_eq!(
+            tools[0].cache_control.as_ref().unwrap().ttl.as_deref(),
+            Some("1h")
+        );
     }
 
     #[test]

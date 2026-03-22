@@ -77,6 +77,13 @@ enum ModelFilteringService {
             groups.append(ModelGroup(tier: "MiniMax", models: minimax))
         }
 
+        // Kimi models
+        let kimi = models.filter { $0.isKimi && $0.isLatestGeneration }
+            |> sortByTier
+        if !kimi.isEmpty {
+            groups.append(ModelGroup(tier: "Kimi", models: kimi))
+        }
+
         // Legacy: everything marked legacy + unknown providers
         var legacyModels: [ModelInfo] = []
         legacyModels.append(contentsOf: (models.filter { $0.isAnthropic && !$0.isLatestGeneration }
@@ -85,8 +92,10 @@ enum ModelFilteringService {
             |> sortByTier))
         legacyModels.append(contentsOf: (models.filter { $0.isGemini && !$0.isLatestGeneration }
             |> sortByTier))
+        legacyModels.append(contentsOf: (models.filter { $0.isKimi && !$0.isLatestGeneration }
+            |> sortByTier))
         legacyModels.append(contentsOf: models.filter {
-            !$0.isAnthropic && !$0.isCodex && !$0.isGemini && !$0.isMiniMax
+            !$0.isAnthropic && !$0.isCodex && !$0.isGemini && !$0.isMiniMax && !$0.isKimi
         })
 
         if !legacyModels.isEmpty {
@@ -119,6 +128,8 @@ enum ModelFilteringService {
                         filter: { $0.isGemini }),
             ProviderDef(id: "minimax", displayName: "MiniMax", color: .tronRose, icon: "IconMiniMax",
                         filter: { $0.isMiniMax }),
+            ProviderDef(id: "kimi", displayName: "Kimi", color: .tronIndigo, icon: "IconKimi",
+                        filter: { $0.isKimi }),
         ]
 
         var groups: [ProviderGroup] = []
@@ -191,6 +202,13 @@ enum ModelFilteringService {
         if id.contains("minimax") {
             return "MiniMax M2"
         }
+        // Kimi
+        if id.contains("kimi") || id.contains("moonshot") {
+            if id.contains("k2.5") { return "Kimi K2.5" }
+            if id.contains("k2") { return "Kimi K2" }
+            if id.contains("moonshot") { return "Moonshot V1" }
+            return "Kimi"
+        }
         return model.name
     }
 
@@ -251,6 +269,7 @@ enum ModelFilteringService {
         if model.isCodex { return 1 }
         if model.isGemini { return 2 }
         if model.isMiniMax { return 3 }
+        if model.isKimi { return 4 }
         return 99
     }
 }

@@ -36,6 +36,7 @@ pub mod error_parsing;
 pub mod google;
 #[path = "shared/health.rs"]
 pub mod health;
+pub mod kimi;
 #[path = "shared/id_remapping.rs"]
 pub mod id_remapping;
 pub mod minimax;

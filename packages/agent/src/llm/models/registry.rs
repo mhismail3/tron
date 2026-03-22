@@ -9,6 +9,7 @@
 
 use crate::llm::anthropic::types::{all_claude_model_ids, get_claude_model};
 use crate::llm::google::types::{all_gemini_model_ids, get_gemini_model};
+use crate::llm::kimi::types::{all_kimi_model_ids, get_kimi_model};
 use crate::llm::minimax::types::{all_minimax_model_ids, get_minimax_model};
 use crate::llm::openai::types::{all_openai_model_ids, get_openai_model};
 use crate::core::messages::Provider;
@@ -33,6 +34,7 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
                 Some(Provider::Google)
             }
             "minimax" if get_minimax_model(bare_model).is_some() => Some(Provider::MiniMax),
+            "kimi" | "moonshot" if get_kimi_model(bare_model).is_some() => Some(Provider::Kimi),
             _ => None,
         };
     }
@@ -49,6 +51,9 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
     }
     if get_minimax_model(model_id).is_some() {
         return Some(Provider::MiniMax);
+    }
+    if get_kimi_model(model_id).is_some() {
+        return Some(Provider::Kimi);
     }
 
     // Unknown model.
@@ -72,6 +77,7 @@ pub fn is_model_supported(model_id: &str) -> bool {
         || get_openai_model(bare).is_some()
         || get_gemini_model(bare).is_some()
         || get_minimax_model(bare).is_some()
+        || get_kimi_model(bare).is_some()
 }
 
 /// Check if a model supports image inputs.
@@ -89,6 +95,9 @@ pub fn model_supports_images(model_id: &str) -> bool {
         return m.supports_images;
     }
     if let Some(m) = get_minimax_model(bare) {
+        return m.supports_images;
+    }
+    if let Some(m) = get_kimi_model(bare) {
         return m.supports_images;
     }
     true
@@ -112,6 +121,9 @@ pub fn model_context_window(model_id: &str) -> u64 {
     if let Some(m) = get_minimax_model(bare) {
         return m.context_window;
     }
+    if let Some(m) = get_kimi_model(bare) {
+        return m.context_window;
+    }
     200_000
 }
 
@@ -121,6 +133,7 @@ pub fn all_model_ids() -> Vec<&'static str> {
     ids.extend(all_openai_model_ids());
     ids.extend(all_gemini_model_ids());
     ids.extend(all_minimax_model_ids());
+    ids.extend(all_kimi_model_ids());
     ids
 }
 
@@ -438,6 +451,59 @@ mod tests {
         assert_eq!(model_context_window("unknown-model"), 200_000);
     }
 
+    // ── Kimi detection ──────────────────────────────────────────────────
+
+    #[test]
+    fn detect_registry_lookup_kimi() {
+        assert_eq!(
+            detect_provider_from_model(KIMI_K2_5),
+            Some(Provider::Kimi)
+        );
+    }
+
+    #[test]
+    fn detect_registry_lookup_kimi_thinking() {
+        assert_eq!(
+            detect_provider_from_model(KIMI_K2_THINKING),
+            Some(Provider::Kimi)
+        );
+    }
+
+    #[test]
+    fn detect_registry_lookup_moonshot() {
+        assert_eq!(
+            detect_provider_from_model(MOONSHOT_V1_128K),
+            Some(Provider::Kimi)
+        );
+    }
+
+    #[test]
+    fn detect_explicit_prefix_kimi() {
+        assert_eq!(
+            detect_provider_from_model("kimi/kimi-k2.5"),
+            Some(Provider::Kimi)
+        );
+    }
+
+    #[test]
+    fn supported_model_kimi() {
+        assert!(is_model_supported("kimi-k2.5"));
+        assert!(is_model_supported("moonshot-v1-8k"));
+    }
+
+    #[test]
+    fn kimi_image_support() {
+        assert!(model_supports_images("kimi-k2.5"));
+        assert!(!model_supports_images("kimi-k2-0905-preview"));
+        assert!(!model_supports_images("moonshot-v1-8k"));
+    }
+
+    #[test]
+    fn context_window_kimi() {
+        assert_eq!(model_context_window(KIMI_K2_5), 262_144);
+        assert_eq!(model_context_window(MOONSHOT_V1_8K), 8_192);
+    }
+
     // ── all_model_ids ────────────────────────────────────────────────────
 
     #[test]
@@ -448,7 +514,7 @@ mod tests {
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
-        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax = 32
-        assert_eq!(ids.len(), 32);
+        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi = 41
+        assert_eq!(ids.len(), 41);
     }
 }
