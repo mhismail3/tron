@@ -1485,22 +1485,61 @@ base64url_encode() {
 
 cmd_login() {
     local label=""
+    local host_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --label) label="$2"; shift 2 ;;
+            --host) host_override="$2"; shift 2 ;;
             --status) cmd_login_status; return ;;
             -h|--help)
                 echo ""
-                echo "Usage: tron login [--label <name>] [--status]"
+                echo "Usage: tron login [--label <name>] [--host <hostname>] [--status]"
                 echo ""
-                echo "  --label <name>   Save as named account (for multi-account switching)"
-                echo "  --status         Show current auth status"
+                echo "  --label <name>       Account label (default: \$USER@hostname)"
+                echo "  --host <hostname>    Override hostname portion of default label"
+                echo "  --status             Show current auth status"
+                echo ""
+                echo "Each machine should have its own OAuth session to avoid token"
+                echo "conflicts. The default label uses your hostname to ensure this."
                 echo ""
                 return ;;
             *) print_error "Unknown option: $1"; return 1 ;;
         esac
     done
+
+    # Show existing accounts
+    if [[ -f "$AUTH_FILE" ]]; then
+        local account_count
+        account_count=$(jq -r '.providers.anthropic.accounts // [] | length' "$AUTH_FILE" 2>/dev/null)
+        if [[ "$account_count" -gt 0 ]]; then
+            local now_ms=$(( $(date +%s) * 1000 ))
+            echo ""
+            echo -e "${DIM}Existing Anthropic accounts:${NC}"
+            jq -r --argjson now "$now_ms" '
+                .providers.anthropic.accounts | to_entries[] |
+                .value.label as $l |
+                .value.oauth.expiresAt as $e |
+                (.key + 1) as $i |
+                if $e > $now then
+                    "  \($i). \($l)  (expires \($e / 1000 | strftime("%Y-%m-%d %H:%M")) \u2014 \u001b[32mvalid\u001b[0m)"
+                else
+                    "  \($i). \($l)  (expires \($e / 1000 | strftime("%Y-%m-%d %H:%M")) \u2014 \u001b[31mEXPIRED\u001b[0m)"
+                end
+            ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+            echo ""
+        fi
+    fi
+
+    # Determine account label
+    if [[ -z "$label" ]]; then
+        local hostname_short
+        hostname_short="${host_override:-$(hostname -s 2>/dev/null || hostname | cut -d. -f1)}"
+        local default_label="${USER:-default}@${hostname_short}"
+        printf "Account label [${BOLD}%s${NC}]: " "$default_label"
+        read -r label
+        label="${label:-$default_label}"
+    fi
 
     # Generate PKCE
     local code_verifier
@@ -1512,9 +1551,7 @@ cmd_login() {
 
     echo ""
     print_status "Opening browser for authentication..."
-    if [[ -n "$label" ]]; then
-        echo -e "  Account label: ${BOLD}${label}${NC}"
-    fi
+    echo -e "  Account: ${BOLD}${label}${NC}"
     echo ""
     echo "If browser doesn't open, visit:"
     echo "$auth_url"
@@ -1522,23 +1559,48 @@ cmd_login() {
 
     open "$auth_url"
 
-    printf "Paste the authorization code: "
-    read -r auth_code
+    echo "After signing in, copy the FULL URL from your browser's address bar."
+    printf "Paste the redirect URL: "
+    read -r auth_input
     echo ""
 
-    if [[ -z "$auth_code" ]]; then
-        print_error "No authorization code provided"
+    if [[ -z "$auth_input" ]]; then
+        print_error "No input provided"
         return 1
     fi
 
-    local code="${auth_code%%#*}"
-    local state="${auth_code#*#}"
+    local code=""
+    local state=""
+
+    if [[ "$auth_input" == http* ]]; then
+        # Parse code and state from URL query parameters
+        code=$(python3 -c "
+import sys, urllib.parse
+q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
+print(q.get('code',[''])[0])
+" "$auth_input" 2>/dev/null)
+        state=$(python3 -c "
+import sys, urllib.parse
+q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
+print(q.get('state',[''])[0])
+" "$auth_input" 2>/dev/null)
+    else
+        # Assume raw authorization code
+        code="$auth_input"
+        state="$code_verifier"
+    fi
+
+    if [[ -z "$code" ]]; then
+        print_error "Could not extract authorization code from input"
+        return 1
+    fi
 
     print_status "Exchanging authorization code..."
 
     local response
     response=$(curl -s -w "\n%{http_code}" -X POST "$OAUTH_TOKEN_ENDPOINT" \
         -H "Content-Type: application/json" \
+        -H "User-Agent: tron-agent/1.0" \
         -d "{
             \"grant_type\": \"authorization_code\",
             \"client_id\": \"${OAUTH_CLIENT_ID}\",
@@ -1571,36 +1633,24 @@ cmd_login() {
 
     local tmp_file="${AUTH_FILE}.tmp"
 
-    if [[ -n "$label" ]]; then
-        jq --arg label "$label" \
-           --arg at "$access_token" \
-           --arg rt "$refresh_token" \
-           --argjson ea "$expires_at" \
-           '
-           .providers.anthropic.accounts //= [] |
-           (.providers.anthropic.accounts | map(.label) | index($label)) as $idx |
-           if $idx != null then
-               .providers.anthropic.accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
-           else
-               .providers.anthropic.accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
-           end |
-           .lastUpdated = (now | todate)
-           ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
-        chmod 600 "$AUTH_FILE"
+    # Always save as named account (label is always set now)
+    jq --arg label "$label" \
+       --arg at "$access_token" \
+       --arg rt "$refresh_token" \
+       --argjson ea "$expires_at" \
+       '
+       .providers.anthropic.accounts //= [] |
+       (.providers.anthropic.accounts | map(.label) | index($label)) as $idx |
+       if $idx != null then
+           .providers.anthropic.accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
+       else
+           .providers.anthropic.accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
+       end |
+       .lastUpdated = (now | todate)
+       ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
+    chmod 600 "$AUTH_FILE"
 
-        print_success "Saved tokens for account \"${label}\""
-    else
-        jq --arg at "$access_token" \
-           --arg rt "$refresh_token" \
-           --argjson ea "$expires_at" \
-           '
-           .providers.anthropic.oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea} |
-           .lastUpdated = (now | todate)
-           ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
-        chmod 600 "$AUTH_FILE"
-
-        print_success "Saved OAuth tokens"
-    fi
+    print_success "Saved tokens for account \"${label}\""
 
     local hours_left=$(( expires_in / 3600 ))
     echo -e "  ${DIM}Token expires in ~${hours_left}h${NC}"

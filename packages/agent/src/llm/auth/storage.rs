@@ -169,6 +169,40 @@ pub fn clear_all_auth(path: &Path) -> Result<(), AuthError> {
     }
 }
 
+/// RAII guard that holds an advisory file lock. Lock released on drop.
+pub struct AuthFileLock {
+    _file: std::fs::File,
+}
+
+/// Acquire a blocking exclusive advisory lock on `{auth_path}.lock`.
+///
+/// Uses `flock(2)` to coordinate token refresh across multiple Tron server
+/// processes on the same machine. The lock file is created if absent (0o600).
+/// The lock is released when the returned guard is dropped.
+#[allow(unsafe_code)]
+pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock> {
+    use std::os::unix::io::AsRawFd;
+
+    let lock_path = auth_path.with_extension("lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(AuthFileLock { _file: lock_file })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,5 +426,48 @@ mod tests {
             Some(crate::llm::auth::types::GoogleOAuthEndpoint::Antigravity)
         );
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
+    }
+
+    #[allow(unsafe_code)]
+    #[test]
+    fn file_lock_is_exclusive() {
+        use std::os::unix::io::AsRawFd;
+
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        let _lock = acquire_auth_file_lock(&path).unwrap();
+
+        // Try non-blocking lock from another fd — should fail
+        let lock_path = path.with_extension("lock");
+        let lock_file2 = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        let ret = unsafe { libc::flock(lock_file2.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_ne!(ret, 0, "second lock should fail with LOCK_NB");
+
+        drop(_lock);
+
+        // Now it should succeed
+        let ret = unsafe { libc::flock(lock_file2.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_eq!(ret, 0, "lock should succeed after first lock dropped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_lock_creates_lock_file_with_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        let _lock = acquire_auth_file_lock(&path).unwrap();
+
+        let lock_path = path.with_extension("lock");
+        assert!(lock_path.exists());
+        let perms = std::fs::metadata(&lock_path).unwrap().permissions();
+        assert_eq!(perms.mode() & 0o777, 0o600);
     }
 }

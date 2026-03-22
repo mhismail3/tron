@@ -192,19 +192,26 @@ pub async fn load_server_auth_with_client(
         } else {
             None
         }
-        .or_else(|| accounts.first());
+        .or_else(|| {
+            // Prefer account whose label ends with @{current_hostname}
+            if let Some(host) = resolve_hostname() {
+                let suffix = format!("@{host}");
+                if let Some(acct) = accounts.iter().find(|a| a.label.ends_with(&suffix)) {
+                    return Some(acct);
+                }
+            }
+            accounts.first()
+        });
 
         if let Some(acct) = account {
-            let (tokens, refreshed) = maybe_refresh_tokens(&acct.oauth, config, client).await?;
-            if refreshed {
-                tracing::info!(account = %acct.label, "persisting refreshed account tokens");
-                let _ = super::storage::save_account_oauth_tokens(
-                    auth_path,
-                    "anthropic",
-                    &acct.label,
-                    &tokens,
-                );
-            }
+            let (tokens, _refreshed) = maybe_refresh_tokens(
+                auth_path,
+                Some(&acct.label),
+                &acct.oauth,
+                config,
+                client,
+            )
+            .await?;
             return Ok(Some(ServerAuth::from_oauth(
                 &tokens,
                 Some(acct.label.clone()),
@@ -214,11 +221,8 @@ pub async fn load_server_auth_with_client(
 
     // 3. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
-        let (tokens, refreshed) = maybe_refresh_tokens(oauth, config, client).await?;
-        if refreshed {
-            tracing::info!("persisting refreshed provider tokens");
-            let _ = super::storage::save_provider_oauth_tokens(auth_path, "anthropic", &tokens);
-        }
+        let (tokens, _refreshed) =
+            maybe_refresh_tokens(auth_path, None, oauth, config, client).await?;
         return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
     }
 
@@ -230,11 +234,58 @@ pub async fn load_server_auth_with_client(
     Ok(None)
 }
 
+/// Read the current tokens for a specific account (or legacy oauth) from auth.json.
+fn read_tokens_from_disk(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
+) -> Option<OAuthTokens> {
+    let pa = super::storage::get_provider_auth(auth_path, "anthropic")?;
+    if let Some(label) = account_label {
+        pa.accounts?
+            .into_iter()
+            .find(|a| a.label == label)
+            .map(|a| a.oauth)
+    } else {
+        pa.oauth
+    }
+}
+
+/// Save refreshed tokens back to auth.json (called while holding file lock).
+fn persist_tokens(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
+    tokens: &OAuthTokens,
+) {
+    let result = if let Some(label) = account_label {
+        tracing::info!(account = label, "persisting refreshed account tokens");
+        super::storage::save_account_oauth_tokens(auth_path, "anthropic", label, tokens)
+    } else {
+        tracing::info!("persisting refreshed provider tokens");
+        super::storage::save_provider_oauth_tokens(auth_path, "anthropic", tokens)
+    };
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "failed to persist refreshed tokens");
+    }
+}
+
+/// Check if a refresh failure indicates the refresh token was already consumed.
+///
+/// HTTP 400 with "invalid_grant" means the single-use refresh token was used
+/// by another process/server between our read and our refresh attempt.
+fn is_stale_token_error(e: &AuthError) -> bool {
+    matches!(e, AuthError::OAuth { status: 400, message } if message.contains("invalid_grant"))
+}
+
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
 ///
-/// Serializes concurrent refresh attempts to prevent invalidating the
-/// refresh token with a second concurrent call.
+/// Serializes concurrent refresh attempts with both a process-local lock
+/// (for async tasks) and a file-level advisory lock (for multiple processes).
+/// Re-reads from disk after acquiring the file lock in case another process
+/// refreshed while we waited. On stale-token errors (HTTP 400 invalid_grant),
+/// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
     tokens: &OAuthTokens,
     config: &OAuthConfig,
     client: &reqwest::Client,
@@ -249,35 +300,130 @@ async fn maybe_refresh_tokens(
         return Ok((tokens.clone(), false));
     }
 
-    // Serialize concurrent refresh attempts
+    // Serialize concurrent refresh attempts within this process
     let lock = REFRESH_LOCK.get_or_init(|| TokioMutex::new(()));
     let _guard = lock.lock().await;
 
-    // Re-check expiry after acquiring lock (another caller may have refreshed)
+    // Re-check expiry after acquiring process lock
     if now_ms() + buffer_ms < tokens.expires_at {
         return Ok((tokens.clone(), false));
     }
 
+    // Acquire file lock (cross-process safety)
+    let _file_lock = super::storage::acquire_auth_file_lock(auth_path)
+        .map_err(AuthError::Io)?;
+
+    // Re-read from disk — another process may have refreshed while we waited.
+    // Also prefer disk tokens for refresh (may have a newer refresh_token).
+    let disk_tokens = read_tokens_from_disk(auth_path, account_label);
+    if let Some(ref dt) = disk_tokens {
+        if now_ms() + buffer_ms < dt.expires_at {
+            return Ok((dt.clone(), true));
+        }
+    }
+    let effective_tokens = disk_tokens.unwrap_or_else(|| tokens.clone());
+
     let client = client.clone();
     let config = config.clone();
-    super::refresh::maybe_refresh(
-        tokens,
-        config.token_expiry_buffer_seconds,
-        "anthropic",
-        |refresh_tok| {
-            let client = client.clone();
-            let config = config.clone();
-            let refresh_tok = refresh_tok.to_owned();
-            async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
-        },
-    )
-    .await
+    let auth_path = auth_path.to_path_buf();
+    let account_label_owned = account_label.map(|s| s.to_string());
+
+    let do_refresh = |tok: &OAuthTokens| {
+        let client = client.clone();
+        let config = config.clone();
+        let tok = tok.clone();
+        async move {
+            super::refresh::maybe_refresh(
+                &tok,
+                config.token_expiry_buffer_seconds,
+                "anthropic",
+                |refresh_tok| {
+                    let client = client.clone();
+                    let config = config.clone();
+                    let refresh_tok = refresh_tok.to_owned();
+                    async move {
+                        refresh_token_with_client(&config, &refresh_tok, &client).await
+                    }
+                },
+            )
+            .await
+        }
+    };
+
+    match do_refresh(&effective_tokens).await {
+        Ok((new_tokens, true)) => {
+            persist_tokens(
+                &auth_path,
+                account_label_owned.as_deref(),
+                &new_tokens,
+            );
+            Ok((new_tokens, true))
+        }
+        Ok(not_refreshed) => Ok(not_refreshed),
+        Err(e) if is_stale_token_error(&e) => {
+            tracing::info!("refresh token consumed by another process, re-reading auth.json");
+
+            let retry_tokens = read_tokens_from_disk(&auth_path, account_label_owned.as_deref());
+            match retry_tokens {
+                Some(rt) if now_ms() + buffer_ms < rt.expires_at => {
+                    Ok((rt, true))
+                }
+                Some(rt) => {
+                    tracing::info!("retrying refresh with updated token from disk");
+                    match do_refresh(&rt).await {
+                        Ok((new_tokens, true)) => {
+                            persist_tokens(
+                                &auth_path,
+                                account_label_owned.as_deref(),
+                                &new_tokens,
+                            );
+                            Ok((new_tokens, true))
+                        }
+                        Ok(not_refreshed) => Ok(not_refreshed),
+                        Err(retry_err) => Err(retry_err),
+                    }
+                }
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Token endpoint response.
 ///
 /// Uses the shared [`super::types::OAuthTokenRefreshResponse`] type.
 type TokenResponse = super::types::OAuthTokenRefreshResponse;
+
+/// Get the short hostname (before the first '.'), e.g. "macbook" from "macbook.local".
+#[allow(unsafe_code)]
+fn short_hostname() -> Option<String> {
+    let mut buf = [0u8; 256];
+    let ret = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+    if ret != 0 {
+        return None;
+    }
+    let name = std::ffi::CStr::from_bytes_until_nul(&buf)
+        .ok()?
+        .to_str()
+        .ok()?;
+    Some(name.split('.').next().unwrap_or(name).to_string())
+}
+
+#[cfg(not(test))]
+fn resolve_hostname() -> Option<String> {
+    short_hostname()
+}
+
+#[cfg(test)]
+fn resolve_hostname() -> Option<String> {
+    MOCK_HOSTNAME.with(|h| h.borrow().clone())
+}
+
+#[cfg(test)]
+thread_local! {
+    static MOCK_HOSTNAME: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -432,9 +578,262 @@ mod tests {
         let auth = result.unwrap();
         assert_eq!(auth.token(), "personal-tok");
 
-        // No preference → first account
+        // No preference, no hostname match → first account
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
         let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "work-tok");
+    }
+
+    #[test]
+    fn short_hostname_strips_domain() {
+        let result = short_hostname();
+        assert!(result.is_some());
+        assert!(!result.unwrap().contains('.'));
+    }
+
+    #[tokio::test]
+    async fn account_selection_prefers_hostname_match() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens_a = OAuthTokens {
+            access_token: "tok-a".to_string(),
+            refresh_token: "ref-a".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens_b = OAuthTokens {
+            access_token: "tok-b".to_string(),
+            refresh_token: "ref-b".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-a", &tokens_a,
+        ).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-b", &tokens_b,
+        ).unwrap();
+
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-b".to_string()));
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "tok-b");
+    }
+
+    #[tokio::test]
+    async fn account_selection_explicit_preference_overrides_hostname() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens_a = OAuthTokens {
+            access_token: "tok-a".to_string(),
+            refresh_token: "ref-a".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens_b = OAuthTokens {
+            access_token: "tok-b".to_string(),
+            refresh_token: "ref-b".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-a", &tokens_a,
+        ).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-b", &tokens_b,
+        ).unwrap();
+
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-a".to_string()));
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, Some("user@host-b"))
+            .await
+            .unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "tok-b");
+    }
+
+    #[tokio::test]
+    async fn account_selection_falls_back_to_first_when_no_hostname_match() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens_work = OAuthTokens {
+            access_token: "tok-work".to_string(),
+            refresh_token: "ref-work".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens_personal = OAuthTokens {
+            access_token: "tok-personal".to_string(),
+            refresh_token: "ref-personal".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "work", &tokens_work,
+        ).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "personal", &tokens_personal,
+        ).unwrap();
+
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("unknown-host".to_string()));
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "tok-work");
+    }
+
+    #[tokio::test]
+    async fn account_selection_no_hostname_available() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens_a = OAuthTokens {
+            access_token: "tok-a".to_string(),
+            refresh_token: "ref-a".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens_b = OAuthTokens {
+            access_token: "tok-b".to_string(),
+            refresh_token: "ref-b".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-a", &tokens_a,
+        ).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host-b", &tokens_b,
+        ).unwrap();
+
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "tok-a");
+    }
+
+    #[tokio::test]
+    async fn account_selection_single_account_no_hostname() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "tok-alice".to_string(),
+            refresh_token: "ref-alice".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "alice", &tokens,
+        ).unwrap();
+
+        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("myhost".to_string()));
+        let cfg = default_config();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "tok-alice");
+    }
+
+    #[test]
+    fn stale_token_error_detected() {
+        let err = AuthError::OAuth {
+            status: 400,
+            message: r#"{"error":"invalid_grant"}"#.to_string(),
+        };
+        assert!(is_stale_token_error(&err));
+    }
+
+    #[test]
+    fn non_stale_errors_not_detected() {
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 400,
+            message: "bad_request".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 401,
+            message: "invalid_grant".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 503,
+            message: "server_error".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test",
+        ))));
+    }
+
+    #[test]
+    fn read_tokens_from_disk_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "disk-tok".to_string(),
+            refresh_token: "disk-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host", &tokens,
+        )
+        .unwrap();
+
+        let loaded = read_tokens_from_disk(&path, Some("user@host")).unwrap();
+        assert_eq!(loaded.access_token, "disk-tok");
+
+        assert!(read_tokens_from_disk(&path, Some("nonexistent")).is_none());
+    }
+
+    #[test]
+    fn read_tokens_from_disk_legacy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "legacy-tok".to_string(),
+            refresh_token: "legacy-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens)
+            .unwrap();
+
+        let loaded = read_tokens_from_disk(&path, None).unwrap();
+        assert_eq!(loaded.access_token, "legacy-tok");
+    }
+
+    #[tokio::test]
+    async fn maybe_refresh_uses_disk_tokens_after_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Write expired tokens initially
+        let expired = OAuthTokens {
+            access_token: "expired-tok".to_string(),
+            refresh_token: "old-ref".to_string(),
+            expires_at: 0,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host", &expired,
+        )
+        .unwrap();
+
+        // Simulate another process having refreshed: write fresh tokens to disk
+        let fresh = OAuthTokens {
+            access_token: "fresh-tok".to_string(),
+            refresh_token: "new-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, "anthropic", "user@host", &fresh,
+        )
+        .unwrap();
+
+        let cfg = default_config();
+        let client = reqwest::Client::new();
+        let (tokens, refreshed) =
+            maybe_refresh_tokens(&path, Some("user@host"), &expired, &cfg, &client)
+                .await
+                .unwrap();
+
+        // Should return the fresh tokens from disk without making HTTP call
+        assert!(refreshed);
+        assert_eq!(tokens.access_token, "fresh-tok");
     }
 }
