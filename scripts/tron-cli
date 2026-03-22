@@ -614,7 +614,10 @@ cmd_login() {
     local code_challenge
     code_challenge=$(printf '%s' "$code_verifier" | openssl dgst -sha256 -binary | base64url_encode)
 
-    local auth_url="${OAUTH_AUTH_ENDPOINT}?code=true&client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_REDIRECT_URI}'))")&scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_SCOPES}'))")&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
+    local encoded_redirect_uri encoded_scope
+    encoded_redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OAUTH_REDIRECT_URI}''', safe=''))")
+    encoded_scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OAUTH_SCOPES}''', safe=''))")
+    local auth_url="${OAUTH_AUTH_ENDPOINT}?code=true&client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${encoded_redirect_uri}&scope=${encoded_scope}&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
 
     echo ""
     print_status "Opening browser for authentication..."
