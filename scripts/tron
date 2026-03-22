@@ -1157,6 +1157,8 @@ cmd_install() {
 
     # Start service
     print_status "Starting service..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
     launchctl load "$PLIST_PATH"
     sleep 3
 
