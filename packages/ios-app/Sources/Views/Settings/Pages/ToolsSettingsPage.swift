@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ToolsSettingsPage: View {
+    @Environment(\.dismiss) private var dismiss
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
@@ -20,6 +21,13 @@ struct ToolsSettingsPage: View {
                     Text("Tools")
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
         }

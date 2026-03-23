@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SessionSettingsPage: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
     let settingsState: SettingsState
     @Binding var confirmArchive: Bool
@@ -137,6 +138,13 @@ struct SessionSettingsPage: View {
                     Text("Session")
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
             .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
