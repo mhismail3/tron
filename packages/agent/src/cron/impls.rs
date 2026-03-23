@@ -191,7 +191,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         let denied_tools = tool_restrictions
             .map(|r| r.resolve_denied_tools(&tool_names))
             .unwrap_or_default();
-        // Interactive tools (AskUserQuestion, RenderAppUI, etc.)
+        // Interactive tools (AskUserQuestion, RenderUI, etc.)
         // are removed automatically by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory

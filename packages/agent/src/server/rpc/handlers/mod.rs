@@ -37,6 +37,7 @@ pub mod message;
 pub mod model;
 pub mod notifications;
 pub mod plan;
+pub mod render_ui;
 pub mod sandbox;
 pub mod session;
 pub mod settings;
@@ -183,6 +184,10 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Canvas
     registry.register("canvas.get", canvas::GetCanvasHandler);
+
+    // RenderUI
+    registry.register("renderUI.getStatus", render_ui::GetStatusHandler);
+    registry.register("renderUI.getCanvasUrl", render_ui::GetCanvasUrlHandler);
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);
@@ -462,6 +467,7 @@ pub(crate) mod test_helpers {
             agent_deps: None,
             server_start_time: Instant::now(),
             browser_provider: None,
+            render_ui_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
@@ -500,6 +506,7 @@ pub(crate) mod test_helpers {
             agent_deps: None,
             server_start_time: Instant::now(),
             browser_provider: None,
+            render_ui_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
@@ -539,8 +546,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            119,
-            "expected 119 methods, got {}",
+            121,
+            "expected 121 methods, got {}",
             reg.methods().len()
         );
     }

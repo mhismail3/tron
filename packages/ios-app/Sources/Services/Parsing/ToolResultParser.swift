@@ -15,25 +15,27 @@ enum ToolResultParser {
         SubagentResultParser.parseWaitForSubagent(from: tool)
     }
 
-    // MARK: - RenderAppUI
+    // MARK: - RenderUI
 
-    static func parseRenderAppUI(from tool: ToolUseData) -> RenderAppUIChipData? {
+    static func parseRenderUI(from tool: ToolUseData) -> RenderUIChipData? {
         let canvasId = ToolArgumentParser.string("canvasId", from: tool.arguments) ?? tool.toolCallId
+        let url = ToolArgumentParser.string("url", from: tool.arguments) ?? ""
         let title = ToolArgumentParser.string("title", from: tool.arguments)
 
-        let status: RenderAppUIStatus
+        let status: RenderUIStatus
         switch tool.status {
         case .running:
             status = .rendering
         case .success:
-            status = .complete
+            status = .ready
         case .error:
             status = .error
         }
 
-        return RenderAppUIChipData(
+        return RenderUIChipData(
             toolCallId: tool.toolCallId,
             canvasId: canvasId,
+            url: url,
             title: title,
             status: status,
             errorMessage: tool.status == .error ? tool.result : nil

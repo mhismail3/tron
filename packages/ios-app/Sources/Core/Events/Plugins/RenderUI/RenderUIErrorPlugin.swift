@@ -1,11 +1,9 @@
 import Foundation
 
-/// Plugin for handling UI render error events.
-/// These events signal errors during UI canvas rendering.
-enum UIRenderErrorPlugin: DispatchableEventPlugin {
-    static let eventType = "agent.ui_render_error"
-
-    // MARK: - Event Data
+/// Plugin for handling render_ui.error events.
+/// Shows error in the chip and sheet.
+enum RenderUIErrorPlugin: DispatchableEventPlugin {
+    static let eventType = "render_ui.error"
 
     struct EventData: StandardEventData {
         let type: String
@@ -19,14 +17,10 @@ enum UIRenderErrorPlugin: DispatchableEventPlugin {
         }
     }
 
-    // MARK: - Result
-
     struct Result: EventResult {
         let canvasId: String
         let error: String
     }
-
-    // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
@@ -38,6 +32,6 @@ enum UIRenderErrorPlugin: DispatchableEventPlugin {
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
         guard let r = result as? Result else { return }
-        context.handleUIRenderError(r)
+        context.handleRenderUIError(r)
     }
 }

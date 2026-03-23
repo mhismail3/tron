@@ -13,7 +13,6 @@ extension ChatViewModel: ToolEventContext {
     // - currentTurnToolCalls: [ToolCallRecord]
     // - askUserQuestionCalledInTurn: Bool (via askUserQuestionState)
     // - browserStatus: BrowserGetStatusResult? (via browserState)
-    // - renderAppUIChipTracker: RenderAppUIChipTracker
 
     /// Safari URL for in-app browser (ToolEventContext)
     var safariURL: URL? {

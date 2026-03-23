@@ -232,7 +232,7 @@ Without `save`, screenshots are ephemeral (you still see the image, but it is no
 
 **AskUserQuestion** presents multiple-choice questions. Stops the current turn — do NOT output text after calling it. Put your recommended option first with "(Recommended)" in the label.
 
-**RenderAppUI** renders native iOS UI components (forms, charts, lists, tables, wizards). Stops the current turn.
+**RenderUI** renders interactive UI from a component spec. Pass `root` and `elements` keys. The user sees the UI in real-time in an in-app browser. Stops the current turn.
 
 **NotifyApp** sends push notifications to the user's iOS devices. **Default to notifying** — if you're unsure whether something warrants a notification, send it. The user can always dismiss a notification; they can't retroactively learn about something you didn't tell them.
 

@@ -20,7 +20,7 @@ enum MessageContent: Equatable {
     case askUserQuestion(AskUserQuestionToolData)
     case answeredQuestions(questionCount: Int)
     case subagent(SubagentToolData)
-    case renderAppUI(RenderAppUIChipData)
+    case renderUI(RenderUIChipData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
     // These provide cleaner API for common system event patterns
@@ -130,12 +130,12 @@ enum MessageContent: Equatable {
             case .failed:
                 return data.error ?? "Subagent failed"
             }
-        case .renderAppUI(let data):
+        case .renderUI(let data):
             switch data.status {
             case .rendering:
                 return "Rendering \(data.displayTitle)..."
-            case .complete:
-                return "\(data.displayTitle) rendered"
+            case .ready:
+                return "\(data.displayTitle) ready"
             case .error:
                 return data.errorMessage ?? "Error generating"
             }

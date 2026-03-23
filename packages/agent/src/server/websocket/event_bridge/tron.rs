@@ -3,6 +3,7 @@ use crate::core::events::TronEvent;
 
 use super::hook;
 use super::message;
+use super::render_ui;
 use super::routed::{BridgedEvent, make_rpc, session_scope};
 use super::session;
 use super::streaming;
@@ -21,6 +22,7 @@ pub(super) fn tron_event_to_bridged(event: &TronEvent) -> BridgedEvent {
         .or_else(|| hook::convert(event))
         .or_else(|| streaming::convert(event))
         .or_else(|| session::convert(event))
+        .or_else(|| render_ui::convert(event))
         .unwrap_or_else(|| BridgedEvent {
             rpc_event: make_rpc(event, event.event_type(), Some(json!({}))),
             scope: session_scope(event.session_id()),

@@ -11,7 +11,8 @@
 //! - **Search**: text/AST unified search
 //! - **Web**: `WebFetch`, `WebSearch`
 //! - **Browser**: `BrowseTheWeb` (includes openURL action)
-//! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`, `RenderAppUI`
+//! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`
+//! - **RenderUI**: interactive UI rendering via pluggable backend
 //! - **Automations**: Managed via `manage-automations` skill (Read/Write/Edit on `~/.tron/workspace/automations.json`)
 //! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
 //!
@@ -38,6 +39,7 @@ pub(crate) mod utils;
 // Tool implementation modules
 pub mod browser;
 pub mod fs;
+pub mod render_ui;
 pub mod search;
 pub mod subagent;
 pub mod system;

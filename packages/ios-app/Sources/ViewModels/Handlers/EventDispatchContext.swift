@@ -49,12 +49,10 @@ import Foundation
     func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result)
 }
 
-@MainActor protocol UICanvasEventHandler: AnyObject {
-    func handleUIRenderStart(_ result: UIRenderStartPlugin.Result)
-    func handleUIRenderChunk(_ result: UIRenderChunkPlugin.Result)
-    func handleUIRenderComplete(_ result: UIRenderCompletePlugin.Result)
-    func handleUIRenderError(_ result: UIRenderErrorPlugin.Result)
-    func handleUIRenderRetry(_ result: UIRenderRetryPlugin.Result)
+@MainActor protocol RenderUIEventHandler: AnyObject {
+    func handleRenderUIStarted(_ result: RenderUIStartedPlugin.Result)
+    func handleRenderUIReady(_ result: RenderUIReadyPlugin.Result)
+    func handleRenderUIError(_ result: RenderUIErrorPlugin.Result)
 }
 
 @MainActor protocol TaskEventHandler: AnyObject {
@@ -90,6 +88,6 @@ import Foundation
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TaskEventHandler, ServerEventHandler,
+    RenderUIEventHandler, TaskEventHandler, ServerEventHandler,
     WorktreeEventHandler, DeviceEventHandler, EventDispatchLogger {}
 

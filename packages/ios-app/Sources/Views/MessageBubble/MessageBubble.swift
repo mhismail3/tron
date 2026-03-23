@@ -92,10 +92,12 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .renderAppUI:
-                if let chipData = ToolResultParser.parseRenderAppUI(from: tool) {
-                    RenderAppUIChip(data: chipData) {
-                        onTap?(.renderAppUI(chipData))
+            case .renderUI:
+                if let chipData = ToolResultParser.parseRenderUI(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        RenderUIChip(data: chipData) {
+                            onTap?(.renderUI(chipData))
+                        }
                     }
                 } else {
                     ToolResultRouter(tool: tool)
@@ -182,9 +184,11 @@ struct MessageBubble: View {
                 onTap?(.subagent(data))
             }
 
-        case .renderAppUI(let data):
-            RenderAppUIChip(data: data) {
-                onTap?(.renderAppUI(data))
+        case .renderUI(let data):
+            if #available(iOS 26.0, *) {
+                RenderUIChip(data: data) {
+                    onTap?(.renderUI(data))
+                }
             }
         }
     }

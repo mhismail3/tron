@@ -72,7 +72,7 @@ extension ChatViewModel: MessagingContext {
     // - resetStreamingManager() in ChatViewModel+TurnLifecycleContext.swift
     // - setSessionProcessing(_:) in ChatViewModel+TurnLifecycleContext.swift
     // - handleAgentError(_:) in ChatViewModel+Events.swift
-    // - logVerbose(_:) in ChatViewModel+UICanvasContext.swift
+    // - logVerbose(_:) in ChatViewModel.swift
     // - logDebug/Info/Warning/Error in ChatViewModel.swift
     // MessagingContext conformance uses those existing implementations.
 

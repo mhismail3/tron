@@ -84,7 +84,7 @@ extension ChatViewModel {
             return true
         case .askUserQuestion(let data) where data.toolCallId == toolCallId:
             return true
-        case .renderAppUI(let data) where data.toolCallId == toolCallId:
+        case .renderUI(let data) where data.toolCallId == toolCallId:
             return true
         default:
             return false

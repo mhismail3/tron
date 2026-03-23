@@ -66,8 +66,8 @@ final class ChatViewModel {
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)
     let subagentState = SubagentState()
-    /// UI canvas state (for RenderAppUI tool)
-    let uiCanvasState = UICanvasState()
+    /// RenderUI state (for container-based json-render)
+    let renderUIState = RenderUIState()
     /// Task state (for persistent task tracking)
     let taskState = TaskState()
     /// Thinking state (for extended thinking display)
@@ -172,8 +172,8 @@ final class ChatViewModel {
     let toolEventCoordinator = ToolEventCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
-    /// Coordinates UI canvas rendering event handling
-    let uiCanvasCoordinator = UICanvasCoordinator()
+    /// Coordinates RenderUI event handling
+    let renderUICoordinator = RenderUICoordinator()
     /// Coordinates browser event handling and session lifecycle
     let browserCoordinator = BrowserCoordinator()
     /// Coordinates AskUserQuestion event handling and user interaction
@@ -194,10 +194,6 @@ final class ChatViewModel {
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
-
-    /// Tracks RenderAppUI chip messages - consolidates race condition handling
-    /// Single source of truth for canvasId → messageId mapping, placeholder IDs, and pending events
-    let renderAppUIChipTracker = RenderAppUIChipTracker()
 
     let audioRecorder: AudioRecorder
 
@@ -559,7 +555,6 @@ final class ChatViewModel {
 
     func clearMessages() {
         clearAllMessages()
-        renderAppUIChipTracker.clearAll()
     }
 
     /// Add an in-chat notification when model is switched

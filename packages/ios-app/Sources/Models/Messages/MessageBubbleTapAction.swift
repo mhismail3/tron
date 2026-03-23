@@ -9,7 +9,7 @@ enum MessageBubbleTapAction {
     case thinking(String)
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     case subagent(SubagentToolData)
-    case renderAppUI(RenderAppUIChipData)
+    case renderUI(RenderUIChipData)
     case taskManager(TaskManagerChipData)
     case notifyApp(NotifyAppChipData)
     case commandTool(CommandToolChipData)

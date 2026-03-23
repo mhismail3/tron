@@ -48,7 +48,7 @@ enum ToolRegistry {
     static let specialToolNames: Set<String> = [
         "askuserquestion",
         "spawnsubagent", "queryagent", "waitforagents",
-        "renderappui",
+        "renderui",
         "taskmanager",
         "notifyapp"
     ]

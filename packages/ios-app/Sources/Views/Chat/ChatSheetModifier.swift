@@ -53,9 +53,9 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showSubagentDetail()
                 }
             }
-            .onChange(of: viewModel.uiCanvasState.showSheet) { _, show in
+            .onChange(of: viewModel.renderUIState.showSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showUICanvas()
+                    sheetCoordinator.showRenderUI()
                 }
             }
             .onChange(of: viewModel.taskState.showSheet) { _, show in
@@ -84,7 +84,7 @@ struct ChatSheetModifier: ViewModifier {
         viewModel.browserState.showBrowserWindow = false
         viewModel.askUserQuestionState.showSheet = false
         viewModel.subagentState.showDetailSheet = false
-        viewModel.uiCanvasState.showSheet = false
+        viewModel.renderUIState.showSheet = false
         viewModel.taskState.showSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()

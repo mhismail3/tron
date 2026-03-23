@@ -5,8 +5,7 @@ import UIKit
 ///
 /// Responsibilities:
 /// - Creating tool messages on tool.start
-/// - Handling special tools: AskUserQuestion, RenderAppUI, BrowseTheWeb openURL action
-/// - Managing RenderAppUI chip race conditions (chunk vs tool_start order)
+/// - Handling special tools: AskUserQuestion, RenderUI, BrowseTheWeb openURL action
 /// - Tracking tool calls for the current turn
 /// - Enqueuing tool events for ordered UI processing
 ///
@@ -29,7 +28,7 @@ final class ToolEventCoordinator {
     ) {
         // Skip tools with custom UI flows that need full tool_start data
         let kind = ToolKind(toolName: pluginResult.toolName)
-        if kind == .renderAppUI { return }
+        if kind == .renderUI { return }
 
         // Finalize any active thinking message before tool chip appears
         context.finalizeThinkingMessageIfNeeded()
@@ -210,35 +209,7 @@ final class ToolEventCoordinator {
         handleToolStartSideEffects(isOpenURL: isOpenURL, openURL: openURL, context: context)
 
         // Create the tool message
-        var message = ChatMessage(role: .assistant, content: .toolUse(tool))
-
-        // Special handling for RenderAppUI
-        if ToolKind(toolName: pluginResult.toolName) == .renderAppUI {
-            let handled = handleRenderAppUIToolStart(pluginResult, message: &message, context: context)
-            if handled {
-                // Existing chip was updated, don't create new message
-                return
-            }
-        } else if let pendingRender = context.renderAppUIChipTracker.consumePendingRenderStart(toolCallId: pluginResult.toolCallId) {
-            // Handle pending UI render (race condition: chunk arrived before tool start)
-            let chipData = RenderAppUIChipData(
-                toolCallId: pluginResult.toolCallId,
-                canvasId: pendingRender.canvasId,
-                title: pendingRender.title,
-                status: .rendering,
-                errorMessage: nil
-            )
-            message.content = .renderAppUI(chipData)
-
-            // Track in tracker (single source of truth)
-            context.renderAppUIChipTracker.createChipFromToolStart(
-                canvasId: pendingRender.canvasId,
-                messageId: message.id,
-                toolCallId: pluginResult.toolCallId,
-                title: pendingRender.title
-            )
-            context.logDebug("Applied pending UI render start to new tool message: \(pendingRender.canvasId)")
-        }
+        let message = ChatMessage(role: .assistant, content: .toolUse(tool))
 
         // Append message to chat
         context.appendToMessages(message)
@@ -434,73 +405,4 @@ final class ToolEventCoordinator {
         }
     }
 
-    /// Handle RenderAppUI tool start - manages chip creation/update.
-    ///
-    /// - Returns: `true` if an existing chip was updated (caller should not create new message),
-    ///            `false` if a new chip was created in the message (caller should add the message)
-    private func handleRenderAppUIToolStart(
-        _ pluginResult: ToolStartPlugin.Result,
-        message: inout ChatMessage,
-        context: ToolEventContext
-    ) -> Bool {
-        // Parse arguments to get canvasId
-        guard let argsData = pluginResult.formattedArguments.data(using: .utf8),
-              let argsJson = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
-              let canvasId = argsJson["canvasId"] as? String else {
-            return false
-        }
-
-        // Check if chip already exists from ui_render_chunk (via tracker)
-        if let chipState = context.renderAppUIChipTracker.getChip(canvasId: canvasId),
-           let messageId = chipState.messageId,
-           let index = MessageFinder.indexById(messageId, in: context.messages),
-           case .renderAppUI(var chipData) = context.messages[index].content {
-            // Chip already exists - update toolCallId to real one
-            let oldToolCallId = chipData.toolCallId
-            chipData.toolCallId = pluginResult.toolCallId
-            context.messages[index].content = .renderAppUI(chipData)
-
-            // Update tracker atomically
-            context.renderAppUIChipTracker.updateToolCallId(canvasId: canvasId, realToolCallId: pluginResult.toolCallId)
-
-            // Update currentToolMessages with correct ID
-            context.currentToolMessages[context.messages[index].id] = context.messages[index]
-
-            // Track tool call for persistence
-            let record = ToolCallRecord(
-                toolCallId: pluginResult.toolCallId,
-                toolName: pluginResult.toolName,
-                arguments: pluginResult.formattedArguments
-            )
-            context.currentTurnToolCalls.append(record)
-
-            context.logInfo("Updated existing RenderAppUI chip toolCallId: \(canvasId), \(oldToolCallId) → \(pluginResult.toolCallId)")
-
-            // Signal to caller that existing chip was updated, don't create new message
-            return true
-        }
-
-        // No existing chip - create one now
-        let title = argsJson["title"] as? String
-        let chipData = RenderAppUIChipData(
-            toolCallId: pluginResult.toolCallId,
-            canvasId: canvasId,
-            title: title,
-            status: .rendering,
-            errorMessage: nil
-        )
-        message.content = .renderAppUI(chipData)
-
-        // Track in tracker (single source of truth)
-        context.renderAppUIChipTracker.createChipFromToolStart(
-            canvasId: canvasId,
-            messageId: message.id,
-            toolCallId: pluginResult.toolCallId,
-            title: title
-        )
-        context.logDebug("Created RenderAppUI chip from tool_start: \(canvasId)")
-
-        // Signal to caller that new message should be added
-        return false
-    }
 }

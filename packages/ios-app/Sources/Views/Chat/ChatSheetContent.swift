@@ -84,8 +84,14 @@ struct ChatSheetContent: View {
         case .subagentDetail:
             subagentDetailSheet
 
-        case .uiCanvas:
-            UICanvasSheet(state: viewModel.uiCanvasState)
+        case .renderUI:
+            if let url = viewModel.renderUIState.activeURL {
+                RenderUISheetView(
+                    url: url,
+                    title: viewModel.renderUIState.activeTitle,
+                    status: viewModel.renderUIState.status
+                )
+            }
 
         case .taskList:
             TaskListSheet(

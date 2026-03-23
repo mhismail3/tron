@@ -100,7 +100,7 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// Tool requested stop (`AskUserQuestion`, `RenderAppUI`).
+    /// Tool requested stop (`AskUserQuestion`, `RenderUI`).
     ToolStop,
     /// Unrecoverable error.
     Error,

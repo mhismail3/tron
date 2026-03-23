@@ -57,6 +57,8 @@ pub struct RpcContext {
     pub server_start_time: Instant,
     /// Browser provider for browser automation (None = browser not available).
     pub browser_provider: Option<Arc<dyn crate::tools::browser::provider::BrowserProvider>>,
+    /// Render UI provider for json-render-server (None = render UI not available).
+    pub render_ui_provider: Option<Arc<dyn crate::tools::render_ui::provider::RenderUIProvider>>,
     /// MLX transcription engine (lazily loaded via `OnceLock`).
     pub transcription_engine: Arc<OnceLock<Arc<MlxEngine>>>,
     /// Embedding controller for vector search (None = embeddings not loaded).

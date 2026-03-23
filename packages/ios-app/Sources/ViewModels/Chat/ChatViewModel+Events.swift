@@ -539,33 +539,6 @@ extension ChatViewModel {
         }
     }
 
-    // MARK: - UI Canvas Event Handlers
-
-    func handleUIRenderStart(_ pluginResult: UIRenderStartPlugin.Result) {
-        // Delegate to coordinator for all UI render start handling
-        uiCanvasCoordinator.handleUIRenderStart(pluginResult, context: self)
-    }
-
-    func handleUIRenderChunk(_ pluginResult: UIRenderChunkPlugin.Result) {
-        // Delegate to coordinator for all UI render chunk handling
-        uiCanvasCoordinator.handleUIRenderChunk(pluginResult, context: self)
-    }
-
-    func handleUIRenderComplete(_ pluginResult: UIRenderCompletePlugin.Result) {
-        // Delegate to coordinator for all UI render complete handling
-        uiCanvasCoordinator.handleUIRenderComplete(pluginResult, context: self)
-    }
-
-    func handleUIRenderError(_ pluginResult: UIRenderErrorPlugin.Result) {
-        // Delegate to coordinator for all UI render error handling
-        uiCanvasCoordinator.handleUIRenderError(pluginResult, context: self)
-    }
-
-    func handleUIRenderRetry(_ pluginResult: UIRenderRetryPlugin.Result) {
-        // Delegate to coordinator for all UI render retry handling
-        uiCanvasCoordinator.handleUIRenderRetry(pluginResult, context: self)
-    }
-
     // MARK: - Task Event Handlers
 
     func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {

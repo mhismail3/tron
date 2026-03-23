@@ -172,14 +172,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
-    func testToolGeneratingSkipsRenderAppUI() async throws {
-        let result = ToolGeneratingPlugin.Result(toolName: "RenderAppUI", toolCallId: "gen_render")
-
-        coordinator.handleToolGenerating(result, context: mockContext)
-
-        XCTAssertEqual(mockContext.messages.count, 0)
-    }
-
     func testToolStartUpdatesDuplicateFromGenerating() async throws {
         // Given: tool_generating already created a chip with empty arguments
         let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_first")
@@ -547,78 +539,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.startBrowserStreamIfNeededCalled)
     }
 
-    // MARK: - RenderAppUI Tool Tests
-
-    func testRenderAppUIToolStartCreatesChip() async throws {
-        // Given: A RenderAppUI tool start
-        let event = ToolStartPlugin.Result(
-            toolName: "RenderAppUI",
-            toolCallId: "render_123",
-            arguments: ["canvasId": AnyCodable("canvas_abc"), "title": AnyCodable("My App")],
-            formattedArguments: "{\"canvasId\": \"canvas_abc\", \"title\": \"My App\"}"
-        )
-
-        // When: Handling tool start (no prior chunk)
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Should create RenderAppUI chip message
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .renderAppUI(let chipData) = mockContext.messages[0].content {
-            XCTAssertEqual(chipData.toolCallId, "render_123")
-            XCTAssertEqual(chipData.canvasId, "canvas_abc")
-            XCTAssertEqual(chipData.title, "My App")
-            XCTAssertEqual(chipData.status, .rendering)
-        } else {
-            XCTFail("Expected renderAppUI content")
-        }
-
-        // Then: Should track in chip tracker
-        XCTAssertTrue(mockContext.renderAppUIChipTracker.hasChip(canvasId: "canvas_abc"))
-    }
-
-    func testRenderAppUIToolStartUpdatesExistingChipFromChunk() async throws {
-        // Given: A chip already exists from earlier chunk (with placeholder toolCallId)
-        let messageId = UUID()
-        let existingMessage = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .renderAppUI(RenderAppUIChipData(
-                toolCallId: "pending_canvas_xyz",
-                canvasId: "canvas_xyz",
-                title: "My App",
-                status: .rendering,
-                errorMessage: nil
-            ))
-        )
-        mockContext.messages.append(existingMessage)
-        _ = mockContext.renderAppUIChipTracker.createChipFromChunk(
-            canvasId: "canvas_xyz",
-            messageId: messageId,
-            title: "My App"
-        )
-
-        // Given: Tool start arrives with real toolCallId
-        let event = ToolStartPlugin.Result(
-            toolName: "RenderAppUI",
-            toolCallId: "render_real_456",
-            arguments: ["canvasId": AnyCodable("canvas_xyz"), "title": AnyCodable("My App")],
-            formattedArguments: "{\"canvasId\": \"canvas_xyz\", \"title\": \"My App\"}"
-        )
-
-        // When: Handling tool start
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Should NOT create new message (update existing)
-        XCTAssertEqual(mockContext.messages.count, 1)
-
-        // Then: Should update toolCallId to real one
-        if case .renderAppUI(let chipData) = mockContext.messages[0].content {
-            XCTAssertEqual(chipData.toolCallId, "render_real_456")
-        } else {
-            XCTFail("Expected renderAppUI content")
-        }
-    }
-
     // MARK: - Tool End Tests
 
     func testToolEndEnqueuesForProcessing() async throws {
@@ -851,7 +771,6 @@ final class MockToolEventContext: ToolEventContext {
     var askUserQuestionCalledInTurn: Bool = false
     var browserStatus: BrowserGetStatusResult?
     var safariURL: URL?
-    let renderAppUIChipTracker = RenderAppUIChipTracker()
     var showBrowserWindow: Bool = false
     var browserDismissal: BrowserDismissal = .none
 

@@ -23,9 +23,6 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
     /// Safari URL for in-app browser
     var safariURL: URL? { get set }
 
-    /// RenderAppUI chip tracker for managing UI canvas chips
-    var renderAppUIChipTracker: RenderAppUIChipTracker { get }
-
     // MARK: - Streaming Management
 
     /// Flush any pending text updates before tool processing

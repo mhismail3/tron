@@ -4,7 +4,7 @@ import Foundation
 /// Eliminates scattered `.lowercased() == "..."` comparisons.
 enum ToolKind: Sendable, Equatable {
     case askUserQuestion
-    case renderAppUI
+    case renderUI
     case browseTheWeb
     case bash
     case read
@@ -24,7 +24,7 @@ enum ToolKind: Sendable, Equatable {
     init(toolName: String) {
         switch toolName.lowercased() {
         case "askuserquestion":   self = .askUserQuestion
-        case "renderappui":       self = .renderAppUI
+        case "renderui":          self = .renderUI
         case "browsetheweb":      self = .browseTheWeb
         case "bash":              self = .bash
         case "read":              self = .read

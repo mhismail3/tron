@@ -127,11 +127,11 @@ struct ChatSheetTests {
         #expect(sheet.id == "subagent")
     }
 
-    @Test("UI canvas sheet has consistent id")
-    func testUICanvasId() {
-        let sheet = ChatSheet.uiCanvas
+    @Test("Render UI sheet has consistent id")
+    func testRenderUIId() {
+        let sheet = ChatSheet.renderUI
 
-        #expect(sheet.id == "uiCanvas")
+        #expect(sheet.id == "renderUI")
     }
 
     @Test("Task list sheet has consistent id")
@@ -255,7 +255,7 @@ struct ChatSheetTests {
             .compactionDetail(compactionData),
             .askUserQuestion,
             .subagentDetail,
-            .uiCanvas,
+            .renderUI,
             .taskList,
             .taskDetail(taskData),
             .notifyApp(notifyData),
@@ -537,13 +537,13 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .subagentDetail)
     }
 
-    @Test("showUICanvas creates UI canvas sheet")
-    func testShowUICanvasCreatesSheet() {
+    @Test("showRenderUI creates render UI sheet")
+    func testShowRenderUICreatesSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showUICanvas()
+        coordinator.showRenderUI()
 
-        #expect(coordinator.activeSheet == .uiCanvas)
+        #expect(coordinator.activeSheet == .renderUI)
     }
 
     @Test("showTaskList creates task list sheet")

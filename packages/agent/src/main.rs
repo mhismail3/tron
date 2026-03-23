@@ -324,9 +324,18 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         tron::tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
 
-    // 9: RenderAppUI
+    // 9: RenderUI
+    let render_ui_provider: Arc<dyn tron::tools::render_ui::provider::RenderUIProvider> = Arc::new(
+        tron::tools::render_ui::providers::lazy::LazyRenderUIProvider::new(
+            Arc::new(tron::tools::render_ui::providers::stub::StubProvider),
+            tron::tools::render_ui::providers::lazy::DiscoveryParams {
+                provider_name: None,
+                executable_path: None,
+            },
+        ),
+    );
     registry.register(Arc::new(
-        tron::tools::ui::render_app_ui::RenderAppUITool::new(),
+        tron::tools::render_ui::render_ui::RenderUITool::new(render_ui_provider),
     ));
 
     // 11: TaskManager
@@ -865,6 +874,7 @@ async fn main() -> Result<()> {
         agent_deps,
         server_start_time: std::time::Instant::now(),
         browser_provider: browser_provider.clone(),
+        render_ui_provider: None, // TODO: wire render UI provider discovery
         transcription_engine,
         embedding_controller,
         subagent_manager: shared_subagent_manager,
@@ -1511,6 +1521,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_provider: None,
+            render_ui_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
@@ -1704,6 +1715,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_provider: None,
+            render_ui_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,

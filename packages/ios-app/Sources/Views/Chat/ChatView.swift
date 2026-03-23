@@ -441,19 +441,8 @@ struct ChatView: View {
                                         )
                                     case .subagent(let data):
                                         viewModel.subagentState.showDetails(with: data)
-                                    case .renderAppUI(let data):
-                                        Task {
-                                            let loaded = await viewModel.uiCanvasState.loadFromServer(
-                                                canvasId: data.canvasId,
-                                                rpcClient: rpcClient
-                                            )
-                                            if loaded {
-                                                viewModel.uiCanvasState.activeCanvasId = data.canvasId
-                                                viewModel.uiCanvasState.showSheet = true
-                                            } else {
-                                                viewModel.showErrorAlert("Canvas not found")
-                                            }
-                                        }
+                                    case .renderUI(let data):
+                                        viewModel.renderUIState.showCanvas(data.canvasId)
                                     case .taskManager(let data):
                                         sheetCoordinator.showTaskDetail(data)
                                     case .notifyApp(let data):

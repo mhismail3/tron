@@ -26,6 +26,8 @@ mod routed;
 mod session;
 #[path = "event_bridge/streaming.rs"]
 mod streaming;
+#[path = "event_bridge/render_ui.rs"]
+mod render_ui;
 #[path = "event_bridge/tool.rs"]
 mod tool;
 #[path = "event_bridge/tron.rs"]

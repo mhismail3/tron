@@ -858,6 +858,33 @@ tron_events! {
         branch_preserved: bool,
         deleted: bool,
     } => "worktree.released",
+
+    // -- RenderUI --
+
+    /// RenderUI started — opens WKWebView sheet on iOS.
+    RenderUIStarted {
+        #[serde(rename = "canvasId")]
+        canvas_id: String,
+        url: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+    } => "render_ui.started",
+
+    /// RenderUI ready — server confirms render is complete.
+    RenderUIReady {
+        #[serde(rename = "canvasId")]
+        canvas_id: String,
+        url: String,
+    } => "render_ui.ready",
+
+    /// RenderUI error — rendering failed.
+    RenderUIError {
+        #[serde(rename = "canvasId")]
+        canvas_id: String,
+        error: String,
+    } => "render_ui.error",
 }
 
 impl TronEvent {
@@ -1645,10 +1672,27 @@ mod tests {
                 strategy: "merge".into(),
             },
             TronEvent::WorktreeReleased {
-                base,
+                base: base.clone(),
                 final_commit: Some("cafebabe".into()),
                 branch_preserved: true,
                 deleted: true,
+            },
+            TronEvent::RenderUIStarted {
+                base: base.clone(),
+                canvas_id: "c1".into(),
+                url: "http://localhost:9250/canvas/c1".into(),
+                title: Some("Test".into()),
+                tool_call_id: "call-1".into(),
+            },
+            TronEvent::RenderUIReady {
+                base: base.clone(),
+                canvas_id: "c1".into(),
+                url: "http://localhost:9250/canvas/c1".into(),
+            },
+            TronEvent::RenderUIError {
+                base,
+                canvas_id: "c1".into(),
+                error: "container died".into(),
             },
         ];
 

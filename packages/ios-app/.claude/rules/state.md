@@ -17,7 +17,7 @@ paths:
 | `SubagentState` | Tracks active sub-agents, events |
 | `ThinkingState` | Thinking/extended thinking |
 | `TodoState` | Todo list state |
-| `UICanvasState` | Dynamic UI rendering |
+| `RenderUIState` | Container-based UI rendering via WKWebView |
 | `InputBarState` | Input field state |
 | `SheetState` | Active sheet management |
 

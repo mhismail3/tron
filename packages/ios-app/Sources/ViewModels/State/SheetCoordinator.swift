@@ -116,9 +116,9 @@ final class SheetCoordinator {
         present(.subagentDetail)
     }
 
-    /// Show UI canvas sheet
-    func showUICanvas() {
-        present(.uiCanvas)
+    /// Show RenderUI sheet (WKWebView)
+    func showRenderUI() {
+        present(.renderUI)
     }
 
     /// Show task list sheet (from toolbar menu)

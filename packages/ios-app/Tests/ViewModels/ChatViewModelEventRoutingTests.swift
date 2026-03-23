@@ -276,33 +276,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertTrue(viewModel.askUserQuestionCalledInTurn)
     }
 
-    func test_toolStart_renderAppUI_createsChip() {
-        // Given
-        let initialCount = viewModel.messages.count
-        let result = makeToolStartResult(
-            toolName: "RenderAppUI",
-            toolCallId: "toolu_render123",
-            arguments: [
-                "canvasId": AnyCodable("canvas_test"),
-                "title": AnyCodable("Test App")
-            ]
-        )
-
-        // When
-        viewModel.handleToolStart(result)
-
-        // Then - RenderAppUI chip should be created
-        XCTAssertEqual(viewModel.messages.count, initialCount + 1)
-
-        if let lastMessage = viewModel.messages.last,
-           case .renderAppUI(let chipData) = lastMessage.content {
-            XCTAssertEqual(chipData.canvasId, "canvas_test")
-            XCTAssertEqual(chipData.status, .rendering)
-        } else {
-            XCTFail("Expected renderAppUI message content")
-        }
-    }
-
     // MARK: - Tool End Routing Tests
 
     func test_toolEnd_updatesTrackedToolCall() {
@@ -523,87 +496,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // Then - browser sheet auto-opens again
         XCTAssertTrue(viewModel.browserState.showBrowserWindow)
-    }
-
-    // MARK: - UI Canvas Routing Tests
-
-    func test_uiRenderChunk_createsChipIfNotExists() {
-        // Given
-        let initialCount = viewModel.messages.count
-
-        // When - chunk arrives before tool_start (race condition)
-        let result = UIRenderChunkPlugin.Result(
-            canvasId: "canvas_race",
-            chunk: "{\"type\": \"container\"",
-            accumulated: "{\"canvasId\": \"canvas_race\", \"title\": \"Race App\", \"ui\": {\"type\": \"container\""
-        )
-        viewModel.handleUIRenderChunk(result)
-
-        // Then - chip should be created with placeholder ID
-        XCTAssertEqual(viewModel.messages.count, initialCount + 1)
-        XCTAssertTrue(viewModel.renderAppUIChipTracker.hasChip(canvasId: "canvas_race"))
-    }
-
-    func test_uiRenderComplete_updatesChipStatus() {
-        // Given - create chip via chunk first
-        let chunkResult = UIRenderChunkPlugin.Result(
-            canvasId: "canvas_complete",
-            chunk: "{",
-            accumulated: "{\"canvasId\": \"canvas_complete\", \"title\": \"Complete App\"}"
-        )
-        viewModel.handleUIRenderChunk(chunkResult)
-
-        // When - complete arrives
-        let completeResult = UIRenderCompletePlugin.Result(
-            canvasId: "canvas_complete",
-            ui: ["type": .init("container"), "children": .init([Any]())],
-            state: nil
-        )
-        viewModel.handleUIRenderComplete(completeResult)
-
-        // Then - chip status should be complete
-        if let chipMessage = viewModel.messages.first(where: {
-            if case .renderAppUI(let data) = $0.content {
-                return data.canvasId == "canvas_complete"
-            }
-            return false
-        }) {
-            if case .renderAppUI(let chipData) = chipMessage.content {
-                XCTAssertEqual(chipData.status, .complete)
-            }
-        } else {
-            XCTFail("Chip message not found")
-        }
-    }
-
-    func test_uiRenderError_setsErrorStatus() {
-        // Given - create chip first
-        let chunkResult = UIRenderChunkPlugin.Result(
-            canvasId: "canvas_error",
-            chunk: "{",
-            accumulated: "{\"canvasId\": \"canvas_error\"}"
-        )
-        viewModel.handleUIRenderChunk(chunkResult)
-
-        // When - error arrives
-        let errorResult = UIRenderErrorPlugin.Result(
-            canvasId: "canvas_error",
-            error: "Invalid UI structure"
-        )
-        viewModel.handleUIRenderError(errorResult)
-
-        // Then - chip should have error status
-        if let chipMessage = viewModel.messages.first(where: {
-            if case .renderAppUI(let data) = $0.content {
-                return data.canvasId == "canvas_error"
-            }
-            return false
-        }) {
-            if case .renderAppUI(let chipData) = chipMessage.content {
-                XCTAssertEqual(chipData.status, .error)
-                XCTAssertEqual(chipData.errorMessage, "Invalid UI structure")
-            }
-        }
     }
 
     // MARK: - Subagent Routing Tests

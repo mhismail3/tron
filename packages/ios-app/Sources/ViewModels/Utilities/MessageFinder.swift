@@ -72,22 +72,6 @@ enum MessageFinder {
         })
     }
 
-    // MARK: - By RenderAppUI
-
-    /// Find LAST message index with matching toolCallId for RenderAppUI or toolUse(renderappui).
-    static func lastIndexOfRenderAppUI(toolCallId: String, in messages: [ChatMessage]) -> Int? {
-        messages.lastIndex(where: { message in
-            switch message.content {
-            case .renderAppUI(let chipData):
-                return chipData.toolCallId == toolCallId
-            case .toolUse(let tool):
-                return tool.toolCallId == toolCallId && ToolKind(toolName: tool.toolName) == .renderAppUI
-            default:
-                return false
-            }
-        })
-    }
-
     // MARK: - By Subagent
 
     /// Find message index by subagentSessionId in subagent content.

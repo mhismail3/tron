@@ -60,7 +60,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Tool sheets
     case askUserQuestion
     case subagentDetail
-    case uiCanvas
+    case renderUI
     case taskList
     case taskDetail(TaskManagerChipData)
 
@@ -100,8 +100,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "askUserQuestion"
         case .subagentDetail:
             return "subagent"
-        case .uiCanvas:
-            return "uiCanvas"
+        case .renderUI:
+            return "renderUI"
         case .taskList:
             return "taskList"
         case .taskDetail(let data):
@@ -145,7 +145,7 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.subagentDetail, .subagentDetail):
             return true
-        case (.uiCanvas, .uiCanvas):
+        case (.renderUI, .renderUI):
             return true
         case (.taskList, .taskList):
             return true

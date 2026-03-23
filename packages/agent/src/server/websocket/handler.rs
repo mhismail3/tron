@@ -110,6 +110,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_provider: None,
+            render_ui_provider: None,
             transcription_engine: std::sync::Arc::new(std::sync::OnceLock::new()),
             subagent_manager: None,
             embedding_controller: None,

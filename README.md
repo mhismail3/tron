@@ -267,7 +267,7 @@ The agent has 18 tools registered at startup, with 3 additional subagent tools a
 | `AskUserQuestion` | Prompt the user for input with structured options. |
 | `NotifyApp` | Send a push notification to iOS (requires APNS config). Falls back to stub without APNS. |
 | `TaskManager` | Create, update, list tasks. Backed by SQLite PARA schema. |
-| `RenderAppUI` | Render custom UI components in the iOS app. |
+| `RenderUI` | Render interactive UI via json-render-server in a container. Displayed in WKWebView. |
 
 ### Subagent
 
