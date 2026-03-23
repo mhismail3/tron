@@ -41,4 +41,24 @@ final class AuthClient {
         )
         return result
     }
+
+    // MARK: - OAuth Flow
+
+    /// Begin an OAuth flow: returns flow ID and authorization URL.
+    func oauthBegin(provider: String) async throws -> OAuthBeginResponse {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.oauthBegin",
+            params: OAuthBeginParams(provider: provider)
+        )
+    }
+
+    /// Complete an OAuth flow: exchange code for tokens, save to auth.json.
+    func oauthComplete(flowId: String, code: String, label: String) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.oauthComplete",
+            params: OAuthCompleteParams(flowId: flowId, code: code, label: label)
+        )
+    }
 }

@@ -23,9 +23,18 @@ pub(crate) mod refresh;
 pub mod storage;
 pub mod types;
 
-/// URL-encode a string for use in query parameters.
+/// Encode set matching Python's `urllib.parse.quote()` defaults: encode everything
+/// except alphanumerics, `_.-~`, and `/` (slash preserved like Python's `safe='/'`).
+const QUERY_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'-')
+    .remove(b'~')
+    .remove(b'/');
+
+/// URL-encode a string for use in query parameters (matches Python `urllib.parse.quote`).
 pub(crate) fn urlencoded(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+    percent_encoding::utf8_percent_encode(s, QUERY_ENCODE_SET).to_string()
 }
 
 /// Shared HTTP client for auth operations (avoids creating one per call).
@@ -83,5 +92,16 @@ mod tests {
     #[test]
     fn urlencoded_alphanumeric_passthrough() {
         assert_eq!(urlencoded("abc123"), "abc123");
+    }
+
+    #[test]
+    fn urlencoded_preserves_slashes() {
+        let encoded = urlencoded("https://console.anthropic.com/oauth/code/callback");
+        assert!(encoded.contains("https%3A//console.anthropic.com/oauth/code/callback"));
+    }
+
+    #[test]
+    fn urlencoded_preserves_safe_chars() {
+        assert_eq!(urlencoded("a_b.c-d~e"), "a_b.c-d~e");
     }
 }

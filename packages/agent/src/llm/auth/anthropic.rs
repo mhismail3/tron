@@ -6,10 +6,10 @@
 use super::errors::AuthError;
 use super::types::{OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
-/// Default Anthropic OAuth settings (matching TypeScript defaults).
+/// Default Anthropic OAuth settings (matching `tron login` CLI).
 pub fn default_config() -> OAuthConfig {
     OAuthConfig {
-        auth_url: "https://console.anthropic.com/oauth/authorize".to_string(),
+        auth_url: "https://claude.ai/oauth/authorize".to_string(),
         token_url: "https://console.anthropic.com/v1/oauth/token".to_string(),
         redirect_uri: "https://console.anthropic.com/oauth/code/callback".to_string(),
         client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string(),
@@ -25,14 +25,28 @@ pub fn default_config() -> OAuthConfig {
 
 /// Build the authorization URL for browser redirect.
 pub fn get_authorization_url(config: &OAuthConfig, challenge: &str) -> String {
-    format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256",
+    get_authorization_url_with_state(config, challenge, None)
+}
+
+/// Build the authorization URL with an optional `state` parameter.
+pub fn get_authorization_url_with_state(
+    config: &OAuthConfig,
+    challenge: &str,
+    state: Option<&str>,
+) -> String {
+    let mut url = format!(
+        "{}?code=true&response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256",
         config.auth_url,
         super::urlencoded(&config.client_id),
         super::urlencoded(&config.redirect_uri),
         super::urlencoded(&config.scopes.join(" ")),
         super::urlencoded(challenge),
-    )
+    );
+    if let Some(s) = state {
+        url.push_str("&state=");
+        url.push_str(&super::urlencoded(s));
+    }
+    url
 }
 
 /// Exchange an authorization code for tokens.
@@ -436,7 +450,7 @@ mod tests {
     #[test]
     fn default_config_values() {
         let cfg = default_config();
-        assert!(cfg.auth_url.contains("anthropic.com"));
+        assert!(cfg.auth_url.contains("claude.ai"));
         assert!(cfg.token_url.contains("oauth/token"));
         assert_eq!(cfg.token_expiry_buffer_seconds, 300);
         assert!(!cfg.scopes.is_empty());

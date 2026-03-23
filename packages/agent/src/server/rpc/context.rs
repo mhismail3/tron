@@ -81,6 +81,8 @@ pub struct RpcContext {
     pub auth_path: PathBuf,
     /// Broadcast manager for pushing events to WebSocket clients.
     pub broadcast_manager: Option<Arc<BroadcastManager>>,
+    /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
+    pub oauth_flows: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>>>,
 }
 
 impl RpcContext {

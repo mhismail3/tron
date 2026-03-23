@@ -120,3 +120,20 @@ struct AuthClearParams: Encodable {
     var provider: String?
     var service: String?
 }
+
+// MARK: - OAuth Flow Types
+
+struct OAuthBeginParams: Encodable {
+    let provider: String
+}
+
+struct OAuthBeginResponse: Decodable {
+    let flowId: String
+    let authUrl: String
+}
+
+struct OAuthCompleteParams: Encodable {
+    let flowId: String
+    let code: String
+    let label: String
+}

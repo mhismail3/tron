@@ -41,6 +41,7 @@ struct ProvidersSettingsPage: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var expandedProvider: String?
+    @State private var showOAuthLogin = false
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
@@ -72,6 +73,9 @@ struct ProvidersSettingsPage: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showOAuthLogin) {
+            OAuthLoginSheet()
         }
         .task { await loadAuthState() }
         .onChange(of: dependencies.authVersion) {
@@ -145,7 +149,8 @@ struct ProvidersSettingsPage: View {
                     providerId: provider.id,
                     providerInfo: info,
                     onSave: { params in await saveProvider(params) },
-                    onClear: { await clearProvider(provider.id) }
+                    onClear: { await clearProvider(provider.id) },
+                    onOAuthLogin: { showOAuthLogin = true }
                 )
             }
         } label: {
@@ -243,6 +248,7 @@ private struct StandardProviderForm: View {
     let providerInfo: ProviderAuthInfo?
     let onSave: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
+    var onOAuthLogin: (() -> Void)?
 
     @State private var apiKey = ""
     @State private var isSaving = false
@@ -298,6 +304,18 @@ private struct StandardProviderForm: View {
                     accountStatusView(account)
                 }
             }
+        }
+
+        // OAuth sign-in (Anthropic only)
+        if providerId == "anthropic", let onOAuthLogin {
+            Button {
+                onOAuthLogin()
+            } label: {
+                Label("Sign in with Anthropic", systemImage: "person.badge.key")
+                    .font(TronTypography.buttonSM)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.tronEmerald)
         }
 
         // Actions

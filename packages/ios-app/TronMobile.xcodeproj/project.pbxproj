@@ -14,6 +14,7 @@
 		02FE389EB93928871C55206C /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BCC3CF17E11CB993CBEF33D /* LogViewer.swift */; };
 		03583C5FB51682CC0601E2E0 /* TaskCreatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1431885C08B5F149D0BB416C /* TaskCreatedPlugin.swift */; };
 		039592DBE1C8714AB0923EC5 /* FilesystemClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910D6B0589DAC4B81B6DBCC4 /* FilesystemClientTests.swift */; };
+		045ABFCE1DC67233A2D89EF3 /* OAuthLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE01E3E153B74455EDFFEA79 /* OAuthLoginSheet.swift */; };
 		0461B194814BC161CFC7F12A /* ChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A31095A71425E246B49FD7EB /* ChatSheet.swift */; };
 		0469B9AB3EBA290338B09CAD /* GenericToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */; };
 		0475312820C4C6CA6AF0F899 /* NotifyAppResultParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 917B5933609A546EB749F872 /* NotifyAppResultParser.swift */; };
@@ -116,6 +117,7 @@
 		2AA9F3FEC522CB75DE582696 /* SubagentStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B810A7EAC7BF064460D2E0A1 /* SubagentStateTests.swift */; };
 		2AB16EE56C9FBE4ADAAA5D41 /* ContextMessageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A717F79500FE0498A52002 /* ContextMessageViews.swift */; };
 		2B7016E6FA9BF50D4E4AF898 /* WebFetchResultViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118D662DA658DFDC37CB9263 /* WebFetchResultViewer.swift */; };
+		2BBD1C56E2D8406A4E5E5B9E /* OAuthWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6905912577DEBB5C9AA6A45 /* OAuthWebView.swift */; };
 		2BC05C3997C6379E6C319AD7 /* QueryAgentChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A59652752128F5912CBE6B94 /* QueryAgentChip.swift */; };
 		2C023B43C34B01278C3387DF /* ProtocolConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9921E926BA75C7BD21CF3EE5 /* ProtocolConstantsTests.swift */; };
 		2CCB76CC068C8388487FB444 /* SubagentEventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8EEF95B5B561FFA9290A251 /* SubagentEventRow.swift */; };
@@ -1129,6 +1131,7 @@
 		C4399074B1EA0E047BA57077 /* ChatViewModelFindMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelFindMessageTests.swift; sourceTree = "<group>"; };
 		C5E09421076542759CF7BB11 /* Debug-Beta.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Debug-Beta.xcconfig"; sourceTree = "<group>"; };
 		C646A336E35F47DB4BEE2F8C /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
+		C6905912577DEBB5C9AA6A45 /* OAuthWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthWebView.swift; sourceTree = "<group>"; };
 		C6F792E5D7EDBEAF9026E367 /* SessionUnarchivedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionUnarchivedPlugin.swift; sourceTree = "<group>"; };
 		C7297D9A306D121FEC63F0C2 /* ParsedEventV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsedEventV2.swift; sourceTree = "<group>"; };
 		C7530F5B9BC8A9C86E308887 /* ToolSharedComponentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedComponentsTests.swift; sourceTree = "<group>"; };
@@ -1272,6 +1275,7 @@
 		FD4579B18A126F09229C08BA /* AutomationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationDetailSheet.swift; sourceTree = "<group>"; };
 		FD99C83E3D861FDAB93AC92B /* ServerRestartingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRestartingPlugin.swift; sourceTree = "<group>"; };
 		FDE9A0978D5561D8DF70C5BD /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
+		FE01E3E153B74455EDFFEA79 /* OAuthLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthLoginSheet.swift; sourceTree = "<group>"; };
 		FE083467BD3FC013AF685716 /* ModelRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRepository.swift; sourceTree = "<group>"; };
 		FEA3C78E118EF1447D6EFEC0 /* MentionDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionDetectorTests.swift; sourceTree = "<group>"; };
 		FEA6CFF3F143AE2A118B1798 /* DashboardPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPoller.swift; sourceTree = "<group>"; };
@@ -1282,6 +1286,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		022C67BE0F7F27308012CD60 /* OAuth */ = {
+			isa = PBXGroup;
+			children = (
+				FE01E3E153B74455EDFFEA79 /* OAuthLoginSheet.swift */,
+				C6905912577DEBB5C9AA6A45 /* OAuthWebView.swift */,
+			);
+			path = OAuth;
+			sourceTree = "<group>";
+		};
 		0463D1ECA32DD4FC984E72AE /* Thinking */ = {
 			isa = PBXGroup;
 			children = (
@@ -1754,6 +1767,7 @@
 				393C89DB821923F90B216AFE /* SettingsView.swift */,
 				139398CA470E8C7ABA0A2A7C /* ToolsSettingsSection.swift */,
 				0248F14D0E46BB22AF7EEF3B /* TronStepper.swift */,
+				022C67BE0F7F27308012CD60 /* OAuth */,
 				39EB1B6E7D22187FC536F07E /* Pages */,
 			);
 			path = Settings;
@@ -3384,6 +3398,8 @@
 				17B5974A12F8C119953C3D4C /* NotifyAppDetailSheet.swift in Sources */,
 				0475312820C4C6CA6AF0F899 /* NotifyAppResultParser.swift in Sources */,
 				6C0BFCAC80C2804D4C33EF6D /* NotifyAppTypes.swift in Sources */,
+				045ABFCE1DC67233A2D89EF3 /* OAuthLoginSheet.swift in Sources */,
+				2BBD1C56E2D8406A4E5E5B9E /* OAuthWebView.swift in Sources */,
 				2F755300CB121D5A8BDB554A /* OrbitingParticleIndicator.swift in Sources */,
 				4B01C49DADEE19BAF1D704E5 /* ParsedEventV2.swift in Sources */,
 				8F42824BAB5A7D9564A4AA62 /* PhaseWaveIndicator.swift in Sources */,

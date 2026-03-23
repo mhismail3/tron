@@ -1024,6 +1024,7 @@ mod tests {
             context_artifacts: Arc::new(crate::server::rpc::session_context::ContextArtifactsService::new()),
             auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))

@@ -1,4 +1,4 @@
-//! Auth handlers: get, update, clear.
+//! Auth handlers: get, update, clear, oauthBegin, oauthComplete.
 //!
 //! Manages provider API keys and OAuth tokens stored in `auth.json`.
 //! All handlers return masked key hints — full secrets are never sent over the wire.
@@ -19,7 +19,7 @@ use crate::llm::auth::types::{
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::opt_string;
+use crate::server::rpc::handlers::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::types::RpcEvent;
 
@@ -302,6 +302,125 @@ impl MethodHandler for ClearAuthHandler {
                         }
                     })?;
                 }
+
+                Ok(build_masked_state(&auth_path))
+            })
+            .await?;
+
+        broadcast_auth_updated(ctx, &masked_state).await;
+        Ok(masked_state)
+    }
+}
+
+// ─── OAuth Flow ──────────────────────────────────────────────────────────────
+
+/// In-memory state for a pending OAuth flow.
+pub struct PendingOAuthFlow {
+    pub verifier: String,
+    pub provider: String,
+    pub created_at: std::time::Instant,
+}
+
+/// Begin an OAuth flow: generate PKCE, return auth URL + flow ID.
+pub struct OAuthBeginHandler;
+
+#[async_trait]
+impl MethodHandler for OAuthBeginHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.oauthBegin"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let provider = require_string_param(params.as_ref(), "provider")?;
+        if provider != "anthropic" {
+            return Err(RpcError::InvalidParams {
+                message: "OAuth login is only supported for anthropic".into(),
+            });
+        }
+
+        let pair = crate::llm::auth::pkce::generate_pkce();
+        let config = crate::llm::auth::anthropic::default_config();
+        let flow_id = uuid::Uuid::now_v7().to_string();
+        // Use verifier as state (matches tron login CLI behavior)
+        let auth_url = crate::llm::auth::anthropic::get_authorization_url_with_state(
+            &config, &pair.challenge, Some(&pair.verifier),
+        );
+
+        let mut flows = ctx.oauth_flows.lock().await;
+
+        // Lazy cleanup: remove expired flows (>10 minutes)
+        flows.retain(|_, f| f.created_at.elapsed() < std::time::Duration::from_secs(600));
+
+        let _ = flows.insert(
+            flow_id.clone(),
+            PendingOAuthFlow {
+                verifier: pair.verifier,
+                provider,
+                created_at: std::time::Instant::now(),
+            },
+        );
+
+        Ok(json!({
+            "flowId": flow_id,
+            "authUrl": auth_url,
+        }))
+    }
+}
+
+/// Complete an OAuth flow: exchange code for tokens, save to auth.json.
+pub struct OAuthCompleteHandler;
+
+#[async_trait]
+impl MethodHandler for OAuthCompleteHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.oauthComplete"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let flow_id = require_string_param(params.as_ref(), "flowId")?;
+        let code = require_string_param(params.as_ref(), "code")?;
+        let label = require_string_param(params.as_ref(), "label")?;
+
+        // Remove flow from map (single-use)
+        let flow = {
+            let mut flows = ctx.oauth_flows.lock().await;
+            flows.remove(&flow_id)
+        };
+
+        let flow = flow.ok_or_else(|| RpcError::InvalidParams {
+            message: "OAuth flow not found or expired".into(),
+        })?;
+
+        if flow.created_at.elapsed() > std::time::Duration::from_secs(600) {
+            return Err(RpcError::InvalidParams {
+                message: "OAuth flow expired".into(),
+            });
+        }
+
+        // Exchange code for tokens (HTTP call to Anthropic)
+        // Pass verifier as state (matches tron login CLI behavior)
+        let config = crate::llm::auth::anthropic::default_config();
+        let tokens = crate::llm::auth::anthropic::exchange_code_for_tokens(
+            &config, &code, &flow.verifier, Some(&flow.verifier),
+        )
+        .await
+        .map_err(|e| RpcError::Internal {
+            message: format!("Token exchange failed: {e}"),
+        })?;
+
+        // Save tokens to auth.json
+        let auth_path = ctx.auth_path.clone();
+        let label_clone = label.clone();
+        let tokens_clone = tokens.clone();
+        let masked_state = ctx
+            .run_blocking("auth.oauthComplete", move || {
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
+                })?;
+
+                crate::llm::auth::storage::save_account_oauth_tokens(
+                    &auth_path,
+                    "anthropic",
+                    &label_clone,
+                    &tokens_clone,
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to save OAuth tokens: {e}"),
+                })?;
 
                 Ok(build_masked_state(&auth_path))
             })
@@ -1012,5 +1131,309 @@ mod tests {
             .unwrap();
 
         assert_eq!(result["providers"]["anthropic"]["hasApiKey"], false);
+    }
+
+    // ── auth.oauthBegin ──
+
+    #[tokio::test]
+    async fn oauth_begin_returns_flow_id_and_auth_url() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result["flowId"].as_str().is_some());
+        assert!(!result["flowId"].as_str().unwrap().is_empty());
+        assert!(result["authUrl"].as_str().is_some());
+        assert!(!result["authUrl"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_auth_url_contains_pkce_challenge() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("code_challenge="));
+        assert!(url.contains("code_challenge_method=S256"));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_auth_url_contains_client_id() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("client_id="));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_auth_url_contains_redirect_uri() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("redirect_uri="));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_auth_url_contains_scopes() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("scope="));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_invalid_provider_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai"})), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("only supported for anthropic"));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_missing_provider_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthBeginHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_auth_url_contains_state() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("state="), "auth URL must contain state parameter");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_stores_flow_in_context() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let flow_id = result["flowId"].as_str().unwrap();
+        let flows = ctx.oauth_flows.lock().await;
+        assert!(flows.contains_key(flow_id));
+        assert_eq!(flows[flow_id].provider, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_each_call_generates_unique_flow_id() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let r1 = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+        let r2 = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        assert_ne!(r1["flowId"].as_str().unwrap(), r2["flowId"].as_str().unwrap());
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_cleans_up_expired_flows() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+
+        // Insert an expired flow manually
+        {
+            let mut flows = ctx.oauth_flows.lock().await;
+            flows.insert(
+                "expired-flow".to_string(),
+                PendingOAuthFlow {
+                    verifier: "v".to_string(),
+                    provider: "anthropic".to_string(),
+                    created_at: std::time::Instant::now() - std::time::Duration::from_secs(700),
+                },
+            );
+        }
+
+        // Begin a new flow — should clean up expired
+        let _ = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let flows = ctx.oauth_flows.lock().await;
+        assert!(!flows.contains_key("expired-flow"));
+    }
+
+    // ── auth.oauthComplete ──
+
+    #[tokio::test]
+    async fn oauth_complete_invalid_flow_id_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthCompleteHandler
+            .handle(
+                Some(json!({"flowId": "nonexistent", "code": "abc", "label": "test"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("not found or expired"));
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_missing_flow_id_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthCompleteHandler
+            .handle(Some(json!({"code": "abc", "label": "test"})), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_missing_code_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthCompleteHandler
+            .handle(Some(json!({"flowId": "abc", "label": "test"})), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_missing_label_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = OAuthCompleteHandler
+            .handle(Some(json!({"flowId": "abc", "code": "test"})), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_flow_id_is_single_use() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+
+        // Insert a flow manually
+        let flow_id = "single-use-flow";
+        {
+            let mut flows = ctx.oauth_flows.lock().await;
+            flows.insert(
+                flow_id.to_string(),
+                PendingOAuthFlow {
+                    verifier: "v".to_string(),
+                    provider: "anthropic".to_string(),
+                    created_at: std::time::Instant::now(),
+                },
+            );
+        }
+
+        // First attempt removes the flow (will fail at token exchange since code is fake,
+        // but the flow is already removed)
+        let _ = OAuthCompleteHandler
+            .handle(
+                Some(json!({"flowId": flow_id, "code": "fake", "label": "test"})),
+                &ctx,
+            )
+            .await;
+
+        // Second attempt should fail with "not found"
+        let err = OAuthCompleteHandler
+            .handle(
+                Some(json!({"flowId": flow_id, "code": "fake", "label": "test"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("not found or expired"));
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_expired_flow_returns_error() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+
+        let flow_id = "expired-flow";
+        {
+            let mut flows = ctx.oauth_flows.lock().await;
+            flows.insert(
+                flow_id.to_string(),
+                PendingOAuthFlow {
+                    verifier: "v".to_string(),
+                    provider: "anthropic".to_string(),
+                    created_at: std::time::Instant::now() - std::time::Duration::from_secs(700),
+                },
+            );
+        }
+
+        let err = OAuthCompleteHandler
+            .handle(
+                Some(json!({"flowId": flow_id, "code": "fake", "label": "test"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("expired"));
+    }
+
+    #[tokio::test]
+    async fn oauth_complete_removes_flow_from_map() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+
+        let flow_id = "will-be-removed";
+        {
+            let mut flows = ctx.oauth_flows.lock().await;
+            flows.insert(
+                flow_id.to_string(),
+                PendingOAuthFlow {
+                    verifier: "v".to_string(),
+                    provider: "anthropic".to_string(),
+                    created_at: std::time::Instant::now(),
+                },
+            );
+        }
+
+        // This will fail at token exchange (fake code) but flow should be removed
+        let _ = OAuthCompleteHandler
+            .handle(
+                Some(json!({"flowId": flow_id, "code": "fake", "label": "test"})),
+                &ctx,
+            )
+            .await;
+
+        let flows = ctx.oauth_flows.lock().await;
+        assert!(!flows.contains_key(flow_id));
     }
 }

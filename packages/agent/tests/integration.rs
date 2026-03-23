@@ -75,6 +75,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         ),
         auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
         broadcast_manager: None,
+        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let mut registry = MethodRegistry::new();
@@ -360,6 +361,7 @@ async fn boot_server_with_provider_and_handles(
         ),
         auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
         broadcast_manager: None,
+        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let mut registry = MethodRegistry::new();

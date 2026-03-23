@@ -681,81 +681,79 @@ async fn main() -> Result<()> {
         device_request_broker: device_broker_cell.clone(),
     });
 
-    // Verify auth is available for the default model at startup.
+    // Check auth availability at startup (informational only — auth can be configured later).
     let startup_auth_ok = provider_factory
         .create_for_model(&settings.server.default_model)
         .await
         .is_ok();
 
+    if startup_auth_ok {
+        tracing::info!(
+            provider = settings.server.default_provider.as_str(),
+            model = settings.server.default_model.as_str(),
+            "auth available for default model"
+        );
+    } else {
+        tracing::warn!(
+            "no auth found at startup — sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
+        );
+    }
+
     // Deferred cron scheduler reference for tool factory (set after CronScheduler creation)
     let cron_scheduler_cell: Arc<std::sync::OnceLock<Arc<tron::cron::CronScheduler>>> =
         Arc::new(std::sync::OnceLock::new());
 
-    let (agent_deps, shared_subagent_manager) = if startup_auth_ok {
-        tracing::info!(
-            provider = settings.server.default_provider.as_str(),
-            model = settings.server.default_model.as_str(),
-            "agent execution enabled"
-        );
+    // Always create agent deps — ProviderFactory reads auth from disk on each call,
+    // so auth configured after startup (e.g. via OAuth) is picked up automatically.
+    let subagent_manager = Arc::new(SubagentManager::new(
+        session_manager.clone(),
+        event_store.clone(),
+        orchestrator.broadcast().clone(),
+        provider_factory.clone(),
+        None,
+        None,
+    ));
+    subagent_manager.set_self_ref();
 
-        // Create SubagentManager (tool_factory set below via OnceCell)
-        let subagent_manager = Arc::new(SubagentManager::new(
-            session_manager.clone(),
-            event_store.clone(),
-            orchestrator.broadcast().clone(),
-            provider_factory.clone(),
-            None,
-            None,
+    // Build tool factory that includes subagent tools + summarizer-backed WebFetch
+    let config = tool_config.clone();
+    let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
+    let sm_for_summarizer = subagent_manager.clone();
+    let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
+        let mut registry = create_tool_registry(&config);
+        registry.register(Arc::new(
+            tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
         ));
-        subagent_manager.set_self_ref();
+        registry.register(Arc::new(
+            tron::tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
+        ));
 
-        // Build tool factory that includes subagent tools + summarizer-backed WebFetch
-        let config = tool_config.clone();
-        let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
-        let sm_for_summarizer = subagent_manager.clone();
-        let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
-            let mut registry = create_tool_registry(&config);
-            registry.register(Arc::new(
-                tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
-            ));
-            registry.register(Arc::new(
-                tron::tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
-            ));
-
-            // Re-register WebFetch with LLM summarizer (overrides the basic version)
-            let summarizer: Arc<dyn tron::tools::traits::ContentSummarizer> = Arc::new(
-                tron::runtime::agent::compaction_handler::SubagentContentSummarizer {
-                    manager: sm_for_summarizer.clone(),
-                },
-            );
-            let http: Arc<dyn tron::tools::traits::HttpClient> = Arc::new(
-                tron::tools::backends::ReqwestHttpClient::from_client(config.http_client.clone()),
-            );
-            registry.register(Arc::new(
-                tron::tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
-            ));
-
-            registry
-        });
-
-        // Break circular dep: SubagentManager needs tool_factory to spawn children
-        subagent_manager.set_tool_factory(tool_factory.clone());
-
-        (
-            Some(AgentDeps {
-                provider_factory,
-                tool_factory,
-                guardrails: None,
-                hooks: None,
-            }),
-            Some(subagent_manager) as Option<Arc<SubagentManager>>,
-        )
-    } else {
-        tracing::warn!(
-            "no auth found — agent execution disabled (sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)"
+        // Re-register WebFetch with LLM summarizer (overrides the basic version)
+        let summarizer: Arc<dyn tron::tools::traits::ContentSummarizer> = Arc::new(
+            tron::runtime::agent::compaction_handler::SubagentContentSummarizer {
+                manager: sm_for_summarizer.clone(),
+            },
         );
-        (None, None)
-    };
+        let http: Arc<dyn tron::tools::traits::HttpClient> = Arc::new(
+            tron::tools::backends::ReqwestHttpClient::from_client(config.http_client.clone()),
+        );
+        registry.register(Arc::new(
+            tron::tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
+        ));
+
+        registry
+    });
+
+    // Break circular dep: SubagentManager needs tool_factory to spawn children
+    subagent_manager.set_tool_factory(tool_factory.clone());
+
+    let agent_deps = Some(AgentDeps {
+        provider_factory,
+        tool_factory,
+        guardrails: None,
+        hooks: None,
+    });
+    let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
 
     // Transcription sidecar (parakeet-mlx via Python worker)
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
@@ -881,6 +879,7 @@ async fn main() -> Result<()> {
         ),
         auth_path: auth_path(),
         broadcast_manager: None, // set by TronServer after creation
+        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Method registry
@@ -1526,6 +1525,7 @@ mod tests {
             ),
             auth_path: dir.path().join("auth.json"),
             broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1718,6 +1718,7 @@ mod tests {
             ),
             auth_path: dir.path().join("auth.json"),
             broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
 
         let mut registry = MethodRegistry::new();

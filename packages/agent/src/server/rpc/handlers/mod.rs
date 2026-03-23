@@ -123,6 +123,8 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("auth.get", auth::GetAuthHandler);
     registry.register("auth.update", auth::UpdateAuthHandler);
     registry.register("auth.clear", auth::ClearAuthHandler);
+    registry.register("auth.oauthBegin", auth::OAuthBeginHandler);
+    registry.register("auth.oauthComplete", auth::OAuthCompleteHandler);
 
     // Tool
     registry.register("tool.result", tool::ToolResultHandler);
@@ -471,6 +473,7 @@ pub(crate) mod test_helpers {
             context_artifacts: Arc::new(ContextArtifactsService::new()),
             auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -508,6 +511,7 @@ pub(crate) mod test_helpers {
             context_artifacts: Arc::new(ContextArtifactsService::new()),
             auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -534,8 +538,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            116,
-            "expected 116 methods, got {}",
+            118,
+            "expected 118 methods, got {}",
             reg.methods().len()
         );
     }
