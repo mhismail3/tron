@@ -4,7 +4,8 @@ struct OAuthLoginSheet: View {
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
 
-    @State private var flowState: OAuthFlowState = .loading
+    @State private var flowState: OAuthFlowState = .label
+    @State private var accountLabel: String = defaultAccountLabel
     @State private var manualCode = ""
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
@@ -13,6 +14,9 @@ struct OAuthLoginSheet: View {
         NavigationStack {
             Group {
                 switch flowState {
+                case .label:
+                    labelView
+
                 case .loading:
                     loadingView("Starting sign in...")
 
@@ -66,10 +70,41 @@ struct OAuthLoginSheet: View {
                 }
             }
         }
-        .task { await beginOAuthFlow() }
     }
 
     // MARK: - Subviews
+
+    private var labelView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            Text("Account label")
+                .font(TronTypography.subheadline)
+                .foregroundStyle(.tronTextSecondary)
+
+            TextField("e.g. moose@iphone", text: $accountLabel)
+                .font(TronTypography.codeCaption)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 48)
+
+            Button {
+                flowState = .loading
+                Task { await beginOAuthFlow() }
+            } label: {
+                Text("Continue")
+                    .font(TronTypography.button)
+                    .frame(minWidth: 120)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.tronEmerald)
+            .disabled(accountLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Spacer()
+        }
+    }
 
     private func loadingView(_ text: String) -> some View {
         VStack(spacing: 12) {
@@ -151,8 +186,7 @@ struct OAuthLoginSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
             Button {
-                flowState = .loading
-                Task { await beginOAuthFlow() }
+                flowState = .label
             } label: {
                 Text("Try Again")
                     .font(TronTypography.button)
@@ -192,13 +226,14 @@ struct OAuthLoginSheet: View {
 
     private func exchangeCode(flowId: String, code: String) {
         flowState = .exchanging
+        let label = accountLabel.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
             do {
                 _ = try await rpcClient.auth.oauthComplete(
                     flowId: flowId,
                     code: code,
-                    label: accountLabel
+                    label: label
                 )
                 flowState = .success
                 try? await Task.sleep(for: .seconds(1))
@@ -209,7 +244,7 @@ struct OAuthLoginSheet: View {
         }
     }
 
-    private var accountLabel: String {
+    private static var defaultAccountLabel: String {
         let user = NSUserName().isEmpty ? "user" : NSUserName()
         let device = UIDevice.current.name
             .lowercased()
@@ -222,6 +257,7 @@ struct OAuthLoginSheet: View {
 // MARK: - Flow State
 
 private enum OAuthFlowState {
+    case label
     case loading
     case webView(flowId: String, url: URL)
     case manualEntry(flowId: String, url: URL)
