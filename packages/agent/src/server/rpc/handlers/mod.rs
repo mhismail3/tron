@@ -21,6 +21,7 @@
 //! `communication`, `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
+pub mod auth;
 pub mod browser;
 pub mod canvas;
 pub mod communication;
@@ -117,6 +118,11 @@ fn register_core(registry: &mut MethodRegistry) {
     // Settings
     registry.register("settings.get", settings::GetSettingsHandler);
     registry.register("settings.update", settings::UpdateSettingsHandler);
+
+    // Auth
+    registry.register("auth.get", auth::GetAuthHandler);
+    registry.register("auth.update", auth::UpdateAuthHandler);
+    registry.register("auth.clear", auth::ClearAuthHandler);
 
     // Tool
     registry.register("tool.result", tool::ToolResultHandler);
@@ -463,6 +469,8 @@ pub(crate) mod test_helpers {
             worktree_coordinator: None,
             device_request_broker: None,
             context_artifacts: Arc::new(ContextArtifactsService::new()),
+            auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+            broadcast_manager: None,
         }
     }
 
@@ -498,6 +506,8 @@ pub(crate) mod test_helpers {
             worktree_coordinator: None,
             device_request_broker: None,
             context_artifacts: Arc::new(ContextArtifactsService::new()),
+            auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+            broadcast_manager: None,
         }
     }
 }
@@ -524,8 +534,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            113,
-            "expected 113 methods, got {}",
+            116,
+            "expected 116 methods, got {}",
             reg.methods().len()
         );
     }

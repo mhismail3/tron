@@ -73,6 +73,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var notifications: NotificationClient = NotificationClient(transport: self)
 
+    /// Auth/provider operations client (API keys, OAuth tokens)
+    @ObservationIgnored
+    lazy var auth: AuthClient = AuthClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
@@ -282,6 +286,11 @@ final class RPCClient: RPCTransport {
            let result = eventV2.getResult() as? ServerRestartingPlugin.Result {
             logger.info("Server restarting: reason=\(result.reason), commit=\(result.commit), expectedMs=\(result.restartExpectedMs)", category: .rpc)
             webSocket?.setDeployRestarting(expectedMs: result.restartExpectedMs)
+        }
+
+        // Handle auth updated — notify observers so Providers page refreshes
+        if eventType == AuthUpdatedPlugin.eventType {
+            NotificationCenter.default.post(name: .authDidUpdate, object: nil)
         }
 
         // Publish event to async stream

@@ -128,6 +128,7 @@ final class EventRegistry: @unchecked Sendable {
 
         // Server events
         register(ServerRestartingPlugin.self)
+        register(AuthUpdatedPlugin.self)
 
         // Device events
         register(DeviceRequestPlugin.self)

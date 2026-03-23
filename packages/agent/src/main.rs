@@ -879,6 +879,8 @@ async fn main() -> Result<()> {
         context_artifacts: Arc::new(
             tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
+        auth_path: auth_path(),
+        broadcast_manager: None, // set by TronServer after creation
     };
 
     // Method registry
@@ -1522,6 +1524,8 @@ mod tests {
             context_artifacts: Arc::new(
                 tron::server::rpc::session_context::ContextArtifactsService::new(),
             ),
+            auth_path: dir.path().join("auth.json"),
+            broadcast_manager: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1712,6 +1716,8 @@ mod tests {
             context_artifacts: Arc::new(
                 tron::server::rpc::session_context::ContextArtifactsService::new(),
             ),
+            auth_path: dir.path().join("auth.json"),
+            broadcast_manager: None,
         };
 
         let mut registry = MethodRegistry::new();

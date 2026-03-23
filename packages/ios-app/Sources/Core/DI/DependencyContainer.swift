@@ -6,6 +6,8 @@ import SwiftUI
 extension Notification.Name {
     /// Posted when server settings (host, port, TLS) change
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
+    /// Posted when auth.json changes on the server (via RPC or WebSocket event)
+    static let authDidUpdate = Notification.Name("tron.authDidUpdate")
 }
 
 // MARK: - Dependency Container
@@ -86,6 +88,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Incremented when server settings change. Views can observe this to react to changes.
     private(set) var serverSettingsVersion: Int = 0
 
+    /// Incremented when auth.json changes on the server. Providers page observes this.
+    private(set) var authVersion: Int = 0
+
     /// Whether the container has been fully initialized
     private(set) var isInitialized = false
 
@@ -155,6 +160,17 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Configure skill store with RPC client (after all properties initialized)
         store.configure(rpcClient: client)
+
+        // Listen for auth updates from WebSocket events
+        NotificationCenter.default.addObserver(
+            forName: .authDidUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.authVersion += 1
+            }
+        }
     }
 
     // MARK: - Async Initialization

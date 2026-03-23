@@ -73,6 +73,8 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         context_artifacts: Arc::new(
             tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
+        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+        broadcast_manager: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -356,6 +358,8 @@ async fn boot_server_with_provider_and_handles(
         context_artifacts: Arc::new(
             tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
+        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+        broadcast_manager: None,
     };
 
     let mut registry = MethodRegistry::new();

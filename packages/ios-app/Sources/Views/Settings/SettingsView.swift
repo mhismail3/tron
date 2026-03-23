@@ -33,6 +33,7 @@ struct SettingsView: View {
     @State private var showContextPage = false
     @State private var showIntegrationsPage = false
     @State private var showToolsPage = false
+    @State private var showProvidersPage = false
     @State private var showAppearancePage = false
 
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
@@ -78,6 +79,11 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showToolsPage) {
                 ToolsSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                    .adaptivePresentationDetents([.medium, .large])
+                    .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showProvidersPage) {
+                ProvidersSettingsPage()
                     .adaptivePresentationDetents([.medium, .large])
                     .presentationDragIndicator(.hidden)
             }
@@ -150,6 +156,9 @@ struct SettingsView: View {
             Section {
                 Button { showConnectionPage = true } label: {
                     settingsRow("network", "Connection", "Server, accounts")
+                }
+                Button { showProvidersPage = true } label: {
+                    settingsRow("key.horizontal", "Providers", "API keys, OAuth tokens")
                 }
                 Button { showSessionPage = true } label: {
                     settingsRow("bolt", "Session", "Workspace, model, limits")

@@ -23,6 +23,7 @@ use crate::server::device::DeviceRequestBroker;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::session_context::ContextArtifactsService;
 use crate::server::shutdown::ShutdownCoordinator;
+use crate::server::websocket::broadcast::BroadcastManager;
 
 /// Dependencies needed to create and run agents.
 pub struct AgentDeps {
@@ -76,6 +77,10 @@ pub struct RpcContext {
     pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
     /// Shared rules/memory/rules-index artifact cache for session and prompt loading.
     pub context_artifacts: Arc<ContextArtifactsService>,
+    /// Path to auth JSON file (`~/.tron/auth.json`).
+    pub auth_path: PathBuf,
+    /// Broadcast manager for pushing events to WebSocket clients.
+    pub broadcast_manager: Option<Arc<BroadcastManager>>,
 }
 
 impl RpcContext {

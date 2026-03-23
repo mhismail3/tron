@@ -97,6 +97,8 @@ impl TronServer {
         let broadcast = Arc::new(BroadcastManager::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         rpc_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
+        // Inject broadcast manager so auth handlers can push events
+        rpc_context.broadcast_manager = Some(Arc::clone(&broadcast));
         // Inject device request broker (uses broadcast for device.request events)
         rpc_context.device_request_broker = Some(Arc::new(
             crate::server::device::DeviceRequestBroker::new(broadcast.clone(), shutdown.token()),

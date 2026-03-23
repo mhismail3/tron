@@ -1022,6 +1022,8 @@ mod tests {
             worktree_coordinator: None,
             device_request_broker: None,
             context_artifacts: Arc::new(crate::server::rpc::session_context::ContextArtifactsService::new()),
+            auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+            broadcast_manager: None,
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))
