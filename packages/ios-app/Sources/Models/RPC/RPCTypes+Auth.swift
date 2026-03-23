@@ -45,6 +45,19 @@ struct AccountInfo: Decodable {
     let label: String
     let expiresAt: Int64
     let isExpired: Bool
+    let hasRefreshToken: Bool
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        label = try container.decode(String.self, forKey: .label)
+        expiresAt = try container.decode(Int64.self, forKey: .expiresAt)
+        isExpired = try container.decode(Bool.self, forKey: .isExpired)
+        hasRefreshToken = (try? container.decode(Bool.self, forKey: .hasRefreshToken)) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case label, expiresAt, isExpired, hasRefreshToken
+    }
 }
 
 struct ServiceAuthInfo: Decodable {

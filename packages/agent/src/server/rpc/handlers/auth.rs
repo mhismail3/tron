@@ -178,6 +178,7 @@ fn build_accounts_list(pa: &ProviderAuth) -> Vec<Value> {
                         "label": a.label,
                         "expiresAt": a.oauth.expires_at,
                         "isExpired": is_expired,
+                        "hasRefreshToken": !a.oauth.refresh_token.is_empty(),
                     })
                 })
                 .collect()

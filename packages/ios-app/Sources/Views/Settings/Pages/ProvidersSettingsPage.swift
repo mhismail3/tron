@@ -5,20 +5,30 @@ import SwiftUI
 private struct ProviderInfo: Identifiable {
     let id: String
     let displayName: String
-    let icon: String
+    let assetIcon: String
+    let color: Color
 
     static let llmProviders: [ProviderInfo] = [
-        ProviderInfo(id: "anthropic", displayName: "Anthropic", icon: "brain"),
-        ProviderInfo(id: "openai-codex", displayName: "OpenAI", icon: "bolt"),
-        ProviderInfo(id: "google", displayName: "Google", icon: "globe"),
-        ProviderInfo(id: "minimax", displayName: "MiniMax", icon: "wand.and.stars"),
-        ProviderInfo(id: "kimi", displayName: "Kimi", icon: "moon"),
+        ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral),
+        ProviderInfo(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", color: .tronSlate),
+        ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan),
+        ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose),
+        ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo),
     ]
 
     static let services: [ProviderInfo] = [
-        ProviderInfo(id: "brave", displayName: "Brave Search", icon: "magnifyingglass"),
-        ProviderInfo(id: "exa", displayName: "Exa", icon: "doc.text.magnifyingglass"),
+        ProviderInfo(id: "brave", displayName: "Brave Search", assetIcon: "", color: .tronAmber),
+        ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber),
     ]
+
+    /// Service icons use SF Symbols since they don't have asset icons
+    var serviceSystemIcon: String {
+        switch id {
+        case "brave": return "magnifyingglass"
+        case "exa": return "doc.text.magnifyingglass"
+        default: return "key"
+        }
+    }
 }
 
 // MARK: - Providers Settings Page
@@ -139,17 +149,19 @@ struct ProvidersSettingsPage: View {
                 )
             }
         } label: {
-            Label {
+            HStack(spacing: 8) {
+                Image(provider.assetIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(provider.color)
+                    .frame(width: 16, height: 16)
                 Text(provider.displayName)
                     .font(TronTypography.subheadline)
-            } icon: {
-                Image(systemName: provider.icon)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .badge(
-                Text(Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle"))
+                Spacer()
+                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
                     .foregroundStyle(isConfigured ? .tronSuccess : .tronTextSecondary.opacity(0.3))
-            )
+            }
         }
     }
 
@@ -172,17 +184,18 @@ struct ProvidersSettingsPage: View {
                 onClear: { await clearService(service.id) }
             )
         } label: {
-            Label {
+            HStack(spacing: 8) {
+                Image(systemName: service.serviceSystemIcon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(service.color)
+                    .frame(width: 16, height: 16)
                 Text(service.displayName)
                     .font(TronTypography.subheadline)
-            } icon: {
-                Image(systemName: service.icon)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .badge(
-                Text(Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle"))
+                Spacer()
+                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
                     .foregroundStyle(isConfigured ? .tronSuccess : .tronTextSecondary.opacity(0.3))
-            )
+            }
         }
     }
 
@@ -242,7 +255,7 @@ private struct StandardProviderForm: View {
         // Current key hint
         if let hint = providerInfo?.apiKeyHint {
             HStack {
-                Text("Current key")
+                Label("Current key", systemImage: "key")
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text(hint)
@@ -253,7 +266,7 @@ private struct StandardProviderForm: View {
 
         // API key input
         HStack {
-            Text("API Key")
+            Label("API Key", systemImage: "key.horizontal")
                 .font(TronTypography.subheadline)
             Spacer()
             SecureField("Enter key", text: $apiKey)
@@ -266,14 +279,8 @@ private struct StandardProviderForm: View {
         // OAuth status
         if let info = providerInfo, info.hasOAuth {
             HStack {
-                Label {
-                    Text("OAuth")
-                        .font(TronTypography.subheadline)
-                } icon: {
-                    Image(systemName: "lock.shield.fill")
-                        .foregroundStyle(.tronEmerald)
-                        .font(.system(size: 12))
-                }
+                Label("OAuth", systemImage: "lock.shield.fill")
+                    .font(TronTypography.subheadline)
                 Spacer()
                 Text(info.isOAuthExpired == true ? "Expired" : "Connected")
                     .font(TronTypography.caption)
@@ -285,31 +292,19 @@ private struct StandardProviderForm: View {
         if let accounts = providerInfo?.accounts, !accounts.isEmpty {
             ForEach(accounts, id: \.label) { account in
                 HStack {
-                    Label {
-                        Text(account.label)
-                            .font(TronTypography.subheadline)
-                    } icon: {
-                        Image(systemName: "person.circle.fill")
-                            .foregroundStyle(.tronEmerald)
-                            .font(.system(size: 12))
-                    }
+                    Label(account.label, systemImage: "person.circle.fill")
+                        .font(TronTypography.subheadline)
                     Spacer()
-                    if account.isExpired {
-                        Text("Expired")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronError)
-                    } else {
-                        Text("Active")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronSuccess)
-                    }
+                    accountStatusView(account)
                 }
             }
         }
 
         // Actions
-        HStack(spacing: 12) {
-            Button {
+        FormActions(
+            saveDisabled: apiKey.isEmpty || isSaving,
+            showClear: providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true || hasAccounts,
+            onSave: {
                 Task {
                     guard !apiKey.isEmpty else { return }
                     isSaving = true
@@ -317,29 +312,28 @@ private struct StandardProviderForm: View {
                     apiKey = ""
                     isSaving = false
                 }
-            } label: {
-                Text("Save")
-                    .font(TronTypography.buttonSM)
-                    .frame(minWidth: 60)
-            }
-            .disabled(apiKey.isEmpty || isSaving)
-            .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
+            },
+            onClear: { Task { await onClear() } }
+        )
+    }
 
-            if providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true || hasAccounts {
-                Button(role: .destructive) {
-                    Task { await onClear() }
-                } label: {
-                    Text("Clear")
-                        .font(TronTypography.buttonSM)
-                        .frame(minWidth: 60)
-                }
-                .buttonStyle(.bordered)
+    @ViewBuilder
+    private func accountStatusView(_ account: AccountInfo) -> some View {
+        if account.isExpired {
+            if account.hasRefreshToken {
+                Label("Will refresh", systemImage: "arrow.clockwise")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(.tronAmber)
+            } else {
+                Text("Expired")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(.tronError)
             }
-
-            Spacer()
+        } else {
+            Text("Active")
+                .font(TronTypography.caption)
+                .foregroundStyle(.tronSuccess)
         }
-        .padding(.vertical, 2)
     }
 }
 
@@ -363,7 +357,7 @@ private struct GoogleProviderForm: View {
         // Current key
         if let hint = providerInfo?.apiKeyHint {
             HStack {
-                Text("Current key")
+                Label("Current key", systemImage: "key")
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text(hint)
@@ -374,7 +368,7 @@ private struct GoogleProviderForm: View {
 
         // Fields
         HStack {
-            Text("API Key")
+            Label("API Key", systemImage: "key.horizontal")
                 .font(TronTypography.subheadline)
             Spacer()
             SecureField("Enter key", text: $apiKey)
@@ -385,7 +379,7 @@ private struct GoogleProviderForm: View {
         }
 
         HStack {
-            Text("Client ID")
+            Label("Client ID", systemImage: "person.text.rectangle")
                 .font(TronTypography.subheadline)
             Spacer()
             TextField("OAuth client ID", text: $clientId)
@@ -396,7 +390,7 @@ private struct GoogleProviderForm: View {
         }
 
         HStack {
-            Text("Client Secret")
+            Label("Client Secret", systemImage: "lock")
                 .font(TronTypography.subheadline)
             Spacer()
             SecureField("OAuth secret", text: $clientSecret)
@@ -407,17 +401,19 @@ private struct GoogleProviderForm: View {
         }
 
         // Endpoint picker
-        Picker("Endpoint", selection: $selectedEndpoint) {
+        Picker(selection: $selectedEndpoint) {
             ForEach(endpoints, id: \.self) { ep in
                 Text(ep == "cloud-code-assist" ? "Cloud Code Assist" : "Antigravity")
                     .tag(ep)
             }
+        } label: {
+            Label("Endpoint", systemImage: "server.rack")
+                .font(TronTypography.subheadline)
         }
-        .pickerStyle(.segmented)
-        .font(TronTypography.caption)
+        .pickerStyle(.menu)
 
         HStack {
-            Text("Project ID")
+            Label("Project ID", systemImage: "folder")
                 .font(TronTypography.subheadline)
             Spacer()
             TextField("GCP project", text: $projectId)
@@ -427,21 +423,12 @@ private struct GoogleProviderForm: View {
                 .textInputAutocapitalization(.never)
         }
 
-        // Current endpoint info
-        if let ep = providerInfo?.endpoint {
-            HStack {
-                Text("Current endpoint")
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Text(ep)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextSecondary)
-            }
-        }
-
         // Actions
-        HStack(spacing: 12) {
-            Button {
+        FormActions(
+            saveDisabled: isSaving,
+            showClear: providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true
+                || providerInfo?.hasClientId == true,
+            onSave: {
                 Task {
                     isSaving = true
                     var params = AuthUpdateParams(provider: "google")
@@ -457,30 +444,9 @@ private struct GoogleProviderForm: View {
                     projectId = ""
                     isSaving = false
                 }
-            } label: {
-                Text("Save")
-                    .font(TronTypography.buttonSM)
-                    .frame(minWidth: 60)
-            }
-            .disabled(isSaving)
-            .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
-
-            if providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true
-                || providerInfo?.hasClientId == true {
-                Button(role: .destructive) {
-                    Task { await onClear() }
-                } label: {
-                    Text("Clear")
-                        .font(TronTypography.buttonSM)
-                        .frame(minWidth: 60)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 2)
+            },
+            onClear: { Task { await onClear() } }
+        )
         .onAppear {
             if let ep = providerInfo?.endpoint {
                 selectedEndpoint = ep
@@ -503,7 +469,7 @@ private struct ServiceForm: View {
     var body: some View {
         if let hint = serviceInfo?.apiKeyHint {
             HStack {
-                Text("Current key")
+                Label("Current key", systemImage: "key")
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text(hint)
@@ -513,7 +479,7 @@ private struct ServiceForm: View {
         }
 
         HStack {
-            Text("API Key")
+            Label("API Key", systemImage: "key.horizontal")
                 .font(TronTypography.subheadline)
             Spacer()
             SecureField("Enter key", text: $apiKey)
@@ -523,8 +489,10 @@ private struct ServiceForm: View {
                 .autocorrectionDisabled()
         }
 
-        HStack(spacing: 12) {
-            Button {
+        FormActions(
+            saveDisabled: apiKey.isEmpty || isSaving,
+            showClear: serviceInfo?.hasApiKey == true,
+            onSave: {
                 Task {
                     guard !apiKey.isEmpty else { return }
                     isSaving = true
@@ -532,19 +500,33 @@ private struct ServiceForm: View {
                     apiKey = ""
                     isSaving = false
                 }
-            } label: {
+            },
+            onClear: { Task { await onClear() } }
+        )
+    }
+}
+
+// MARK: - Shared Form Actions
+
+private struct FormActions: View {
+    let saveDisabled: Bool
+    let showClear: Bool
+    let onSave: () -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button { onSave() } label: {
                 Text("Save")
                     .font(TronTypography.buttonSM)
                     .frame(minWidth: 60)
             }
-            .disabled(apiKey.isEmpty || isSaving)
+            .disabled(saveDisabled)
             .buttonStyle(.borderedProminent)
             .tint(.tronEmerald)
 
-            if serviceInfo?.hasApiKey == true {
-                Button(role: .destructive) {
-                    Task { await onClear() }
-                } label: {
+            if showClear {
+                Button(role: .destructive) { onClear() } label: {
                     Text("Clear")
                         .font(TronTypography.buttonSM)
                         .frame(minWidth: 60)
