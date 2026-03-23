@@ -306,18 +306,6 @@ private struct StandardProviderForm: View {
             }
         }
 
-        // OAuth sign-in (Anthropic only)
-        if providerId == "anthropic", let onOAuthLogin {
-            Button {
-                onOAuthLogin()
-            } label: {
-                Label("Sign in with Anthropic", systemImage: "person.badge.key")
-                    .font(TronTypography.buttonSM)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
-        }
-
         // Actions
         FormActions(
             saveDisabled: apiKey.isEmpty || isSaving,
@@ -331,7 +319,8 @@ private struct StandardProviderForm: View {
                     isSaving = false
                 }
             },
-            onClear: { Task { await onClear() } }
+            onClear: { Task { await onClear() } },
+            onOAuthLogin: providerId == "anthropic" ? onOAuthLogin : nil
         )
     }
 
@@ -531,6 +520,7 @@ private struct FormActions: View {
     let showClear: Bool
     let onSave: () -> Void
     let onClear: () -> Void
+    var onOAuthLogin: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -550,6 +540,16 @@ private struct FormActions: View {
                         .frame(minWidth: 60)
                 }
                 .buttonStyle(.bordered)
+            }
+
+            if let onOAuthLogin {
+                Button { onOAuthLogin() } label: {
+                    Text("OAuth Login")
+                        .font(TronTypography.buttonSM)
+                        .frame(minWidth: 60)
+                }
+                .buttonStyle(.bordered)
+                .tint(.tronEmerald)
             }
 
             Spacer()
