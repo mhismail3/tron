@@ -207,7 +207,14 @@ pub struct AuthFileLock {
 pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock> {
     use std::os::unix::io::AsRawFd;
 
-    let lock_path = auth_path.with_extension("lock");
+    // Place lock file in workspace/deployment/ to keep ~/.tron/ clean.
+    let lock_path = auth_path
+        .parent()
+        .unwrap_or(auth_path)
+        .join("workspace/deployment/auth.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -452,6 +459,14 @@ mod tests {
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
     }
 
+    /// Helper: derive the lock path the same way `acquire_auth_file_lock` does.
+    fn lock_path_for(auth_path: &Path) -> std::path::PathBuf {
+        auth_path
+            .parent()
+            .unwrap_or(auth_path)
+            .join("workspace/deployment/auth.lock")
+    }
+
     #[allow(unsafe_code)]
     #[test]
     fn file_lock_is_exclusive() {
@@ -459,11 +474,10 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-
         let _lock = acquire_auth_file_lock(&path).unwrap();
 
         // Try non-blocking lock from another fd — should fail
-        let lock_path = path.with_extension("lock");
+        let lock_path = lock_path_for(&path);
         let lock_file2 = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -486,10 +500,9 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-
         let _lock = acquire_auth_file_lock(&path).unwrap();
 
-        let lock_path = path.with_extension("lock");
+        let lock_path = lock_path_for(&path);
         assert!(lock_path.exists());
         let perms = std::fs::metadata(&lock_path).unwrap().permissions();
         assert_eq!(perms.mode() & 0o777, 0o600);
