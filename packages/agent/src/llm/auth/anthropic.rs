@@ -151,23 +151,20 @@ pub fn is_oauth_token(token: &str) -> bool {
 /// Load server auth from auth storage.
 ///
 /// Priority:
-/// 1. `env_token` (pre-configured OAuth token, e.g. `CLAUDE_CODE_OAUTH_TOKEN`)
-/// 2. Multi-account OAuth tokens (from `accounts[]`)
-/// 3. Legacy single OAuth tokens
-/// 4. API key
+/// 1. Multi-account OAuth tokens (from `accounts[]`)
+/// 2. Legacy single OAuth tokens
+/// 3. API key
 ///
 /// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "anthropic"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
-    env_token: Option<&str>,
     preferred_account: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
     load_server_auth_with_client(
         auth_path,
         config,
-        env_token,
         preferred_account,
         super::shared_auth_client(),
     )
@@ -179,25 +176,14 @@ pub async fn load_server_auth(
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
-    env_token: Option<&str>,
     preferred_account: Option<&str>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    // 1. Env var token (long-lived, no refresh)
-    if let Some(token) = env_token {
-        return Ok(Some(ServerAuth::OAuth {
-            access_token: token.to_string(),
-            refresh_token: String::new(),
-            expires_at: i64::MAX,
-            account_label: None,
-        }));
-    }
-
     let Some(pa) = super::storage::get_provider_auth(auth_path, "anthropic") else {
         return Ok(None);
     };
 
-    // 2. Multi-account tokens
+    // 1. Multi-account tokens
     if let Some(accounts) = &pa.accounts
         && !accounts.is_empty()
     {
@@ -233,14 +219,14 @@ pub async fn load_server_auth_with_client(
         }
     }
 
-    // 3. Legacy single OAuth
+    // 2. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
         let (tokens, _refreshed) =
             maybe_refresh_tokens(auth_path, None, oauth, config, client).await?;
         return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
     }
 
-    // 4. API key
+    // 3. API key
     if let Some(key) = &pa.api_key {
         return Ok(Some(ServerAuth::from_api_key(key)));
     }
@@ -477,17 +463,30 @@ mod tests {
     // urlencoded tests moved to auth/mod.rs (single source of truth)
 
     #[tokio::test]
-    async fn load_server_auth_env_token_priority() {
+    async fn load_server_auth_only_reads_from_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
+
+        // Save API key to auth.json
+        crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-file-key").unwrap();
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, Some("env-token"), None)
-            .await
-            .unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "sk-file-key");
+
+        // Save OAuth tokens too — OAuth takes priority over API key
+        let tokens = OAuthTokens {
+            access_token: "oauth-tok".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
-        assert_eq!(auth.token(), "env-token");
+        assert_eq!(auth.token(), "oauth-tok");
     }
 
     #[tokio::test]
@@ -498,7 +497,7 @@ mod tests {
         crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert!(!auth.is_oauth());
         assert_eq!(auth.token(), "sk-123");
@@ -510,7 +509,7 @@ mod tests {
         let path = dir.path().join("auth.json");
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -528,7 +527,7 @@ mod tests {
         crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-tok");
@@ -552,7 +551,7 @@ mod tests {
             .unwrap();
 
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await;
+        let result = load_server_auth(&path, &cfg, None).await;
 
         // Should return Err (OAuth refresh failed), NOT Ok(Some(ApiKey))
         assert!(
@@ -586,7 +585,7 @@ mod tests {
         let cfg = default_config();
 
         // Prefer "personal" account
-        let result = load_server_auth(&path, &cfg, None, Some("personal"))
+        let result = load_server_auth(&path, &cfg, Some("personal"))
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -594,7 +593,7 @@ mod tests {
 
         // No preference, no hostname match → first account
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "work-tok");
     }
@@ -630,7 +629,7 @@ mod tests {
 
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-b".to_string()));
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "tok-b");
     }
@@ -659,7 +658,7 @@ mod tests {
 
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-a".to_string()));
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, Some("user@host-b"))
+        let result = load_server_auth(&path, &cfg, Some("user@host-b"))
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -690,7 +689,7 @@ mod tests {
 
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("unknown-host".to_string()));
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "tok-work");
     }
@@ -719,7 +718,7 @@ mod tests {
 
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "tok-a");
     }
@@ -740,7 +739,7 @@ mod tests {
 
         MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("myhost".to_string()));
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "tok-alice");
     }

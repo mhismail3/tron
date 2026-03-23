@@ -252,20 +252,14 @@ pub fn get_api_headers(auth: &GoogleAuth) -> Vec<(String, String)> {
 /// Load server auth from auth storage.
 ///
 /// Priority:
-/// 1. `env_token` (pre-configured OAuth token)
-/// 2. OAuth tokens from `auth.json` (auto-refresh if expired)
-/// 3. `env_api_key` (env var API key)
-/// 4. API key from `auth.json`
+/// 1. OAuth tokens from `auth.json` (auto-refresh if expired)
+/// 2. API key from `auth.json`
 #[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
-    env_token: Option<&str>,
-    env_api_key: Option<&str>,
 ) -> Result<Option<GoogleAuth>, AuthError> {
     load_server_auth_with_client(
         auth_path,
-        env_token,
-        env_api_key,
         super::shared_auth_client(),
     )
     .await
@@ -275,27 +269,9 @@ pub async fn load_server_auth(
 #[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
-    env_token: Option<&str>,
-    env_api_key: Option<&str>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // 1. Env var OAuth token
-    if let Some(token) = env_token {
-        return Ok(Some(GoogleAuth {
-            auth: ServerAuth::OAuth {
-                access_token: token.to_string(),
-                refresh_token: String::new(),
-                expires_at: i64::MAX,
-                account_label: None,
-            },
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: None,
-        }));
-    }
-
-    // 2. OAuth from auth.json
+    // 1. OAuth from auth.json
     let gpa = super::storage::get_google_provider_auth(auth_path);
     if let Some(ref gpa) = gpa
         && let Some(oauth) = &gpa.base.oauth
@@ -317,7 +293,6 @@ pub async fn load_server_auth_with_client(
             Ok((tokens, refreshed)) => {
                 if refreshed {
                     tracing::info!("persisting refreshed Google tokens");
-                    // Update the stored OAuth tokens in the google provider auth
                     let mut updated_gpa = gpa.clone();
                     updated_gpa.base.oauth = Some(tokens.clone());
                     let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
@@ -336,18 +311,7 @@ pub async fn load_server_auth_with_client(
         }
     }
 
-    // 3. Env var API key
-    if let Some(key) = env_api_key {
-        return Ok(Some(GoogleAuth {
-            auth: ServerAuth::from_api_key(key),
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: None,
-        }));
-    }
-
-    // 4. API key from auth.json
+    // 2. API key from auth.json
     if let Some(gpa) = &gpa
         && let Some(key) = &gpa.base.api_key
     {
@@ -539,29 +503,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_env_token() {
+    async fn load_server_auth_only_reads_from_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, Some("env-tok"), None)
-            .await
-            .unwrap();
+        // Save API key to file and verify it loads
+        let mut gpa = GoogleProviderAuth::default();
+        gpa.base.api_key = Some("file-api-key".to_string());
+        crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
-        assert!(auth.auth.is_oauth());
-        assert_eq!(auth.auth.token(), "env-tok");
+        assert_eq!(auth.auth.token(), "file-api-key");
     }
 
     #[tokio::test]
-    async fn load_server_auth_env_api_key() {
+    async fn load_server_auth_oauth_from_file_only() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, None, Some("env-key"))
-            .await
-            .unwrap();
+        let gpa = GoogleProviderAuth {
+            base: crate::llm::auth::types::ProviderAuth {
+                oauth: Some(OAuthTokens {
+                    access_token: "ya29.file-oauth".to_string(),
+                    refresh_token: "ref".to_string(),
+                    expires_at: now_ms() + 3_600_000,
+                }),
+                ..Default::default()
+            },
+            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
+            ..Default::default()
+        };
+        crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
-        assert!(!auth.auth.is_oauth());
-        assert_eq!(auth.auth.token(), "env-key");
+        assert!(auth.auth.is_oauth());
+        assert_eq!(auth.auth.token(), "ya29.file-oauth");
     }
 
     #[tokio::test]
@@ -569,7 +547,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, None, None).await.unwrap();
+        let result = load_server_auth(&path).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -592,7 +570,7 @@ mod tests {
         };
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
-        let result = load_server_auth(&path, None, None).await.unwrap();
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.auth.token(), "ya29.fresh");
         assert_eq!(auth.endpoint, Some(GoogleOAuthEndpoint::Antigravity));

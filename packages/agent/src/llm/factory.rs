@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::{info, warn};
+use tracing::info;
 use crate::llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
 use crate::llm::provider::{Provider, ProviderError, ProviderFactory};
 
@@ -46,9 +46,6 @@ pub struct DefaultProviderFactory {
     kimi_base_url: Option<String>,
     /// Shared HTTP client — connection pool reused across all providers.
     http_client: reqwest::Client,
-    /// When true, skip env-var fallbacks for auth (used in tests).
-    #[cfg(test)]
-    disable_env_fallback: bool,
 }
 
 impl DefaultProviderFactory {
@@ -79,8 +76,6 @@ impl DefaultProviderFactory {
             minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
             kimi_base_url: settings.api.kimi.as_ref().map(|k| k.base_url.clone()),
             http_client,
-            #[cfg(test)]
-            disable_env_fallback: false,
         }
     }
 
@@ -89,23 +84,6 @@ impl DefaultProviderFactory {
     pub fn with_auth_path(mut self, path: PathBuf) -> Self {
         self.auth_path = path;
         self
-    }
-
-    /// Disable env-var auth fallbacks (for testing).
-    #[cfg(test)]
-    #[must_use]
-    pub fn with_no_env_fallback(mut self) -> Self {
-        self.disable_env_fallback = true;
-        self
-    }
-
-    /// Read an env var, returning `None` when env fallbacks are disabled.
-    fn env_var(&self, name: &str) -> Option<String> {
-        #[cfg(test)]
-        if self.disable_env_fallback {
-            return None;
-        }
-        std::env::var(name).ok()
     }
 
     /// Get a clone of the shared HTTP client.
@@ -120,55 +98,41 @@ impl DefaultProviderFactory {
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
-        let env_token = self.env_var("CLAUDE_CODE_OAUTH_TOKEN");
         let preferred = self.anthropic.preferred_account.as_deref();
 
         let server_auth = match crate::llm::auth::anthropic::load_server_auth_with_client(
             &self.auth_path,
             &oauth_config,
-            env_token.as_deref(),
             preferred,
             &self.http_client,
         )
         .await
         {
             Ok(Some(auth)) => auth,
-            Ok(None) => match self.env_var("ANTHROPIC_API_KEY") {
-                Some(key) => {
-                    info!("using ANTHROPIC_API_KEY env var (no OAuth tokens found)");
-                    crate::llm::auth::ServerAuth::from_api_key(key)
-                }
-                None => {
-                    return Err(ProviderError::Auth {
-                        message: "no Anthropic auth available (OAuth or API key)".into(),
+            Ok(None) => {
+                return Err(ProviderError::Auth {
+                    message: "no Anthropic auth configured — add credentials in Settings > Providers".into(),
+                });
+            }
+            Err(e) => {
+                if e.is_transient() {
+                    return Err(ProviderError::Api {
+                        status: match &e {
+                            crate::llm::auth::errors::AuthError::OAuth { status, .. } => *status,
+                            crate::llm::auth::errors::AuthError::Http(he) => {
+                                he.status().map_or(503, |s| s.as_u16())
+                            }
+                            _ => 503,
+                        },
+                        message: format!("Anthropic auth failed (transient): {e}"),
+                        code: None,
+                        retryable: true,
                     });
                 }
-            },
-            Err(e) => match self.env_var("ANTHROPIC_API_KEY") {
-                Some(key) => {
-                    warn!(error = %e, "Anthropic OAuth failed, falling back to API key");
-                    crate::llm::auth::ServerAuth::from_api_key(key)
-                }
-                None => {
-                    if e.is_transient() {
-                        return Err(ProviderError::Api {
-                            status: match &e {
-                                crate::llm::auth::errors::AuthError::OAuth { status, .. } => *status,
-                                crate::llm::auth::errors::AuthError::Http(he) => {
-                                    he.status().map_or(503, |s| s.as_u16())
-                                }
-                                _ => 503,
-                            },
-                            message: format!("Anthropic auth failed (transient): {e}"),
-                            code: None,
-                            retryable: true,
-                        });
-                    }
-                    return Err(ProviderError::Auth {
-                        message: format!("Anthropic auth failed: {e}"),
-                    });
-                }
-            },
+                return Err(ProviderError::Auth {
+                    message: format!("Anthropic auth failed: {e}"),
+                });
+            }
         };
 
         let auth = match server_auth {
@@ -220,13 +184,8 @@ impl DefaultProviderFactory {
     }
 
     async fn create_openai(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let env_token = self.env_var("OPENAI_OAUTH_TOKEN");
-        let env_api_key = self.env_var("OPENAI_API_KEY");
-
         let server_auth = match crate::llm::auth::openai::load_server_auth_with_client(
             &self.auth_path,
-            env_token.as_deref(),
-            env_api_key.as_deref(),
             &self.http_client,
         )
         .await
@@ -234,7 +193,7 @@ impl DefaultProviderFactory {
             Ok(Some(auth)) => auth,
             Ok(None) => {
                 return Err(ProviderError::Auth {
-                    message: "no OpenAI auth available (set OPENAI_API_KEY or sign in)".into(),
+                    message: "no OpenAI auth configured — add credentials in Settings > Providers".into(),
                 });
             }
             Err(e) => {
@@ -280,13 +239,8 @@ impl DefaultProviderFactory {
     }
 
     async fn create_google(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let env_token = self.env_var("GOOGLE_OAUTH_TOKEN");
-        let env_api_key = self.env_var("GOOGLE_API_KEY");
-
         let google_auth = match crate::llm::auth::google::load_server_auth_with_client(
             &self.auth_path,
-            env_token.as_deref(),
-            env_api_key.as_deref(),
             &self.http_client,
         )
         .await
@@ -294,7 +248,7 @@ impl DefaultProviderFactory {
             Ok(Some(auth)) => auth,
             Ok(None) => {
                 return Err(ProviderError::Auth {
-                    message: "no Google auth available (set GOOGLE_API_KEY or sign in)".into(),
+                    message: "no Google auth configured — add credentials in Settings > Providers".into(),
                 });
             }
             Err(e) => {
@@ -356,11 +310,7 @@ impl DefaultProviderFactory {
         ))
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        // Priority: env var > auth.json
-        let api_key = if let Some(key) = self.env_var("MINIMAX_API_KEY") {
-            info!("using MINIMAX_API_KEY env var");
-            key
-        } else if let Some(pa) =
+        let api_key = if let Some(pa) =
             crate::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
         {
             if let Some(key) = pa.api_key {
@@ -373,7 +323,7 @@ impl DefaultProviderFactory {
             }
         } else {
             return Err(ProviderError::Auth {
-                message: "no MiniMax auth available (set MINIMAX_API_KEY or add to auth.json)"
+                message: "no MiniMax auth configured — add API key in Settings > Providers"
                     .into(),
             });
         };
@@ -403,11 +353,7 @@ impl DefaultProviderFactory {
     }
 
     fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        // Priority: env var > auth.json
-        let api_key = if let Some(key) = self.env_var("MOONSHOT_API_KEY") {
-            info!("using MOONSHOT_API_KEY env var");
-            key
-        } else if let Some(pa) =
+        let api_key = if let Some(pa) =
             crate::llm::auth::storage::get_provider_auth(&self.auth_path, "kimi")
         {
             if let Some(key) = pa.api_key {
@@ -420,7 +366,7 @@ impl DefaultProviderFactory {
             }
         } else {
             return Err(ProviderError::Auth {
-                message: "no Kimi auth available (set MOONSHOT_API_KEY or add to auth.json)"
+                message: "no Kimi auth configured — add API key in Settings > Providers"
                     .into(),
             });
         };
@@ -492,7 +438,6 @@ mod tests {
         let settings = crate::settings::TronSettings::default();
         DefaultProviderFactory::new(&settings)
             .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"))
-            .with_no_env_fallback()
     }
 
     #[test]
@@ -643,7 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn factory_uses_api_key_when_no_oauth_exists() {
-        // When auth.json has no OAuth tokens, API key env var should work
+        // When auth.json has no OAuth tokens and no API key, should fail
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
         // Write empty auth.json (no OAuth tokens, no API key in file)
@@ -651,10 +596,9 @@ mod tests {
 
         let settings = crate::settings::TronSettings::default();
         let factory = DefaultProviderFactory::new(&settings)
-            .with_auth_path(path)
-            .with_no_env_fallback();
+            .with_auth_path(path);
 
-        // No OAuth, no env var → should fail with auth error
+        // No OAuth, no auth.json credentials → should fail with auth error
         let err = expect_auth_error(&factory, "claude-opus-4-6").await;
         assert_eq!(err.category(), "auth");
         assert!(
@@ -679,8 +623,7 @@ mod tests {
 
         let settings = crate::settings::TronSettings::default();
         let factory = DefaultProviderFactory::new(&settings)
-            .with_auth_path(path)
-            .with_no_env_fallback();
+            .with_auth_path(path);
 
         // Should fail — OAuth exists but refresh fails, no API key to fall back to
         let err = expect_auth_error(&factory, "claude-opus-4-6").await;

@@ -62,20 +62,14 @@ pub async fn refresh_token_with_client(
 /// Load server auth from auth storage.
 ///
 /// Priority:
-/// 1. `env_token` (pre-configured OAuth token, e.g. `OPENAI_OAUTH_TOKEN`)
-/// 2. OAuth tokens from `auth.json` (provider key: `openai-codex`)
-/// 3. `env_api_key` (e.g. `OPENAI_API_KEY`)
-/// 4. API key from `auth.json`
+/// 1. OAuth tokens from `auth.json` (provider key: `openai-codex`)
+/// 2. API key from `auth.json`
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
-    env_token: Option<&str>,
-    env_api_key: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
     load_server_auth_with_client(
         auth_path,
-        env_token,
-        env_api_key,
         super::shared_auth_client(),
     )
     .await
@@ -85,23 +79,11 @@ pub async fn load_server_auth(
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
-    env_token: Option<&str>,
-    env_api_key: Option<&str>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    // 1. Env var OAuth token
-    if let Some(token) = env_token {
-        return Ok(Some(ServerAuth::OAuth {
-            access_token: token.to_string(),
-            refresh_token: String::new(),
-            expires_at: i64::MAX,
-            account_label: None,
-        }));
-    }
-
     let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY);
 
-    // 2. OAuth tokens
+    // 1. OAuth tokens
     if let Some(ref pa) = pa
         && let Some(oauth) = &pa.oauth
     {
@@ -123,12 +105,7 @@ pub async fn load_server_auth_with_client(
         }
     }
 
-    // 3. Env var API key
-    if let Some(key) = env_api_key {
-        return Ok(Some(ServerAuth::from_api_key(key)));
-    }
-
-    // 4. API key from auth.json
+    // 2. API key from auth.json
     if let Some(pa) = &pa
         && let Some(key) = &pa.api_key
     {
@@ -176,29 +153,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_env_token() {
+    async fn load_server_auth_only_reads_from_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, Some("env-tok"), None)
-            .await
-            .unwrap();
+        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-file-key").unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
-        assert!(auth.is_oauth());
-        assert_eq!(auth.token(), "env-tok");
+        assert_eq!(auth.token(), "sk-file-key");
     }
 
     #[tokio::test]
-    async fn load_server_auth_env_api_key() {
+    async fn load_server_auth_oauth_from_file_only() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, None, Some("sk-openai"))
-            .await
-            .unwrap();
+        let tokens = OAuthTokens {
+            access_token: "oauth-from-file".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
-        assert!(!auth.is_oauth());
-        assert_eq!(auth.token(), "sk-openai");
+        assert!(auth.is_oauth());
+        assert_eq!(auth.token(), "oauth-from-file");
     }
 
     #[tokio::test]
@@ -208,7 +189,7 @@ mod tests {
 
         crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-file-key").unwrap();
 
-        let result = load_server_auth(&path, None, None).await.unwrap();
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "sk-file-key");
     }
@@ -218,7 +199,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let result = load_server_auth(&path, None, None).await.unwrap();
+        let result = load_server_auth(&path).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -234,23 +215,9 @@ mod tests {
         };
         crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens).unwrap();
 
-        let result = load_server_auth(&path, None, None).await.unwrap();
+        let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-openai-tok");
-    }
-
-    #[tokio::test]
-    async fn env_token_takes_priority_over_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-file").unwrap();
-
-        let result = load_server_auth(&path, Some("env-tok"), None)
-            .await
-            .unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "env-tok");
     }
 }

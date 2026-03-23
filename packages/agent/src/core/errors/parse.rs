@@ -104,7 +104,7 @@ fn patterns() -> &'static [ErrorPattern] {
             category: ErrorCategory::Authentication,
             message: "Invalid API key",
             suggestion: Some(
-                "Run \"tron login\" to re-authenticate or check your ANTHROPIC_API_KEY",
+                "Run \"tron login\" to re-authenticate or update credentials in Settings > Providers",
             ),
             is_retryable: false,
         },
@@ -119,7 +119,7 @@ fn patterns() -> &'static [ErrorPattern] {
             check: |s| s.contains("401"),
             category: ErrorCategory::Authentication,
             message: "Authentication required",
-            suggestion: Some("Run \"tron login\" or set ANTHROPIC_API_KEY environment variable"),
+            suggestion: Some("Run \"tron login\" or update credentials in Settings > Providers"),
             is_retryable: false,
         },
         ErrorPattern {

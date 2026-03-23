@@ -695,7 +695,7 @@ async fn main() -> Result<()> {
         );
     } else {
         tracing::warn!(
-            "no auth found at startup — sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
+            "no auth found at startup — sign in via Settings > Providers"
         );
     }
 
@@ -1287,10 +1287,10 @@ mod tests {
 
     #[tokio::test]
     async fn openai_returns_none_without_auth() {
-        // With no env vars and no auth.json, OpenAI returns None
+        // With no auth.json, OpenAI returns None
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron::llm::auth::openai::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::openai::load_server_auth(&path)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1300,7 +1300,7 @@ mod tests {
     async fn google_returns_none_without_auth() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron::llm::auth::google::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::google::load_server_auth(&path)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1328,7 +1328,7 @@ mod tests {
 
         // load_server_auth should find the OAuth tokens
         let config = tron::llm::auth::anthropic::default_config();
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1352,7 +1352,7 @@ mod tests {
 
         // OAuth takes priority
         let config = tron::llm::auth::anthropic::default_config();
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1395,13 +1395,13 @@ mod tests {
 
         // Select "personal" account
         let result =
-            tron::llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
+            tron::llm::auth::anthropic::load_server_auth(&path, &config, Some("personal"))
                 .await
                 .unwrap();
         assert_eq!(result.unwrap().token(), "personal-tok");
 
         // No preference → first account
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
             .await
             .unwrap();
         assert_eq!(result.unwrap().token(), "work-tok");
@@ -1424,7 +1424,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = tron::llm::auth::openai::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::openai::load_server_auth(&path)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1451,7 +1451,7 @@ mod tests {
         };
         tron::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
-        let result = tron::llm::auth::google::load_server_auth(&path, None, None)
+        let result = tron::llm::auth::google::load_server_auth(&path)
             .await
             .unwrap();
         let auth = result.unwrap();
