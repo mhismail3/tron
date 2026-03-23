@@ -137,3 +137,9 @@ struct OAuthCompleteParams: Encodable {
     let code: String
     let label: String
 }
+
+struct RenameAccountParams: Encodable {
+    let provider: String
+    let oldLabel: String
+    let newLabel: String
+}

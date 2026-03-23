@@ -61,4 +61,13 @@ final class AuthClient {
             params: OAuthCompleteParams(flowId: flowId, code: code, label: label)
         )
     }
+
+    /// Rename an OAuth account label.
+    func renameAccount(provider: String, oldLabel: String, newLabel: String) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.renameAccount",
+            params: RenameAccountParams(provider: provider, oldLabel: oldLabel, newLabel: newLabel)
+        )
+    }
 }

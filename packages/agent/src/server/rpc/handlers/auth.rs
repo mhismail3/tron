@@ -431,6 +431,40 @@ impl MethodHandler for OAuthCompleteHandler {
     }
 }
 
+/// Rename an OAuth account label.
+pub struct RenameAccountHandler;
+
+#[async_trait]
+impl MethodHandler for RenameAccountHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.renameAccount"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let provider = require_string_param(params.as_ref(), "provider")?;
+        let old_label = require_string_param(params.as_ref(), "oldLabel")?;
+        let new_label = require_string_param(params.as_ref(), "newLabel")?;
+
+        let auth_path = ctx.auth_path.clone();
+        let masked_state = ctx
+            .run_blocking("auth.renameAccount", move || {
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
+                })?;
+
+                crate::llm::auth::storage::rename_account(
+                    &auth_path, &provider, &old_label, &new_label,
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to rename account: {e}"),
+                })?;
+
+                Ok(build_masked_state(&auth_path))
+            })
+            .await?;
+
+        broadcast_auth_updated(ctx, &masked_state).await;
+        Ok(masked_state)
+    }
+}
+
 // ─── Update helpers ──────────────────────────────────────────────────────────
 
 fn update_standard_provider(

@@ -150,6 +150,9 @@ struct ProvidersSettingsPage: View {
                     providerInfo: info,
                     onSave: { params in await saveProvider(params) },
                     onClear: { await clearProvider(provider.id) },
+                    onRenameAccount: { oldLabel, newLabel in
+                        await renameAccount(provider: provider.id, oldLabel: oldLabel, newLabel: newLabel)
+                    },
                     onOAuthLogin: { showOAuthLogin = true }
                 )
             }
@@ -232,6 +235,16 @@ struct ProvidersSettingsPage: View {
         }
     }
 
+    private func renameAccount(provider: String, oldLabel: String, newLabel: String) async {
+        do {
+            authState = try await rpcClient.auth.renameAccount(
+                provider: provider, oldLabel: oldLabel, newLabel: newLabel
+            )
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     private func clearService(_ serviceId: String) async {
         do {
             authState = try await rpcClient.auth.clear(AuthClearParams(service: serviceId))
@@ -248,10 +261,13 @@ private struct StandardProviderForm: View {
     let providerInfo: ProviderAuthInfo?
     let onSave: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
+    let onRenameAccount: (String, String) async -> Void
     var onOAuthLogin: (() -> Void)?
 
     @State private var apiKey = ""
     @State private var isSaving = false
+    @State private var editingAccountLabel: String?
+    @State private var editedLabel = ""
 
     private var hasAccounts: Bool {
         !(providerInfo?.accounts?.isEmpty ?? true)
@@ -297,12 +313,37 @@ private struct StandardProviderForm: View {
         // Accounts
         if let accounts = providerInfo?.accounts, !accounts.isEmpty {
             ForEach(accounts, id: \.label) { account in
-                HStack {
-                    Label(account.label, systemImage: "person.circle.fill")
-                        .font(TronTypography.subheadline)
-                    Spacer()
-                    accountStatusView(account)
+                Button {
+                    editedLabel = account.label
+                    editingAccountLabel = account.label
+                } label: {
+                    HStack {
+                        Label(account.label, systemImage: "person.circle.fill")
+                            .font(TronTypography.subheadline)
+                        Spacer()
+                        accountStatusView(account)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+            }
+            .alert("Rename Account", isPresented: .init(
+                get: { editingAccountLabel != nil },
+                set: { if !$0 { editingAccountLabel = nil } }
+            )) {
+                TextField("Account label", text: $editedLabel)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                Button("Cancel", role: .cancel) { editingAccountLabel = nil }
+                Button("Save") {
+                    guard let oldLabel = editingAccountLabel else { return }
+                    let newLabel = editedLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !newLabel.isEmpty, newLabel != oldLabel else { return }
+                    editingAccountLabel = nil
+                    Task { await onRenameAccount(oldLabel, newLabel) }
+                }
+            } message: {
+                Text("Enter a new label for this account")
             }
         }
 

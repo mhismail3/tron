@@ -134,6 +134,30 @@ pub fn save_account_oauth_tokens(
     save_auth_storage(path, &mut storage)
 }
 
+/// Rename an account label for a provider.
+pub fn rename_account(
+    path: &Path,
+    provider: &str,
+    old_label: &str,
+    new_label: &str,
+) -> Result<(), AuthError> {
+    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
+
+    let accounts = pa.accounts.get_or_insert_with(Vec::new);
+    if let Some(existing) = accounts.iter_mut().find(|a| a.label == old_label) {
+        existing.label = new_label.to_string();
+    } else {
+        return Err(AuthError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Account '{old_label}' not found"),
+        )));
+    }
+
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
 /// Get account labels for a provider.
 pub fn get_account_labels(path: &Path, provider: &str) -> Vec<String> {
     let Some(pa) = get_provider_auth(path, provider) else {
