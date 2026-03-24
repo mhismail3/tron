@@ -264,7 +264,7 @@ async fn main() -> Result<()> {
         for subdir in &["sessions", "knowledge", "cron"] {
             let _ = std::fs::create_dir_all(tron_home.join("memory").join(subdir));
         }
-        let _ = std::fs::create_dir_all(tron_home.join("notes").join("voice"));
+        let _ = std::fs::create_dir_all(tron_home.join("user").join("voice"));
         let _ = std::fs::create_dir_all(tron_home.join("memory").join("skills"));
         let _ = std::fs::create_dir_all(tron_home.join("memory").join("rules"));
     }

@@ -128,8 +128,8 @@ confirm_action() {
 ensure_tron_home() {
     mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns,scratch}
     mkdir -p "$TRON_HOME"/memory/{sessions,knowledge,cron}
-    mkdir -p "$TRON_HOME"/notes/voice
-    mkdir -p "$TRON_HOME"/{skills,rules}
+    mkdir -p "$TRON_HOME"/user/voice
+    mkdir -p "$TRON_HOME"/memory/{skills,rules}
 }
 
 # Wait for a port to become free, with timeout.

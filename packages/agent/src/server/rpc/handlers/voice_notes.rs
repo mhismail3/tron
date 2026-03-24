@@ -86,7 +86,7 @@ impl MethodHandler for SaveHandler {
     }
 }
 
-/// List voice notes (reads from `~/.tron/notes/voice/`).
+/// List voice notes (reads from `~/.tron/user/voice/`).
 pub struct ListHandler;
 
 #[async_trait]
@@ -136,8 +136,8 @@ mod tests {
     fn notes_dir_returns_voice_notes_directory() {
         let dir = voice_notes_service::notes_dir();
         assert!(
-            dir.ends_with(".tron/notes/voice"),
-            "Expected '.tron/notes/voice' dir, got: {dir}"
+            dir.ends_with(".tron/user/voice"),
+            "Expected '.tron/user/voice' dir, got: {dir}"
         );
     }
 
