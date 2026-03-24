@@ -254,17 +254,19 @@ async fn main() -> Result<()> {
         }
     }
 
-    // One-time migration: artifacts/ → workspace/
+    // Ensure ~/.tron/ directory structure exists
     {
         let tron_home = tron::settings::tron_home_dir();
-        let old_artifacts = tron_home.join("artifacts");
-        let new_workspace = tron_home.join("workspace");
-        if old_artifacts.exists() && !new_workspace.exists() {
-            let _ = std::fs::rename(&old_artifacts, &new_workspace);
+        let system = tron_home.join("system");
+        for subdir in &["bin", "db", "deployment", "scratch"] {
+            let _ = std::fs::create_dir_all(system.join(subdir));
         }
-        for subdir in &["scratch", "cron", "canvases", "deployment"] {
-            let _ = std::fs::create_dir_all(new_workspace.join(subdir));
+        for subdir in &["sessions", "knowledge", "cron"] {
+            let _ = std::fs::create_dir_all(tron_home.join("memory").join(subdir));
         }
+        let _ = std::fs::create_dir_all(tron_home.join("notes").join("voice"));
+        let _ = std::fs::create_dir_all(tron_home.join("skills"));
+        let _ = std::fs::create_dir_all(tron_home.join("rules"));
     }
 
     // Database (events + tasks share one SQLite file) — set up before logging
@@ -469,7 +471,7 @@ async fn main() -> Result<()> {
     // Cron scheduler
     let cron_cancel = tokio_util::sync::CancellationToken::new();
     let cron_config_path = tron::settings::tron_home_dir()
-        .join("workspace")
+        .join("memory")
         .join("automations.json");
     let cron_backup_path = tron::settings::deploy_dir().join("automations.json.bak");
 
