@@ -213,11 +213,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "totalActivated": total_activated,
             })),
         )),
-        TronEvent::MemoryLoaded { count, .. } => Some(session_scoped(
-            event,
-            "memory.loaded",
-            Some(json!({ "count": count })),
-        )),
         TronEvent::SkillRemoved { skill_name, .. } => Some(session_scoped(
             event,
             "agent.skill_removed",

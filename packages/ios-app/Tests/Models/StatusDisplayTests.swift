@@ -107,33 +107,4 @@ struct StatusDisplayTests {
         #expect(WaitForAgentsStatus.timedOut.iconName == "clock.badge.exclamationmark")
     }
 
-    // MARK: - RenderAppUIStatus
-
-    @Test("RenderAppUIStatus color returns expected values")
-    func renderAppUIStatusColor() {
-        #expect(RenderAppUIStatus.rendering.color == .tronAmber)
-        #expect(RenderAppUIStatus.complete.color == .tronSuccess)
-        #expect(RenderAppUIStatus.error.color == .tronError)
-    }
-
-    @Test("RenderAppUIStatus label returns expected values")
-    func renderAppUIStatusLabel() {
-        #expect(RenderAppUIStatus.rendering.label == "Rendering")
-        #expect(RenderAppUIStatus.complete.label == "Completed")
-        #expect(RenderAppUIStatus.error.label == "Failed")
-    }
-
-    // MARK: - TaskManagerChipStatus
-
-    @Test("TaskManagerChipStatus label returns expected values")
-    func taskManagerStatusLabel() {
-        #expect(TaskManagerChipStatus.running.label == "Running")
-        #expect(TaskManagerChipStatus.completed.label == "Completed")
-    }
-
-    @Test("TaskManagerChipStatus iconName returns expected values")
-    func taskManagerStatusIconName() {
-        #expect(TaskManagerChipStatus.running.iconName == "")
-        #expect(TaskManagerChipStatus.completed.iconName == "checklist")
-    }
 }

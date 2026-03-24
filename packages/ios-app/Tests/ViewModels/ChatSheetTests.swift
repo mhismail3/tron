@@ -9,36 +9,6 @@ struct ChatSheetTests {
 
     // MARK: - ChatSheet Enum Identity Tests
 
-    @Test("Safari sheets with different URLs have different ids")
-    func testSafariDifferentURLsHaveDifferentIds() {
-        let url1 = URL(string: "https://example.com")!
-        let url2 = URL(string: "https://other.com")!
-
-        let sheet1 = ChatSheet.safari(url1)
-        let sheet2 = ChatSheet.safari(url2)
-
-        #expect(sheet1.id != sheet2.id)
-    }
-
-    @Test("Safari sheets with same URL have same id")
-    func testSafariSameURLHaveSameId() {
-        let url = URL(string: "https://example.com")!
-
-        let sheet1 = ChatSheet.safari(url)
-        let sheet2 = ChatSheet.safari(url)
-
-        #expect(sheet1.id == sheet2.id)
-    }
-
-    @Test("Browser sheet has consistent id")
-    func testBrowserSheetId() {
-        let sheet1 = ChatSheet.browser
-        let sheet2 = ChatSheet.browser
-
-        #expect(sheet1.id == sheet2.id)
-        #expect(sheet1.id == "browser")
-    }
-
     @Test("Settings sheet has consistent id")
     func testSettingsSheetId() {
         let sheet = ChatSheet.settings
@@ -127,20 +97,6 @@ struct ChatSheetTests {
         #expect(sheet.id == "subagent")
     }
 
-    @Test("UI canvas sheet has consistent id")
-    func testUICanvasId() {
-        let sheet = ChatSheet.uiCanvas
-
-        #expect(sheet.id == "uiCanvas")
-    }
-
-    @Test("Task list sheet has consistent id")
-    func testTaskListId() {
-        let sheet = ChatSheet.taskList
-
-        #expect(sheet.id == "taskList")
-    }
-
     @Test("Notify app sheets with different data have different ids")
     func testNotifyAppDifferentDataHaveDifferentIds() {
         let data1 = NotifyAppChipData(
@@ -171,36 +127,6 @@ struct ChatSheetTests {
 
         #expect(sheet1.id == sheet2.id)
         #expect(sheet1.id == "thinking")
-    }
-
-    @Test("Task detail sheet has unique id per tool call")
-    func testTaskDetailId() {
-        let data1 = TaskManagerChipData(
-            toolCallId: "call_1",
-            action: "create",
-            taskTitle: "Task 1",
-            chipSummary: "Created \"Task 1\"",
-            fullResult: "Created task task_1: Task 1 [pending]",
-            arguments: "{}",
-            entityDetail: nil,
-            status: .completed
-        )
-        let data2 = TaskManagerChipData(
-            toolCallId: "call_2",
-            action: "list",
-            taskTitle: nil,
-            chipSummary: "3 tasks",
-            fullResult: "Tasks (3/3):",
-            arguments: "{}",
-            entityDetail: nil,
-            status: .completed
-        )
-
-        let sheet1 = ChatSheet.taskDetail(data1)
-        let sheet2 = ChatSheet.taskDetail(data2)
-
-        #expect(sheet1.id != sheet2.id)
-        #expect(sheet1.id == "taskDetail-call_1")
     }
 
     @Test("All sheet cases have unique base ids")
@@ -234,20 +160,18 @@ struct ChatSheetTests {
             result: nil,
             isResultTruncated: false
         )
-        let taskData = TaskManagerChipData(
-            toolCallId: "task_tool",
-            action: "create",
-            taskTitle: "Test",
-            chipSummary: "Created \"Test\"",
-            fullResult: "Created task task_1: Test [pending]",
-            arguments: "{}",
-            entityDetail: nil,
-            status: .completed
+        let providerErrorData = ProviderErrorDetailData(
+            provider: "test",
+            category: "rate_limit",
+            message: "Too many requests",
+            suggestion: nil,
+            retryable: true,
+            statusCode: 429,
+            errorType: nil,
+            model: nil
         )
 
         let sheets: [ChatSheet] = [
-            .safari(URL(string: "https://example.com")!),
-            .browser,
             .settings,
             .contextAudit,
             .sessionHistory,
@@ -255,13 +179,12 @@ struct ChatSheetTests {
             .compactionDetail(compactionData),
             .askUserQuestion,
             .subagentDetail,
-            .uiCanvas,
-            .taskList,
-            .taskDetail(taskData),
             .notifyApp(notifyData),
             .thinkingDetail("content"),
             .commandToolDetail(commandToolData),
-            .modelPicker
+            .providerErrorDetail(providerErrorData),
+            .modelPicker,
+            .sourceChanges
         ]
 
         // Extract base ids (before any dynamic suffix)
@@ -427,29 +350,6 @@ struct SheetCoordinatorTests {
 
     // MARK: - Convenience Method Tests
 
-    @Test("showSafari creates safari sheet")
-    func testShowSafariCreatesSafariSheet() {
-        let coordinator = SheetCoordinator()
-        let url = URL(string: "https://example.com")!
-
-        coordinator.showSafari(url)
-
-        if case .safari(let sheetUrl) = coordinator.activeSheet {
-            #expect(sheetUrl == url)
-        } else {
-            Issue.record("Expected safari sheet")
-        }
-    }
-
-    @Test("showBrowser creates browser sheet")
-    func testShowBrowserCreatesBrowserSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showBrowser()
-
-        #expect(coordinator.activeSheet == .browser)
-    }
-
     @Test("showSettings creates settings sheet")
     func testShowSettingsCreatesSettingsSheet() {
         let coordinator = SheetCoordinator()
@@ -535,49 +435,6 @@ struct SheetCoordinatorTests {
         coordinator.showSubagentDetail()
 
         #expect(coordinator.activeSheet == .subagentDetail)
-    }
-
-    @Test("showUICanvas creates UI canvas sheet")
-    func testShowUICanvasCreatesSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showUICanvas()
-
-        #expect(coordinator.activeSheet == .uiCanvas)
-    }
-
-    @Test("showTaskList creates task list sheet")
-    func testShowTaskListCreatesSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showTaskList()
-
-        #expect(coordinator.activeSheet == .taskList)
-    }
-
-    @Test("showTaskDetail creates task detail sheet with chip data")
-    func testShowTaskDetailCreatesCorrectSheet() {
-        let coordinator = SheetCoordinator()
-        let data = TaskManagerChipData(
-            toolCallId: "call_123",
-            action: "create",
-            taskTitle: "Fix bug",
-            chipSummary: "Created \"Fix bug\"",
-            fullResult: "Created task task_abc: Fix bug [pending]",
-            arguments: "{\"action\":\"create\",\"title\":\"Fix bug\"}",
-            entityDetail: nil,
-            status: .completed
-        )
-
-        coordinator.showTaskDetail(data)
-
-        if case .taskDetail(let sheetData) = coordinator.activeSheet {
-            #expect(sheetData.toolCallId == "call_123")
-            #expect(sheetData.action == "create")
-            #expect(sheetData.fullResult == "Created task task_abc: Fix bug [pending]")
-        } else {
-            Issue.record("Expected taskDetail sheet")
-        }
     }
 
     @Test("showNotifyApp creates notify app sheet with data")

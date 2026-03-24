@@ -109,18 +109,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.isProcessing)
     }
 
-    func testSendMessageResetsBrowserDismissal() async {
-        // Given: Browser was dismissed by user
-        mockContext.inputText = "Test"
-        mockContext.browserDismissal = .userDismissed
-
-        // When: Sending message
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Dismissal should be reset
-        XCTAssertEqual(mockContext.browserDismissal, .none)
-    }
-
     func testSendMessageResetsStreamingState() async {
         // Given: Valid input
         mockContext.inputText = "Test"
@@ -310,22 +298,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.appendedInterruptedMessage)
     }
 
-    func testAbortAgentClosesBrowserSession() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Browser session should be closed
-        XCTAssertTrue(mockContext.closeBrowserSessionCalled)
-    }
-
-    func testAbortAgentCancelsDeviceRequests() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Active device requests should be cancelled
-        XCTAssertTrue(mockContext.cancelActiveDeviceRequestsCalled)
-    }
-
     func testAbortAgentUpdatesDashboardState() async {
         // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
@@ -411,7 +383,6 @@ final class MockMessagingContext: MessagingContext {
     var agentPhase: AgentPhase = .idle
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
-    var browserDismissal: BrowserDismissal = .none
     var lastAnsweredQuestionCount: Int = 0
 
     // MARK: - Tracking for Assertions
@@ -433,7 +404,6 @@ final class MockMessagingContext: MessagingContext {
     var handleAgentErrorCalled = false
     var abortAgentCalled = false
     var finalizeStreamingMessageCalled = false
-    var closeBrowserSessionCalled = false
     var cancelActiveDeviceRequestsCalled = false
     var showErrorAlertCalled = false
 
@@ -503,10 +473,6 @@ final class MockMessagingContext: MessagingContext {
 
     func finalizeStreamingMessage() {
         finalizeStreamingMessageCalled = true
-    }
-
-    func closeBrowserSession() {
-        closeBrowserSessionCalled = true
     }
 
     func cancelActiveDeviceRequests() {

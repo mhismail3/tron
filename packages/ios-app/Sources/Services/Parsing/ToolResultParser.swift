@@ -15,45 +15,6 @@ enum ToolResultParser {
         SubagentResultParser.parseWaitForSubagent(from: tool)
     }
 
-    // MARK: - RenderAppUI
-
-    static func parseRenderAppUI(from tool: ToolUseData) -> RenderAppUIChipData? {
-        let canvasId = ToolArgumentParser.string("canvasId", from: tool.arguments) ?? tool.toolCallId
-        let title = ToolArgumentParser.string("title", from: tool.arguments)
-
-        let status: RenderAppUIStatus
-        switch tool.status {
-        case .running:
-            status = .rendering
-        case .success:
-            status = .complete
-        case .error:
-            status = .error
-        }
-
-        return RenderAppUIChipData(
-            toolCallId: tool.toolCallId,
-            canvasId: canvasId,
-            title: title,
-            status: status,
-            errorMessage: tool.status == .error ? tool.result : nil
-        )
-    }
-
-    // MARK: - TaskManager
-
-    static func parseTaskManager(from tool: ToolUseData) -> TaskManagerChipData? {
-        TaskResultParser.parseTaskManager(from: tool)
-    }
-
-    static func parseListResult(from result: String, action: String) -> ListResult? {
-        TaskResultParser.parseListResult(from: result, action: action)
-    }
-
-    static func parseEntityDetail(from result: String, action: String) -> EntityDetail? {
-        TaskResultParser.parseEntityDetail(from: result, action: action)
-    }
-
     // MARK: - NotifyApp
 
     static func parseNotifyApp(from tool: ToolUseData) -> NotifyAppChipData? {

@@ -257,9 +257,6 @@ final class TurnLifecycleCoordinator {
 
         context.finalizeStreamingMessage()
 
-        // Reset browser dismissal for next turn
-        context.browserDismissal = .none
-
         // Update dashboard with final response and tool count
         context.setSessionProcessing(false)
         context.updateSessionDashboardInfo(
@@ -274,9 +271,6 @@ final class TurnLifecycleCoordinator {
         context.resetUIUpdateQueue()
         context.resetAnimationCoordinatorToolState()
         context.resetStreamingManager()
-
-        // Close browser session when agent completes
-        context.closeBrowserSession()
 
         // Refresh context from server to ensure accuracy after all operations
         Task {

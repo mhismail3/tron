@@ -56,25 +56,6 @@ pub enum BroadcastEventType {
     #[serde(rename = "agent.todos_updated")]
     AgentTodosUpdated,
 
-    // ── Task ─────────────────────────────────────────────────────────
-    /// A task was created.
-    #[serde(rename = "task.created")]
-    TaskCreated,
-    /// A task was updated.
-    #[serde(rename = "task.updated")]
-    TaskUpdated,
-    /// A task was deleted.
-    #[serde(rename = "task.deleted")]
-    TaskDeleted,
-
-    // ── Browser ──────────────────────────────────────────────────────
-    /// A browser frame (screenshot) is available.
-    #[serde(rename = "browser.frame")]
-    BrowserFrame,
-    /// The browser was closed.
-    #[serde(rename = "browser.closed")]
-    BrowserClosed,
-
     // ── Event store ──────────────────────────────────────────────────
     /// A new event was persisted to the store.
     #[serde(rename = "event.new")]
@@ -95,11 +76,6 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
     BroadcastEventType::AgentMemoryUpdated,
     BroadcastEventType::AgentSkillRemoved,
     BroadcastEventType::AgentTodosUpdated,
-    BroadcastEventType::TaskCreated,
-    BroadcastEventType::TaskUpdated,
-    BroadcastEventType::TaskDeleted,
-    BroadcastEventType::BrowserFrame,
-    BroadcastEventType::BrowserClosed,
     BroadcastEventType::EventNew,
 ];
 
@@ -165,7 +141,7 @@ mod tests {
 
     #[test]
     fn all_broadcast_types_count() {
-        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 18);
+        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 13);
     }
 
     #[test]
@@ -204,11 +180,6 @@ mod tests {
             ),
             (BroadcastEventType::AgentSkillRemoved, "agent.skill_removed"),
             (BroadcastEventType::AgentTodosUpdated, "agent.todos_updated"),
-            (BroadcastEventType::TaskCreated, "task.created"),
-            (BroadcastEventType::TaskUpdated, "task.updated"),
-            (BroadcastEventType::TaskDeleted, "task.deleted"),
-            (BroadcastEventType::BrowserFrame, "browser.frame"),
-            (BroadcastEventType::BrowserClosed, "browser.closed"),
             (BroadcastEventType::EventNew, "event.new"),
         ];
 
@@ -251,7 +222,7 @@ mod tests {
     #[test]
     fn envelope_omits_null_session_id() {
         let envelope = EventEnvelope {
-            event_type: BroadcastEventType::BrowserClosed,
+            event_type: BroadcastEventType::EventNew,
             session_id: None,
             timestamp: "2025-01-15T10:00:00Z".to_string(),
             data: serde_json::json!({}),
@@ -326,7 +297,7 @@ mod tests {
     #[test]
     fn create_envelope_no_session_id() {
         let envelope = create_event_envelope(
-            BroadcastEventType::BrowserClosed,
+            BroadcastEventType::EventNew,
             serde_json::json!({}),
             None,
         );

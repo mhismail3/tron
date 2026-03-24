@@ -18,14 +18,6 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
     /// Running tool counter for O(1) hasRunningTools check
     var runningToolCount: Int { get set }
 
-    // MARK: - State Objects
-
-    /// Safari URL for in-app browser
-    var safariURL: URL? { get set }
-
-    /// RenderAppUI chip tracker for managing UI canvas chips
-    var renderAppUIChipTracker: RenderAppUIChipTracker { get }
-
     // MARK: - Streaming Management
 
     /// Flush any pending text updates before tool processing
@@ -55,16 +47,6 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
 
     /// Open the AskUserQuestion sheet for a tool call
     func openAskUserQuestionSheet(for data: AskUserQuestionToolData)
-
-    // MARK: - Browser
-
-    /// Update browser status if needed (for browser tools)
-    /// - Returns: true if browser should be shown/streamed for this turn
-    @discardableResult
-    func updateBrowserStatusIfNeeded() -> Bool
-
-    /// Start browser streaming if needed (for browser tools)
-    func startBrowserStreamIfNeeded()
 
     // MARK: - Thinking State
 

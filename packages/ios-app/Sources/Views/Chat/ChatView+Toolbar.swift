@@ -58,26 +58,12 @@ extension ChatView {
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if viewModel.hasBrowserSession {
-                Button {
-                    viewModel.toggleBrowserWindow()
-                } label: {
-                    Image(systemName: "globe")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
             Menu {
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.history.rawValue) } label: {
                     Label("Session History", systemImage: "clock.arrow.circlepath")
                 }
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.context.rawValue) } label: {
                     Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
-                }
-                if viewModel.taskState.hasTasks {
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.tasks.rawValue) } label: {
-                        Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
-                    }
                 }
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.changes.rawValue) } label: {
                     Label {

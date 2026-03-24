@@ -63,17 +63,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.getAgentStateCalled)
     }
 
-    func testConnectAndResumeFetchesTasksAfterResume() async {
-        // Given: Connection succeeds
-        mockContext.isConnected = true
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should fetch tasks
-        XCTAssertTrue(mockContext.listTasksCalled)
-    }
-
     func testConnectAndResumeSetsShouldDismissOnSessionNotFound() async {
         // Given: Session not found error
         mockContext.isConnected = true
@@ -151,17 +140,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
         // Then: Should NOT check agent state
         XCTAssertFalse(mockContext.getAgentStateCalled)
-    }
-
-    func testReconnectAndResumeFetchesTasks() async {
-        // Given: Already connected
-        mockContext.isConnected = true
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should fetch tasks
-        XCTAssertTrue(mockContext.listTasksCalled)
     }
 
     // MARK: - Check and Resume Agent State Tests
@@ -319,31 +297,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
     }
 
-    // MARK: - Fetch Tasks Tests
-
-    func testFetchTasksUpdatesTaskState() async {
-        // Given: Tasks available
-        mockContext.tasksResult = createMockTaskListResult(count: 1)
-
-        // When: Fetch tasks
-        await coordinator.fetchTasksOnResume(context: mockContext)
-
-        // Then: Should update task state
-        XCTAssertTrue(mockContext.updateTasksCalled)
-        XCTAssertEqual(mockContext.lastTasksCount, 1)
-    }
-
-    func testFetchTasksHandlesError() async {
-        // Given: Fetch will fail
-        mockContext.listTasksShouldFail = true
-
-        // When: Fetch tasks
-        await coordinator.fetchTasksOnResume(context: mockContext)
-
-        // Then: Should not crash, just log warning
-        XCTAssertFalse(mockContext.updateTasksCalled)
-    }
-
     // MARK: - Disconnect Tests
 
     func testDisconnectCallsRpcDisconnect() async {
@@ -420,15 +373,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
         return try! JSONDecoder().decode(HistoryMessage.self, from: json)
     }
 
-    private func createMockTaskListResult(count: Int) -> TaskListResult {
-        let json = """
-        {
-            "tasks": \(count > 0 ? "[{\"id\": \"1\", \"title\": \"Test\", \"status\": \"pending\", \"priority\": \"medium\", \"source\": \"agent\", \"tags\": [], \"createdAt\": \"2024-01-01T00:00:00Z\", \"updatedAt\": \"2024-01-01T00:00:00Z\"}]" : "[]"),
-            "total": \(count)
-        }
-        """.data(using: .utf8)!
-        return try! JSONDecoder().decode(TaskListResult.self, from: json)
-    }
 }
 
 // MARK: - Test Error

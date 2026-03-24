@@ -58,18 +58,12 @@ final class ChatViewModel {
 
     // MARK: - Extracted State Objects
 
-    /// Browser state (frame, status, sheet visibility)
-    let browserState = BrowserState()
     /// AskUserQuestion state (sheet, current data, answers)
     let askUserQuestionState = AskUserQuestionState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)
     let subagentState = SubagentState()
-    /// UI canvas state (for RenderAppUI tool)
-    let uiCanvasState = UICanvasState()
-    /// Task state (for persistent task tracking)
-    let taskState = TaskState()
     /// Thinking state (for extended thinking display)
     let thinkingState = ThinkingState()
     /// Input bar state (text, attachments, skills, reasoning level)
@@ -88,12 +82,6 @@ final class ChatViewModel {
     var askUserQuestionCalledInTurn: Bool {
         get { askUserQuestionState.calledInTurn }
         set { askUserQuestionState.calledInTurn = newValue }
-    }
-
-    /// Current browser status (ToolEventContext)
-    var browserStatus: BrowserGetStatusResult? {
-        get { browserState.browserStatus }
-        set { browserState.browserStatus = newValue }
     }
 
     /// Make a tool visible for rendering (ToolEventContext)
@@ -164,10 +152,6 @@ final class ChatViewModel {
     let toolEventCoordinator = ToolEventCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
-    /// Coordinates UI canvas rendering event handling
-    let uiCanvasCoordinator = UICanvasCoordinator()
-    /// Coordinates browser event handling and session lifecycle
-    let browserCoordinator = BrowserCoordinator()
     /// Coordinates AskUserQuestion event handling and user interaction
     let askUserQuestionCoordinator = AskUserQuestionCoordinator()
     /// Coordinates voice recording and transcription
@@ -184,10 +168,6 @@ final class ChatViewModel {
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
-
-    /// Tracks RenderAppUI chip messages - consolidates race condition handling
-    /// Single source of truth for canvasId → messageId mapping, placeholder IDs, and pending events
-    let renderAppUIChipTracker = RenderAppUIChipTracker()
 
     let audioRecorder: AudioRecorder
 
@@ -399,10 +379,6 @@ final class ChatViewModel {
     /// Tracked fire-and-forget tasks — cancelled in deinit to prevent leaks
     @ObservationIgnored
     private var backgroundTasks: [Task<Void, Never>] = []
-    /// Debounced refreshTasks task — cancel-and-replace pattern
-    @ObservationIgnored
-    var refreshTasksDebounceTask: Task<Void, Never>?
-
     /// Launch a tracked background task. Removed from tracking on completion.
     func launchBackground(_ operation: @escaping @Sendable @MainActor () async -> Void) {
         let task = Task { @MainActor [weak self] in
@@ -419,7 +395,6 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             for task in backgroundTasks { task.cancel() }
-            refreshTasksDebounceTask?.cancel()
         }
     }
 
@@ -542,7 +517,6 @@ final class ChatViewModel {
 
     func clearMessages() {
         clearAllMessages()
-        renderAppUIChipTracker.clearAll()
     }
 
     /// Add an in-chat notification when model is switched

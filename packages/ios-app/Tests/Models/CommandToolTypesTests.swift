@@ -217,14 +217,6 @@ struct CommandToolTypesTests {
         #expect(config.displayName == "Web Search")
     }
 
-    @Test("Registry returns correct config for Task tool")
-    func testRegistryTaskConfig() {
-        let config = CommandToolRegistry.config(for: "task")
-
-        #expect(config.icon == "arrow.triangle.branch")
-        #expect(config.displayName == "Task")
-    }
-
     @Test("Registry returns fallback config for unknown tool")
     func testRegistryUnknownToolConfig() {
         let config = CommandToolRegistry.config(for: "unknowntool")
@@ -255,11 +247,8 @@ struct CommandToolTypesTests {
         #expect(commandTools.contains("search"))
         #expect(commandTools.contains("glob"))
         #expect(commandTools.contains("find"))
-        #expect(commandTools.contains("browsetheweb"))
         #expect(commandTools.contains("webfetch"))
         #expect(commandTools.contains("websearch"))
-        #expect(commandTools.contains("task"))
-        #expect(commandTools.contains("manageautomations"))
     }
 
     @Test("Registry isCommandTool returns true for command tools")
@@ -268,7 +257,6 @@ struct CommandToolTypesTests {
         #expect(CommandToolRegistry.isCommandTool("bash"))
         #expect(CommandToolRegistry.isCommandTool("search"))
         #expect(CommandToolRegistry.isCommandTool("edit"))
-        #expect(CommandToolRegistry.isCommandTool("manageautomations"))
     }
 
     @Test("Registry isCommandTool returns false for special tools")
@@ -277,10 +265,7 @@ struct CommandToolTypesTests {
         #expect(!CommandToolRegistry.isCommandTool("askuserquestion"))
         #expect(!CommandToolRegistry.isCommandTool("spawnsubagent"))
         #expect(!CommandToolRegistry.isCommandTool("waitforsubagent"))
-        #expect(!CommandToolRegistry.isCommandTool("renderappui"))
-        #expect(!CommandToolRegistry.isCommandTool("taskmanager"))
         #expect(!CommandToolRegistry.isCommandTool("notifyapp"))
-        #expect(!CommandToolRegistry.isCommandTool("adapt"))
     }
 
     // MARK: - CommandToolChipData Factory Tests
@@ -326,24 +311,6 @@ struct CommandToolTypesTests {
         #expect(chipData.icon == "terminal")
         #expect(chipData.summary == "git status --short")
         #expect(chipData.status == .running)
-    }
-
-    @Test("Factory creates chip data from ToolUseData for ManageAutomations tool")
-    func testFactoryCreatesManageAutomationsChipData() {
-        let toolUse = ToolUseData(
-            toolName: "ManageAutomations",
-            toolCallId: "call_cron_1",
-            arguments: "{\"action\": \"create\", \"name\": \"Daily Backup\"}",
-            status: .success,
-            result: "{\"job\": {\"id\": \"cron_123\"}}",
-            durationMs: 50
-        )
-        let chipData = CommandToolChipData(from: toolUse)
-        #expect(chipData.normalizedName == "manageautomations")
-        #expect(chipData.displayName == "Automation")
-        #expect(chipData.icon == "clock.badge.checkmark")
-        #expect(chipData.summary == "create")
-        #expect(chipData.status == .success)
     }
 
     @Test("Factory preserves display name for completed tools")

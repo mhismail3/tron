@@ -114,20 +114,7 @@ protocol ToolStateTracking: AnyObject {
 
     /// Whether AskUserQuestion was called in the current turn.
     var askUserQuestionCalledInTurn: Bool { get set }
-
-    /// Current browser status.
-    var browserStatus: BrowserGetStatusResult? { get set }
 }
-
-// MARK: - Browser Management
-
-/// Protocol for contexts that can manage browser sessions.
-@MainActor
-protocol BrowserManaging: AnyObject {
-    /// Close the browser session.
-    func closeBrowserSession()
-}
-
 
 // MARK: - Dashboard Updates
 

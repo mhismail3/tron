@@ -12,14 +12,6 @@ extension ChatViewModel: ToolEventContext {
     // - currentToolMessages: [UUID: ChatMessage]
     // - currentTurnToolCalls: [ToolCallRecord]
     // - askUserQuestionCalledInTurn: Bool (via askUserQuestionState)
-    // - browserStatus: BrowserGetStatusResult? (via browserState)
-    // - renderAppUIChipTracker: RenderAppUIChipTracker
-
-    /// Safari URL for in-app browser (ToolEventContext)
-    var safariURL: URL? {
-        get { browserState.safariURL }
-        set { browserState.safariURL = newValue }
-    }
 
     // MARK: - Protocol Methods
 
@@ -41,34 +33,6 @@ extension ChatViewModel: ToolEventContext {
     /// Enqueue a tool end for ordered processing (ToolEventContext)
     func enqueueToolEnd(_ data: UIUpdateQueue.ToolEndData) {
         uiUpdateQueue.enqueueToolEnd(data)
-    }
-
-    /// Update browser status if needed - for browser tools (ToolEventContext)
-    /// Also auto-shows the browser window when a browser tool is detected.
-    @discardableResult
-    func updateBrowserStatusIfNeeded() -> Bool {
-        let shouldShow = browserState.dismissal != .userDismissed
-        if browserState.browserStatus == nil {
-            browserState.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
-        }
-        // Auto-show browser window when browser tool is detected (unless user dismissed this turn)
-        // This follows the same pattern as BrowserCoordinator.handleBrowserFrame and
-        // ChatViewModel+Events.extractAndDisplayBrowserScreenshot
-        if shouldShow && !browserState.showBrowserWindow {
-            browserState.showBrowserWindow = true
-            logger.info("Browser window auto-shown on browser tool start", category: .events)
-        }
-        return shouldShow
-    }
-
-    /// Start browser stream if not already streaming (ToolEventContext)
-    func startBrowserStreamIfNeeded() {
-        if browserState.browserStatus?.isStreaming == true || browserState.dismissal == .userDismissed {
-            return
-        }
-        Task {
-            await startBrowserStream()
-        }
     }
 
     /// Reset thinking state for a new thinking block (ToolEventContext)

@@ -66,133 +66,7 @@ struct ChatView: View {
     // MARK: - Body
 
     var body: some View {
-        // Main content
-        messagesScrollView
-            .overlay {
-                if viewModel.inputBarState.isMentionPopupVisible {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(.tronStandard) {
-                                viewModel.inputBarState.isMentionPopupVisible = false
-                            }
-                        }
-                }
-            }
-            .environment(\.textSelectionDisabled, isDisappearing)
-            .background(
-                NavigationWillDisappearObserver {
-                    isDisappearing = true
-                }
-                .frame(width: 0, height: 0)
-            )
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Floating input area - iOS 26 liquid glass, no backgrounds
-                VStack(spacing: 8) {
-                    // Note: ThinkingCaption is now inline with messages (in messagesScrollView)
-                    // so that the response appears below/after the thinking block
-
-                    // Input area with integrated status pills and model picker
-                    InputBar(
-                        state: viewModel.inputBarState,
-                        config: InputBarConfig(
-                            agentPhase: viewModel.agentPhase,
-                            isCompacting: viewModel.isCompacting,
-                            isRecording: viewModel.isRecording,
-                            isTranscribing: viewModel.isTranscribing,
-                            modelName: displayModelName,
-                            tokenUsage: viewModel.contextState.totalTokenUsage,
-                            contextPercentage: viewModel.contextState.contextPercentage,
-                            contextWindow: viewModel.contextState.currentContextWindow,
-                            lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
-                            cachedModels: cachedModels,
-                            isLoadingModels: isLoadingModels,
-                            currentModelInfo: currentModelInfo,
-                            skillStore: skillStore,
-                            inputHistory: inputHistory,
-                            animationCoordinator: viewModel.animationCoordinator,
-                            readOnly: workspaceDeleted || !isInteractionEnabled,
-                            queuedMessages: viewModel.messageQueueState.queue
-                        ),
-                        actions: InputBarActions(
-                            onSend: { [viewModel, inputHistory, scrollCoordinator] in
-                                inputHistory.addToHistory(viewModel.inputText)
-                                scrollCoordinator.userSentMessage()
-
-                                // Dismiss keyboard on send
-                                UIApplication.shared.sendAction(
-                                    #selector(UIResponder.resignFirstResponder),
-                                    to: nil, from: nil, for: nil
-                                )
-
-                                if viewModel.agentPhase.isIdle {
-                                    // Normal send: include skills/spells
-                                    let skillsToSend = viewModel.inputBarState.selectedSkills
-                                    let spellsToSend = viewModel.inputBarState.selectedSpells
-                                    viewModel.inputBarState.selectedSkills = []
-                                    viewModel.inputBarState.selectedSpells = []
-                                    viewModel.sendMessage(
-                                        reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                        skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                        spells: spellsToSend.isEmpty ? nil : spellsToSend
-                                    )
-                                } else {
-                                    // Agent busy: queue text only (no attachments/skills/spells)
-                                    viewModel.enqueueCurrentInput()
-                                }
-                            },
-                            onAbort: viewModel.abortAgent,
-                            onMicTap: viewModel.toggleRecording,
-                            onAddAttachment: viewModel.addAttachment,
-                            onRemoveAttachment: viewModel.removeAttachment,
-                            onHistoryNavigate: { newText in
-                                viewModel.inputText = newText
-                            },
-                            onModelSelect: { model in
-                                switchModel(to: model)
-                            },
-                            onReasoningLevelChange: { newLevel in
-                                viewModel.inputBarState.reasoningLevel = newLevel
-                            },
-                            onContextTap: { [sheetCoordinator] in
-                                sheetCoordinator.showContextAudit()
-                            },
-                            onModelPickerTap: { [sheetCoordinator] in
-                                sheetCoordinator.showModelPicker()
-                            },
-                            onSkillSelect: nil,
-                            onSkillRemove: { _ in
-                                // Skill removed from selection - no additional action needed
-                            },
-                            onSkillDetailTap: { [sheetCoordinator] skill in
-                                sheetCoordinator.showSkillDetail(skill, mode: .skill)
-                            },
-                            onSpellRemove: { _ in
-                                // Spell removed from selection - no additional action needed
-                            },
-                            onSpellDetailTap: { [sheetCoordinator] spell in
-                                sheetCoordinator.showSkillDetail(spell, mode: .spell)
-                            },
-                            onQueueRemove: { [viewModel] id in
-                                viewModel.messageQueueState.remove(id: id)
-                            }
-                        )
-                    )
-                    .id(sessionId)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(.clear)
-            .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .navigationBarBackButtonHidden(true)
-        .background(InteractivePopGestureEnabler())
-        .toolbar {
-            leadingToolbarItem
-            principalToolbarItem
-            trailingToolbarItem
-        }
-        // MARK: - Sheet Modifier (extracted to help type-checker)
+        chatNavigationContent
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
@@ -229,7 +103,6 @@ struct ChatView: View {
             switch action {
             case .history: sheetCoordinator.showSessionHistory()
             case .context: sheetCoordinator.showContextAudit()
-            case .tasks: sheetCoordinator.showTaskList()
             case .settings: sheetCoordinator.showSettings()
             case .changes: sheetCoordinator.showSourceChanges()
             }
@@ -318,11 +191,6 @@ struct ChatView: View {
                 await skillStore?.refreshAndLoadSkills(sessionId: sessionId)
             }
 
-            // Check browser status in parallel (fire-and-forget)
-            Task {
-                await viewModel.requestBrowserStatus()
-            }
-
             // Check worktree status in parallel (fire-and-forget)
             Task {
                 await viewModel.requestWorktreeStatus()
@@ -402,6 +270,156 @@ struct ChatView: View {
         }
     }
 
+    // MARK: - Chat Navigation Content (extracted to reduce body complexity for type-checker)
+
+    private var chatNavigationContent: some View {
+        chatCoreContent
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .background(InteractivePopGestureEnabler())
+        .toolbar {
+            leadingToolbarItem
+            principalToolbarItem
+            trailingToolbarItem
+        }
+    }
+
+    // MARK: - Chat Core Content (extracted to reduce body complexity for type-checker)
+
+    private var chatCoreContent: some View {
+        messagesScrollView
+            .overlay {
+                if viewModel.inputBarState.isMentionPopupVisible {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.tronStandard) {
+                                viewModel.inputBarState.isMentionPopupVisible = false
+                            }
+                        }
+                }
+            }
+            .environment(\.textSelectionDisabled, isDisappearing)
+            .background(
+                NavigationWillDisappearObserver {
+                    isDisappearing = true
+                }
+                .frame(width: 0, height: 0)
+            )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                inputAreaContent
+            }
+            .scrollContentBackground(.hidden)
+            .background(.clear)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Input Area Content (extracted for type-checker)
+
+    private var inputAreaContent: some View {
+        VStack(spacing: 8) {
+            InputBar(
+                state: viewModel.inputBarState,
+                config: InputBarConfig(
+                    agentPhase: viewModel.agentPhase,
+                    isCompacting: viewModel.isCompacting,
+                    isRecording: viewModel.isRecording,
+                    isTranscribing: viewModel.isTranscribing,
+                    modelName: displayModelName,
+                    tokenUsage: viewModel.contextState.totalTokenUsage,
+                    contextPercentage: viewModel.contextState.contextPercentage,
+                    contextWindow: viewModel.contextState.currentContextWindow,
+                    lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
+                    cachedModels: cachedModels,
+                    isLoadingModels: isLoadingModels,
+                    currentModelInfo: currentModelInfo,
+                    skillStore: skillStore,
+                    inputHistory: inputHistory,
+                    animationCoordinator: viewModel.animationCoordinator,
+                    readOnly: workspaceDeleted || !isInteractionEnabled,
+                    queuedMessages: viewModel.messageQueueState.queue
+                ),
+                actions: InputBarActions(
+                    onSend: { [viewModel, inputHistory, scrollCoordinator] in
+                        inputHistory.addToHistory(viewModel.inputText)
+                        scrollCoordinator.userSentMessage()
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil, from: nil, for: nil
+                        )
+                        if viewModel.agentPhase.isIdle {
+                            let skillsToSend = viewModel.inputBarState.selectedSkills
+                            let spellsToSend = viewModel.inputBarState.selectedSpells
+                            viewModel.inputBarState.selectedSkills = []
+                            viewModel.inputBarState.selectedSpells = []
+                            viewModel.sendMessage(
+                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                spells: spellsToSend.isEmpty ? nil : spellsToSend
+                            )
+                        } else {
+                            viewModel.enqueueCurrentInput()
+                        }
+                    },
+                    onAbort: viewModel.abortAgent,
+                    onMicTap: viewModel.toggleRecording,
+                    onAddAttachment: viewModel.addAttachment,
+                    onRemoveAttachment: viewModel.removeAttachment,
+                    onHistoryNavigate: { newText in viewModel.inputText = newText },
+                    onModelSelect: { model in switchModel(to: model) },
+                    onReasoningLevelChange: { newLevel in viewModel.inputBarState.reasoningLevel = newLevel },
+                    onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
+                    onModelPickerTap: { [sheetCoordinator] in sheetCoordinator.showModelPicker() },
+                    onSkillSelect: nil,
+                    onSkillRemove: { _ in },
+                    onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
+                    onSpellRemove: { _ in },
+                    onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },
+                    onQueueRemove: { [viewModel] id in viewModel.messageQueueState.remove(id: id) }
+                )
+            )
+            .id(sessionId)
+        }
+    }
+
+    // MARK: - Bubble Tap Handler
+
+    private func handleBubbleTap(_ action: MessageBubbleTapAction) {
+        switch action {
+        case .skill(let skill):
+            sheetCoordinator.showSkillDetail(skill, mode: .skill)
+        case .spell(let spell):
+            sheetCoordinator.showSkillDetail(spell, mode: .spell)
+        case .askUserQuestion(let data):
+            viewModel.openAskUserQuestionSheet(for: data)
+        case .thinking(let content):
+            sheetCoordinator.showThinkingDetail(content)
+        case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
+            sheetCoordinator.showCompactionDetail(
+                tokensBefore: tokensBefore,
+                tokensAfter: tokensAfter,
+                reason: reason,
+                summary: summary,
+                preservedTurns: preservedTurns,
+                summarizedTurns: summarizedTurns
+            )
+        case .subagent(let data):
+            viewModel.subagentState.showDetails(with: data)
+        case .notifyApp(let data):
+            sheetCoordinator.showNotifyApp(data)
+        case .commandTool(let data):
+            sheetCoordinator.showCommandToolDetail(data)
+        case .queryAgent(let data):
+            sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
+        case .waitForAgents(let data):
+            sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
+        case .subagentResult(let sid):
+            viewModel.subagentState.showDetails(for: sid)
+        case .providerError(let data):
+            sheetCoordinator.showProviderErrorDetail(data)
+        }
+    }
+
     // MARK: - Messages Scroll View
 
     private var messagesScrollView: some View {
@@ -420,56 +438,7 @@ struct ChatView: View {
                         ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
                             MessageBubble(
                                 message: message,
-                                onTap: { [sheetCoordinator, sessionId] action in
-                                    switch action {
-                                    case .skill(let skill):
-                                        sheetCoordinator.showSkillDetail(skill, mode: .skill)
-                                    case .spell(let spell):
-                                        sheetCoordinator.showSkillDetail(spell, mode: .spell)
-                                    case .askUserQuestion(let data):
-                                        viewModel.openAskUserQuestionSheet(for: data)
-                                    case .thinking(let content):
-                                        sheetCoordinator.showThinkingDetail(content)
-                                    case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
-                                        sheetCoordinator.showCompactionDetail(
-                                            tokensBefore: tokensBefore,
-                                            tokensAfter: tokensAfter,
-                                            reason: reason,
-                                            summary: summary,
-                                            preservedTurns: preservedTurns,
-                                            summarizedTurns: summarizedTurns
-                                        )
-                                    case .subagent(let data):
-                                        viewModel.subagentState.showDetails(with: data)
-                                    case .renderAppUI(let data):
-                                        Task {
-                                            let loaded = await viewModel.uiCanvasState.loadFromServer(
-                                                canvasId: data.canvasId,
-                                                rpcClient: rpcClient
-                                            )
-                                            if loaded {
-                                                viewModel.uiCanvasState.activeCanvasId = data.canvasId
-                                                viewModel.uiCanvasState.showSheet = true
-                                            } else {
-                                                viewModel.showErrorAlert("Canvas not found")
-                                            }
-                                        }
-                                    case .taskManager(let data):
-                                        sheetCoordinator.showTaskDetail(data)
-                                    case .notifyApp(let data):
-                                        sheetCoordinator.showNotifyApp(data)
-                                    case .commandTool(let data):
-                                        sheetCoordinator.showCommandToolDetail(data)
-                                    case .queryAgent(let data):
-                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
-                                    case .waitForAgents(let data):
-                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
-                                    case .subagentResult(let sid):
-                                        viewModel.subagentState.showDetails(for: sid)
-                                    case .providerError(let data):
-                                        sheetCoordinator.showProviderErrorDetail(data)
-                                    }
-                                }
+                                onTap: { action in handleBubbleTap(action) }
                             )
                             .id(message.id)
                             // Per-message entrance animation - fade in with slight upward movement
@@ -712,7 +681,7 @@ struct ChatView: View {
 // Workaround: Post notification, handle via onReceive
 
 enum ChatMenuAction: String, CaseIterable {
-    case history, context, tasks, settings, changes
+    case history, context, settings, changes
 }
 
 extension Notification.Name {

@@ -4,7 +4,6 @@ import PhotosUI
 // MARK: - MessagingContext Conformance
 
 extension ChatViewModel: MessagingContext {
-    // browserDismissal is provided by ChatViewModel+TurnLifecycleContext.swift
 
     var lastAnsweredQuestionCount: Int {
         askUserQuestionState.lastAnsweredQuestionCount
@@ -23,8 +22,7 @@ extension ChatViewModel: MessagingContext {
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             skills: skills,
-            spells: spells,
-            deviceContext: nil
+            spells: spells
         )
     }
 

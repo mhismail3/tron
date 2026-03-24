@@ -39,8 +39,6 @@ enum EventIconProvider {
             return "sparkles"
         case .compactBoundary, .compactSummary:
             return "arrow.down.right.and.arrow.up.left"
-        case .memoryLedger:
-            return "brain.fill"
         case .configModelSwitch:
             return "arrow.triangle.2.circlepath"
         case .configPromptUpdate, .configReasoningLevel:
@@ -100,8 +98,6 @@ enum EventIconProvider {
             return .tronWarning
         case .compactBoundary, .compactSummary:
             return .tronCyan
-        case .memoryLedger:
-            return .purple
         case .configModelSwitch:
             return .tronPurple
         case .configPromptUpdate, .configReasoningLevel:

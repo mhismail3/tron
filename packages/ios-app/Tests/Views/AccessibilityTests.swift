@@ -35,8 +35,6 @@ struct AccessibilityTests {
             ("Notify", NotifyAppStatus.sent.label),
             ("Query", QueryAgentStatus.success.label),
             ("Wait", WaitForAgentsStatus.completed.label),
-            ("Render", RenderAppUIStatus.complete.label),
-            ("Task", TaskManagerChipStatus.completed.label),
         ]
 
         for (tool, status) in statuses {

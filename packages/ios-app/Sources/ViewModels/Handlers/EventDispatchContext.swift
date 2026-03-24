@@ -33,11 +33,6 @@ import Foundation
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result)
 }
 
-@MainActor protocol BrowserEventHandler: AnyObject {
-    func handleBrowserFrame(_ result: BrowserFramePlugin.Result)
-    func handleBrowserClosed(_ sessionId: String)
-}
-
 @MainActor protocol SubagentEventHandler: AnyObject {
     func handleSubagentSpawned(_ result: SubagentSpawnedPlugin.Result)
     func handleSubagentStatus(_ result: SubagentStatusPlugin.Result)
@@ -45,20 +40,6 @@ import Foundation
     func handleSubagentFailed(_ result: SubagentFailedPlugin.Result)
     func handleSubagentEvent(_ result: SubagentEventPlugin.Result)
     func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result)
-}
-
-@MainActor protocol UICanvasEventHandler: AnyObject {
-    func handleUIRenderStart(_ result: UIRenderStartPlugin.Result)
-    func handleUIRenderChunk(_ result: UIRenderChunkPlugin.Result)
-    func handleUIRenderComplete(_ result: UIRenderCompletePlugin.Result)
-    func handleUIRenderError(_ result: UIRenderErrorPlugin.Result)
-    func handleUIRenderRetry(_ result: UIRenderRetryPlugin.Result)
-}
-
-@MainActor protocol TaskEventHandler: AnyObject {
-    func handleTaskCreated(_ result: TaskCreatedPlugin.Result)
-    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result)
-    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result)
 }
 
 @MainActor protocol ServerEventHandler: AnyObject {
@@ -83,7 +64,6 @@ import Foundation
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
-    ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TaskEventHandler, ServerEventHandler,
-    WorktreeEventHandler, EventDispatchLogger {}
+    ContextEventHandler, SubagentEventHandler,
+    ServerEventHandler, WorktreeEventHandler, EventDispatchLogger {}
 

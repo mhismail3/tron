@@ -197,14 +197,10 @@ struct CommandToolDetailSheet: View {
             return "Pattern: \"\(pattern)\"\nPath: \(path)"
         case "glob", "find":
             return extractPattern(from: data.arguments)
-        case "browsetheweb":
-            return extractBrowserDetails(from: data.arguments)
         case "webfetch":
             return extractUrl(from: data.arguments)
         case "websearch":
             return extractQuery(from: data.arguments)
-        case "task":
-            return extractTaskDetails(from: data.arguments)
         case "manageautomations":
             return extractAutomationDetails(from: data.arguments)
         default:
@@ -340,12 +336,6 @@ struct CommandToolDetailSheet: View {
                 result: result,
                 isExpanded: $isResultExpanded
             )
-        case "browsetheweb":
-            BrowserToolViewer(
-                action: extractBrowserAction(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
-            )
         default:
             GenericResultViewer(result: result, isExpanded: $isResultExpanded)
         }
@@ -398,25 +388,6 @@ struct CommandToolDetailSheet: View {
             return unescapeJSON(String(match.1))
         }
         return ""
-    }
-
-    private func extractBrowserAction(from args: String) -> String {
-        if let match = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return ""
-    }
-
-    private func extractBrowserDetails(from args: String) -> String {
-        let action = extractBrowserAction(from: args)
-        if action == "navigate", let urlMatch = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
-            return "Action: \(action)\nURL: \(unescapeJSON(String(urlMatch.1)))"
-        }
-        if ["click", "fill", "type", "select"].contains(action),
-           let selectorMatch = args.firstMatch(of: /"selector"\s*:\s*"([^"]+)"/) {
-            return "Action: \(action)\nSelector: \(unescapeJSON(String(selectorMatch.1)))"
-        }
-        return "Action: \(action)"
     }
 
     private func extractUrl(from args: String) -> String {

@@ -476,17 +476,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.catchingUpMessageId)
     }
 
-    func testCompleteResetsBrowserDismissal() {
-        // Given
-        mockContext.browserDismissal = .userDismissed
-
-        // When
-        coordinator.handleComplete(streamingText: "", context: mockContext)
-
-        // Then
-        XCTAssertEqual(mockContext.browserDismissal, .none)
-    }
-
     func testCompleteClearsToolTracking() {
         // Given
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
@@ -500,14 +489,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         // Then
         XCTAssertTrue(mockContext.currentToolMessages.isEmpty)
         XCTAssertTrue(mockContext.currentTurnToolCalls.isEmpty)
-    }
-
-    func testCompleteClosesBrowserSession() {
-        // When
-        coordinator.handleComplete(streamingText: "", context: mockContext)
-
-        // Then
-        XCTAssertTrue(mockContext.closeBrowserSessionCalled)
     }
 
     func testCompleteTriggersContextRefresh() async throws {
@@ -596,9 +577,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
     var catchingUpMessageId: UUID?
-    var browserDismissal: BrowserDismissal = .none
     var sessionId: String = "test-session"
-    var browserStatus: BrowserGetStatusResult?
 
     // Context state tracking
     var contextStateCurrentContextWindow: Int = 0
@@ -614,7 +593,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var uiUpdateQueueFlushCalled = false
     var uiUpdateQueueResetCalled = false
     var streamingManagerResetCalled = false
-    var closeBrowserSessionCalled = false
     var refreshContextFromServerCalled = false
     var thinkingStateEndTurnCalled = false
 
@@ -655,10 +633,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
 
     func resetStreamingManager() {
         streamingManagerResetCalled = true
-    }
-
-    func closeBrowserSession() {
-        closeBrowserSessionCalled = true
     }
 
     func refreshContextFromServer() async {

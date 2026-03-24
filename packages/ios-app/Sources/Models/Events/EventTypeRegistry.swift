@@ -74,10 +74,6 @@ enum PersistedEventType: String, CaseIterable {
     case worktreeReleased = "worktree.released"
     case worktreeMerged = "worktree.merged"
 
-    // Memory
-    case memoryLedger = "memory.ledger"
-    case memoryLoaded = "memory.loaded"
-
     // Error events
     case errorAgent = "error.agent"
     case errorTool = "error.tool"
@@ -193,8 +189,6 @@ enum PersistedEventType: String, CaseIterable {
         case .worktreeCommit: return "Git commit"
         case .worktreeReleased: return "Worktree released"
         case .worktreeMerged: return "Worktree merged"
-        case .memoryLedger: return "Memory updated"
-        case .memoryLoaded: return "Memories loaded"
         case .errorAgent: return "Agent error"
         case .errorTool: return "Tool error"
         case .errorProvider: return "Provider error"

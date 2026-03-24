@@ -28,12 +28,6 @@ struct ChatSheetContent: View {
     @ViewBuilder
     private var sheetContent: some View {
         switch sheet {
-        case .safari(let url):
-            SafariView(url: url)
-
-        case .browser:
-            browserSheet
-
         case .settings:
             SettingsView()
                 .environment(\.dependencies, dependencies)
@@ -74,18 +68,6 @@ struct ChatSheetContent: View {
         case .subagentDetail:
             subagentDetailSheet
 
-        case .uiCanvas:
-            UICanvasSheet(state: viewModel.uiCanvasState)
-
-        case .taskList:
-            TaskListSheet(
-                rpcClient: rpcClient,
-                taskState: viewModel.taskState
-            )
-
-        case .taskDetail(let data):
-            taskDetailSheet(fallback: data)
-
         case .notifyApp(let data):
             NotifyAppDetailSheet(data: data)
 
@@ -125,20 +107,6 @@ struct ChatSheetContent: View {
     // MARK: - Sheet Builders
 
     @ViewBuilder
-    private func taskDetailSheet(fallback: TaskManagerChipData) -> some View {
-        // Look up live data from viewModel.messages so streaming output updates in real-time
-        let liveData: TaskManagerChipData = {
-            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: fallback.toolCallId, in: viewModel.messages),
-               case .toolUse(let tool) = viewModel.messages[index].content,
-               let parsed = ToolResultParser.parseTaskManager(from: tool) {
-                return parsed
-            }
-            return fallback
-        }()
-        TaskDetailSheet(chipData: liveData)
-    }
-
-    @ViewBuilder
     private func commandToolDetailSheet(fallback: CommandToolChipData) -> some View {
         // Look up live data from viewModel.messages so streaming output updates in real-time
         let liveData: CommandToolChipData = {
@@ -168,25 +136,8 @@ struct ChatSheetContent: View {
         case "remember":
             RememberToolDetailSheet(data: liveData)
         default:
-            CommandToolDetailSheet(data: liveData, onOpenURL: { url in
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(300))
-                    sheetCoordinator?.showSafari(url)
-                }
-            })
+            CommandToolDetailSheet(data: liveData, onOpenURL: { _ in })
         }
-    }
-
-    @ViewBuilder
-    private var browserSheet: some View {
-        BrowserSheetView(
-            frameImage: viewModel.browserState.browserFrame,
-            currentUrl: viewModel.browserState.browserStatus?.currentUrl,
-            isStreaming: viewModel.browserState.browserStatus?.isStreaming ?? false,
-            onCloseBrowser: {
-                viewModel.userDismissedBrowser()
-            }
-        )
     }
 
     @ViewBuilder

@@ -60,43 +60,6 @@ struct BrowserGetStatusResult: Decodable {
     }
 }
 
-/// Browser frame event data (received via WebSocket events)
-/// Server sends: { type: "browser.frame", sessionId, timestamp, data: { sessionId, data, frameId, timestamp, metadata } }
-struct BrowserFrameEvent: Decodable {
-    let type: String
-    let sessionId: String?
-    let timestamp: String?
-    let data: BrowserFrameData
-
-    struct BrowserFrameData: Decodable {
-        let sessionId: String
-        /// Base64-encoded frame data (JPEG or PNG)
-        let data: String
-        /// Frame sequence number
-        let frameId: Int
-        /// Timestamp when frame was captured (milliseconds)
-        let timestamp: Double
-        /// Optional frame metadata
-        let metadata: BrowserFrameMetadata?
-    }
-
-    /// Convenience accessors for nested data
-    var frameData: String { data.data }
-    var frameId: Int { data.frameId }
-    var frameTimestamp: Double { data.timestamp }
-    var frameSessionId: String { data.sessionId }
-    var metadata: BrowserFrameMetadata? { data.metadata }
-}
-
-struct BrowserFrameMetadata: Decodable {
-    let offsetTop: Double?
-    let pageScaleFactor: Double?
-    let deviceWidth: Double?
-    let deviceHeight: Double?
-    let scrollOffsetX: Double?
-    let scrollOffsetY: Double?
-}
-
 // MARK: - Voice Notes Methods
 
 struct VoiceNotesSaveParams: Encodable {

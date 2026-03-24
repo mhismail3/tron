@@ -29,12 +29,6 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Get agent state from the server
     func getAgentState(sessionId: String) async throws -> AgentStateResult
 
-    /// List tasks
-    func listTasks() async throws -> TaskListResult
-
-    /// Update tasks in the task state
-    func updateTasks(_ tasks: [RpcTask])
-
     /// Append a "catching up" message and return its ID
     func appendCatchingUpMessage() -> UUID
 
@@ -124,7 +118,7 @@ final class ConnectionCoordinator {
         await checkAndResumeAgentState(context: context)
 
         // Fetch current tasks
-        await fetchTasksOnResume(context: context)
+
 
         context.logDebug("Session resumed, using local EventDatabase for message history")
     }
@@ -179,7 +173,7 @@ final class ConnectionCoordinator {
         await checkAndResumeAgentState(context: context)
 
         // Refresh tasks in case they changed while disconnected
-        await fetchTasksOnResume(context: context)
+
     }
 
     // MARK: - Fetch Tasks
@@ -187,17 +181,6 @@ final class ConnectionCoordinator {
     /// Fetch current tasks when resuming a session.
     ///
     /// - Parameter context: The context providing access to state and dependencies
-    func fetchTasksOnResume(context: ConnectionContext) async {
-        do {
-            let result = try await context.listTasks()
-            context.updateTasks(result.tasks)
-            context.logDebug("Fetched \(result.tasks.count) tasks on session resume")
-        } catch {
-            // Non-fatal - tasks just won't show until next update
-            context.logWarning("Failed to fetch tasks on resume: \(error.localizedDescription)")
-        }
-    }
-
     // MARK: - Check Agent State
 
     /// Check agent state and set up streaming if agent is currently running.

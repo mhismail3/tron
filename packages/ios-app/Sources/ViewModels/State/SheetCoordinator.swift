@@ -47,16 +47,6 @@ final class SheetCoordinator {
 
     // MARK: - Convenience Presenters
 
-    /// Show Safari with URL
-    func showSafari(_ url: URL) {
-        present(.safari(url))
-    }
-
-    /// Show browser window
-    func showBrowser() {
-        present(.browser)
-    }
-
     /// Show settings sheet
     func showSettings() {
         present(.settings)
@@ -109,21 +99,6 @@ final class SheetCoordinator {
     /// Show subagent detail sheet
     func showSubagentDetail() {
         present(.subagentDetail)
-    }
-
-    /// Show UI canvas sheet
-    func showUICanvas() {
-        present(.uiCanvas)
-    }
-
-    /// Show task list sheet (from toolbar menu)
-    func showTaskList() {
-        present(.taskList)
-    }
-
-    /// Show task detail sheet (from chip tap, with tool result data)
-    func showTaskDetail(_ data: TaskManagerChipData) {
-        present(.taskDetail(data))
     }
 
     /// Show notify app detail sheet

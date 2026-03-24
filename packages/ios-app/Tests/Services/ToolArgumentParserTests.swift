@@ -287,13 +287,6 @@ struct ToolArgumentParserTests {
         #expect(ToolArgumentParser.query(from: args) == "Swift async await tutorial")
     }
 
-    @Test("Parses real BrowseTheWeb arguments")
-    func testRealBrowseArgs() {
-        let args = "{\"action\": \"navigate\", \"url\": \"https://example.com\"}"
-        #expect(ToolArgumentParser.action(from: args) == "navigate")
-        #expect(ToolArgumentParser.url(from: args) == "https://example.com")
-    }
-
     @Test("Parses real Write tool arguments with content")
     func testRealWriteArgs() {
         let args = "{\"file_path\": \"/path/to/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\"\\n}\"}"

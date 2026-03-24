@@ -128,29 +128,6 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForToolCallInRenderAppUI() {
-        // Given: A message with renderAppUI content
-        let messageId = UUID()
-        let message = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .renderAppUI(RenderAppUIChipData(
-                toolCallId: "toolu_render",
-                canvasId: "canvas_123",
-                title: "Test UI",
-                status: .complete,
-                errorMessage: nil
-            ))
-        )
-        viewModel.messages = [message]
-
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_render"))
-
-        // Then: Should return the message ID
-        XCTAssertEqual(found, messageId)
-    }
-
     func testFindMessageIdForToolCallNotFound() {
         // Given: A message without matching tool call ID
         let message = ChatMessage(

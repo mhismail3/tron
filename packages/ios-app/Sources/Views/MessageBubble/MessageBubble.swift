@@ -92,22 +92,6 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .renderAppUI:
-                if let chipData = ToolResultParser.parseRenderAppUI(from: tool) {
-                    RenderAppUIChip(data: chipData) {
-                        onTap?(.renderAppUI(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
-            case .taskManager:
-                if let chipData = ToolResultParser.parseTaskManager(from: tool) {
-                    TaskManagerChip(data: chipData) {
-                        onTap?(.taskManager(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
             case .notifyApp:
                 if let chipData = ToolResultParser.parseNotifyApp(from: tool) {
                     NotifyAppChip(data: chipData) {
@@ -182,10 +166,6 @@ struct MessageBubble: View {
                 onTap?(.subagent(data))
             }
 
-        case .renderAppUI(let data):
-            RenderAppUIChip(data: data) {
-                onTap?(.renderAppUI(data))
-            }
         }
     }
 

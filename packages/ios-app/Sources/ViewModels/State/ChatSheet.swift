@@ -35,10 +35,6 @@ struct ProviderErrorDetailData: Equatable, Hashable {
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
 enum ChatSheet: Identifiable, Equatable {
-    // Browser sheets
-    case safari(URL)
-    case browser
-
     // Settings & Info
     case settings
     case contextAudit
@@ -51,9 +47,6 @@ enum ChatSheet: Identifiable, Equatable {
     // Tool sheets
     case askUserQuestion
     case subagentDetail
-    case uiCanvas
-    case taskList
-    case taskDetail(TaskManagerChipData)
 
     // Notification sheets
     case notifyApp(NotifyAppChipData)
@@ -71,10 +64,6 @@ enum ChatSheet: Identifiable, Equatable {
 
     var id: String {
         switch self {
-        case .safari(let url):
-            return "safari-\(url.absoluteString)"
-        case .browser:
-            return "browser"
         case .settings:
             return "settings"
         case .contextAudit:
@@ -89,12 +78,6 @@ enum ChatSheet: Identifiable, Equatable {
             return "askUserQuestion"
         case .subagentDetail:
             return "subagent"
-        case .uiCanvas:
-            return "uiCanvas"
-        case .taskList:
-            return "taskList"
-        case .taskDetail(let data):
-            return "taskDetail-\(data.toolCallId)"
         case .notifyApp(let data):
             return "notifyApp-\(data.toolCallId)"
         case .thinkingDetail:
@@ -114,10 +97,6 @@ enum ChatSheet: Identifiable, Equatable {
 
     static func == (lhs: ChatSheet, rhs: ChatSheet) -> Bool {
         switch (lhs, rhs) {
-        case (.safari(let url1), .safari(let url2)):
-            return url1 == url2
-        case (.browser, .browser):
-            return true
         case (.settings, .settings):
             return true
         case (.contextAudit, .contextAudit):
@@ -132,12 +111,6 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.subagentDetail, .subagentDetail):
             return true
-        case (.uiCanvas, .uiCanvas):
-            return true
-        case (.taskList, .taskList):
-            return true
-        case (.taskDetail(let data1), .taskDetail(let data2)):
-            return data1.toolCallId == data2.toolCallId
         case (.notifyApp(let data1), .notifyApp(let data2)):
             return data1.toolCallId == data2.toolCallId
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):

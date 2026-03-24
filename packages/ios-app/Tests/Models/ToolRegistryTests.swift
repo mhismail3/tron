@@ -203,8 +203,7 @@ struct ToolRegistryTests {
     func testIsCommandToolFalse() {
         #expect(!ToolRegistry.isCommandTool("askuserquestion"))
         #expect(!ToolRegistry.isCommandTool("spawnsubagent"))
-        #expect(!ToolRegistry.isCommandTool("renderappui"))
-        #expect(!ToolRegistry.isCommandTool("taskmanager"))
+        #expect(!ToolRegistry.isCommandTool("getconfirmation"))
     }
 
     // MARK: - Viewer Factory Tests

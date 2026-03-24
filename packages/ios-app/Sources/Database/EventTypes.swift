@@ -239,10 +239,6 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             }
             return "File edited"
 
-        case .memoryLedger:
-            let title = payload.string("title") ?? "Memory updated"
-            return "Memory: \(title)"
-
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
 
@@ -467,9 +463,6 @@ enum SessionEventType: String, Codable {
 
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
-
-    // Memory
-    case memoryLedger = "memory.ledger"
 
     // Rules tracking
     case rulesLoaded = "rules.loaded"

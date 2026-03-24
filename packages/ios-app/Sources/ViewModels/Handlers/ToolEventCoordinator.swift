@@ -5,8 +5,7 @@ import UIKit
 ///
 /// Responsibilities:
 /// - Creating tool messages on tool.start
-/// - Handling special tools: AskUserQuestion, RenderAppUI, BrowseTheWeb openURL action
-/// - Managing RenderAppUI chip race conditions (chunk vs tool_start order)
+/// - Handling special tools: AskUserQuestion
 /// - Tracking tool calls for the current turn
 /// - Enqueuing tool events for ordered UI processing
 ///
@@ -27,9 +26,7 @@ final class ToolEventCoordinator {
         _ pluginResult: ToolGeneratingPlugin.Result,
         context: ToolEventContext
     ) {
-        // Skip tools with custom UI flows that need full tool_start data
         let kind = ToolKind(toolName: pluginResult.toolName)
-        if kind == .renderAppUI { return }
 
         // Finalize any active thinking message before tool chip appears
         context.finalizeThinkingMessageIfNeeded()
@@ -110,26 +107,9 @@ final class ToolEventCoordinator {
         _ pluginResult: ToolStartPlugin.Result,
         context: ToolEventContext
     ) {
-        // Classify tool type (absorbed from ChatEventHandler)
+        // Classify tool type
         let kind = ToolKind(toolName: pluginResult.toolName)
         let isAskUserQuestion = kind == .askUserQuestion
-        let isBrowserTool = kind == .browseTheWeb
-
-        // Detect BrowseTheWeb openURL action
-        let isOpenURL: Bool
-        var openURL: URL?
-        if kind == .browseTheWeb,
-           let args = pluginResult.arguments,
-           let actionValue = args["action"],
-           let actionStr = actionValue.value as? String,
-           actionStr == "openURL" {
-            isOpenURL = true
-            if let urlValue = args["url"], let urlString = urlValue.value as? String {
-                openURL = URL(string: urlString)
-            }
-        } else {
-            isOpenURL = false
-        }
 
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?
@@ -182,16 +162,6 @@ final class ToolEventCoordinator {
                     context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
                 }
 
-                // Still handle browser tool detection for pre-existing chips
-                if isBrowserTool {
-                    let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
-                    if shouldStartStreaming {
-                        context.startBrowserStreamIfNeeded()
-                    }
-                }
-
-                // Handle side-effects even when updating existing chip
-                handleToolStartSideEffects(isOpenURL: isOpenURL, openURL: openURL, context: context)
                 return
             }
         }
@@ -206,39 +176,8 @@ final class ToolEventCoordinator {
             return
         }
 
-        // Handle side-effects (URL opening, etc.)
-        handleToolStartSideEffects(isOpenURL: isOpenURL, openURL: openURL, context: context)
-
         // Create the tool message
-        var message = ChatMessage(role: .assistant, content: .toolUse(tool))
-
-        // Special handling for RenderAppUI
-        if ToolKind(toolName: pluginResult.toolName) == .renderAppUI {
-            let handled = handleRenderAppUIToolStart(pluginResult, message: &message, context: context)
-            if handled {
-                // Existing chip was updated, don't create new message
-                return
-            }
-        } else if let pendingRender = context.renderAppUIChipTracker.consumePendingRenderStart(toolCallId: pluginResult.toolCallId) {
-            // Handle pending UI render (race condition: chunk arrived before tool start)
-            let chipData = RenderAppUIChipData(
-                toolCallId: pluginResult.toolCallId,
-                canvasId: pendingRender.canvasId,
-                title: pendingRender.title,
-                status: .rendering,
-                errorMessage: nil
-            )
-            message.content = .renderAppUI(chipData)
-
-            // Track in tracker (single source of truth)
-            context.renderAppUIChipTracker.createChipFromToolStart(
-                canvasId: pendingRender.canvasId,
-                messageId: message.id,
-                toolCallId: pluginResult.toolCallId,
-                title: pendingRender.title
-            )
-            context.logDebug("Applied pending UI render start to new tool message: \(pendingRender.canvasId)")
-        }
+        let message = ChatMessage(role: .assistant, content: .toolUse(tool))
 
         // Append message to chat
         context.appendToMessages(message)
@@ -258,15 +197,6 @@ final class ToolEventCoordinator {
             arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
-
-        // Update browser status for browser tools
-        if isBrowserTool {
-            context.logInfo("Browser tool detected")
-            let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
-            if shouldStartStreaming {
-                context.startBrowserStreamIfNeeded()
-            }
-        }
 
         // Enqueue tool start for ordered processing and staggered animation
         let toolStartData = UIUpdateQueue.ToolStartData(
@@ -310,18 +240,6 @@ final class ToolEventCoordinator {
                 context.openAskUserQuestionSheet(for: data)
             }
             return
-        }
-
-        // Check if this is a browser tool result with screenshot data
-        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            if case .toolUse(let tool) = context.messages[index].content {
-                if ToolKind(toolName: tool.toolName) == .browseTheWeb {
-                    // Browser screenshot extraction is handled by ChatViewModel
-                    // (requires access to BrowserScreenshotService and browserState.browserFrame)
-                    // We just log here that it would be extracted
-                    context.logDebug("Browser tool result - screenshot extraction handled by context")
-                }
-            }
         }
 
         // Update tracked tool call with result
@@ -416,91 +334,4 @@ final class ToolEventCoordinator {
         context.currentTurnToolCalls.append(record)
     }
 
-    /// Handle tool start side-effects that must run regardless of whether the chip
-    /// was pre-created by tool_generating. URL opening via BrowseTheWeb openURL action.
-    private func handleToolStartSideEffects(
-        isOpenURL: Bool,
-        openURL: URL?,
-        context: ToolEventContext
-    ) {
-        // Handle BrowseTheWeb openURL action - opens Safari in-app
-        if isOpenURL {
-            if let url = openURL {
-                context.logInfo("Opening Safari with URL: \(url.absoluteString)")
-                context.safariURL = url
-            } else {
-                context.logError("BrowseTheWeb openURL action missing valid URL")
-            }
-        }
-    }
-
-    /// Handle RenderAppUI tool start - manages chip creation/update.
-    ///
-    /// - Returns: `true` if an existing chip was updated (caller should not create new message),
-    ///            `false` if a new chip was created in the message (caller should add the message)
-    private func handleRenderAppUIToolStart(
-        _ pluginResult: ToolStartPlugin.Result,
-        message: inout ChatMessage,
-        context: ToolEventContext
-    ) -> Bool {
-        // Parse arguments to get canvasId
-        guard let argsData = pluginResult.formattedArguments.data(using: .utf8),
-              let argsJson = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
-              let canvasId = argsJson["canvasId"] as? String else {
-            return false
-        }
-
-        // Check if chip already exists from ui_render_chunk (via tracker)
-        if let chipState = context.renderAppUIChipTracker.getChip(canvasId: canvasId),
-           let messageId = chipState.messageId,
-           let index = MessageFinder.indexById(messageId, in: context.messages),
-           case .renderAppUI(var chipData) = context.messages[index].content {
-            // Chip already exists - update toolCallId to real one
-            let oldToolCallId = chipData.toolCallId
-            chipData.toolCallId = pluginResult.toolCallId
-            context.messages[index].content = .renderAppUI(chipData)
-
-            // Update tracker atomically
-            context.renderAppUIChipTracker.updateToolCallId(canvasId: canvasId, realToolCallId: pluginResult.toolCallId)
-
-            // Update currentToolMessages with correct ID
-            context.currentToolMessages[context.messages[index].id] = context.messages[index]
-
-            // Track tool call for persistence
-            let record = ToolCallRecord(
-                toolCallId: pluginResult.toolCallId,
-                toolName: pluginResult.toolName,
-                arguments: pluginResult.formattedArguments
-            )
-            context.currentTurnToolCalls.append(record)
-
-            context.logInfo("Updated existing RenderAppUI chip toolCallId: \(canvasId), \(oldToolCallId) → \(pluginResult.toolCallId)")
-
-            // Signal to caller that existing chip was updated, don't create new message
-            return true
-        }
-
-        // No existing chip - create one now
-        let title = argsJson["title"] as? String
-        let chipData = RenderAppUIChipData(
-            toolCallId: pluginResult.toolCallId,
-            canvasId: canvasId,
-            title: title,
-            status: .rendering,
-            errorMessage: nil
-        )
-        message.content = .renderAppUI(chipData)
-
-        // Track in tracker (single source of truth)
-        context.renderAppUIChipTracker.createChipFromToolStart(
-            canvasId: canvasId,
-            messageId: message.id,
-            toolCallId: pluginResult.toolCallId,
-            title: title
-        )
-        context.logDebug("Created RenderAppUI chip from tool_start: \(canvasId)")
-
-        // Signal to caller that new message should be added
-        return false
-    }
 }

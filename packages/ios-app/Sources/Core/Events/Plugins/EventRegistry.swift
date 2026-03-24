@@ -105,22 +105,6 @@ final class EventRegistry: @unchecked Sendable {
         register(SubagentEventPlugin.self)
         register(SubagentResultAvailablePlugin.self)
 
-        // UI Canvas events
-        register(UIRenderStartPlugin.self)
-        register(UIRenderChunkPlugin.self)
-        register(UIRenderCompletePlugin.self)
-        register(UIRenderErrorPlugin.self)
-        register(UIRenderRetryPlugin.self)
-
-        // Browser events
-        register(BrowserFramePlugin.self)
-        register(BrowserClosedPlugin.self)
-
-        // Task events
-        register(TaskCreatedPlugin.self)
-        register(TaskUpdatedPlugin.self)
-        register(TaskDeletedPlugin.self)
-
         // Agent turn events
         register(AgentTurnPlugin.self)
 

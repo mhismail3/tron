@@ -9,16 +9,6 @@ import Foundation
 /// for methods that need to adapt plugin Result types to existing signatures.
 extension ChatViewModel: EventDispatchTarget {
 
-    // MARK: - Browser Event Wrappers
-
-    /// Handle browser frame event - wraps the existing handleBrowserFrameResult
-    func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {
-        handleBrowserFrameResult(result)
-    }
-
-    // Note: handleBrowserClosed(_ sessionId: String) is already implemented
-    // in ChatViewModel+Browser.swift
-
     // MARK: - Subagent Event Wrappers
 
     /// Handle subagent spawned event - wraps the existing handleSubagentSpawnedResult

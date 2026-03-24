@@ -6,7 +6,6 @@
 ///
 /// - **`events`**: Variants whose payload is deserialized via `serde_json::from_value`.
 /// - **`raw_events`**: Variants whose payload is passed through as raw `Value`.
-///   (Only `MemoryLoaded` currently — its schema is intentionally opaque.)
 /// - **`domain_groups`**: Named boolean methods grouping variants into domains.
 macro_rules! define_events {
     (

@@ -33,12 +33,6 @@ extension ChatViewModel: TurnLifecycleContext {
         streamingManager.streamingMessageId != nil && !streamingManager.streamingText.isEmpty
     }
 
-    /// How the browser sheet was dismissed this turn (TurnLifecycleContext)
-    var browserDismissal: BrowserDismissal {
-        get { browserState.dismissal }
-        set { browserState.dismissal = newValue }
-    }
-
     // MARK: - Streaming Management (Protocol Methods)
 
     /// Reset the streaming manager (TurnLifecycleContext)
@@ -79,10 +73,6 @@ extension ChatViewModel: TurnLifecycleContext {
     func resetUIUpdateQueue() {
         uiUpdateQueue.reset()
     }
-
-    // MARK: - Browser (Protocol Methods)
-
-    // closeBrowserSession() is already defined in ChatViewModel
 
     // MARK: - Context State (Protocol Methods)
 

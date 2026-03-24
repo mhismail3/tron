@@ -24,20 +24,6 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator: sheetCoordinator
                 )
             }
-            .onChange(of: viewModel.browserState.safariURL) { _, url in
-                if let url = url, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showSafari(url)
-                }
-            }
-            .onChange(of: viewModel.browserState.showBrowserWindow) { _, show in
-                if show {
-                    if sheetCoordinator.activeSheet == nil {
-                        sheetCoordinator.showBrowser()
-                    }
-                } else if sheetCoordinator.activeSheet == .browser {
-                    sheetCoordinator.activeSheet = nil
-                }
-            }
             .onChange(of: viewModel.showSettings) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
                     sheetCoordinator.showSettings()
@@ -53,16 +39,6 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showSubagentDetail()
                 }
             }
-            .onChange(of: viewModel.uiCanvasState.showSheet) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showUICanvas()
-                }
-            }
-            .onChange(of: viewModel.taskState.showSheet) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showTaskList()
-                }
-            }
     }
 
     private var sheetBinding: Binding<ChatSheet?> {
@@ -73,19 +49,8 @@ struct ChatSheetModifier: ViewModifier {
     }
 
     private func onDismiss() {
-        if sheetCoordinator.lastActiveSheet == .browser {
-            if viewModel.browserState.dismissal == .autoDismissed {
-                viewModel.browserState.dismissal = .none
-            } else {
-                viewModel.userDismissedBrowser()
-            }
-        }
-        viewModel.browserState.safariURL = nil
-        viewModel.browserState.showBrowserWindow = false
         viewModel.askUserQuestionState.showSheet = false
         viewModel.subagentState.showDetailSheet = false
-        viewModel.uiCanvasState.showSheet = false
-        viewModel.taskState.showSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()
     }

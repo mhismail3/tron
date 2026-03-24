@@ -1,7 +1,6 @@
 import Foundation
 
 /// Manages worktree isolation state for ChatViewModel.
-/// Follows the same extracted-state pattern as BrowserState, TaskState, etc.
 @Observable
 @MainActor
 final class WorktreeIsolationState {

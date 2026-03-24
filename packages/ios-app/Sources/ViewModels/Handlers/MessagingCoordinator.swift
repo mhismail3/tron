@@ -12,10 +12,9 @@ import SwiftUI
 /// - SessionIdentifiable: Session ID access
 /// - ProcessingTrackable: Processing state and dashboard updates
 /// - StreamingManaging: Streaming state management
-/// - BrowserManaging: Browser session management
 /// - DashboardUpdating: Dashboard info updates
 @MainActor
-protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, BrowserManaging, DashboardUpdating {
+protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, DashboardUpdating {
     /// The current input text
     var inputText: String { get set }
 
@@ -27,9 +26,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Current turn number
     var currentTurn: Int { get set }
-
-    /// How the browser sheet was dismissed this turn (if at all)
-    var browserDismissal: BrowserDismissal { get set }
 
     /// Number of questions from the last AskUserQuestion answer submission
     var lastAnsweredQuestionCount: Int { get }
@@ -128,7 +124,6 @@ final class MessagingCoordinator {
         }
 
         // Reset browser dismissal for new prompt - browser can auto-open again
-        context.browserDismissal = .none
 
         // Create user message with attachments, skills, and spells displayed above text
         let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
@@ -203,7 +198,6 @@ final class MessagingCoordinator {
 
         context.markPendingQuestionsAsSuperseded()
         context.dismissPendingSubagentResults()
-        context.browserDismissal = .none
 
         let userMessage = ChatMessage.user(text)
         context.appendMessage(userMessage)
@@ -248,9 +242,6 @@ final class MessagingCoordinator {
             context.clearThinkingCaption()
             context.appendInterruptedMessage()
             context.logInfo("Agent aborted successfully")
-
-            // Close browser session when agent is interrupted
-            context.closeBrowserSession()
         } catch {
             context.logError("Failed to abort agent: \(error.localizedDescription)")
             context.showError(error.localizedDescription)

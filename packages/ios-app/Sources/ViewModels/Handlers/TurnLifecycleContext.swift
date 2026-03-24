@@ -8,13 +8,12 @@ import Foundation
 /// - ProcessingTrackable: Processing state and setSessionProcessing
 /// - StreamingManaging: Streaming state management
 /// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
-/// - BrowserManaging: Browser session management
 ///
 /// Note: SessionIdentifiable was removed as sessionId is not used by TurnLifecycleCoordinator.
 /// Note: streamingText removed - passed as parameter to handleComplete instead.
 /// Note: updateTotalTokenUsage removed - not called by coordinator.
 @MainActor
-protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging, MessageMutating {
+protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, MessageMutating {
 
     // MARK: - Turn Tracking State
 
@@ -40,9 +39,6 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
 
     /// ID of the catching-up notification message
     var catchingUpMessageId: UUID? { get set }
-
-    /// How the browser sheet was dismissed this turn (if at all)
-    var browserDismissal: BrowserDismissal { get set }
 
     // MARK: - Thinking State
 

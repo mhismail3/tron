@@ -72,10 +72,7 @@ final class DispatchableEventPluginTests: XCTestCase {
         let _: any ToolEventHandler = context
         let _: any TurnLifecycleEventHandler = context
         let _: any ContextEventHandler = context
-        let _: any BrowserEventHandler = context
         let _: any SubagentEventHandler = context
-        let _: any UICanvasEventHandler = context
-        let _: any TaskEventHandler = context
         let _: any EventDispatchLogger = context
 
         // And as the composed target

@@ -172,14 +172,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
-    func testToolGeneratingSkipsRenderAppUI() async throws {
-        let result = ToolGeneratingPlugin.Result(toolName: "RenderAppUI", toolCallId: "gen_render")
-
-        coordinator.handleToolGenerating(result, context: mockContext)
-
-        XCTAssertEqual(mockContext.messages.count, 0)
-    }
-
     func testToolStartUpdatesDuplicateFromGenerating() async throws {
         // Given: tool_generating already created a chip with empty arguments
         let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_first")
@@ -262,35 +254,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.enqueuedToolStarts.count, 2)
         XCTAssertEqual(mockContext.enqueuedToolStarts[0].toolCallId, "tc1")
         XCTAssertEqual(mockContext.enqueuedToolStarts[1].toolCallId, "tc2")
-    }
-
-    func testBrowserToolStartStillTriggersOnDuplicate() async throws {
-        // Given: tool_generating already created a chip for a browser tool
-        let genResult = ToolGeneratingPlugin.Result(toolName: "BrowseTheWeb", toolCallId: "browser_dup")
-        coordinator.handleToolGenerating(genResult, context: mockContext)
-        XCTAssertEqual(mockContext.messages.count, 1)
-
-        // When: tool_start arrives with isBrowserTool: true and full arguments
-        let event = ToolStartPlugin.Result(
-            toolName: "BrowseTheWeb",
-            toolCallId: "browser_dup",
-            arguments: ["action": AnyCodable("navigate"), "url": AnyCodable("https://example.com")],
-            formattedArguments: "{\"action\":\"navigate\",\"url\":\"https://example.com\"}"
-        )
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: No duplicate message
-        XCTAssertEqual(mockContext.messages.count, 1)
-        // Then: Arguments are updated
-        if case .toolUse(let tool) = mockContext.messages[0].content {
-            XCTAssertTrue(tool.arguments.contains("navigate"))
-        } else {
-            XCTFail("Expected toolUse content")
-        }
-        // Then: Browser status is still set
-        XCTAssertNotNil(mockContext.browserStatus)
-        // Then: Browser streaming is started
-        XCTAssertTrue(mockContext.startBrowserStreamIfNeededCalled)
     }
 
     // MARK: - Tool Start Tests
@@ -466,156 +429,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
             XCTAssertEqual(tool.toolName, "AskUserQuestion")
         } else {
             XCTFail("Expected toolUse content for fallback")
-        }
-    }
-
-    // MARK: - BrowseTheWeb openURL Action Tests
-
-    func testBrowseTheWebOpenURLAction() async throws {
-        // Given: A BrowseTheWeb tool start with openURL action
-        let event = ToolStartPlugin.Result(
-            toolName: "BrowseTheWeb",
-            toolCallId: "browser_123",
-            arguments: ["action": AnyCodable("openURL"), "url": AnyCodable("https://example.com")],
-            formattedArguments: "{\"action\": \"openURL\", \"url\": \"https://example.com\"}"
-        )
-
-        // When: Handling tool start
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Should set Safari URL
-        XCTAssertEqual(mockContext.safariURL, URL(string: "https://example.com")!)
-
-        // Then: Should ALSO create regular tool message (don't return early)
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .toolUse(let tool) = mockContext.messages[0].content {
-            XCTAssertEqual(tool.toolName, "BrowseTheWeb")
-        } else {
-            XCTFail("Expected toolUse content")
-        }
-    }
-
-    // MARK: - Browser Tool Tests
-
-    func testBrowserToolStartUpdatesBrowserStatus() async throws {
-        // Given: A browser tool start
-        let event = ToolStartPlugin.Result(
-            toolName: "BrowseTheWeb",
-            toolCallId: "browser_snap",
-            arguments: nil,
-            formattedArguments: "{}"
-        )
-
-        // When: Handling tool start (browserStatus is initially nil)
-        XCTAssertNil(mockContext.browserStatus)
-        XCTAssertFalse(mockContext.showBrowserWindow)
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Browser status should be set
-        XCTAssertNotNil(mockContext.browserStatus)
-        XCTAssertTrue(mockContext.browserStatus?.hasBrowser ?? false)
-
-        // Then: Browser window should be auto-shown
-        XCTAssertTrue(mockContext.showBrowserWindow)
-
-        // Then: Browser streaming should be requested
-        XCTAssertTrue(mockContext.startBrowserStreamIfNeededCalled)
-    }
-
-    func testBrowserToolStartRespectsUserDismissal() async throws {
-        // Given: User has dismissed browser this turn
-        mockContext.browserDismissal = .userDismissed
-
-        // Given: A browser tool start
-        let event = ToolStartPlugin.Result(
-            toolName: "BrowseTheWeb",
-            toolCallId: "browser_dismissed",
-            arguments: nil,
-            formattedArguments: "{}"
-        )
-
-        // When: Handling tool start
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Browser status should still be set
-        XCTAssertNotNil(mockContext.browserStatus)
-
-        // Then: Browser window should NOT be auto-shown (user dismissed)
-        XCTAssertFalse(mockContext.showBrowserWindow)
-
-        // Then: Browser streaming should NOT be requested
-        XCTAssertFalse(mockContext.startBrowserStreamIfNeededCalled)
-    }
-
-    // MARK: - RenderAppUI Tool Tests
-
-    func testRenderAppUIToolStartCreatesChip() async throws {
-        // Given: A RenderAppUI tool start
-        let event = ToolStartPlugin.Result(
-            toolName: "RenderAppUI",
-            toolCallId: "render_123",
-            arguments: ["canvasId": AnyCodable("canvas_abc"), "title": AnyCodable("My App")],
-            formattedArguments: "{\"canvasId\": \"canvas_abc\", \"title\": \"My App\"}"
-        )
-
-        // When: Handling tool start (no prior chunk)
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Should create RenderAppUI chip message
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .renderAppUI(let chipData) = mockContext.messages[0].content {
-            XCTAssertEqual(chipData.toolCallId, "render_123")
-            XCTAssertEqual(chipData.canvasId, "canvas_abc")
-            XCTAssertEqual(chipData.title, "My App")
-            XCTAssertEqual(chipData.status, .rendering)
-        } else {
-            XCTFail("Expected renderAppUI content")
-        }
-
-        // Then: Should track in chip tracker
-        XCTAssertTrue(mockContext.renderAppUIChipTracker.hasChip(canvasId: "canvas_abc"))
-    }
-
-    func testRenderAppUIToolStartUpdatesExistingChipFromChunk() async throws {
-        // Given: A chip already exists from earlier chunk (with placeholder toolCallId)
-        let messageId = UUID()
-        let existingMessage = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .renderAppUI(RenderAppUIChipData(
-                toolCallId: "pending_canvas_xyz",
-                canvasId: "canvas_xyz",
-                title: "My App",
-                status: .rendering,
-                errorMessage: nil
-            ))
-        )
-        mockContext.messages.append(existingMessage)
-        _ = mockContext.renderAppUIChipTracker.createChipFromChunk(
-            canvasId: "canvas_xyz",
-            messageId: messageId,
-            title: "My App"
-        )
-
-        // Given: Tool start arrives with real toolCallId
-        let event = ToolStartPlugin.Result(
-            toolName: "RenderAppUI",
-            toolCallId: "render_real_456",
-            arguments: ["canvasId": AnyCodable("canvas_xyz"), "title": AnyCodable("My App")],
-            formattedArguments: "{\"canvasId\": \"canvas_xyz\", \"title\": \"My App\"}"
-        )
-
-        // When: Handling tool start
-        coordinator.handleToolStart(event, context: mockContext)
-
-        // Then: Should NOT create new message (update existing)
-        XCTAssertEqual(mockContext.messages.count, 1)
-
-        // Then: Should update toolCallId to real one
-        if case .renderAppUI(let chipData) = mockContext.messages[0].content {
-            XCTAssertEqual(chipData.toolCallId, "render_real_456")
-        } else {
-            XCTFail("Expected renderAppUI content")
         }
     }
 
@@ -849,11 +662,6 @@ final class MockToolEventContext: ToolEventContext {
 
     // MARK: - State Objects
     var askUserQuestionCalledInTurn: Bool = false
-    var browserStatus: BrowserGetStatusResult?
-    var safariURL: URL?
-    let renderAppUIChipTracker = RenderAppUIChipTracker()
-    var showBrowserWindow: Bool = false
-    var browserDismissal: BrowserDismissal = .none
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false
@@ -867,7 +675,6 @@ final class MockToolEventContext: ToolEventContext {
     var openedAskUserQuestionData: AskUserQuestionToolData?
     var resetThinkingForNewBlockCalled = false
     var finalizeThinkingMessageIfNeededCalled = false
-    var startBrowserStreamIfNeededCalled = false
 
     // MARK: - Protocol Methods
 
@@ -902,22 +709,6 @@ final class MockToolEventContext: ToolEventContext {
     func openAskUserQuestionSheet(for data: AskUserQuestionToolData) {
         askUserQuestionSheetOpened = true
         openedAskUserQuestionData = data
-    }
-
-    @discardableResult
-    func updateBrowserStatusIfNeeded() -> Bool {
-        let shouldShow = browserDismissal != .userDismissed
-        if browserStatus == nil {
-            browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
-        }
-        if shouldShow && !showBrowserWindow {
-            showBrowserWindow = true
-        }
-        return shouldShow
-    }
-
-    func startBrowserStreamIfNeeded() {
-        startBrowserStreamIfNeededCalled = true
     }
 
     func resetThinkingForNewBlock() {

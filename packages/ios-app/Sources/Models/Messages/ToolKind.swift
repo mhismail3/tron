@@ -4,8 +4,6 @@ import Foundation
 /// Eliminates scattered `.lowercased() == "..."` comparisons.
 enum ToolKind: Sendable, Equatable {
     case askUserQuestion
-    case renderAppUI
-    case browseTheWeb
     case bash
     case read
     case write
@@ -16,7 +14,6 @@ enum ToolKind: Sendable, Equatable {
     case waitForSubagent
     case waitForAgents
     case queryAgent
-    case taskManager
     case notifyApp
     case manageAutomations
     case other(String)
@@ -24,8 +21,6 @@ enum ToolKind: Sendable, Equatable {
     init(toolName: String) {
         switch toolName.lowercased() {
         case "askuserquestion":   self = .askUserQuestion
-        case "renderappui":       self = .renderAppUI
-        case "browsetheweb":      self = .browseTheWeb
         case "bash":              self = .bash
         case "read":              self = .read
         case "write":             self = .write
@@ -36,7 +31,6 @@ enum ToolKind: Sendable, Equatable {
         case "waitforsubagent":   self = .waitForSubagent
         case "waitforagents":     self = .waitForAgents
         case "queryagent":        self = .queryAgent
-        case "taskmanager":       self = .taskManager
         case "notifyapp":         self = .notifyApp
         case "manageautomations": self = .manageAutomations
         default:                  self = .other(toolName)

@@ -91,36 +91,8 @@ extension ChatViewModel {
     }
 
     func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
-        // Check if this is a browser tool result with screenshot data
-        // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
-        if let index = messageIndex.index(forToolCallId: pluginResult.toolCallId)
-            ?? MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: messages) {
-            if case .toolUse(let tool) = messages[index].content {
-                if ToolKind(toolName: tool.toolName) == .browseTheWeb {
-                    // Pass plugin result for screenshot extraction (needs result.details)
-                    extractAndDisplayBrowserScreenshot(from: pluginResult)
-                }
-            }
-        }
-
         // Delegate directly to coordinator
         toolEventCoordinator.handleToolEnd(pluginResult, context: self)
-    }
-
-    /// Extract screenshot from browser tool result and display it.
-    /// Uses BrowserScreenshotService for extraction, handling result details and text patterns.
-    private func extractAndDisplayBrowserScreenshot(from pluginResult: ToolEndPlugin.Result) {
-        guard let extractionResult = BrowserScreenshotService.extractScreenshot(from: pluginResult) else {
-            return
-        }
-
-        logger.info("Browser screenshot from \(extractionResult.source.rawValue) (\(extractionResult.image.size.width)x\(extractionResult.image.size.height))", category: .events)
-        browserState.browserFrame = extractionResult.image
-
-        // Only auto-show if user hasn't manually dismissed this turn
-        if browserState.dismissal != .userDismissed && !browserState.showBrowserWindow {
-            browserState.showBrowserWindow = true
-        }
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
@@ -152,12 +124,6 @@ extension ChatViewModel {
 
         // Clear thinking accumulation (streaming finalization handled by coordinator)
         thinkingState.clearCurrentStreaming()
-
-        // Auto-dismiss browser sheet when agent completes
-        if browserState.showBrowserWindow {
-            browserState.dismissal = .autoDismissed
-            browserState.showBrowserWindow = false
-        }
 
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
@@ -351,7 +317,6 @@ extension ChatViewModel {
             lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
         )
         finalizeStreamingMessage()
-        closeBrowserSession()
 
         if let category = result.category, category != "unknown" {
             let data = ProviderErrorDetailData(
@@ -400,9 +365,6 @@ extension ChatViewModel {
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)
 
-        // Close browser session on error
-        closeBrowserSession()
-
         // Drain queued messages if any — agent is idle now
         drainMessageQueue()
     }
@@ -419,69 +381,6 @@ extension ChatViewModel {
             logger.info("Synced session events from server for session \(sessionId)", category: .events)
         } catch {
             logger.error("Failed to sync session events: \(error.localizedDescription)", category: .events)
-        }
-    }
-
-    // MARK: - UI Canvas Event Handlers
-
-    func handleUIRenderStart(_ pluginResult: UIRenderStartPlugin.Result) {
-        // Delegate to coordinator for all UI render start handling
-        uiCanvasCoordinator.handleUIRenderStart(pluginResult, context: self)
-    }
-
-    func handleUIRenderChunk(_ pluginResult: UIRenderChunkPlugin.Result) {
-        // Delegate to coordinator for all UI render chunk handling
-        uiCanvasCoordinator.handleUIRenderChunk(pluginResult, context: self)
-    }
-
-    func handleUIRenderComplete(_ pluginResult: UIRenderCompletePlugin.Result) {
-        // Delegate to coordinator for all UI render complete handling
-        uiCanvasCoordinator.handleUIRenderComplete(pluginResult, context: self)
-    }
-
-    func handleUIRenderError(_ pluginResult: UIRenderErrorPlugin.Result) {
-        // Delegate to coordinator for all UI render error handling
-        uiCanvasCoordinator.handleUIRenderError(pluginResult, context: self)
-    }
-
-    func handleUIRenderRetry(_ pluginResult: UIRenderRetryPlugin.Result) {
-        // Delegate to coordinator for all UI render retry handling
-        uiCanvasCoordinator.handleUIRenderRetry(pluginResult, context: self)
-    }
-
-    // MARK: - Task Event Handlers
-
-    func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {
-        logger.debug("Task created: \(result.taskId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result) {
-        logger.debug("Task updated: \(result.taskId)", category: .events)
-        debouncedRefreshTasks()
-    }
-
-    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
-        logger.debug("Task deleted: \(result.taskId)", category: .events)
-        taskState.removeTask(id: result.taskId)
-    }
-
-    /// Debounced refreshTasks — cancel-and-replace to coalesce rapid task/project/area events.
-    private func debouncedRefreshTasks() {
-        refreshTasksDebounceTask?.cancel()
-        refreshTasksDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            await self?.refreshTasks()
-        }
-    }
-
-    private func refreshTasks() async {
-        do {
-            let result = try await rpcClient.misc.listTasks()
-            taskState.updateTasks(result.tasks)
-        } catch {
-            logger.warning("Failed to refresh tasks: \(error.localizedDescription)", category: .events)
         }
     }
 
@@ -555,11 +454,6 @@ extension ChatViewModel {
         }
     }
 
-
-    func handleBrowserFrameResult(_ result: BrowserFramePlugin.Result) {
-        // Delegate to browser coordinator for frame handling
-        handleBrowserFrame(frameData: result.frameData)
-    }
 
     func handleSubagentSpawnedResult(_ result: SubagentSpawnedPlugin.Result) {
         logger.info("Subagent spawned: \(result.subagentSessionId) for task: \(result.task.prefix(50))...", category: .chat)

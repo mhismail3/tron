@@ -970,10 +970,6 @@ fn all_event_types_have_wire_mapping() {
             }],
             total_activated: 1,
         },
-        TronEvent::MemoryLoaded {
-            base: base.clone(),
-            count: 2,
-        },
         TronEvent::SkillRemoved {
             base: base.clone(),
             skill_name: "n".into(),
@@ -1160,17 +1156,6 @@ fn rules_loaded_wire_format() {
     let data = rpc.data.unwrap();
     assert_eq!(data["totalFiles"], 5);
     assert_eq!(data["dynamicRulesCount"], 2);
-}
-
-#[test]
-fn memory_loaded_wire_format() {
-    let event = TronEvent::MemoryLoaded {
-        base: BaseEvent::now("s1"),
-        count: 3,
-    };
-    let rpc = tron_event_to_rpc(&event);
-    assert_eq!(rpc.event_type, "memory.loaded");
-    assert_eq!(rpc.data.unwrap()["count"], 3);
 }
 
 #[test]

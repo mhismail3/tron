@@ -353,34 +353,6 @@ final class BrowserTypesTests: XCTestCase {
         XCTAssertEqual(status.currentUrl, "https://example.com")
     }
 
-    func testBrowserFrameEventDecoding() throws {
-        let json = """
-        {
-            "type": "browser.frame",
-            "sessionId": "sess_123",
-            "timestamp": "2026-01-26T00:00:00.000Z",
-            "data": {
-                "sessionId": "sess_123",
-                "data": "base64encodeddata",
-                "frameId": 42,
-                "timestamp": 1706234567890.0,
-                "metadata": {
-                    "offsetTop": 0.0,
-                    "pageScaleFactor": 1.0,
-                    "deviceWidth": 1280.0,
-                    "deviceHeight": 800.0
-                }
-            }
-        }
-        """.data(using: .utf8)!
-
-        let event = try JSONDecoder().decode(BrowserFrameEvent.self, from: json)
-
-        XCTAssertEqual(event.type, "browser.frame")
-        XCTAssertEqual(event.frameData, "base64encodeddata")
-        XCTAssertEqual(event.frameId, 42)
-        XCTAssertEqual(event.metadata?.deviceWidth, 1280.0)
-    }
 }
 
 // MARK: - Task Types Tests

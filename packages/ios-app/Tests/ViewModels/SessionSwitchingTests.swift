@@ -67,18 +67,6 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertEqual(viewModel.connectionState, .disconnected)
     }
 
-    func testNewChatViewModelHasCleanBrowserState() {
-        // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
-
-        // Then: Browser state should be clean
-        XCTAssertNil(viewModel.browserState.browserFrame)
-        XCTAssertNil(viewModel.browserState.browserStatus)
-        XCTAssertFalse(viewModel.browserState.showBrowserWindow)
-    }
-
     func testNewChatViewModelHasEmptyInputState() {
         // Given: A fresh ChatViewModel
         let mockURL = URL(string: "ws://localhost:8080/ws")!

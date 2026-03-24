@@ -722,11 +722,6 @@ tron_events! {
         total_activated: u32,
     } => "rules_activated",
 
-    /// Memory loaded (memory context loaded).
-    MemoryLoaded {
-        count: u32,
-    } => "memory_loaded",
-
     /// Skill removed.
     SkillRemoved {
         #[serde(rename = "skillName")]
@@ -1562,10 +1557,6 @@ mod tests {
                 }],
                 total_activated: 1,
             },
-            TronEvent::MemoryLoaded {
-                base: base.clone(),
-                count: 2,
-            },
             TronEvent::SkillRemoved {
                 base: base.clone(),
                 skill_name: "n".into(),
@@ -1742,17 +1733,6 @@ mod tests {
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["totalFiles"], 3);
         assert_eq!(json["dynamicRulesCount"], 1);
-    }
-
-    #[test]
-    fn memory_loaded_event_type() {
-        let e = TronEvent::MemoryLoaded {
-            base: BaseEvent::now("s1"),
-            count: 2,
-        };
-        assert_eq!(e.event_type(), "memory_loaded");
-        let json = serde_json::to_value(&e).unwrap();
-        assert_eq!(json["count"], 2);
     }
 
     #[test]

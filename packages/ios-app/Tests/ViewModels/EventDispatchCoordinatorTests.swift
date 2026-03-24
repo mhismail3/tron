@@ -316,38 +316,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleSkillRemovedCalledWith?.skillName, "commit")
     }
 
-    // MARK: - Browser Event Tests
-
-    func testDispatch_browserFrame_callsHandleBrowserFrame() {
-        // Given: A browser frame result
-        let result = BrowserFramePlugin.Result(frameData: "base64imagedata", format: nil, width: nil, height: nil)
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: BrowserFramePlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleBrowserFrameCalledWith?.frameData, "base64imagedata")
-    }
-
-    func testDispatch_browserClosed_callsHandleBrowserClosed() {
-        // Given: A browser closed result
-        let result = BrowserClosedPlugin.Result(closedSessionId: "browser_session_123")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: BrowserClosedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleBrowserClosedCalledWith, "browser_session_123")
-    }
-
     // MARK: - Subagent Event Tests
 
     func testDispatch_subagentSpawned_callsHandleSubagentSpawned() {
@@ -453,100 +421,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleSubagentEventCalledWith?.subagentSessionId, "agent_123")
     }
 
-    // MARK: - UI Canvas Event Tests
-
-    func testDispatch_uiRenderStart_callsHandleUIRenderStart() {
-        // Given: A UI render start result
-        let result = UIRenderStartPlugin.Result(canvasId: "canvas_123", title: nil, toolCallId: "tool_1")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: UIRenderStartPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleUIRenderStartCalledWith?.canvasId, "canvas_123")
-    }
-
-    func testDispatch_uiRenderChunk_callsHandleUIRenderChunk() {
-        // Given: A UI render chunk result
-        let result = UIRenderChunkPlugin.Result(canvasId: "canvas_123", chunk: "<div>", accumulated: "<div>Hello</div>")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: UIRenderChunkPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleUIRenderChunkCalledWith?.canvasId, "canvas_123")
-    }
-
-    func testDispatch_uiRenderComplete_callsHandleUIRenderComplete() {
-        // Given: A UI render complete result
-        let result = UIRenderCompletePlugin.Result(canvasId: "canvas_123", ui: nil, state: nil)
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: UIRenderCompletePlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleUIRenderCompleteCalledWith?.canvasId, "canvas_123")
-    }
-
-    func testDispatch_uiRenderError_callsHandleUIRenderError() {
-        // Given: A UI render error result
-        let result = UIRenderErrorPlugin.Result(canvasId: "canvas_123", error: "Render failed")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: UIRenderErrorPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleUIRenderErrorCalledWith?.canvasId, "canvas_123")
-    }
-
-    func testDispatch_uiRenderRetry_callsHandleUIRenderRetry() {
-        // Given: A UI render retry result
-        let result = UIRenderRetryPlugin.Result(canvasId: "canvas_123", attempt: 2, errors: "Validation failed")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: UIRenderRetryPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleUIRenderRetryCalledWith?.canvasId, "canvas_123")
-    }
-
-    // MARK: - Task Event Tests
-
-    func testDispatch_taskCreated_callsHandleTaskCreated() {
-        // Given: A task created result
-        let result = TaskCreatedPlugin.Result(taskId: "t1", title: "Test", status: "pending", projectId: nil)
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: TaskCreatedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertTrue(mockContext.handleTaskCreatedCalled)
-    }
-
     // MARK: - Edge Case Tests
 
     func testDispatch_transformFailure_logsWarning() {
@@ -627,28 +501,12 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleSkillRemovedCalledWith: SkillRemovedPlugin.Result?
     var handleRulesActivatedCalledWith: RulesActivatedPlugin.Result?
 
-    // MARK: - Browser
-    var handleBrowserFrameCalledWith: BrowserFramePlugin.Result?
-    var handleBrowserClosedCalledWith: String?
-
     // MARK: - Subagents
     var handleSubagentSpawnedCalledWith: SubagentSpawnedPlugin.Result?
     var handleSubagentStatusCalledWith: SubagentStatusPlugin.Result?
     var handleSubagentCompletedCalledWith: SubagentCompletedPlugin.Result?
     var handleSubagentFailedCalledWith: SubagentFailedPlugin.Result?
     var handleSubagentEventCalledWith: SubagentEventPlugin.Result?
-
-    // MARK: - UI Canvas
-    var handleUIRenderStartCalledWith: UIRenderStartPlugin.Result?
-    var handleUIRenderChunkCalledWith: UIRenderChunkPlugin.Result?
-    var handleUIRenderCompleteCalledWith: UIRenderCompletePlugin.Result?
-    var handleUIRenderErrorCalledWith: UIRenderErrorPlugin.Result?
-    var handleUIRenderRetryCalledWith: UIRenderRetryPlugin.Result?
-
-    // MARK: - Task
-    var handleTaskCreatedCalled = false
-    var handleTaskUpdatedCalled = false
-    var handleTaskDeletedCalled = false
 
     // MARK: - Logging
     var logWarningCalled = false
@@ -733,14 +591,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleRulesActivatedCalledWith = result
     }
 
-    func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {
-        handleBrowserFrameCalledWith = result
-    }
-
-    func handleBrowserClosed(_ sessionId: String) {
-        handleBrowserClosedCalledWith = sessionId
-    }
-
     func handleSubagentSpawned(_ result: SubagentSpawnedPlugin.Result) {
         handleSubagentSpawnedCalledWith = result
     }
@@ -763,38 +613,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result) {
         // No-op for test mock
-    }
-
-    func handleUIRenderStart(_ result: UIRenderStartPlugin.Result) {
-        handleUIRenderStartCalledWith = result
-    }
-
-    func handleUIRenderChunk(_ result: UIRenderChunkPlugin.Result) {
-        handleUIRenderChunkCalledWith = result
-    }
-
-    func handleUIRenderComplete(_ result: UIRenderCompletePlugin.Result) {
-        handleUIRenderCompleteCalledWith = result
-    }
-
-    func handleUIRenderError(_ result: UIRenderErrorPlugin.Result) {
-        handleUIRenderErrorCalledWith = result
-    }
-
-    func handleUIRenderRetry(_ result: UIRenderRetryPlugin.Result) {
-        handleUIRenderRetryCalledWith = result
-    }
-
-    func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {
-        handleTaskCreatedCalled = true
-    }
-
-    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result) {
-        handleTaskUpdatedCalled = true
-    }
-
-    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
-        handleTaskDeletedCalled = true
     }
 
     // MARK: - Server
