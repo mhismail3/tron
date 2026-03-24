@@ -2,7 +2,7 @@
 //!
 //! Loading flow:
 //! 1. Start with compiled [`TronSettings::default()`]
-//! 2. If `~/.tron/settings.json` exists, deep-merge user values over defaults
+//! 2. If `~/.tron/system/settings.json` exists, deep-merge user values over defaults
 //! 3. Apply environment variable overrides (highest priority)
 //!
 //! Deep merge rules:
@@ -23,19 +23,19 @@ pub fn tron_home_dir() -> PathBuf {
     crate::core::paths::tron_home()
 }
 
-/// Resolve the path to the settings file (`~/.tron/settings.json`).
+/// Resolve the path to the settings file (`~/.tron/system/settings.json`).
 pub fn settings_path() -> PathBuf {
-    tron_home_dir().join("settings.json")
+    tron_home_dir().join("system").join("settings.json")
 }
 
-/// Resolve the path to the auth file (`~/.tron/auth.json`).
+/// Resolve the path to the auth file (`~/.tron/system/auth.json`).
 pub fn auth_path() -> PathBuf {
-    tron_home_dir().join("auth.json")
+    tron_home_dir().join("system").join("auth.json")
 }
 
-/// Resolve the deployment directory (`~/.tron/workspace/deployment/`).
+/// Resolve the deployment directory (`~/.tron/system/deployment/`).
 pub fn deploy_dir() -> PathBuf {
-    tron_home_dir().join("workspace").join("deployment")
+    tron_home_dir().join("system").join("deployment")
 }
 
 /// Load settings from the default path with env var overrides.

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Root settings type for the Tron agent.
 ///
-/// Loaded from `~/.tron/settings.json` with defaults applied for
+/// Loaded from `~/.tron/system/settings.json` with defaults applied for
 /// missing fields. Environment variables can override specific values.
 ///
 /// # JSON Format

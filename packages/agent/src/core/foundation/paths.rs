@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// Uses a fixed path under the owner's tron workspace so that files
 /// created by a headless/launchd process still land somewhere sensible
 /// rather than polluting `/tmp`.
-const FALLBACK_HOME: &str = "/Users/moose/.tron/workspace";
+const FALLBACK_HOME: &str = "/Users/moose/.tron/system";
 
 /// Get the user's home directory, falling back to [`FALLBACK_HOME`] if `$HOME` is unset.
 pub fn home_dir() -> String {

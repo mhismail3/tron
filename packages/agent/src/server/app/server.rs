@@ -65,9 +65,9 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Guard preventing double-restart during deploy.
     pub deploy_restart_initiated: Arc<AtomicBool>,
-    /// Path to the installed server binary (e.g. `~/.tron/tron`).
+    /// Path to the installed server binary (e.g. `~/.tron/system/bin/tron`).
     pub deploy_binary_path: PathBuf,
-    /// Deployment directory (e.g. `~/.tron/workspace/deployment/`).
+    /// Deployment directory (e.g. `~/.tron/system/deployment/`).
     pub deploy_dir: PathBuf,
 }
 
@@ -111,7 +111,7 @@ impl TronServer {
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
             deploy_restart_initiated: Arc::new(AtomicBool::new(false)),
-            deploy_binary_path: crate::settings::tron_home_dir().join("tron"),
+            deploy_binary_path: crate::settings::tron_home_dir().join("system").join("bin").join("tron"),
             deploy_dir: crate::settings::deploy_dir(),
             start_time: Instant::now(),
         }

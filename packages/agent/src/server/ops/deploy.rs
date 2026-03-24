@@ -146,7 +146,7 @@ pub enum DeployError {
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
-/// Read the deployed commit from `workspace/deployment/deployed-commit`.
+/// Read the deployed commit from `system/deployment/deployed-commit`.
 pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
     std::fs::read_to_string(artifacts_dir.join("deployed-commit"))
         .map_or_else(|_| "unknown".to_string(), |s| s.trim().to_string())
@@ -193,7 +193,7 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
 
 /// Write `last-deployment.json` compatible with `scripts/tron` format.
 ///
-/// `artifacts_dir` should be `~/.tron/workspace/deployment/`.
+/// `artifacts_dir` should be `~/.tron/system/deployment/`.
 pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
     write_last_deployment_inner(artifacts_dir, sentinel, None)
 }
@@ -718,7 +718,7 @@ mod tests {
         let resp = DeployStatusResponse {
             version: "0.1.0".into(),
             deployed_commit: "abc123".into(),
-            binary_path: "/home/user/.tron/tron".into(),
+            binary_path: "/home/user/.tron/system/bin/tron".into(),
             binary_exists: true,
             binary_modified: Some("2026-02-23T10:00:00Z".into()),
             restart_initiated: false,

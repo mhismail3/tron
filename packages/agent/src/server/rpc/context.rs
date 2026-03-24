@@ -70,7 +70,7 @@ pub struct RpcContext {
     pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
     /// Shared rules/memory/rules-index artifact cache for session and prompt loading.
     pub context_artifacts: Arc<ContextArtifactsService>,
-    /// Path to auth JSON file (`~/.tron/auth.json`).
+    /// Path to auth JSON file (`~/.tron/system/auth.json`).
     pub auth_path: PathBuf,
     /// Broadcast manager for pushing events to WebSocket clients.
     pub broadcast_manager: Option<Arc<BroadcastManager>>,

@@ -1,6 +1,6 @@
 //! Auth storage file I/O.
 //!
-//! Reads and writes `~/.tron/auth.json` with secure file permissions (0o600).
+//! Reads and writes `~/.tron/system/auth.json` with secure file permissions (0o600).
 
 use std::path::{Path, PathBuf};
 
@@ -207,11 +207,11 @@ pub struct AuthFileLock {
 pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock> {
     use std::os::unix::io::AsRawFd;
 
-    // Place lock file in workspace/deployment/ to keep ~/.tron/ clean.
+    // Place lock file in system/deployment/ to keep ~/.tron/ clean.
     let lock_path = auth_path
         .parent()
         .unwrap_or(auth_path)
-        .join("workspace/deployment/auth.lock");
+        .join("deployment/auth.lock");
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -257,8 +257,8 @@ mod tests {
 
     #[test]
     fn auth_file_path_construction() {
-        let p = auth_file_path(Path::new("/home/user/.tron"));
-        assert_eq!(p, PathBuf::from("/home/user/.tron/auth.json"));
+        let p = auth_file_path(Path::new("/home/user/.tron/system"));
+        assert_eq!(p, PathBuf::from("/home/user/.tron/system/auth.json"));
     }
 
     #[test]
@@ -464,7 +464,7 @@ mod tests {
         auth_path
             .parent()
             .unwrap_or(auth_path)
-            .join("workspace/deployment/auth.lock")
+            .join("deployment/auth.lock")
     }
 
     #[allow(unsafe_code)]

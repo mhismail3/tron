@@ -424,7 +424,7 @@ impl ProviderFactory for DefaultProviderFactory {
     }
 }
 
-/// Resolve the auth file path (`~/.tron/auth.json`).
+/// Resolve the auth file path (`~/.tron/system/auth.json`).
 fn auth_path() -> PathBuf {
     crate::settings::loader::auth_path()
 }

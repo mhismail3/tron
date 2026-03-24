@@ -65,7 +65,7 @@ BENCH_GATE_MAX_P95_REGRESSION_PCT=15
 BENCH_GATE_MAX_MEAN_REGRESSION_PCT=35
 
 # Installed binary
-INSTALLED_BINARY="$TRON_HOME/tron"
+INSTALLED_BINARY="$TRON_HOME/system/bin/tron"
 
 # Service configuration
 PLIST_NAME="com.tron.server"
@@ -73,13 +73,13 @@ PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 PROD_PORT=9847
 
 # File paths
-DEPLOY_DIR="$TRON_HOME/workspace/deployment"
+DEPLOY_DIR="$TRON_HOME/system/deployment"
 PROD_LOG_FILE="$DEPLOY_DIR/server.log"
 DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
 DEPLOY_LOCK_FILE="$TRON_HOME/deploy.lock"
 
 # OAuth
-AUTH_FILE="$TRON_HOME/auth.json"
+AUTH_FILE="$TRON_HOME/system/auth.json"
 OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
 OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
@@ -126,8 +126,10 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/{database,mods,knowledge,skills,workspace/canvases,workspace/deployment,workspace/scratch,workspace/cron}
-    mkdir -p "$TRON_HOME"/mods/apns
+    mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns,scratch}
+    mkdir -p "$TRON_HOME"/memory/{sessions,knowledge,cron}
+    mkdir -p "$TRON_HOME"/notes/voice
+    mkdir -p "$TRON_HOME"/{skills,rules}
 }
 
 # Wait for a port to become free, with timeout.
@@ -393,7 +395,7 @@ create_launchd_plist() {
         <key>RUST_LOG</key>
         <string>info</string>
         <key>GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE</key>
-        <string>$TRON_HOME/mods/google/credentials.json</string>
+        <string>$TRON_HOME/system/mods/google/credentials.json</string>
     </dict>
 
     <key>StandardOutPath</key>
@@ -466,7 +468,7 @@ query_logs() {
     fi
 
     # Database mode
-    local db_path="$TRON_HOME/database/tron.db"
+    local db_path="$TRON_HOME/system/db/log.db"
 
     if [ ! -f "$db_path" ]; then
         print_error "Database not found: $db_path"
@@ -631,9 +633,9 @@ cmd_dev() {
     done
 
     # Ensure transcription sidecar files are deployed
-    mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    mkdir -p "$HOME/.tron/system/mods/transcribe"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
 
     if [ "$do_build" = true ]; then
         build_rust
@@ -1014,9 +1016,9 @@ cmd_deploy() {
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
-    mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    mkdir -p "$HOME/.tron/system/mods/transcribe"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
 
     # Install runtime CLI (only if changed)
     local cli_source="$SCRIPT_DIR/tron-cli"
@@ -1106,7 +1108,7 @@ cmd_install() {
 
     # Ensure directories exist
     mkdir -p "$BIN_DIR"
-    mkdir -p "$TRON_HOME/workspace/deployment"
+    mkdir -p "$TRON_HOME/system/deployment"
     mkdir -p "$HOME/Library/LaunchAgents"
 
     # Build if needed
@@ -1123,9 +1125,9 @@ cmd_install() {
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
-    mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    mkdir -p "$HOME/.tron/system/mods/transcribe"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
     print_success "Deployed transcription sidecar"
 
     # Create launchd plist
@@ -1283,8 +1285,8 @@ cmd_setup() {
     # Create default config files
     print_status "Creating configuration files..."
 
-    if [ ! -f "$TRON_HOME/settings.json" ]; then
-        cat > "$TRON_HOME/settings.json" << 'EOF'
+    if [ ! -f "$TRON_HOME/system/settings.json" ]; then
+        cat > "$TRON_HOME/system/settings.json" << 'EOF'
 {
   "server": {
     "defaultModel": "claude-sonnet-4-20250514",
@@ -1306,15 +1308,15 @@ EOF
         print_warning "settings.json already exists, skipping"
     fi
 
-    if [ ! -f "$TRON_HOME/auth.json" ]; then
-        cat > "$TRON_HOME/auth.json" << 'EOF'
+    if [ ! -f "$TRON_HOME/system/auth.json" ]; then
+        cat > "$TRON_HOME/system/auth.json" << 'EOF'
 {
   "version": 1,
   "providers": {},
   "lastUpdated": ""
 }
 EOF
-        chmod 600 "$TRON_HOME/auth.json"
+        chmod 600 "$TRON_HOME/system/auth.json"
         print_success "Created auth.json"
     else
         print_warning "auth.json already exists, skipping"
@@ -1438,7 +1440,7 @@ cmd_restart() {
 }
 
 cmd_errors() {
-    local db_path="$TRON_HOME/database/tron.db"
+    local db_path="$TRON_HOME/system/db/log.db"
 
     if [ -f "$db_path" ]; then
         echo -e "${RED}Recent errors from database:${NC}"

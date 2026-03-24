@@ -1,7 +1,7 @@
 //! Python venv management for the parakeet-mlx transcription sidecar.
 //!
 //! Handles Python discovery, venv creation, and package installation.
-//! All state lives under `~/.tron/mods/transcribe/`.
+//! All state lives under `~/.tron/system/mods/transcribe/`.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -14,7 +14,7 @@ use crate::transcription::types::TranscriptionError;
 /// Base directory for the transcription sidecar.
 pub fn sidecar_dir() -> PathBuf {
     let home = crate::core::paths::home_dir();
-    PathBuf::from(format!("{home}/.tron/mods/transcribe"))
+    PathBuf::from(format!("{home}/.tron/system/mods/transcribe"))
 }
 
 /// Path to the worker script.
@@ -143,7 +143,7 @@ mod tests {
     fn sidecar_dir_under_tron() {
         let dir = sidecar_dir();
         let s = dir.to_string_lossy();
-        assert!(s.contains(".tron/mods/transcribe"), "Got: {s}");
+        assert!(s.contains(".tron/system/mods/transcribe"), "Got: {s}");
     }
 
     #[test]

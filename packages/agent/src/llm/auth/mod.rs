@@ -4,7 +4,7 @@
 //! - **API key**: Direct key-based auth
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
-//! Auth state is persisted to `~/.tron/auth.json` with secure file permissions.
+//! Auth state is persisted to `~/.tron/system/auth.json` with secure file permissions.
 //!
 //! # Provider modules
 //!

@@ -4,10 +4,10 @@
 //!
 //! Settings are loaded from three layers (in priority order):
 //! 1. **Compiled defaults** — [`TronSettings::default()`]
-//! 2. **User file** — `~/.tron/settings.json` (deep-merged over defaults)
+//! 2. **User file** — `~/.tron/system/settings.json` (deep-merged over defaults)
 //! 3. **Environment variables** — `TRON_*` overrides (highest priority)
 //!
-//! Settings are server-authoritative: `~/.tron/settings.json` is the source
+//! Settings are server-authoritative: `~/.tron/system/settings.json` is the source
 //! of truth. iOS reads/writes via `settings.get`/`settings.update` RPC methods.
 //!
 //! The global singleton is reloadable: when `settings.update` writes new
@@ -58,7 +58,7 @@ static SETTINGS: RwLock<Option<Arc<TronSettings>>> = RwLock::new(None);
 
 /// Get the global settings instance.
 ///
-/// On first call, loads settings from `~/.tron/settings.json` with env var
+/// On first call, loads settings from `~/.tron/system/settings.json` with env var
 /// overrides. On subsequent calls, returns the cached value. If loading
 /// fails, returns compiled defaults.
 ///

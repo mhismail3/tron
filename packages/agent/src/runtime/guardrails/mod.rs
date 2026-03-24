@@ -336,41 +336,45 @@ mod tests {
     }
 
     #[test]
-    fn path_write_to_tron_app_blocked() {
+    fn path_write_to_tron_system_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/app/server.js")));
+        let eval = engine.evaluate(&make_write_ctx(&format!(
+            "{home}/.tron/system/settings.json"
+        )));
         assert!(eval.blocked);
         assert!(
             eval.triggered_rules
                 .iter()
-                .any(|r| r.rule_id == "core.tron-app-protection")
+                .any(|r| r.rule_id == "core.tron-system-protection")
         );
     }
 
     #[test]
-    fn path_edit_tron_database_blocked() {
+    fn path_edit_tron_system_db_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/database/prod.db")));
+        let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/system/db/prod.db")));
         assert!(eval.blocked);
         assert!(
             eval.triggered_rules
                 .iter()
-                .any(|r| r.rule_id == "core.tron-db-protection")
+                .any(|r| r.rule_id == "core.tron-system-protection")
         );
     }
 
     #[test]
-    fn path_write_tron_auth_blocked() {
+    fn path_write_tron_system_auth_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/auth.json")));
+        let eval = engine.evaluate(&make_write_ctx(&format!(
+            "{home}/.tron/system/auth.json"
+        )));
         assert!(eval.blocked);
         assert!(
             eval.triggered_rules
                 .iter()
-                .any(|r| r.rule_id == "core.tron-auth-protection")
+                .any(|r| r.rule_id == "core.tron-system-protection")
         );
     }
 
@@ -434,28 +438,28 @@ mod tests {
     }
 
     #[test]
-    fn path_bash_tee_to_tron_app_blocked() {
+    fn path_bash_tee_to_tron_system_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let cmd = format!("echo test | tee {home}/.tron/app/file.txt");
+        let cmd = format!("echo test | tee {home}/.tron/system/settings.json");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
         assert!(eval.blocked);
     }
 
     #[test]
-    fn path_bash_cp_to_tron_db_blocked() {
+    fn path_bash_cp_to_tron_system_db_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let cmd = format!("cp foo.db {home}/.tron/database/prod.db");
+        let cmd = format!("cp foo.db {home}/.tron/system/db/prod.db");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
         assert!(eval.blocked);
     }
 
     #[test]
-    fn path_bash_redirect_to_tron_auth_blocked() {
+    fn path_bash_redirect_to_tron_system_auth_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let cmd = format!("echo '{{}}' > {home}/.tron/auth.json");
+        let cmd = format!("echo '{{}}' > {home}/.tron/system/auth.json");
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
         assert!(eval.blocked);
     }
@@ -1336,7 +1340,7 @@ mod tests {
     fn engine_all_default_rules_registered() {
         let engine = default_engine();
         let rules = engine.get_rules();
-        assert_eq!(rules.len(), 11);
+        assert_eq!(rules.len(), 9);
     }
 
     #[test]

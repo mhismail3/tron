@@ -22,7 +22,7 @@ use std::time::SystemTime;
 const CONTEXT_FILENAMES: &[&str] = &["claude.md", "agents.md"];
 
 /// Directories that may contain rules files.
-const AGENT_DIRS: &[&str] = &[".claude", ".tron", ".agent"];
+const AGENT_DIRS: &[&str] = &[".claude", ".tron/rules", ".agent"];
 
 /// Directories excluded from scanning by default.
 const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
@@ -208,6 +208,7 @@ fn scan_directory(dir: &Path, current_depth: u32, ctx: &mut ScanContext<'_>) {
                     &entry.path(),
                     ctx.project_root,
                     false,
+                    Some(agent_dir),
                     ctx.results,
                     ctx.seen_real_paths,
                 );
@@ -236,6 +237,7 @@ fn scan_directory(dir: &Path, current_depth: u32, ctx: &mut ScanContext<'_>) {
                 &entry.path(),
                 ctx.project_root,
                 true,
+                None,
                 ctx.results,
                 ctx.seen_real_paths,
             );
@@ -281,6 +283,7 @@ fn try_add_file(
     file_path: &Path,
     project_root: &Path,
     is_standalone: bool,
+    agent_dir: Option<&str>,
     results: &mut Vec<DiscoveredRulesFile>,
     seen_real_paths: &mut HashSet<PathBuf>,
 ) {
@@ -307,7 +310,7 @@ fn try_add_file(
         .collect::<Vec<_>>()
         .join("/");
 
-    let scope_dir = compute_scope_dir(&relative_path, is_standalone);
+    let scope_dir = compute_scope_dir(&relative_path, is_standalone, agent_dir);
     let is_global = scope_dir.is_empty();
 
     results.push(DiscoveredRulesFile {
@@ -327,26 +330,50 @@ fn try_add_file(
 /// - Agent dir files: parent of the agent dir.
 ///   e.g. `packages/foo/.claude/CLAUDE.md` → `packages/foo`
 ///   e.g. `.claude/CLAUDE.md` → `""`
+///   e.g. `.tron/rules/CLAUDE.md` → `""` (multi-segment agent dir)
 /// - Standalone files: parent directory.
 ///   e.g. `packages/foo/CLAUDE.md` → `packages/foo`
 ///   e.g. `CLAUDE.md` → `""`
-fn compute_scope_dir(relative_path: &str, is_standalone: bool) -> String {
+fn compute_scope_dir(relative_path: &str, is_standalone: bool, agent_dir: Option<&str>) -> String {
     if is_standalone {
         // Parent directory of the file
         match relative_path.rfind('/') {
             Some(idx) => relative_path[..idx].to_owned(),
             None => String::new(), // Root-level file
         }
-    } else {
-        // Agent dir file: go up two levels (past .claude/ and the filename)
-        // e.g. "packages/foo/.claude/CLAUDE.md" → "packages/foo/.claude" → "packages/foo"
-        let agent_dir = match relative_path.rfind('/') {
+    } else if let Some(ad) = agent_dir {
+        // Strip the agent dir suffix and the filename to get the scope.
+        // e.g. "packages/foo/.claude/CLAUDE.md" with agent_dir=".claude"
+        //   → strip "/CLAUDE.md" → "packages/foo/.claude"
+        //   → strip "/.claude" → "packages/foo"
+        // e.g. ".tron/rules/CLAUDE.md" with agent_dir=".tron/rules"
+        //   → strip "/CLAUDE.md" → ".tron/rules"
+        //   → strip "/.tron/rules" or match exactly → ""
+        let without_file = match relative_path.rfind('/') {
             Some(idx) => &relative_path[..idx],
             None => return String::new(),
         };
-        match agent_dir.rfind('/') {
-            Some(idx) => agent_dir[..idx].to_owned(),
-            None => String::new(), // Root agent dir like ".claude"
+        // `without_file` should end with the agent dir pattern
+        if without_file == ad {
+            String::new()
+        } else if let Some(prefix) = without_file.strip_suffix(&format!("/{ad}")) {
+            prefix.to_owned()
+        } else {
+            // Fallback: go up one level
+            match without_file.rfind('/') {
+                Some(idx) => without_file[..idx].to_owned(),
+                None => String::new(),
+            }
+        }
+    } else {
+        // Legacy path: go up two levels (past agent_dir/ and the filename)
+        let agent_dir_path = match relative_path.rfind('/') {
+            Some(idx) => &relative_path[..idx],
+            None => return String::new(),
+        };
+        match agent_dir_path.rfind('/') {
+            Some(idx) => agent_dir_path[..idx].to_owned(),
+            None => String::new(),
         }
     }
 }
@@ -412,13 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn discovers_tron_dir_at_project_root() {
+    fn discovers_tron_rules_dir_at_project_root() {
         let tmp = setup();
-        write_file(tmp.path(), ".tron/CLAUDE.md", "# Tron rules");
+        write_file(tmp.path(), ".tron/rules/CLAUDE.md", "# Tron rules");
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].relative_path, ".tron/CLAUDE.md");
+        assert_eq!(results[0].relative_path, ".tron/rules/CLAUDE.md");
     }
 
     #[test]
@@ -435,13 +462,13 @@ mod tests {
     fn case_insensitive_filenames() {
         let tmp = setup();
         write_file(tmp.path(), ".claude/claude.md", "# lowercase claude");
-        write_file(tmp.path(), ".tron/agents.md", "# lowercase agents");
+        write_file(tmp.path(), ".tron/rules/agents.md", "# lowercase agents");
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 2);
         let mut paths: Vec<_> = results.iter().map(|r| r.relative_path.as_str()).collect();
         paths.sort_unstable();
-        assert_eq!(paths, vec![".claude/claude.md", ".tron/agents.md"]);
+        assert_eq!(paths, vec![".claude/claude.md", ".tron/rules/agents.md"]);
     }
 
     #[test]
@@ -469,7 +496,7 @@ mod tests {
             "packages/agent/.claude/CLAUDE.md",
             "# Deep rule",
         );
-        write_file(tmp.path(), "src/lib/.tron/AGENTS.md", "# Nested rule");
+        write_file(tmp.path(), "src/lib/.tron/rules/AGENTS.md", "# Nested rule");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -479,7 +506,7 @@ mod tests {
             paths,
             vec![
                 "packages/agent/.claude/CLAUDE.md",
-                "src/lib/.tron/AGENTS.md"
+                "src/lib/.tron/rules/AGENTS.md"
             ]
         );
     }
@@ -725,7 +752,7 @@ mod tests {
     fn discovers_files_across_multiple_agent_dirs() {
         let tmp = setup();
         write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Claude");
-        write_file(tmp.path(), "packages/foo/.tron/AGENTS.md", "# Tron Agents");
+        write_file(tmp.path(), "packages/foo/.tron/rules/AGENTS.md", "# Tron Agents");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -746,31 +773,42 @@ mod tests {
 
     #[test]
     fn scope_dir_root_agent_dir() {
-        assert_eq!(compute_scope_dir(".claude/CLAUDE.md", false), "");
+        assert_eq!(compute_scope_dir(".claude/CLAUDE.md", false, Some(".claude")), "");
     }
 
     #[test]
     fn scope_dir_nested_agent_dir() {
         assert_eq!(
-            compute_scope_dir("packages/foo/.claude/CLAUDE.md", false),
+            compute_scope_dir("packages/foo/.claude/CLAUDE.md", false, Some(".claude")),
             "packages/foo"
         );
     }
 
     #[test]
-    fn scope_dir_deeply_nested_agent_dir() {
-        assert_eq!(compute_scope_dir("a/b/c/.tron/AGENTS.md", false), "a/b/c");
+    fn scope_dir_deeply_nested_tron_rules() {
+        assert_eq!(
+            compute_scope_dir("a/b/c/.tron/rules/AGENTS.md", false, Some(".tron/rules")),
+            "a/b/c"
+        );
+    }
+
+    #[test]
+    fn scope_dir_root_tron_rules() {
+        assert_eq!(
+            compute_scope_dir(".tron/rules/CLAUDE.md", false, Some(".tron/rules")),
+            ""
+        );
     }
 
     #[test]
     fn scope_dir_standalone_root() {
-        assert_eq!(compute_scope_dir("CLAUDE.md", true), "");
+        assert_eq!(compute_scope_dir("CLAUDE.md", true, None), "");
     }
 
     #[test]
     fn scope_dir_standalone_nested() {
         assert_eq!(
-            compute_scope_dir("packages/foo/CLAUDE.md", true),
+            compute_scope_dir("packages/foo/CLAUDE.md", true, None),
             "packages/foo"
         );
     }

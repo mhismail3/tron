@@ -33,7 +33,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/database/log.db`
+//! 7. Production DB target is strictly `~/.tron/system/db/log.db`
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -103,7 +103,7 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the auth file path (`~/.tron/auth.json`).
+/// Resolve the auth file path (`~/.tron/system/auth.json`).
 fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
@@ -329,7 +329,7 @@ async fn main() -> Result<()> {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
-    // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
+    // APNS service (optional — only if config exists at ~/.tron/system/mods/apns/)
     let apns_service: ApnsServiceOption = {
         #[cfg(feature = "apns")]
         {

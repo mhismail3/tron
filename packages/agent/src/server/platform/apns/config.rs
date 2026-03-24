@@ -1,4 +1,4 @@
-//! APNS configuration loading from `~/.tron/mods/apns/`.
+//! APNS configuration loading from `~/.tron/system/mods/apns/`.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -37,10 +37,11 @@ impl ApnsConfig {
             };
             return expanded;
         }
-        // Default: ~/.tron/mods/apns/AuthKey_{keyId}.p8
+        // Default: ~/.tron/system/mods/apns/AuthKey_{keyId}.p8
         let home = crate::core::paths::home_dir();
         PathBuf::from(home)
             .join(".tron")
+            .join("system")
             .join("mods")
             .join("apns")
             .join(format!("AuthKey_{}.p8", self.key_id))
@@ -56,7 +57,7 @@ impl ApnsConfig {
     }
 }
 
-/// Load APNS config from `~/.tron/mods/apns/config.json`.
+/// Load APNS config from `~/.tron/system/mods/apns/config.json`.
 ///
 /// Returns `None` if config doesn't exist or is invalid (not an error —
 /// APNS is optional).
@@ -72,6 +73,7 @@ pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
         let home = crate::core::paths::home_dir();
         PathBuf::from(home)
             .join(".tron")
+            .join("system")
             .join("mods")
             .join("apns")
             .join("config.json")
@@ -147,7 +149,7 @@ mod tests {
         };
         let path = config.resolved_key_path();
         assert!(path.to_string_lossy().contains("AuthKey_ABC123.p8"));
-        assert!(path.to_string_lossy().contains(".tron/mods/apns"));
+        assert!(path.to_string_lossy().contains(".tron/system/mods/apns"));
     }
 
     #[test]

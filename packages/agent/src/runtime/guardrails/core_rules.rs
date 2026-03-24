@@ -3,12 +3,10 @@
 //! Defines all core (immutable) and standard (configurable) rules that ship
 //! with the guardrail engine. Core rules cannot be disabled by configuration.
 //!
-//! ## Core Rules (8)
+//! ## Core Rules (6)
 //! - `core.destructive-commands` — blocks rm -rf /, fork bombs, dd to devices, etc.
 //! - `core.tron-no-delete` — prevents deletion of files in ~/.tron
-//! - `core.tron-app-protection` — protects ~/.tron/app/
-//! - `core.tron-db-protection` — protects ~/.tron/database/
-//! - `core.tron-auth-protection` — protects ~/.tron/auth.json
+//! - `core.tron-system-protection` — protects ~/.tron/system/** from agent writes
 //! - `core.synology-drive-protection` — protects Synology Drive cloud storage
 //! - `core.system-protection` — blocks writes to OS-critical paths (/System, /usr, /etc, etc.)
 //! - `core.dotfiles-protection` — read-only access to dotfiles (~/.ssh, ~/.aws, ~/.config, etc.)
@@ -31,9 +29,7 @@ use super::types::{RuleTier, Scope, Severity};
 pub const CORE_RULE_IDS: &[&str] = &[
     "core.destructive-commands",
     "core.tron-no-delete",
-    "core.tron-app-protection",
-    "core.tron-db-protection",
-    "core.tron-auth-protection",
+    "core.tron-system-protection",
     "core.synology-drive-protection",
     "core.system-protection",
     "core.dotfiles-protection",
@@ -60,9 +56,7 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         // Core rules
         core_destructive_commands(),
         core_tron_no_delete(),
-        core_tron_app_protection(),
-        core_tron_db_protection(),
-        core_tron_auth_protection(),
+        core_tron_system_protection(),
         core_synology_drive_protection(),
         core_system_protection(),
         core_dotfiles_protection(),
@@ -144,16 +138,16 @@ fn core_tron_no_delete() -> GuardrailRule {
     })
 }
 
-/// Core rule: Protect ~/.tron/app directory.
-fn core_tron_app_protection() -> GuardrailRule {
+/// Core rule: Protect ~/.tron/system/ directory (db, auth, settings, deployment, mods, bin).
+fn core_tron_system_protection() -> GuardrailRule {
     let home = homedir();
-    let app_path = format!("{home}/.tron/app");
+    let system_path = format!("{home}/.tron/system");
 
     GuardrailRule::Path(PathRule {
         base: RuleBase {
-            id: "core.tron-app-protection".into(),
-            name: "Tron App Protection".into(),
-            description: "Protects the ~/.tron/app directory from agent modifications".into(),
+            id: "core.tron-system-protection".into(),
+            name: "Tron System Protection".into(),
+            description: "Protects the ~/.tron/system/ directory from agent modifications".into(),
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
@@ -163,57 +157,7 @@ fn core_tron_app_protection() -> GuardrailRule {
             tags: vec!["security".into(), "config-protection".into()],
         },
         path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
-        protected_paths: vec![app_path.clone(), format!("{app_path}/**")],
-        block_traversal: false,
-        block_hidden: false,
-    })
-}
-
-/// Core rule: Protect ~/.tron/database directory.
-fn core_tron_db_protection() -> GuardrailRule {
-    let home = homedir();
-    let db_path = format!("{home}/.tron/database");
-
-    GuardrailRule::Path(PathRule {
-        base: RuleBase {
-            id: "core.tron-db-protection".into(),
-            name: "Tron DB Protection".into(),
-            description: "Protects the ~/.tron/database directory from agent modifications".into(),
-            severity: Severity::Block,
-            scope: Scope::Global,
-            tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
-            priority: 1000,
-            enabled: true,
-            tags: vec!["security".into(), "config-protection".into()],
-        },
-        path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
-        protected_paths: vec![db_path.clone(), format!("{db_path}/**")],
-        block_traversal: false,
-        block_hidden: false,
-    })
-}
-
-/// Core rule: Protect ~/.tron/auth.json.
-fn core_tron_auth_protection() -> GuardrailRule {
-    let home = homedir();
-    let auth_path = format!("{home}/.tron/auth.json");
-
-    GuardrailRule::Path(PathRule {
-        base: RuleBase {
-            id: "core.tron-auth-protection".into(),
-            name: "Tron Auth Protection".into(),
-            description: "Protects the ~/.tron/auth.json file from agent modifications".into(),
-            severity: Severity::Block,
-            scope: Scope::Global,
-            tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
-            priority: 1000,
-            enabled: true,
-            tags: vec!["security".into(), "config-protection".into()],
-        },
-        path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
-        protected_paths: vec![auth_path],
+        protected_paths: vec![system_path.clone(), format!("{system_path}/**")],
         block_traversal: false,
         block_hidden: false,
     })
@@ -408,9 +352,7 @@ mod tests {
     fn test_is_core_rule() {
         assert!(is_core_rule("core.destructive-commands"));
         assert!(is_core_rule("core.tron-no-delete"));
-        assert!(is_core_rule("core.tron-app-protection"));
-        assert!(is_core_rule("core.tron-db-protection"));
-        assert!(is_core_rule("core.tron-auth-protection"));
+        assert!(is_core_rule("core.tron-system-protection"));
         assert!(is_core_rule("core.synology-drive-protection"));
         assert!(is_core_rule("core.system-protection"));
         assert!(is_core_rule("core.dotfiles-protection"));
@@ -421,7 +363,7 @@ mod tests {
     #[test]
     fn test_default_rules_count() {
         let rules = default_rules();
-        assert_eq!(rules.len(), 11); // 8 core + 3 standard
+        assert_eq!(rules.len(), 9); // 6 core + 3 standard
     }
 
     #[test]
@@ -568,17 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn dotfiles_allows_write_to_tron_workspace() {
+    fn dotfiles_allows_write_to_tron_scratch() {
         let rule = find_rule("core.dotfiles-protection");
         let home = homedir();
         let ctx = make_ctx(
             "Write",
-            serde_json::json!({"file_path": format!("{home}/.tron/workspace/scratch/file.txt")}),
+            serde_json::json!({"file_path": format!("{home}/.tron/system/scratch/file.txt")}),
         );
         let result = rule.evaluate(&ctx, None);
         assert!(
             !result.triggered,
-            "Write to ~/.tron/workspace should be allowed"
+            "Write to ~/.tron/system/scratch should be allowed"
         );
     }
 }
