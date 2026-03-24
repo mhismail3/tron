@@ -57,13 +57,6 @@ struct ToolRegistryTests {
         #expect(d.displayName == "Find")
     }
 
-    @Test("BrowseTheWeb tool has correct icon and display name")
-    func testBrowseTheWebDescriptor() {
-        let d = ToolRegistry.descriptor(for: "browsetheweb")
-        #expect(d.icon == "globe")
-        #expect(d.displayName == "Browse")
-    }
-
     @Test("WebFetch tool has correct icon and display name")
     func testWebFetchDescriptor() {
         let d = ToolRegistry.descriptor(for: "webfetch")
@@ -76,20 +69,6 @@ struct ToolRegistryTests {
         let d = ToolRegistry.descriptor(for: "websearch")
         #expect(d.icon == "magnifyingglass.circle")
         #expect(d.displayName == "Web Search")
-    }
-
-    @Test("Task tool has correct icon and display name")
-    func testTaskDescriptor() {
-        let d = ToolRegistry.descriptor(for: "task")
-        #expect(d.icon == "arrow.triangle.branch")
-        #expect(d.displayName == "Task")
-    }
-
-    @Test("Remember tool has correct icon and display name")
-    func testRememberDescriptor() {
-        let d = ToolRegistry.descriptor(for: "remember")
-        #expect(d.icon == "brain.fill")
-        #expect(d.displayName == "Remember")
     }
 
     @Test("Unknown tool gets default descriptor")
@@ -168,20 +147,6 @@ struct ToolRegistryTests {
         #expect(summary == "**/*.swift")
     }
 
-    @Test("BrowseTheWeb summary extracts navigate action with URL")
-    func testBrowseNavigateSummary() {
-        let d = ToolRegistry.descriptor(for: "browsetheweb")
-        let summary = d.summaryExtractor("{\"action\": \"navigate\", \"url\": \"https://example.com\"}")
-        #expect(summary == "navigate: https://example.com")
-    }
-
-    @Test("BrowseTheWeb summary extracts click action with selector")
-    func testBrowseClickSummary() {
-        let d = ToolRegistry.descriptor(for: "browsetheweb")
-        let summary = d.summaryExtractor("{\"action\": \"click\", \"selector\": \"#submit\"}")
-        #expect(summary == "click: #submit")
-    }
-
     @Test("WebFetch summary shows domain and prompt")
     func testWebFetchSummary() {
         let d = ToolRegistry.descriptor(for: "webfetch")
@@ -212,20 +177,6 @@ struct ToolRegistryTests {
         #expect(summary.contains("..."))
     }
 
-    @Test("Task summary extracts description")
-    func testTaskSummary() {
-        let d = ToolRegistry.descriptor(for: "task")
-        let summary = d.summaryExtractor("{\"description\": \"Search for config files\"}")
-        #expect(summary == "Search for config files")
-    }
-
-    @Test("Task summary falls back to prompt")
-    func testTaskSummaryFallback() {
-        let d = ToolRegistry.descriptor(for: "task")
-        let summary = d.summaryExtractor("{\"prompt\": \"Do the thing\"}")
-        #expect(summary == "Do the thing")
-    }
-
     @Test("Unknown tool summary is empty")
     func testUnknownSummary() {
         let d = ToolRegistry.descriptor(for: "unknowntool")
@@ -235,52 +186,9 @@ struct ToolRegistryTests {
 
     // MARK: - Tool Set Tests
 
-    @Test("ManageAutomations tool has correct icon and display name")
-    func testManageAutomationsDescriptor() {
-        let d = ToolRegistry.descriptor(for: "manageautomations")
-        #expect(d.icon == "clock.badge.checkmark")
-        #expect(d.displayName == "Automation")
-        #expect(d.completedDisplayName == "Automated")
-    }
-
-    @Test("ManageAutomations summary extracts action")
-    func testManageAutomationsSummary() {
-        let d = ToolRegistry.descriptor(for: "manageautomations")
-        let summary = d.summaryExtractor("{\"action\": \"create\", \"name\": \"Daily Backup\"}")
-        #expect(summary == "create")
-    }
-
-    @Test("ManageAutomations summary extracts action with jobId")
-    func testManageAutomationsSummaryWithJobId() {
-        let d = ToolRegistry.descriptor(for: "manageautomations")
-        let summary = d.summaryExtractor("{\"action\": \"trigger\", \"jobId\": \"cron_123\"}")
-        #expect(summary == "trigger")
-    }
-
-    @Test("ManageAutomations summary handles missing action")
-    func testManageAutomationsSummaryMissing() {
-        let d = ToolRegistry.descriptor(for: "manageautomations")
-        let summary = d.summaryExtractor("{}")
-        #expect(summary == "")
-    }
-
-    @Test("ManageAutomations is case-insensitive")
-    func testManageAutomationsCaseInsensitive() {
-        let d1 = ToolRegistry.descriptor(for: "ManageAutomations")
-        let d2 = ToolRegistry.descriptor(for: "MANAGEAUTOMATIONS")
-        #expect(d1.displayName == "Automation")
-        #expect(d2.displayName == "Automation")
-    }
-
-    @Test("ManageAutomations has nil viewer factory")
-    func testManageAutomationsNilFactory() {
-        let d = ToolRegistry.descriptor(for: "manageautomations")
-        #expect(d.viewerFactory == nil)
-    }
-
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "webfetch", "websearch", "task", "remember", "manageautomations", "managecalendar", "searchcontacts"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 
@@ -303,7 +211,7 @@ struct ToolRegistryTests {
 
     @Test("Command tools have viewer factories")
     func testViewerFactories() {
-        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "browsetheweb", "webfetch", "websearch"] {
+        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch"] {
             let d = ToolRegistry.descriptor(for: name)
             #expect(d.viewerFactory != nil, "Expected viewer factory for \(name)")
         }

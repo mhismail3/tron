@@ -1,4 +1,109 @@
 import Foundation
+import SwiftUI
+
+// MARK: - TaskManager Types
+
+/// Status of a TaskManager tool call
+enum TaskManagerChipStatus: Equatable {
+    case running
+    case completed
+
+    var label: String {
+        switch self {
+        case .running: "Running"
+        case .completed: "Completed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .running: ""
+        case .completed: "checklist"
+        }
+    }
+}
+
+/// Data for rendering a TaskManager tool call as a compact chip
+struct TaskManagerChipData: Equatable, Identifiable {
+    var id: String { toolCallId }
+    let toolCallId: String
+    let action: String
+    let taskTitle: String?
+    let chipSummary: String
+    let fullResult: String?
+    let arguments: String
+    let entityDetail: EntityDetail?
+    var listResult: ListResult? = nil
+    var batchResult: BatchResult? = nil
+    var durationMs: Int? = nil
+    var status: TaskManagerChipStatus = .completed
+
+    var formattedDuration: String? {
+        guard let ms = durationMs else { return nil }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+}
+
+enum ListResult: Equatable {
+    case tasks([TaskListItem])
+    case searchResults([SearchResultItem])
+    case empty(String)
+}
+
+struct TaskListItem: Equatable, Identifiable {
+    var id: String { taskId }
+    let taskId: String
+    let title: String
+    let mark: String
+    let status: String?
+}
+
+struct SearchResultItem: Equatable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let title: String
+    let status: String
+}
+
+struct BatchResult: Equatable {
+    let affected: Int
+    let ids: [String]
+}
+
+struct EntityDetail: Equatable {
+    struct ListItem: Equatable {
+        let mark: String
+        let id: String
+        let title: String
+        let extra: String?
+    }
+
+    struct ActivityItem: Equatable {
+        let date: String
+        let action: String
+        let detail: String?
+    }
+
+    let title: String
+    let id: String
+    let status: String
+    let activeForm: String?
+    let description: String?
+    let notes: String?
+    let parentId: String?
+    let createdAt: String?
+    let updatedAt: String?
+    let startedAt: String?
+    let completedAt: String?
+    let subtasks: [ListItem]
+    let activity: [ActivityItem]
+}
+
+// MARK: - Task Result Parsing
 
 /// Task manager result parsing for UI display.
 enum TaskResultParser {

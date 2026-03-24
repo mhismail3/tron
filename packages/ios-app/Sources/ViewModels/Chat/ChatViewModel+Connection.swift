@@ -92,12 +92,6 @@ extension ChatViewModel {
     /// Connect and resume the session
     func connectAndResume() async {
         await connectionCoordinator.connectAndResume(context: self)
-        // Cache haptics settings on connection to avoid RPC per haptic event
-        if cachedHapticsSettings == nil {
-            if let settings = try? await rpcClient.settings.get() {
-                cachedHapticsSettings = settings.integrations.haptics
-            }
-        }
     }
 
     /// Reconnect to server and resume streaming state after app returns to foreground

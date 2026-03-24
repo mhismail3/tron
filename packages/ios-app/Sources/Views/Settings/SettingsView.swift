@@ -31,7 +31,6 @@ struct SettingsView: View {
     @State private var showConnectionPage = false
     @State private var showSessionPage = false
     @State private var showContextPage = false
-    @State private var showIntegrationsPage = false
     @State private var showToolsPage = false
     @State private var showProvidersPage = false
     @State private var showAppearancePage = false
@@ -69,11 +68,6 @@ struct SettingsView: View {
         settingsList
             .sheet(isPresented: $showContextPage) {
                 ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
-            }
-            .sheet(isPresented: $showIntegrationsPage) {
-                IntegrationSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                     .adaptivePresentationDetents([.medium, .large])
                     .presentationDragIndicator(.hidden)
             }
@@ -165,9 +159,6 @@ struct SettingsView: View {
                 }
                 Button { showContextPage = true } label: {
                     settingsRow("brain", "Context", "Compaction, memory, rules")
-                }
-                Button { showIntegrationsPage = true } label: {
-                    settingsRow("iphone.and.arrow.forward", "Integrations", "Device context, haptics, calendar")
                 }
                 Button { showToolsPage = true } label: {
                     settingsRow("wrench.and.screwdriver", "Tools", "Browser automation")

@@ -34,13 +34,7 @@ enum ToolRegistry {
         "read", "write", "edit",
         "bash",
         "search", "glob", "find",
-        "browsetheweb",
-        "webfetch", "websearch",
-        "task",
-        "remember",
-        "manageautomations",
-        "managecalendar",
-        "searchcontacts"
+        "webfetch", "websearch"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -173,36 +167,6 @@ enum ToolRegistry {
                 ))
             }
         ),
-        "browsetheweb": ToolDescriptor(
-            icon: "globe",
-            iconColor: .blue,
-            displayName: "Browse",
-            completedDisplayName: "Browsed",
-            summaryExtractor: { args in
-                let action = ToolArgumentParser.action(from: args)
-                guard !action.isEmpty else { return "" }
-                if action == "navigate" {
-                    let url = ToolArgumentParser.url(from: args)
-                    if !url.isEmpty { return "\(action): \(url)" }
-                }
-                if ["click", "fill", "type", "select"].contains(action) {
-                    let selector = ToolArgumentParser.string("selector", from: args) ?? ""
-                    if !selector.isEmpty { return "\(action): \(selector)" }
-                }
-                return action
-            },
-            viewerFactory: { tool, isExpanded in
-                let action = ToolArgumentParser.action(from: tool.arguments)
-                let selector = ToolArgumentParser.string("selector", from: tool.arguments) ?? ""
-                let url = ToolArgumentParser.url(from: tool.arguments)
-                let detail = !action.isEmpty ? (action == "navigate" && !url.isEmpty ? "\(action): \(url)" : (!selector.isEmpty ? "\(action): \(selector)" : action)) : ""
-                return AnyView(BrowserToolViewer(
-                    action: detail,
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
-                ))
-            }
-        ),
         "webfetch": ToolDescriptor(
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
@@ -253,59 +217,6 @@ enum ToolRegistry {
             displayName: "Ask User",
             completedDisplayName: "Asked",
             summaryExtractor: { _ in "" },
-            viewerFactory: nil
-        ),
-        "task": ToolDescriptor(
-            icon: "arrow.triangle.branch",
-            iconColor: .tronAmber,
-            displayName: "Task",
-            completedDisplayName: nil,
-            summaryExtractor: { args in
-                let desc = ToolArgumentParser.string("description", from: args) ?? ToolArgumentParser.string("prompt", from: args) ?? ""
-                return ToolArgumentParser.truncate(desc)
-            },
-            viewerFactory: nil
-        ),
-        "remember": ToolDescriptor(
-            icon: "brain.fill",
-            iconColor: .purple,
-            displayName: "Remember",
-            completedDisplayName: "Recalled",
-            summaryExtractor: { args in
-                let action = ToolArgumentParser.string("action", from: args) ?? ""
-                return action.isEmpty ? "" : action
-            },
-            viewerFactory: nil
-        ),
-        "manageautomations": ToolDescriptor(
-            icon: "clock.badge.checkmark",
-            iconColor: .tronCoral,
-            displayName: "Automation",
-            completedDisplayName: "Automated",
-            summaryExtractor: { args in
-                ToolArgumentParser.action(from: args)
-            },
-            viewerFactory: nil
-        ),
-        "managecalendar": ToolDescriptor(
-            icon: "calendar",
-            iconColor: .red,
-            displayName: "Calendar",
-            completedDisplayName: nil,
-            summaryExtractor: { args in
-                ToolArgumentParser.action(from: args)
-            },
-            viewerFactory: nil
-        ),
-        "searchcontacts": ToolDescriptor(
-            icon: "person.crop.circle",
-            iconColor: .blue,
-            displayName: "Contacts",
-            completedDisplayName: "Searched",
-            summaryExtractor: { args in
-                let query = ToolArgumentParser.query(from: args)
-                return query.isEmpty ? "" : "\"\(ToolArgumentParser.truncate(query, maxLength: 30))\""
-            },
             viewerFactory: nil
         ),
     ]

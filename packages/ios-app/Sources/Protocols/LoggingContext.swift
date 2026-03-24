@@ -128,14 +128,6 @@ protocol BrowserManaging: AnyObject {
     func closeBrowserSession()
 }
 
-// MARK: - Device Request Management
-
-/// Protocol for cancelling active device requests on abort.
-@MainActor
-protocol DeviceRequestManaging: AnyObject {
-    /// Cancel all active device requests (Health, Calendar, Contacts).
-    func cancelActiveDeviceRequests()
-}
 
 // MARK: - Dashboard Updates
 

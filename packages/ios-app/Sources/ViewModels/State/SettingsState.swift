@@ -28,25 +28,6 @@ final class SettingsState {
     var taskAutoInjectEnabled: Bool = false
     var isolationMode: String = "always"
 
-    // MARK: - Integration Settings
-
-    var integrationDeviceContextEnabled: Bool = false
-    var integrationDeviceContextBattery: Bool = true
-    var integrationDeviceContextNetwork: Bool = true
-    var integrationDeviceContextAudioRoute: Bool = true
-    var integrationDeviceContextDisplay: Bool = true
-    var integrationDeviceContextActivity: Bool = true
-    var integrationDeviceContextCalendarPreview: Bool = true
-    var integrationHapticsEnabled: Bool = false
-    var integrationHapticsOnTaskComplete: Bool = true
-    var integrationHapticsOnError: Bool = true
-    var integrationHapticsOnNotification: Bool = true
-    var integrationCalendarEnabled: Bool = false
-    var integrationCalendarAllowWrite: Bool = false
-    var integrationContactsEnabled: Bool = false
-    var integrationLocationEnabled: Bool = false
-    var integrationLocationPrecision: String = "city"
-
     // MARK: - Tool Settings
 
     var toolBrowserHeaded: Bool = false
@@ -106,24 +87,6 @@ final class SettingsState {
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
             isolationMode = settings.isolationMode
-            // Integration settings
-            integrationDeviceContextEnabled = settings.integrations.deviceContext.enabled
-            integrationDeviceContextBattery = settings.integrations.deviceContext.battery
-            integrationDeviceContextNetwork = settings.integrations.deviceContext.network
-            integrationDeviceContextAudioRoute = settings.integrations.deviceContext.audioRoute
-            integrationDeviceContextDisplay = settings.integrations.deviceContext.display
-            integrationDeviceContextActivity = settings.integrations.deviceContext.activity
-            integrationDeviceContextCalendarPreview = settings.integrations.deviceContext.calendarPreview
-            integrationHapticsEnabled = settings.integrations.haptics.enabled
-            integrationHapticsOnTaskComplete = settings.integrations.haptics.onTaskComplete
-            integrationHapticsOnError = settings.integrations.haptics.onError
-            integrationHapticsOnNotification = settings.integrations.haptics.onNotification
-            integrationCalendarEnabled = settings.integrations.calendar.enabled
-            integrationCalendarAllowWrite = settings.integrations.calendar.allowWrite
-            integrationContactsEnabled = settings.integrations.contacts.enabled
-            integrationLocationEnabled = settings.integrations.location.enabled
-            integrationLocationPrecision = settings.integrations.location.precision
-
             toolBrowserHeaded = settings.tools.browser.headed
             anthropicAccounts = settings.anthropicAccounts ?? []
             selectedAnthropicAccount = settings.anthropicAccount
@@ -172,22 +135,6 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = true
         taskAutoInjectEnabled = false
         isolationMode = "always"
-        integrationDeviceContextEnabled = false
-        integrationDeviceContextBattery = true
-        integrationDeviceContextNetwork = true
-        integrationDeviceContextAudioRoute = true
-        integrationDeviceContextDisplay = true
-        integrationDeviceContextActivity = true
-        integrationDeviceContextCalendarPreview = true
-        integrationHapticsEnabled = false
-        integrationHapticsOnTaskComplete = true
-        integrationHapticsOnError = true
-        integrationHapticsOnNotification = true
-        integrationCalendarEnabled = false
-        integrationCalendarAllowWrite = false
-        integrationContactsEnabled = false
-        integrationLocationEnabled = false
-        integrationLocationPrecision = "city"
         toolBrowserHeaded = false
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
@@ -220,16 +167,6 @@ final class SettingsState {
                     cache: .init(ttlMs: 900000, maxEntries: 100)
                 ),
                 browser: .init(headed: false)
-            ),
-            integrations: .init(
-                deviceContext: .init(
-                    enabled: false, battery: true, network: true, audioRoute: true,
-                    display: true, activity: true, calendarPreview: true
-                ),
-                haptics: .init(enabled: false, onTaskComplete: true, onError: true, onNotification: true),
-                calendar: .init(enabled: false, allowWrite: false),
-                contacts: .init(enabled: false),
-                location: .init(enabled: false, precision: "city")
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))
         )

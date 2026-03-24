@@ -73,9 +73,6 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         // Notify observers so dashboard can refresh notification badge
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .notificationReceived, object: nil)
-
-            // Trigger notification haptic
-            HapticService.shared.triggerNotification()
         }
     }
 

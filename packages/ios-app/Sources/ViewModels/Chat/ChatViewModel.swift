@@ -82,9 +82,6 @@ final class ChatViewModel {
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)
     let worktreeState = WorktreeIsolationState()
-    /// Cached haptics settings — populated from server settings, avoids RPC per haptic event
-    var cachedHapticsSettings: ServerSettings.IntegrationSettings.HapticsSettings?
-
     // MARK: - Protocol Conformance (Context Protocols)
 
     /// Whether AskUserQuestion was called in the current turn (ToolEventContext, TurnLifecycleContext)
@@ -182,8 +179,6 @@ final class ChatViewModel {
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
-    /// Dispatches device requests to local services (calendar, contacts)
-    var deviceRequestDispatcher: DeviceRequestDispatcher?
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates event dispatch - routes plugin events to handlers
@@ -245,7 +240,6 @@ final class ChatViewModel {
         self.eventStoreManager = eventStoreManager
         self.connectionState = rpcClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
-        self.deviceRequestDispatcher = DeviceRequestDispatcher(rpcClient: rpcClient)
         setupBindings()
         setupEventHandlers()
         setupAudioRecorder()
@@ -284,7 +278,6 @@ final class ChatViewModel {
                 self.isCompacting = false
                 self.compactionInProgressMessageId = nil
                 self.runningToolCount = 0
-                DeviceRequestDispatcher.clearDeduplicationState()
             }
         })
 
@@ -439,12 +432,7 @@ final class ChatViewModel {
     private func handleEventV2(_ event: ParsedEventV2) {
         switch event {
         case .plugin(let type, _, _, let transform):
-            // Device requests are global — never suppress during catch-up
-            if type == "device.request" {
-                handlePluginEvent(type: type, transform: transform)
-                return
-            }
-            // Suppress other real-time events during catch-up to prevent duplicates
+            // Suppress real-time events during catch-up to prevent duplicates
             guard !isCatchingUp else { return }
             handlePluginEvent(type: type, transform: transform)
 

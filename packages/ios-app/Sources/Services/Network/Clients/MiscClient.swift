@@ -354,7 +354,7 @@ final class MiscClient {
     // MARK: - Device Request Methods
 
     /// Respond to a device request from the server.
-    /// Called by DeviceRequestDispatcher after handling a local device operation.
+    /// Respond to a device request from the server (legacy, retained for protocol compatibility).
     func deviceRespond(requestId: String, result: [String: AnyCodable]) async throws {
         let ws = try transport.requireConnection()
 

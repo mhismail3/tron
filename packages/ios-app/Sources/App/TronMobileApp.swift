@@ -164,20 +164,6 @@ struct TronMobileApp: App {
         }
         if initializer.isReady {
             await setupPushNotifications()
-            await resumeEnabledIntegrations()
-        }
-    }
-
-    /// Resume integrations that were previously enabled (e.g. location monitoring).
-    /// Fetches server-authoritative settings and starts services accordingly.
-    private func resumeEnabledIntegrations() async {
-        do {
-            let settings = try await container.rpcClient.settings.get()
-            if settings.integrations.location.enabled {
-                LocationService.shared.startMonitoring()
-            }
-        } catch {
-            TronLogger.shared.warning("Failed to load settings for integration resume: \(error)", category: .general)
         }
     }
 

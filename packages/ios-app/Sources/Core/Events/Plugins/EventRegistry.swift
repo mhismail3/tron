@@ -130,9 +130,6 @@ final class EventRegistry: @unchecked Sendable {
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)
 
-        // Device events
-        register(DeviceRequestPlugin.self)
-
         // Worktree events
         register(WorktreeAcquiredPlugin.self)
         register(WorktreeCommitPlugin.self)
