@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use metrics::{counter, histogram};
 use parking_lot::RwLock;
-use crate::embeddings::EmbeddingController;
 use crate::events::{ConnectionPool, EventStore};
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
@@ -55,12 +54,8 @@ pub struct RpcContext {
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
-    /// Browser provider for browser automation (None = browser not available).
-    pub browser_provider: Option<Arc<dyn crate::tools::browser::provider::BrowserProvider>>,
     /// MLX transcription engine (lazily loaded via `OnceLock`).
     pub transcription_engine: Arc<OnceLock<Arc<MlxEngine>>>,
-    /// Embedding controller for vector search (None = embeddings not loaded).
-    pub embedding_controller: Option<Arc<tokio::sync::Mutex<EmbeddingController>>>,
     /// Subagent manager for spawning subsessions (None = fallback to keyword summarizer).
     pub subagent_manager: Option<Arc<SubagentManager>>,
     /// Provider health tracker for rolling-window error rate monitoring.

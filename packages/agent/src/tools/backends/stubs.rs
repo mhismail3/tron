@@ -9,8 +9,7 @@ use serde_json::Value;
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    EventStoreQuery, MemoryEntry,
-    Notification, NotifyDelegate, NotifyResult, SessionInfo, SubagentConfig,
+    Notification, NotifyDelegate, NotifyResult, SubagentConfig,
     SubagentHandle, SubagentResult, SubagentSpawner, WaitMode,
 };
 
@@ -55,71 +54,6 @@ impl NotifyDelegate for StubNotifyDelegate {
     }
 }
 
-// ─── EventStoreQuery ─────────────────────────────────────────────────────────
-
-/// Stub event store query — memory recall isn't wired yet.
-pub struct StubEventStoreQuery;
-
-#[async_trait]
-impl EventStoreQuery for StubEventStoreQuery {
-    async fn recall_memory(
-        &self,
-        _query: &str,
-        _workspace_id: Option<&str>,
-        _limit: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError> {
-        Err(not_available("Memory recall"))
-    }
-    async fn list_sessions(
-        &self,
-        _limit: u32,
-        _offset: u32,
-    ) -> Result<Vec<SessionInfo>, ToolError> {
-        Err(not_available("Session listing"))
-    }
-    async fn get_session(&self, _session_id: &str) -> Result<Option<SessionInfo>, ToolError> {
-        Err(not_available("Session lookup"))
-    }
-    async fn get_events(
-        &self,
-        _session_id: &str,
-        _event_type: Option<&str>,
-        _turn: Option<u32>,
-        _limit: u32,
-        _offset: u32,
-    ) -> Result<Vec<Value>, ToolError> {
-        Err(not_available("Event queries"))
-    }
-    async fn get_messages(&self, _session_id: &str, _limit: u32) -> Result<Vec<Value>, ToolError> {
-        Err(not_available("Message queries"))
-    }
-    async fn get_tool_calls(
-        &self,
-        _session_id: &str,
-        _limit: u32,
-    ) -> Result<Vec<Value>, ToolError> {
-        Err(not_available("Tool call queries"))
-    }
-    async fn get_logs(
-        &self,
-        _session_id: &str,
-        _level: Option<&str>,
-        _limit: u32,
-        _offset: u32,
-    ) -> Result<Vec<Value>, ToolError> {
-        Err(not_available("Log queries"))
-    }
-    async fn get_stats(&self) -> Result<Value, ToolError> {
-        Err(not_available("Database stats"))
-    }
-    async fn get_schema(&self) -> Result<String, ToolError> {
-        Err(not_available("Schema queries"))
-    }
-    async fn read_blob(&self, _blob_id: &str) -> Result<String, ToolError> {
-        Err(not_available("Blob storage"))
-    }
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -161,13 +95,6 @@ mod tests {
             sheet_content: None,
         };
         let err = delegate.send_notification(&notification).await;
-        assert!(err.is_err());
-    }
-
-    #[tokio::test]
-    async fn stub_event_store_query_returns_error() {
-        let store = StubEventStoreQuery;
-        let err = store.recall_memory("test query", None, 10).await;
         assert!(err.is_err());
     }
 

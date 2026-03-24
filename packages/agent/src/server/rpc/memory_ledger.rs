@@ -18,9 +18,7 @@ pub struct LedgerWriteDeps {
     /// Subagent manager for spawning LLM summarizer sessions.
     pub subagent_manager:
         Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
-    /// Embedding controller for fire-and-forget semantic vector indexing.
-    pub embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
-    /// Shutdown coordinator for tracking in-flight embedding tasks.
+    /// Shutdown coordinator for tracking in-flight background tasks.
     pub shutdown_coordinator: Option<Arc<crate::server::shutdown::ShutdownCoordinator>>,
 }
 
@@ -284,7 +282,6 @@ mod tests {
         let deps = LedgerWriteDeps {
             event_store: ctx.event_store.clone(),
             subagent_manager: Some(subagent),
-            embedding_controller: None,
             shutdown_coordinator: None,
         };
 

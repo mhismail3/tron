@@ -200,32 +200,6 @@ pub struct SubagentResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Browser types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A browser automation action.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserAction {
-    /// Action name (navigate, click, snapshot, etc.).
-    pub action: String,
-    /// Action-specific parameters.
-    #[serde(flatten)]
-    pub params: Value,
-}
-
-/// Result from a browser action.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserResult {
-    /// Output content.
-    pub content: String,
-    /// Optional details.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Notification types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -263,47 +237,6 @@ pub struct NotifyResult {
     /// Diagnostic message (device count, errors).
     #[serde(default)]
     pub message: Option<String>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Memory types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A memory entry from the event store.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MemoryEntry {
-    /// Entry content.
-    pub content: String,
-    /// Source session ID.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    /// Relevance score (0–100).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub score: Option<u32>,
-    /// Timestamp.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>,
-}
-
-/// Session info from the event store.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionInfo {
-    /// Session ID.
-    pub session_id: String,
-    /// Session title.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    /// Created timestamp.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-    /// Whether the session is archived.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub archived: Option<bool>,
-    /// Event count.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_count: Option<u64>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -415,49 +348,6 @@ pub trait NotifyDelegate: Send + Sync {
     ) -> Result<NotifyResult, ToolError>;
 }
 
-/// Event store queries (`Remember` tool).
-#[async_trait]
-pub trait EventStoreQuery: Send + Sync {
-    /// Semantic memory recall with optional workspace scoping.
-    async fn recall_memory(
-        &self,
-        query: &str,
-        workspace_id: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError>;
-    /// List sessions.
-    async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError>;
-    /// Get a single session.
-    async fn get_session(&self, session_id: &str) -> Result<Option<SessionInfo>, ToolError>;
-    /// Get events for a session.
-    async fn get_events(
-        &self,
-        session_id: &str,
-        event_type: Option<&str>,
-        turn: Option<u32>,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<Value>, ToolError>;
-    /// Get conversation messages.
-    async fn get_messages(&self, session_id: &str, limit: u32) -> Result<Vec<Value>, ToolError>;
-    /// Get tool calls.
-    async fn get_tool_calls(&self, session_id: &str, limit: u32) -> Result<Vec<Value>, ToolError>;
-    /// Get application logs.
-    async fn get_logs(
-        &self,
-        session_id: &str,
-        level: Option<&str>,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<Value>, ToolError>;
-    /// Get database statistics.
-    async fn get_stats(&self) -> Result<Value, ToolError>;
-    /// Get database schema.
-    async fn get_schema(&self) -> Result<String, ToolError>;
-    /// Read a blob by ID.
-    async fn read_blob(&self, blob_id: &str) -> Result<String, ToolError>;
-}
-
 /// Stores large content externally, returning a reference ID.
 ///
 /// Used by `BashTool` to offload large outputs to blob storage instead of
@@ -470,18 +360,6 @@ pub trait BlobStore: Send + Sync {
         content: &[u8],
         mime_type: &str,
     ) -> Result<String, crate::tools::errors::ToolError>;
-}
-
-/// iOS device request/response (`ManageCalendar`, `SearchContacts`).
-#[async_trait]
-pub trait DeviceDelegate: Send + Sync {
-    /// Send a request to the iOS device and await the response.
-    async fn device_request(
-        &self,
-        session_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, ToolError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

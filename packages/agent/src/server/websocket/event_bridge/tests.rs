@@ -144,79 +144,6 @@ fn session_saved_stays_session_scoped() {
     assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
 }
 
-#[test]
-fn browser_frames_stay_session_scoped() {
-    let event = BrowserEvent::Frame {
-        session_id: "s1".into(),
-        frame: crate::tools::browser::types::BrowserFrame {
-            session_id: "browser-1".into(),
-            frame_id: 7,
-            timestamp: 1_707_999_045_123,
-            data: "payload".into(),
-            metadata: Some(crate::tools::browser::types::FrameMetadata::default()),
-        },
-    };
-    let bridged = browser_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
-}
-
-#[tokio::test]
-async fn bridge_routes_browser_frames_to_bound_session() {
-    let (tron_tx, _) = broadcast::channel::<TronEvent>(16);
-    let (browser_tx, browser_rx) = broadcast::channel::<BrowserEvent>(16);
-    let bm = Arc::new(BroadcastManager::new());
-
-    let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
-    let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
-    conn1.bind_session("s1");
-    bm.add(Arc::new(conn1)).await;
-
-    let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::unbounded_channel();
-    let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
-    bm.add(Arc::new(conn2)).await;
-
-    let rx = tron_tx.subscribe();
-    let bridge = EventBridge::new(
-        rx,
-        bm.clone(),
-        Some(browser_rx),
-        CancellationToken::new(),
-        Arc::new(TurnAccumulatorMap::new()),
-    );
-    let handle = tokio::spawn(bridge.run());
-
-    let _ = browser_tx
-        .send(BrowserEvent::Frame {
-            session_id: "s1".into(),
-            frame: crate::tools::browser::types::BrowserFrame {
-                session_id: "browser-1".into(),
-                frame_id: 7,
-                timestamp: 1_707_999_045_123,
-                data: "payload".into(),
-                metadata: Some(crate::tools::browser::types::FrameMetadata::default()),
-            },
-        })
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let msg = conn1_rx.try_recv();
-    assert!(
-        msg.is_ok(),
-        "bound session client should receive browser frame"
-    );
-    let parsed: serde_json::Value = serde_json::from_str(&msg.unwrap()).unwrap();
-    assert_eq!(parsed["type"], "browser.frame");
-
-    assert!(
-        conn2_rx.try_recv().is_err(),
-        "unbound client should not receive session-scoped browser frame"
-    );
-
-    drop(browser_tx);
-    drop(tron_tx);
-    let _ = handle.await;
-}
-
 #[tokio::test]
 async fn bridge_routes_session_events() {
     let (tx, _) = broadcast::channel(16);
@@ -236,7 +163,6 @@ async fn bridge_routes_session_events() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -277,7 +203,6 @@ async fn bridge_broadcasts_session_lifecycle_to_all() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -326,7 +251,6 @@ async fn bridge_broadcasts_turn_start_to_all() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -366,7 +290,6 @@ async fn bridge_keeps_content_events_session_scoped() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -407,7 +330,6 @@ async fn bridge_routes_global_events() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -426,44 +348,6 @@ async fn bridge_routes_global_events() {
     assert!(msg.is_ok());
 
     drop(tx);
-    let _ = handle.await;
-}
-
-#[tokio::test]
-async fn bridge_continues_without_browser_after_browser_channel_closes() {
-    let (tron_tx, _) = broadcast::channel::<TronEvent>(16);
-    let (browser_tx, browser_rx) = broadcast::channel::<BrowserEvent>(16);
-    let bm = Arc::new(BroadcastManager::new());
-
-    let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
-    let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
-    conn.bind_session("s1");
-    bm.add(Arc::new(conn)).await;
-
-    let rx = tron_tx.subscribe();
-    let bridge = EventBridge::new(
-        rx,
-        bm.clone(),
-        Some(browser_rx),
-        CancellationToken::new(),
-        Arc::new(TurnAccumulatorMap::new()),
-    );
-    let handle = tokio::spawn(bridge.run());
-
-    // Close browser channel
-    drop(browser_tx);
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    // Tron events should still flow
-    let _ = tron_tx.send(agent_start_event("s1")).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let msg = conn_rx.try_recv();
-    assert!(msg.is_ok());
-    let parsed: serde_json::Value = serde_json::from_str(&msg.unwrap()).unwrap();
-    assert_eq!(parsed["type"], "agent.start");
-
-    drop(tron_tx);
     let _ = handle.await;
 }
 
@@ -1401,7 +1285,6 @@ async fn compaction_events_route_through_bridge() {
     let bridge = EventBridge::new(
         rx,
         bm.clone(),
-        None,
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
@@ -1572,7 +1455,7 @@ async fn bridge_feeds_events_to_accumulator() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), map.clone());
+    let bridge = EventBridge::new(rx, bm.clone(), CancellationToken::new(), map.clone());
     let handle = tokio::spawn(bridge.run());
 
     let _ = tx.send(TronEvent::TurnStart {
@@ -1600,7 +1483,7 @@ async fn bridge_accumulator_clears_on_agent_end() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), map.clone());
+    let bridge = EventBridge::new(rx, bm.clone(), CancellationToken::new(), map.clone());
     let handle = tokio::spawn(bridge.run());
 
     let _ = tx.send(TronEvent::TurnStart {

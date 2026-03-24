@@ -40,7 +40,6 @@ pub struct CronAgentTurnExecutor {
     tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
     origin: String,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
 }
 
 impl CronAgentTurnExecutor {
@@ -54,7 +53,6 @@ impl CronAgentTurnExecutor {
         subagent_manager: Option<
             Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>,
         >,
-        embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
     ) -> Self {
         Self {
             event_store,
@@ -63,7 +61,6 @@ impl CronAgentTurnExecutor {
             tool_factory,
             origin,
             subagent_manager,
-            embedding_controller,
         }
     }
 
@@ -191,7 +188,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         let denied_tools = tool_restrictions
             .map(|r| r.resolve_denied_tools(&tool_names))
             .unwrap_or_default();
-        // Interactive tools (AskUserQuestion, RenderAppUI, etc.)
+        // Interactive tools (AskUserQuestion, etc.)
         // are removed automatically by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory
@@ -279,7 +276,6 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             &session_id,
             &self.event_store,
             &self.subagent_manager,
-            &self.embedding_controller,
         )
         .await;
 
@@ -313,12 +309,10 @@ async fn write_cron_ledger(
     session_id: &str,
     event_store: &Arc<crate::events::EventStore>,
     subagent_manager: &Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
-    embedding_controller: &Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
 ) -> bool {
     let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
         event_store: event_store.clone(),
         subagent_manager: subagent_manager.clone(),
-        embedding_controller: embedding_controller.clone(),
         shutdown_coordinator: None,
     };
     let result =
@@ -524,7 +518,7 @@ mod tests {
         });
         mgr.invalidate_session(&sid);
 
-        let result = write_cron_ledger(&sid, &store, &None, &None).await;
+        let result = write_cron_ledger(&sid, &store, &None).await;
         assert!(!result, "should skip when subagent_manager is None");
     }
 
@@ -534,18 +528,17 @@ mod tests {
         let sid = mgr.create_session("mock", "/tmp", Some("empty")).unwrap();
         mgr.invalidate_session(&sid);
 
-        let result = write_cron_ledger(&sid, &store, &None, &None).await;
+        let result = write_cron_ledger(&sid, &store, &None).await;
         assert!(!result, "should skip for session with no messages");
     }
 
     #[tokio::test]
-    async fn write_cron_ledger_no_embedding_controller() {
+    async fn write_cron_ledger_nonexistent_session() {
         let (store, _mgr) = make_test_store_and_manager();
         let result = write_cron_ledger(
             "nonexistent",
             &store,
             &None,
-            &None::<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
         )
         .await;
         // Must not panic — gracefully returns false
@@ -669,7 +662,6 @@ mod tests {
         let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
             event_store: store.clone(),
             subagent_manager: Some(subagent),
-            embedding_controller: None,
             shutdown_coordinator: None,
         };
         let lw = crate::server::rpc::memory_ledger::execute_ledger_write(&sid, &deps, "cron").await;
@@ -740,7 +732,6 @@ mod tests {
             Arc::new(crate::tools::registry::ToolRegistry::new),
             "http://localhost:0".into(),
             None,
-            None,
         );
 
         // The execute call will retry provider creation. It will succeed on 3rd attempt,
@@ -786,7 +777,6 @@ mod tests {
             Arc::new(crate::tools::registry::ToolRegistry::new),
             "http://localhost:0".into(),
             None,
-            None,
         );
 
         let result = executor
@@ -823,7 +813,6 @@ mod tests {
             factory,
             Arc::new(crate::tools::registry::ToolRegistry::new),
             "http://localhost:0".into(),
-            None,
             None,
         );
 

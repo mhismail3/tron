@@ -60,10 +60,8 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        browser_provider: None,
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
-        embedding_controller: None,
         health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
@@ -95,7 +93,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
-        None,
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
@@ -346,10 +343,8 @@ async fn boot_server_with_provider_and_handles(
             hooks: None,
         }),
         server_start_time: std::time::Instant::now(),
-        browser_provider: None,
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
-        embedding_controller: None,
         health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
@@ -381,7 +376,6 @@ async fn boot_server_with_provider_and_handles(
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
-        None,
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );

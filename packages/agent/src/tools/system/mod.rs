@@ -1,4 +1,3 @@
-//! System tools: Bash, Remember.
+//! System tools: Bash.
 
 pub mod bash;
-pub mod remember;

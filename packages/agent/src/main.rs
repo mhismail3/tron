@@ -10,9 +10,8 @@
 //! tron::settings      Settings schema, layered loading, global singleton
 //! tron::events        SQLite event store, migrations, session reconstruction
 //! tron::llm           Provider trait, model registry, SSE streaming, auth
-//! tron::tools         Tool trait, registry, filesystem/bash/web/browser/subagent tools
+//! tron::tools         Tool trait, registry, filesystem/bash/web/subagent tools
 //! tron::skills        SKILL.md parser, registry, context injection
-//! tron::embeddings    ONNX embeddings (EmbeddingGemma-300M), vector search
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
 //! tron::server        Axum HTTP/WS, RPC handlers, event bridge, APNS
@@ -94,53 +93,7 @@ struct Cli {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum Command {
-    /// Import LEDGER.jsonl and embed memory entries.
-    BackfillLedger {
-        #[command(subcommand)]
-        action: BackfillAction,
-    },
-}
-
-#[derive(clap::Subcommand, Debug)]
-enum BackfillAction {
-    /// Import LEDGER.jsonl entries as memory.ledger events (idempotent).
-    Import {
-        /// Path to LEDGER.jsonl file.
-        #[arg(long)]
-        ledger_path: PathBuf,
-
-        /// Only import entries whose front.path starts with this prefix.
-        #[arg(long)]
-        project_filter: Option<String>,
-
-        /// Parse and report without writing to DB.
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Embed all unembedded memory.ledger events.
-    Embed {
-        /// Drop and recreate the `memory_vectors` table before embedding.
-        #[arg(long)]
-        force: bool,
-    },
-
-    /// Import LEDGER.jsonl entries then embed them.
-    All {
-        /// Path to LEDGER.jsonl file.
-        #[arg(long)]
-        ledger_path: PathBuf,
-
-        /// Only import entries whose front.path starts with this prefix.
-        #[arg(long)]
-        project_filter: Option<String>,
-
-        /// Drop and recreate vectors before embedding.
-        #[arg(long)]
-        force: bool,
-    },
-}
+enum Command {}
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -155,109 +108,18 @@ fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
-/// Find an available ephemeral port by binding to port 0.
-fn find_free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-    listener.local_addr().expect("local_addr").port()
-}
-
-/// Embed unembedded `memory.ledger` events on startup (fire-and-forget).
-#[cfg(feature = "ort")]
-async fn startup_embed(
-    store: Arc<EventStore>,
-    ctrl: Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
-) {
-    let unembedded = tron::backfill::find_unembedded(&store);
-
-    if unembedded.is_empty() {
-        tracing::debug!("startup backfill: all memory.ledger events are embedded");
-        return;
-    }
-
-    let entries = tron::backfill::to_backfill_entries(unembedded);
-    let count = entries.len();
-    tracing::info!(count, "startup backfill: embedding unembedded entries");
-
-    let controller = ctrl.lock().await;
-    match controller.backfill(entries).await {
-        Ok(r) => {
-            tracing::info!(
-                succeeded = r.succeeded,
-                skipped = r.skipped,
-                failed = r.failed,
-                "startup backfill complete"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "startup backfill failed");
-        }
-    }
-}
-
-/// Run the backfill-ledger CLI subcommand.
-async fn run_backfill_command(action: BackfillAction, db_path: Option<PathBuf>) -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ort=warn")),
-        )
-        .init();
-
-    match action {
-        BackfillAction::Import {
-            ledger_path,
-            project_filter,
-            dry_run,
-        } => {
-            let (store, _) = tron::backfill::open_store(db_path)?;
-            tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), dry_run)
-        }
-        BackfillAction::Embed { force } => {
-            #[cfg(feature = "ort")]
-            {
-                let (store, db_path) = tron::backfill::open_store(db_path)?;
-                tron::backfill::run_embed(&store, &db_path, force).await
-            }
-            #[cfg(not(feature = "ort"))]
-            {
-                let _ = force;
-                anyhow::bail!("embedding requires the `ort` feature (build with default features)")
-            }
-        }
-        BackfillAction::All {
-            ledger_path,
-            project_filter,
-            force,
-        } => {
-            let (store, db_path) = tron::backfill::open_store(db_path)?;
-            tron::backfill::run_import(&store, &ledger_path, project_filter.as_deref(), false)?;
-            #[cfg(feature = "ort")]
-            { tron::backfill::run_embed(&store, &db_path, force).await }
-            #[cfg(not(feature = "ort"))]
-            {
-                let _ = (db_path, force);
-                anyhow::bail!("embedding requires the `ort` feature (build with default features)")
-            }
-        }
-    }
-}
 
 /// Configuration for tool registry creation.
 ///
-/// Captures shared resources (event store, task pool, API keys) so the
+/// Captures shared resources (event store, API keys) so the
 /// tool factory closure can create real provider implementations.
 struct ToolRegistryConfig {
     event_store: Arc<tron::events::EventStore>,
-    task_pool: tron::events::ConnectionPool,
     brave_api_key: Option<String>,
-    browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>>,
     #[cfg_attr(not(feature = "apns"), allow(dead_code))]
     apns_service: ApnsServiceOption,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>>,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
-    /// Device request broker for iOS round-trip tools (set after server creation via `OnceLock`).
-    device_request_broker: Arc<std::sync::OnceLock<Arc<tron::server::device::DeviceRequestBroker>>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -265,7 +127,7 @@ struct ToolRegistryConfig {
 /// Called once per agent run to create a fresh registry. Registration matches
 /// the TypeScript server:
 /// - Tools with real backends use real providers
-/// - BrowseTheWeb/NotifyApp: conditionally registered (only with backend)
+/// - NotifyApp: conditionally registered (only with APNS backend)
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
@@ -278,18 +140,8 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     let http: Arc<dyn tron::tools::traits::HttpClient> =
         Arc::new(ReqwestHttpClient::from_client(config.http_client.clone()));
 
-    // Real providers backed by SQLite
-    let mut store_query_builder =
-        tron::events::query_delegate::SqliteEventStoreQuery::new(config.event_store.clone());
-    if let Some(ref ec) = config.embedding_controller {
-        store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
-    }
-    let store_query: Arc<dyn tron::tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
-    let task_pool = Arc::new(config.task_pool.clone());
-
     let mut registry = ToolRegistry::new();
 
-    // Registration order matches the TypeScript server exactly:
     // 1–3: Filesystem tools
     registry.register(Arc::new(tron::tools::fs::read::ReadTool::new(fs.clone())));
     registry.register(Arc::new(tron::tools::fs::write::WriteTool::new(fs.clone())));
@@ -310,42 +162,18 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 6: Find
     registry.register(Arc::new(tron::tools::fs::find::FindTool::new()));
 
-    // 7: BrowseTheWeb (lazy re-discovery if stub at startup)
-    let browser_provider: Arc<dyn tron::tools::browser::provider::BrowserProvider> = config
-        .browser_provider
-        .clone()
-        .unwrap_or_else(|| Arc::new(tron::tools::browser::providers::stub::StubProvider));
-    registry.register(Arc::new(
-        tron::tools::browser::browse_the_web::BrowseTheWebTool::new(browser_provider),
-    ));
-
-    // 8: AskUserQuestion
+    // 7: AskUserQuestion
     registry.register(Arc::new(
         tron::tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
 
-    // 9: RenderAppUI
-    registry.register(Arc::new(
-        tron::tools::ui::render_app_ui::RenderAppUITool::new(),
-    ));
-
-    // 11: TaskManager
-    registry.register(Arc::new(
-        tron::tools::ui::task_manager::TaskManagerTool::new(task_pool),
-    ));
-
-    // 12: Remember
-    registry.register(Arc::new(tron::tools::system::remember::RememberTool::new(
-        store_query,
-    )));
-
-    // 13: NotifyApp — real APNS when available, stub fallback
+    // 8: NotifyApp — real APNS when available, stub fallback
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
         if let Some(ref apns) = config.apns_service {
             Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
                 apns.clone(),
-                config.task_pool.clone(),
+                config.event_store.pool().clone(),
             ))
         } else {
             Arc::new(StubNotifyDelegate)
@@ -357,34 +185,12 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         notify_delegate,
     )));
 
-    // 14–16: Device-querying tools (conditional on device request broker)
-    if let Some(broker) = config.device_request_broker.get() {
-        let device_delegate: Arc<dyn tron::tools::traits::DeviceDelegate> = broker.clone();
-
-        let settings =
-            tron::settings::loader::load_settings_from_path(&tron::settings::loader::settings_path())
-                .unwrap_or_default();
-
-        if settings.integrations.calendar.enabled {
-            registry.register(Arc::new(tron::tools::ui::calendar::ManageCalendarTool::new(
-                device_delegate.clone(),
-                settings.integrations.calendar.allow_write,
-            )));
-        }
-
-        if settings.integrations.contacts.enabled {
-            registry.register(Arc::new(tron::tools::ui::contacts::SearchContactsTool::new(
-                device_delegate,
-            )));
-        }
-    }
-
-    // 18: WebFetch (always available)
+    // 9: WebFetch (always available)
     registry.register(Arc::new(tron::tools::web::web_fetch::WebFetchTool::new(
         http.clone(),
     )));
 
-    // 15: WebSearch — conditional on Brave API key (matches TS server)
+    // 10: WebSearch — conditional on Brave API key
     if let Some(ref api_key) = config.brave_api_key {
         registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
             http,
@@ -404,8 +210,8 @@ async fn main() -> Result<()> {
     let args = Cli::parse();
 
     // Dispatch subcommands before server startup.
-    if let Some(Command::BackfillLedger { action }) = args.command {
-        return run_backfill_command(action, args.db_path).await;
+    if let Some(_cmd) = args.command {
+        // Reserved for future subcommands.
     }
 
     // INVARIANT: Deploy crash-loop protection runs FIRST (pure filesystem, no dependencies).
@@ -499,7 +305,6 @@ async fn main() -> Result<()> {
         Some(origin.clone()),
     );
     let flush_task = tron::core::logging::spawn_flush_task(log_handle.clone());
-    let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
     // Core services
@@ -508,7 +313,7 @@ async fn main() -> Result<()> {
         .unwrap_or(settings.server.max_concurrent_sessions);
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.clone()));
-    session_manager.set_task_pool(task_pool.clone());
+    session_manager.set_task_pool(event_store.pool().clone());
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
@@ -519,30 +324,6 @@ async fn main() -> Result<()> {
     if brave_api_key.is_some() {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
-
-    // Browser provider (lazy re-discovery if not found at startup)
-    let browser_provider: Option<Arc<dyn tron::tools::browser::provider::BrowserProvider>> = Some({
-        let stream_port = find_free_port();
-        let params = tron::tools::browser::providers::lazy::DiscoveryParams {
-            stream_port,
-            provider_name: settings.tools.browser.provider.clone(),
-            executable_path: settings.tools.browser.executable_path.clone(),
-            headed: settings.tools.browser.headed,
-        };
-        let initial = tron::tools::browser::providers::find_browser_provider(
-            stream_port,
-            settings.tools.browser.provider.as_deref(),
-            settings.tools.browser.executable_path.as_deref(),
-            settings.tools.browser.headed,
-        )
-        .unwrap_or_else(|| Arc::new(tron::tools::browser::providers::stub::StubProvider));
-        if initial.name() != "stub" {
-            tracing::info!(provider = initial.name(), "browser provider found — browser tool enabled");
-        } else {
-            tracing::info!("no browser provider found at startup — will retry on first use");
-        }
-        Arc::new(tron::tools::browser::providers::lazy::LazyBrowserProvider::new(initial, params))
-    });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
     let apns_service: ApnsServiceOption = {
@@ -569,81 +350,6 @@ async fn main() -> Result<()> {
         { None }
     };
 
-    // Embedding controller (optional — fire-and-forget ONNX model loading)
-    let embedding_controller: Option<
-        Arc<tokio::sync::Mutex<tron::embeddings::EmbeddingController>>,
-    > = {
-        #[cfg(feature = "ort")]
-        {
-            let emb_settings = &settings.context.memory.embedding;
-            if emb_settings.enabled {
-                let emb_config = tron::embeddings::EmbeddingConfig::from_settings(emb_settings);
-                let mut ctrl = tron::embeddings::EmbeddingController::new(emb_config.clone());
-
-                // Create vector repository with a dedicated connection (VectorRepository owns a
-                // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
-                let vec_conn =
-                    rusqlite::Connection::open(&db_path).expect("db connection for vectors");
-                vec_conn
-                    .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
-                    .expect("vector connection pragmas");
-                let repo = tron::embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
-                repo.ensure_table().expect("vector table creation");
-                ctrl.set_vector_repo(Arc::new(parking_lot::Mutex::new(repo)));
-
-                let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
-
-                // Fire-and-forget: load ONNX model + backfill unembedded entries
-                let service = Arc::new(tron::embeddings::ort_service::OnnxEmbeddingService::new(
-                    emb_config,
-                ));
-                let service_clone = Arc::clone(&service);
-                let ctrl_for_init = Arc::clone(&ctrl_arc);
-
-                let store_for_backfill = Arc::clone(&event_store);
-                let _embed_init_handle = tokio::spawn(async move {
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(120),
-                        service_clone.initialize(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(())) => {
-                            ctrl_for_init.lock().await.set_service(service_clone);
-                            tracing::info!("embedding service ready — semantic memory enabled");
-
-                            // Fire-and-forget: embed any unembedded memory.ledger events
-                            startup_embed(
-                                Arc::clone(&store_for_backfill),
-                                Arc::clone(&ctrl_for_init),
-                            )
-                            .await;
-                        }
-                        Ok(Err(e)) => {
-                            tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
-                        }
-                        Err(_) => {
-                            tracing::error!(
-                                "embedding service init timed out after 120s — semantic memory disabled"
-                            );
-                        }
-                    }
-                });
-
-                tracing::info!("embedding controller created (vector repo ready)");
-                Some(ctrl_arc)
-            } else {
-                tracing::info!("embeddings disabled in settings");
-                None
-            }
-        }
-        #[cfg(not(feature = "ort"))]
-        {
-            tracing::info!("embeddings feature disabled");
-            None
-        }
-    };
-
     // Agent dependencies (provider factory + tool factory)
     // The factory creates a fresh provider per request by detecting the provider
     // type from the model ID and loading auth from disk. This means model switches
@@ -652,11 +358,6 @@ async fn main() -> Result<()> {
     let shared_http_client = default_factory.http_client();
     let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
 
-    // Deferred device request broker reference (set after TronServer creation when BroadcastManager is available)
-    let device_broker_cell: Arc<
-        std::sync::OnceLock<Arc<tron::server::device::DeviceRequestBroker>>,
-    > = Arc::new(std::sync::OnceLock::new());
-
     // Clone before move into ToolRegistryConfig
     #[cfg(feature = "apns")]
     let apns_for_deploy = apns_service.clone();
@@ -664,13 +365,9 @@ async fn main() -> Result<()> {
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
-        task_pool: task_pool.clone(),
         brave_api_key,
-        browser_provider: browser_provider.clone(),
         apns_service,
-        embedding_controller: embedding_controller.clone(),
         http_client: shared_http_client,
-        device_request_broker: device_broker_cell.clone(),
     });
 
     // Check auth availability at startup (informational only — auth can be configured later).
@@ -780,7 +477,6 @@ async fn main() -> Result<()> {
             deps.tool_factory.clone(),
             origin.clone(),
             shared_subagent_manager.clone(),
-            embedding_controller.clone(),
         )) as _
     });
     let cron_deps = tron::cron::ExecutorDeps {
@@ -791,7 +487,7 @@ async fn main() -> Result<()> {
             { tool_config.apns_service.as_ref().map(|apns| {
                 Arc::new(tron::cron::impls::CronPushNotifier::new(
                     apns.clone(),
-                    task_pool.clone(),
+                    event_store.pool().clone(),
                 )) as _
             }) }
             #[cfg(not(feature = "apns"))]
@@ -801,10 +497,10 @@ async fn main() -> Result<()> {
             Arc::new(tron::cron::impls::CronSystemEventInjector::new(event_store.clone())) as _,
         ),
         http_client: tool_config.http_client.clone(),
-        pool: task_pool.clone(),
+        pool: event_store.pool().clone(),
     };
     let cron_scheduler = Arc::new(tron::cron::CronScheduler::new(
-        task_pool.clone(),
+        event_store.pool().clone(),
         Arc::new(tron::cron::SystemClock),
         cron_deps,
         cron_config_path,
@@ -846,19 +542,18 @@ async fn main() -> Result<()> {
     let session_manager_for_startup = session_manager.clone();
     let settings_path_for_selftest = settings_path.clone();
     #[cfg(feature = "apns")]
-    let task_pool_for_deploy = task_pool.clone();
+    let pool_for_deploy = event_store.pool().clone();
+    let rpc_task_pool = event_store.pool().clone();
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
         skill_registry,
-        task_pool: Some(task_pool),
+        task_pool: Some(rpc_task_pool),
         settings_path,
         agent_deps,
         server_start_time: std::time::Instant::now(),
-        browser_provider: browser_provider.clone(),
         transcription_engine,
-        embedding_controller,
         subagent_manager: shared_subagent_manager,
         health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None, // set by TronServer after creation
@@ -892,27 +587,14 @@ async fn main() -> Result<()> {
     // Build and start server
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
-    // Event bridge: orchestrator events + browser frames → WebSocket clients
-    let browser_rx = browser_provider.as_ref().map(|p| p.subscribe());
+    // Event bridge: orchestrator events → WebSocket clients
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
-        browser_rx,
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
     let bridge_handle = tokio::spawn(bridge.run());
-
-    // Wire device request broker into tool factory — MUST use the same instance
-    // the server's RPC context uses, otherwise device.respond resolves against
-    // a different broker than the one holding the pending request.
-    let _ = device_broker_cell.set(
-        server
-            .rpc_context()
-            .device_request_broker
-            .clone()
-            .expect("server must have device_request_broker"),
-    );
 
     // Wire cron broadcaster (needs BroadcastManager from server)
     cron_scheduler.set_broadcaster(Arc::new(tron::cron::impls::CronEventBroadcaster::new(
@@ -1034,7 +716,7 @@ async fn main() -> Result<()> {
                         Some(subject) => format!("{short_commit}: {subject}"),
                         None => format!("Tron updated to {short_commit}"),
                     };
-                    let tokens: Vec<String> = task_pool_for_deploy
+                    let tokens: Vec<String> = pool_for_deploy
                         .get()
                         .ok()
                         .and_then(|conn| {
@@ -1081,7 +763,7 @@ async fn main() -> Result<()> {
                 && let Ok(content) = std::fs::read_to_string(&pending_path)
                 && let Ok(data) = serde_json::from_str::<serde_json::Value>(&content)
             {
-                let tokens: Vec<String> = task_pool_for_deploy
+                let tokens: Vec<String> = pool_for_deploy
                     .get()
                     .ok()
                     .and_then(|conn| {
@@ -1486,7 +1168,6 @@ mod tests {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
         }
-        let task_pool = pool.clone();
         let event_store = Arc::new(EventStore::new(pool));
 
         let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -1498,13 +1179,11 @@ mod tests {
             session_manager,
             event_store,
             skill_registry,
-            task_pool: Some(task_pool),
+            task_pool: None,
             settings_path,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
-            browser_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
-            embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
@@ -1532,7 +1211,6 @@ mod tests {
         let bridge = EventBridge::new(
             orchestrator.subscribe(),
             server.broadcast().clone(),
-            None,
             server.shutdown().token(),
             orchestrator.turn_accumulators().clone(),
         );
@@ -1593,16 +1271,12 @@ mod tests {
             let conn = pool.get().unwrap();
             let _ = tron::events::run_migrations(&conn).unwrap();
         }
-        let event_store = Arc::new(EventStore::new(pool.clone()));
+        let event_store = Arc::new(EventStore::new(pool));
         ToolRegistryConfig {
             event_store,
-            task_pool: pool,
             brave_api_key: None,
-            browser_provider: None,
             apns_service: None,
-            embedding_controller: None,
             http_client: reqwest::Client::new(),
-            device_request_broker: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -1611,22 +1285,15 @@ mod tests {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
         let names = registry.names();
-        // First 8 tools must match TS server order exactly
         assert_eq!(names[0], "Read");
         assert_eq!(names[1], "Write");
         assert_eq!(names[2], "Edit");
         assert_eq!(names[3], "Bash");
         assert_eq!(names[4], "Search");
         assert_eq!(names[5], "Find");
-        assert_eq!(names[6], "BrowseTheWeb");
-        assert_eq!(names[7], "AskUserQuestion");
-    }
-
-    #[test]
-    fn tool_registry_has_browse_the_web() {
-        let config = make_tool_config();
-        let registry = create_tool_registry(&config);
-        assert!(registry.names().contains(&"BrowseTheWeb".to_string()));
+        assert_eq!(names[6], "AskUserQuestion");
+        assert_eq!(names[7], "NotifyApp");
+        assert_eq!(names[8], "WebFetch");
     }
 
     #[test]
@@ -1640,11 +1307,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 13 tools without Brave API key (no WebSearch), without subagent tools
+        // 9 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            13,
-            "expected 13 tools (no WebSearch without Brave key), got: {:?}",
+            9,
+            "expected 9 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1658,8 +1325,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            14,
-            "expected 14 tools with WebSearch, got: {:?}",
+            10,
+            "expected 10 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }
@@ -1695,9 +1362,7 @@ mod tests {
             settings_path: dir.path().join("settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
-            browser_provider: None,
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
-            embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,

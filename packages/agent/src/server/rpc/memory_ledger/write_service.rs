@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use serde_json::Value;
 use tracing::{debug, warn};
 
@@ -170,7 +168,7 @@ fn build_ledger_payload(
 async fn persist_and_embed(
     deps: &LedgerWriteDeps,
     session_id: &str,
-    session: &SessionRow,
+    _session: &SessionRow,
     entry: &LedgerEntry,
     payload: MemoryLedgerPayload,
 ) -> LedgerWriteResult {
@@ -214,14 +212,6 @@ async fn persist_and_embed(
         Err(_) => return LedgerWriteResult::failed("failed to persist ledger entry"),
     };
 
-    spawn_embed_memory(
-        deps.embedding_controller.as_ref(),
-        &event_id,
-        &session.workspace_id,
-        &payload_json,
-        deps.shutdown_coordinator.as_ref(),
-    );
-
     debug!(
         session_id,
         title = %entry.title,
@@ -248,34 +238,6 @@ fn ledger_read_failure(
             LedgerWriteResult::failed("database temporarily busy")
         }
         _ => LedgerWriteResult::failed("failed to load session history"),
-    }
-}
-
-/// Spawn a fire-and-forget embedding task.
-fn spawn_embed_memory(
-    controller: Option<&Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
-    event_id: &str,
-    workspace_id: &str,
-    payload: &Value,
-    shutdown_coordinator: Option<&Arc<crate::server::shutdown::ShutdownCoordinator>>,
-) {
-    if let Some(controller) = controller {
-        let controller = Arc::clone(controller);
-        let event_id = event_id.to_owned();
-        let workspace_id = workspace_id.to_owned();
-        let payload = payload.clone();
-        let handle = tokio::spawn(async move {
-            let controller = controller.lock().await;
-            if let Err(error) = controller
-                .embed_memory(&event_id, &workspace_id, &payload)
-                .await
-            {
-                warn!(error = %error, event_id, "failed to embed ledger entry");
-            }
-        });
-        if let Some(coordinator) = shutdown_coordinator {
-            coordinator.register_task(handle);
-        }
     }
 }
 

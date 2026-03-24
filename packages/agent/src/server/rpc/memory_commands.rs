@@ -39,7 +39,6 @@ impl MemoryCommandService {
         let deps = LedgerWriteDeps {
             event_store: ctx.event_store.clone(),
             subagent_manager: ctx.subagent_manager.clone(),
-            embedding_controller: ctx.embedding_controller.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         };
         let result = execute_ledger_write(&session_id, &deps, "manual").await;

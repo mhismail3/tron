@@ -37,7 +37,6 @@ struct RuntimeMemoryDeps {
     event_store: Arc<crate::events::EventStore>,
     broadcast: Arc<crate::runtime::EventEmitter>,
     session_id: String,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
     shutdown_coordinator: Option<Arc<crate::server::shutdown::ShutdownCoordinator>>,
     ledger_enabled: bool,
 }
@@ -51,7 +50,6 @@ impl crate::events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
             event_store: self.event_store.clone(),
             subagent_manager: self.subagent_manager.clone(),
-            embedding_controller: self.embedding_controller.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
         };
         crate::server::rpc::memory_ledger::execute_ledger_write(&self.session_id, &deps, "auto").await
@@ -108,13 +106,11 @@ struct PromptRunPlan {
     health_tracker: Arc<crate::llm::ProviderHealthTracker>,
     event_store: Arc<crate::events::EventStore>,
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
-    embedding_controller: Option<Arc<tokio::sync::Mutex<crate::embeddings::EmbeddingController>>>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_coordinator: Option<Arc<crate::server::shutdown::ShutdownCoordinator>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
-    browser_provider: Option<Arc<dyn crate::tools::browser::provider::BrowserProvider>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -205,13 +201,11 @@ pub fn spawn_prompt_run(
         health_tracker: ctx.health_tracker.clone(),
         event_store: ctx.event_store.clone(),
         context_artifacts: ctx.context_artifacts.clone(),
-        embedding_controller: ctx.embedding_controller.clone(),
         skill_registry: ctx.skill_registry.clone(),
         subagent_manager: ctx.subagent_manager.clone(),
         shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
-        browser_provider: ctx.browser_provider.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -241,13 +235,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         health_tracker,
         event_store,
         context_artifacts,
-        embedding_controller,
         skill_registry,
         subagent_manager,
         shutdown_coordinator,
         shutdown_token,
         worktree_coordinator,
-        browser_provider,
         server_origin,
         run_id,
         model,
@@ -380,40 +372,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let pre_activated_rules = prompt_artifacts.pre_activated_rules;
     let resolved_ws_id = prompt_artifacts.workspace_id;
 
-    let memory = {
-        let auto_inject = &settings.context.memory.auto_inject;
-
-        if auto_inject.enabled && !is_chat {
-            if let Some(ref controller) = embedding_controller {
-                let controller = controller.lock().await;
-                match resolved_ws_id.as_deref() {
-                    Some(workspace_id) => {
-                        let count = auto_inject.count.clamp(1, 10);
-                        let query_context = if auto_inject.semantic_injection {
-                            Some(prompt.as_str())
-                        } else {
-                            None
-                        };
-                        controller
-                            .load_workspace_memory(
-                                &event_store,
-                                workspace_id,
-                                count,
-                                query_context,
-                                auto_inject.recency_anchor_count,
-                            )
-                            .await
-                            .map(|memory| memory.content)
-                    }
-                    None => None,
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
+    let memory: Option<String> = None;
     let subagent_results_context = prompt_bootstrap.subagent_results_context;
 
     let memory = if let Some(ref worktree) = worktree_info {
@@ -597,10 +556,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         let _ = persister.flush().await;
     }
 
-    if let Some(ref browser_provider) = browser_provider {
-        browser_provider.close_all_sessions().await;
-    }
-
     if let Some(ref error_message) = result.error {
         let parsed = crate::core::errors::parse::parse_error(error_message);
         let _ = broadcast.emit(crate::core::events::TronEvent::Error {
@@ -647,7 +602,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         event_store: event_store.clone(),
         broadcast: broadcast.clone(),
         session_id: session_id.clone(),
-        embedding_controller: embedding_controller.clone(),
         shutdown_coordinator: shutdown_coordinator.clone(),
         ledger_enabled: settings.context.memory.ledger.enabled,
     };

@@ -1,4 +1,6 @@
 //! Browser handlers: startStream, stopStream, getStatus.
+//!
+//! Browser support has been removed. All handlers return NOT_AVAILABLE.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -6,7 +8,6 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
 /// Start browser streaming for a session.
@@ -14,21 +15,11 @@ pub struct StartStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StartStreamHandler {
-    #[instrument(skip(self, ctx), fields(method = "browser.startStream"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let Some(ref provider) = ctx.browser_provider else {
-            return Err(RpcError::NotAvailable {
-                message: "Browser streaming not available (no provider found)".into(),
-            });
-        };
-        provider
-            .start_stream(&session_id)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-        Ok(serde_json::json!({ "success": true }))
+    #[instrument(skip(self, _ctx), fields(method = "browser.startStream"))]
+    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        Err(RpcError::NotAvailable {
+            message: "Browser streaming has been removed".into(),
+        })
     }
 }
 
@@ -37,17 +28,8 @@ pub struct StopStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StopStreamHandler {
-    #[instrument(skip(self, ctx), fields(method = "browser.stopStream"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        if let Some(ref provider) = ctx.browser_provider {
-            provider
-                .stop_stream(&session_id)
-                .await
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
-        }
+    #[instrument(skip(self, _ctx), fields(method = "browser.stopStream"))]
+    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         Ok(serde_json::json!({ "success": true }))
     }
 }
@@ -57,15 +39,12 @@ pub struct GetStatusHandler;
 
 #[async_trait]
 impl MethodHandler for GetStatusHandler {
-    #[instrument(skip(self, ctx), fields(method = "browser.getStatus"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let status = ctx
-            .browser_provider
-            .as_ref()
-            .map(|p| p.get_status(&session_id))
-            .unwrap_or_default();
-        Ok(serde_json::to_value(status).unwrap_or_default())
+    #[instrument(skip(self, _ctx), fields(method = "browser.getStatus"))]
+    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        Ok(serde_json::json!({
+            "hasBrowser": false,
+            "isStreaming": false,
+        }))
     }
 }
 
@@ -76,7 +55,7 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn start_stream_not_available_when_no_service() {
+    async fn start_stream_not_available() {
         let ctx = make_test_context();
         let err = StartStreamHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
@@ -86,17 +65,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_stream_missing_session() {
-        let ctx = make_test_context();
-        let err = StartStreamHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn stop_stream_no_service_succeeds() {
+    async fn stop_stream_succeeds() {
         let ctx = make_test_context();
         let result = StopStreamHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
@@ -106,7 +75,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_status_no_service_returns_defaults() {
+    async fn get_status_returns_defaults() {
         let ctx = make_test_context();
         let result = GetStatusHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)

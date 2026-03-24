@@ -196,22 +196,6 @@ impl DeviceRequestBroker {
 
 const DEVICE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[async_trait::async_trait]
-impl crate::tools::traits::DeviceDelegate for DeviceRequestBroker {
-    async fn device_request(
-        &self,
-        session_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, crate::tools::errors::ToolError> {
-        self.request(session_id, method, params, DEVICE_REQUEST_TIMEOUT)
-            .await
-            .map_err(|e| crate::tools::errors::ToolError::Internal {
-                message: e.to_string(),
-            })
-    }
-}
-
 /// Errors from device request/response.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceRequestError {
@@ -230,31 +214,6 @@ mod tests {
     fn make_broker() -> DeviceRequestBroker {
         let broadcast = Arc::new(BroadcastManager::new());
         DeviceRequestBroker::new(broadcast, CancellationToken::new())
-    }
-
-    #[test]
-    fn device_request_broker_implements_device_delegate() {
-        fn _assert<T: crate::tools::traits::DeviceDelegate>() {}
-        _assert::<DeviceRequestBroker>();
-    }
-
-    #[tokio::test]
-    async fn device_delegate_maps_error_to_tool_error() {
-        use crate::tools::traits::DeviceDelegate;
-        let cancel = CancellationToken::new();
-        let broadcast = Arc::new(BroadcastManager::new());
-        let broker = Arc::new(DeviceRequestBroker::new(broadcast, cancel.clone()));
-        // Cancel immediately so the request fails with Cancelled → ToolError::Internal
-        cancel.cancel();
-        let result = broker
-            .device_request("sess", "test.method", json!({}))
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            matches!(err, crate::tools::errors::ToolError::Internal { .. }),
-            "expected ToolError::Internal, got {err:?}"
-        );
     }
 
     #[test]

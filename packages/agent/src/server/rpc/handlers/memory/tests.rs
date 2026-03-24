@@ -1039,7 +1039,6 @@ async fn execute_ledger_write_includes_source_field() {
     let deps = LedgerWriteDeps {
         event_store: ctx.event_store.clone(),
         subagent_manager: None,
-        embedding_controller: None,
         shutdown_coordinator: None,
     };
     let result = execute_ledger_write(&sid, &deps, "manual").await;
@@ -1323,7 +1322,6 @@ async fn execute_ledger_write_cron_source() {
     let deps = LedgerWriteDeps {
         event_store: ctx.event_store.clone(),
         subagent_manager: Some(subagent),
-        embedding_controller: None,
         shutdown_coordinator: None,
     };
 

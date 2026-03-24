@@ -7,12 +7,10 @@
 //! registered tools. Tools are grouped by category:
 //!
 //! - **Filesystem**: `Read`, `Write`, `Edit`, `Find`
-//! - **System**: `Bash`, `Remember`
+//! - **System**: `Bash`
 //! - **Search**: text/AST unified search
 //! - **Web**: `WebFetch`, `WebSearch`
-//! - **Browser**: `BrowseTheWeb` (includes openURL action)
-//! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`, `RenderAppUI`
-//! - **Automations**: Managed via `manage-automations` skill (Read/Write/Edit on `~/.tron/workspace/automations.json`)
+//! - **UI**: `AskUserQuestion`, `NotifyApp`
 //! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
 //!
 //! ## Module Position
@@ -36,7 +34,6 @@ pub mod traits;
 pub(crate) mod utils;
 
 // Tool implementation modules
-pub mod browser;
 pub mod fs;
 pub mod search;
 pub mod subagent;
