@@ -2,7 +2,7 @@
 //! `SQLite` repository for cron jobs and runs.
 //!
 //! Handles CRUD operations, runtime state management, and garbage collection.
-//! All operations use the shared `tron.db` connection pool.
+//! All operations use the shared `log.db` connection pool.
 
 use chrono::{DateTime, Utc};
 use rusqlite::params;

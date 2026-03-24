@@ -5,7 +5,7 @@
 //! ## Architecture
 //!
 //! - **Config file** (`~/.tron/workspace/automations.json`): Canonical job definitions
-//! - **`SQLite`** (`tron.db`): Runtime state (`next_run_at`, failures, runs)
+//! - **`SQLite`** (`log.db`): Runtime state (`next_run_at`, failures, runs)
 //! - **Scheduler**: Timer-based loop that fires due jobs
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)

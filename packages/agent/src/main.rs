@@ -33,7 +33,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/database/tron.db`
+//! 7. Production DB target is strictly `~/.tron/database/log.db`
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -1160,7 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn server_boots_and_responds() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("tron.db");
+        let db_path = dir.path().join("log.db");
         let settings_path = dir.path().join("settings.json");
 
         // Single DB for events + tasks
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn server_runs_migrations() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("tron.db");
+        let db_path = dir.path().join("log.db");
         let db_str = db_path.to_string_lossy();
         let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
         let conn = pool.get().unwrap();

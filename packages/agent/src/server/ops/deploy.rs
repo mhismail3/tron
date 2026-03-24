@@ -1404,7 +1404,7 @@ mod tests {
     #[test]
     fn self_test_all_pass() {
         let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("tron.db");
+        let db = dir.path().join("log.db");
         let settings = dir.path().join("settings.json");
         let auth = dir.path().join("auth.json");
         let binary = dir.path().join("tron");
@@ -1443,7 +1443,7 @@ mod tests {
     #[test]
     fn self_test_missing_auth() {
         let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("tron.db");
+        let db = dir.path().join("log.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute_batch("CREATE TABLE events (id TEXT); CREATE TABLE sessions (id TEXT);")
             .unwrap();
@@ -1467,7 +1467,7 @@ mod tests {
     #[test]
     fn self_test_non_executable_binary() {
         let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("tron.db");
+        let db = dir.path().join("log.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute_batch("CREATE TABLE events (id TEXT); CREATE TABLE sessions (id TEXT);")
             .unwrap();
