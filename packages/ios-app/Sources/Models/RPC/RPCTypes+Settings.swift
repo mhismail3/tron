@@ -15,7 +15,6 @@ struct ServerSettings: Decodable {
     let anthropicAccounts: [String]?
     let anthropicAccount: String?
     let compaction: CompactionSettings
-    let memory: MemorySettings
     let rules: RulesSettings
     let tasks: TaskSettings
     let tools: ToolSettings
@@ -47,7 +46,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ContextKeys: String, CodingKey {
-        case compactor, memory, rules, tasks
+        case compactor, rules, tasks
     }
 
     init(from decoder: Decoder) throws {
@@ -76,12 +75,10 @@ struct ServerSettings: Decodable {
         // context.*
         if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {
             compaction = (try? contextContainer.decodeIfPresent(CompactionSettings.self, forKey: .compactor)) ?? .defaults
-            memory = (try? contextContainer.decodeIfPresent(MemorySettings.self, forKey: .memory)) ?? .defaults
             rules = (try? contextContainer.decodeIfPresent(RulesSettings.self, forKey: .rules)) ?? .defaults
             tasks = (try? contextContainer.decodeIfPresent(TaskSettings.self, forKey: .tasks)) ?? .defaults
         } else {
             compaction = .defaults
-            memory = .defaults
             rules = .defaults
             tasks = .defaults
         }
@@ -150,64 +147,6 @@ struct ServerSettings: Decodable {
             defaultTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .defaultTurnFallback)) ?? 25
             alertTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .alertTurnFallback)) ?? 15
             maxPreservedRatio = (try? container.decodeIfPresent(Double.self, forKey: .maxPreservedRatio)) ?? 0.20
-        }
-    }
-
-    struct MemorySettings: Decodable {
-        let ledger: LedgerSettings
-        let autoInject: AutoInjectSettings
-
-        static let defaults = MemorySettings(
-            ledger: .defaults, autoInject: .defaults
-        )
-
-        private enum CodingKeys: String, CodingKey {
-            case ledger, autoInject
-        }
-
-        init(ledger: LedgerSettings, autoInject: AutoInjectSettings) {
-            self.ledger = ledger
-            self.autoInject = autoInject
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            ledger = (try? container.decodeIfPresent(LedgerSettings.self, forKey: .ledger)) ?? .defaults
-            autoInject = (try? container.decodeIfPresent(AutoInjectSettings.self, forKey: .autoInject)) ?? .defaults
-        }
-
-        struct LedgerSettings: Decodable {
-            let enabled: Bool
-            static let defaults = LedgerSettings(enabled: true)
-        }
-
-        struct AutoInjectSettings: Decodable {
-            let enabled: Bool
-            let count: Int
-            let semanticInjection: Bool
-            let recencyAnchorCount: Int
-            static let defaults = AutoInjectSettings(
-                enabled: true, count: 5, semanticInjection: true, recencyAnchorCount: 2
-            )
-
-            private enum CodingKeys: String, CodingKey {
-                case enabled, count, semanticInjection, recencyAnchorCount
-            }
-
-            init(enabled: Bool, count: Int, semanticInjection: Bool, recencyAnchorCount: Int) {
-                self.enabled = enabled
-                self.count = count
-                self.semanticInjection = semanticInjection
-                self.recencyAnchorCount = recencyAnchorCount
-            }
-
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
-                count = (try? container.decodeIfPresent(Int.self, forKey: .count)) ?? 5
-                semanticInjection = (try? container.decodeIfPresent(Bool.self, forKey: .semanticInjection)) ?? true
-                recencyAnchorCount = (try? container.decodeIfPresent(Int.self, forKey: .recencyAnchorCount)) ?? 2
-            }
         }
     }
 
@@ -335,7 +274,6 @@ struct ServerSettingsUpdate: Encodable {
 
     struct ContextUpdate: Encodable {
         var compactor: CompactorUpdate?
-        var memory: MemoryUpdate?
         var rules: RulesUpdate?
         var tasks: TasksUpdate?
 
@@ -347,22 +285,6 @@ struct ServerSettingsUpdate: Encodable {
             var defaultTurnFallback: Int?
             var alertTurnFallback: Int?
             var maxPreservedRatio: Double?
-        }
-
-        struct MemoryUpdate: Encodable {
-            var ledger: LedgerUpdate?
-            var autoInject: AutoInjectUpdate?
-
-            struct LedgerUpdate: Encodable {
-                var enabled: Bool?
-            }
-
-            struct AutoInjectUpdate: Encodable {
-                var enabled: Bool?
-                var count: Int?
-                var semanticInjection: Bool?
-                var recencyAnchorCount: Int?
-            }
         }
 
         struct RulesUpdate: Encodable {

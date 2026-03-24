@@ -19,11 +19,6 @@ struct ContextSettingsPage: View {
                 )
 
                 ContextSettingsSection(
-                    memoryLedgerEnabled: Bindable(settingsState).memoryLedgerEnabled,
-                    memoryAutoInject: Bindable(settingsState).memoryAutoInject,
-                    memoryAutoInjectCount: Bindable(settingsState).memoryAutoInjectCount,
-                    memorySemanticInjection: Bindable(settingsState).memorySemanticInjection,
-                    memoryRecencyAnchorCount: Bindable(settingsState).memoryRecencyAnchorCount,
                     taskAutoInjectEnabled: Bindable(settingsState).taskAutoInjectEnabled,
                     discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
                     updateServerSetting: updateServerSetting

@@ -1,100 +1,11 @@
 import SwiftUI
 
 struct ContextSettingsSection: View {
-    @Binding var memoryLedgerEnabled: Bool
-    @Binding var memoryAutoInject: Bool
-    @Binding var memoryAutoInjectCount: Int
-    @Binding var memorySemanticInjection: Bool
-    @Binding var memoryRecencyAnchorCount: Int
     @Binding var taskAutoInjectEnabled: Bool
     @Binding var discoverStandaloneFiles: Bool
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     var body: some View {
-        // Ledger — own pill with caption
-        Section {
-            Toggle(isOn: $memoryLedgerEnabled) {
-                Label("Auto-update ledger", systemImage: "book.closed")
-                    .font(TronTypography.subheadline)
-            }
-            .tint(.tronEmerald)
-            .onChange(of: memoryLedgerEnabled) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(memory: .init(ledger: .init(enabled: newValue))))
-                }
-            }
-        } header: {
-            Text("Memory")
-                .font(TronTypography.sans(size: TronTypography.sizeBody3))
-        } footer: {
-            Text("Automatically update the session memory ledger after each response.")
-                .font(TronTypography.caption2)
-        }
-
-        // Memories — own pill
-        Section {
-            Toggle(isOn: $memoryAutoInject) {
-                Label("Auto-inject memories", systemImage: "brain.head.profile")
-                    .font(TronTypography.subheadline)
-            }
-            .tint(.tronEmerald)
-            .onChange(of: memoryAutoInject) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(enabled: newValue))))
-                }
-            }
-
-            if memoryAutoInject {
-                HStack {
-                    Label("Maximum entries to load", systemImage: "list.number")
-                        .font(TronTypography.subheadline)
-                    Spacer()
-                    Text("\(memoryAutoInjectCount)")
-                        .font(TronTypography.subheadline)
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .frame(minWidth: 20)
-                    TronStepper(value: $memoryAutoInjectCount, range: 1...10)
-                }
-                .onChange(of: memoryAutoInjectCount) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(count: newValue))))
-                    }
-                }
-
-                Toggle(isOn: $memorySemanticInjection) {
-                    Label("Semantic injection", systemImage: "sparkle.magnifyingglass")
-                        .font(TronTypography.subheadline)
-                }
-                .tint(.tronEmerald)
-                .onChange(of: memorySemanticInjection) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(semanticInjection: newValue))))
-                    }
-                }
-
-                HStack {
-                    Label("Recency anchor", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                        .font(TronTypography.subheadline)
-                    Spacer()
-                    Text("\(memoryRecencyAnchorCount)")
-                        .font(TronTypography.subheadline)
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .frame(minWidth: 20)
-                    TronStepper(value: $memoryRecencyAnchorCount, range: 0...5)
-                }
-                .onChange(of: memoryRecencyAnchorCount) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(recencyAnchorCount: newValue))))
-                    }
-                }
-            }
-        } footer: {
-            Text("Load recent session memories at start of new sessions.")
-                .font(TronTypography.caption2)
-        }
-
         // Tasks + rules
         Section {
             Toggle(isOn: $taskAutoInjectEnabled) {

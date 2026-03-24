@@ -27,8 +27,6 @@ import Foundation
 @MainActor protocol ContextEventHandler: AnyObject {
     func handleCompactionStarted(_ result: CompactionStartedPlugin.Result)
     func handleCompaction(_ result: CompactionPlugin.Result)
-    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result)
-    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
     func handleContextCleared(_ result: ContextClearedPlugin.Result)
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result)

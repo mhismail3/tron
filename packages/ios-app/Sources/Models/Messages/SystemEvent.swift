@@ -35,12 +35,6 @@ enum SystemEvent: Equatable, Hashable {
     case turnFailed(error: String, code: String?, recoverable: Bool)
     /// Subagent completed while parent was idle - results available for review
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
-    /// Memory ledger write in progress (spinner)
-    case memoryUpdating
-    /// Memory ledger entry was written after a response cycle
-    case memoryUpdated(title: String, entryType: String, eventId: String?)
-    /// Memories were auto-injected at session start
-    case memoriesLoaded(count: Int)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
 
@@ -82,12 +76,6 @@ enum SystemEvent: Equatable, Hashable {
             return "Request failed: \(error)"
         case .subagentResultAvailable(_, let taskPreview, let success):
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
-        case .memoryUpdating:
-            return "Retaining memory..."
-        case .memoryUpdated(let title, _, _):
-            return "Memory updated: \(title)"
-        case .memoriesLoaded(let count):
-            return "Loaded \(count) \(count == 1 ? "memory" : "memories")"
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category)
             return "\(label): \(data.message)"
@@ -144,38 +132,6 @@ enum SystemEvent: Equatable, Hashable {
     /// Number of turns summarized during compaction
     var compactionSummarizedTurns: Int? {
         if case .compaction(_, _, _, _, _, let summarized) = self { return summarized }
-        return nil
-    }
-
-    /// Whether this is a memory updating or memory updated event (for unified animation)
-    var isMemoryNotification: Bool {
-        switch self {
-        case .memoryUpdating, .memoryUpdated: return true
-        default: return false
-        }
-    }
-
-    /// Whether the memory notification is still in progress
-    var memoryIsInProgress: Bool {
-        if case .memoryUpdating = self { return true }
-        return false
-    }
-
-    /// Title from a memoryUpdated event (empty for in-progress)
-    var memoryTitle: String {
-        if case .memoryUpdated(let title, _, _) = self { return title }
-        return ""
-    }
-
-    /// Entry type from a memoryUpdated event (empty for in-progress)
-    var memoryEntryType: String {
-        if case .memoryUpdated(_, let entryType, _) = self { return entryType }
-        return ""
-    }
-
-    /// Event ID of the persisted memory.ledger event (for detail sheet lookup)
-    var memoryEventId: String? {
-        if case .memoryUpdated(_, _, let eventId) = self { return eventId }
         return nil
     }
 

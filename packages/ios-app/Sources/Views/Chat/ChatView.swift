@@ -464,8 +464,6 @@ struct ChatView: View {
                                         sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
                                     case .waitForAgents(let data):
                                         sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
-                                    case .memoryUpdated(let title, let entryType, let eventId):
-                                        sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)
                                     case .subagentResult(let sid):
                                         viewModel.subagentState.showDetails(for: sid)
                                     case .providerError(let data):

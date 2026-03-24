@@ -13,11 +13,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 25)
-        XCTAssertTrue(state.memoryLedgerEnabled)
-        XCTAssertTrue(state.memoryAutoInject)
-        XCTAssertEqual(state.memoryAutoInjectCount, 5)
-        XCTAssertTrue(state.memorySemanticInjection)
-        XCTAssertEqual(state.memoryRecencyAnchorCount, 2)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
@@ -35,11 +30,6 @@ final class SettingsStateTests: XCTestCase {
         state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.90
         state.defaultTurnFallback = 15
-        state.memoryLedgerEnabled = false
-        state.memoryAutoInject = false
-        state.memoryAutoInjectCount = 8
-        state.memorySemanticInjection = false
-        state.memoryRecencyAnchorCount = 4
         state.maxConcurrentSessions = 25
         state.quickSessionWorkspace = "/some/other/path"
 
@@ -51,11 +41,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 25)
-        XCTAssertTrue(state.memoryLedgerEnabled)
-        XCTAssertTrue(state.memoryAutoInject)
-        XCTAssertEqual(state.memoryAutoInjectCount, 5)
-        XCTAssertTrue(state.memorySemanticInjection)
-        XCTAssertEqual(state.memoryRecencyAnchorCount, 2)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
     }
 
@@ -80,8 +65,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertNotNil(update.server)
         XCTAssertEqual(update.server?.maxConcurrentSessions, 10)
         XCTAssertNotNil(update.context?.compactor)
-        XCTAssertNotNil(update.context?.memory?.ledger)
-        XCTAssertEqual(update.context?.memory?.ledger?.enabled, true)
         XCTAssertNotNil(update.tools?.web)
     }
 

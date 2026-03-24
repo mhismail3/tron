@@ -160,10 +160,8 @@ struct UnifiedEventTransformer {
             return ErrorHandlers.transformTurnFailed(payload, timestamp: ts)
         case .contextCleared:
             return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
-        case .memoryLedger:
-            return SystemEventHandlers.transformMemoryLedger(payload, timestamp: ts, eventId: eventId)
-        case .memoryLoaded:
-            return SystemEventHandlers.transformMemoryLoaded(payload, timestamp: ts)
+        case .memoryLedger, .memoryLoaded:
+            return nil
         case .compactBoundary:
             return SystemEventHandlers.transformCompactBoundary(payload, timestamp: ts)
         case .skillRemoved:

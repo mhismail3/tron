@@ -95,13 +95,6 @@ final class MiscClient {
         )
     }
 
-    /// Trigger a one-shot memory ledger update for the current session
-    func updateLedger(sessionId: String) async throws -> MemoryUpdateLedgerResult {
-        let ws = try transport.requireConnection()
-        let params = MemoryUpdateLedgerParams(sessionId: sessionId)
-        return try await ws.send(method: "memory.updateLedger", params: params)
-    }
-
     // MARK: - Worktree Methods
 
     /// Get worktree status for a session

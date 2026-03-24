@@ -8,13 +8,10 @@ struct SystemEventView: View {
     var onTap: ((MessageBubbleTapAction) -> Void)?
 
     var body: some View {
-        // Memory and compaction events share unified views for smooth in-place animation
-        if event.isMemoryNotification {
-            memoryNotificationView
-        } else if event.isCompactionNotification {
+        if event.isCompactionNotification {
             compactionNotificationView
         } else {
-            nonMemoryEventView
+            eventView
         }
     }
 
@@ -37,23 +34,7 @@ struct SystemEventView: View {
     }
 
     @ViewBuilder
-    private var memoryNotificationView: some View {
-        let isInProgress = event.memoryIsInProgress
-        let title = event.memoryTitle
-        let entryType = event.memoryEntryType
-        let eventId = event.memoryEventId
-        MemoryNotificationView(
-            isInProgress: isInProgress,
-            title: title,
-            entryType: entryType,
-            onTap: isInProgress ? nil : {
-                onTap?(.memoryUpdated(title: title, entryType: entryType, eventId: eventId))
-            }
-        )
-    }
-
-    @ViewBuilder
-    private var nonMemoryEventView: some View {
+    private var eventView: some View {
         switch event {
         case .modelChange(let from, let to):
             ModelChangeNotificationView(from: from, to: to)
@@ -100,9 +81,6 @@ struct SystemEventView: View {
                     onTap?(.subagentResult(sessionId: subagentSessionId))
                 }
             )
-
-        case .memoriesLoaded(let count):
-            MemoriesLoadedNotificationView(count: count)
 
         case .providerError(let data):
             ProviderErrorNotificationView(

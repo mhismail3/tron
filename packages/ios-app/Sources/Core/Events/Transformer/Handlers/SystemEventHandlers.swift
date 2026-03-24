@@ -149,40 +149,6 @@ enum SystemEventHandlers {
         )
     }
 
-    /// Transform memory.ledger event into a ChatMessage.
-    ///
-    /// Memory ledger events indicate when a ledger entry was written after a response cycle.
-    static func transformMemoryLedger(
-        _ payload: [String: AnyCodable],
-        timestamp: Date,
-        eventId: String? = nil
-    ) -> ChatMessage? {
-        let title = payload["title"]?.value as? String ?? "Memory updated"
-        let entryType = payload["entryType"]?.value as? String ?? "conversation"
-
-        return ChatMessage(
-            role: .system,
-            content: .memoryUpdated(title: title, entryType: entryType, eventId: eventId),
-            timestamp: timestamp
-        )
-    }
-
-    /// Transform memory.loaded event into a ChatMessage.
-    ///
-    /// Memory loaded events indicate when memories were auto-injected at session start.
-    static func transformMemoryLoaded(
-        _ payload: [String: AnyCodable],
-        timestamp: Date
-    ) -> ChatMessage? {
-        guard let count = payload["count"]?.value as? Int, count > 0 else { return nil }
-
-        return ChatMessage(
-            role: .system,
-            content: .memoriesLoaded(count: count),
-            timestamp: timestamp
-        )
-    }
-
     /// Transform notification.subagent_result event into a ChatMessage.
     ///
     /// These events are persisted when a non-blocking subagent completes while

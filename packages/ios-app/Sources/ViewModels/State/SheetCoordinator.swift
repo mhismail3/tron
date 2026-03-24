@@ -96,11 +96,6 @@ final class SheetCoordinator {
         )))
     }
 
-    /// Show memory detail sheet
-    func showMemoryDetail(title: String, entryType: String, sessionId: String, eventId: String? = nil) {
-        present(.memoryDetail(MemoryDetailData(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)))
-    }
-
     /// Show provider error detail sheet
     func showProviderErrorDetail(_ data: ProviderErrorDetailData) {
         present(.providerErrorDetail(data))

@@ -101,7 +101,6 @@ enum PersistedEventType: String, CaseIterable {
              .notificationInterrupted, .notificationSubagentResult,
              .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded, .rulesActivated,
-             .memoryLedger, .memoryLoaded,
              .errorAgent, .errorTool, .errorProvider,
              .turnFailed:
             return true

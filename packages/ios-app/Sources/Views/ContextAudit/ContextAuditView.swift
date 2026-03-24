@@ -28,11 +28,6 @@ struct ContextAuditView: View {
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
 
-    // Manual memory update state
-    @State private var isAutoLedgerEnabled: Bool = true
-    @State private var isUpdatingLedger: Bool = false
-    @State private var showNoNewContentAlert: Bool = false
-
     // Message pagination state
     @State private var messagesLoadedCount: Int = 10  // Initial batch size
 
@@ -83,15 +78,12 @@ struct ContextAuditView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    if isAutoLedgerEnabled {
-                        clearButton(iconOnly: false)
-                    } else {
-                        clearButton(iconOnly: true)
-                        compactButton(iconOnly: true)
-                    }
+                    clearButton(iconOnly: false)
                 }
                 ToolbarItem(placement: .principal) { principalToolbarContent }
-                ToolbarItem(placement: .topBarTrailing) { trailingToolbarContent }
+                ToolbarItem(placement: .topBarTrailing) {
+                    compactButton(iconOnly: false)
+                }
             }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -100,11 +92,6 @@ struct ContextAuditView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
-            }
-            .alert("No New Content", isPresented: $showNoNewContentAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("There's nothing new to retain since the last memory update.")
             }
             .task {
                 await loadContext()
@@ -128,34 +115,6 @@ struct ContextAuditView: View {
         Text("Context")
             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
             .foregroundStyle(.tronEmerald)
-    }
-
-    @ViewBuilder
-    private var trailingToolbarContent: some View {
-        if isAutoLedgerEnabled {
-            // Auto-ledger ON: Compact button with icon + text
-            compactButton(iconOnly: false)
-        } else {
-            // Auto-ledger OFF: Retain button
-            Button {
-                Task { await updateMemoryLedger() }
-            } label: {
-                HStack(spacing: 4) {
-                    if isUpdatingLedger {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .tint(.purple)
-                    } else {
-                        Image(systemName: "brain")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    }
-                    Text("Retain")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                }
-                .foregroundStyle(hasMessages && !readOnly ? .purple : .tronTextMuted)
-            }
-            .disabled(isUpdatingLedger || !hasMessages || readOnly)
-        }
     }
 
     // MARK: - Toolbar Button Builders
@@ -382,20 +341,12 @@ struct ContextAuditView: View {
         isLoading = true
 
         do {
-            // Load detailed context snapshot, settings, and events in parallel
+            // Load detailed context snapshot and events in parallel
             async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
-            async let settingsTask = rpcClient.settings.get()
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
-
-            do {
-                let settings = try await settingsTask
-                isAutoLedgerEnabled = settings.memory.ledger.enabled
-            } catch {
-                logger.warning("Failed to load settings for context sheet, defaulting auto-ledger to true: \(error)", category: .general)
-            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -452,21 +403,6 @@ struct ContextAuditView: View {
             errorMessage = "Failed to compact context: \(error.localizedDescription)"
             isCompacting = false
         }
-    }
-
-    private func updateMemoryLedger() async {
-        isUpdatingLedger = true
-        do {
-            let result = try await rpcClient.misc.updateLedger(sessionId: sessionId)
-            if result.written {
-                dismiss()
-            } else {
-                showNoNewContentAlert = true
-            }
-        } catch {
-            errorMessage = "Failed to update memory: \(error.localizedDescription)"
-        }
-        isUpdatingLedger = false
     }
 
     private func removeSkillFromContext(skillName: String) async {

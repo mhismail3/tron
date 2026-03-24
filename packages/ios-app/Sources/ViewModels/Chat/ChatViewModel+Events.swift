@@ -272,103 +272,6 @@ extension ChatViewModel {
         drainMessageQueue()
     }
 
-    func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
-        logger.info("Memory updating started", category: .events)
-
-        flushPendingTextUpdates()
-        finalizeStreamingMessage()
-
-        let inProgressMessage = ChatMessage.memoryUpdating()
-        appendToMessages(inProgressMessage)
-        memoryUpdatingInProgressMessageId = inProgressMessage.id
-
-        // Defensive timeout: if memory_updated never arrives, remove the spinner
-        memoryUpdatingTimeoutTask?.cancel()
-        let messageId = inProgressMessage.id
-        memoryUpdatingTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            guard let self, !Task.isCancelled else { return }
-            guard self.memoryUpdatingInProgressMessageId == messageId else { return }
-            self.logWarning("Memory updating timeout — memory_updated never arrived, removing spinner")
-            if let idx = self.messageIndex.index(for: messageId) {
-                _ = withAnimation(.smooth(duration: 0.3)) {
-                    self.removeFromMessages(at: idx)
-                }
-            }
-            self.memoryUpdatingInProgressMessageId = nil
-        }
-    }
-
-    func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
-        logger.info("Memory updated: \(pluginResult.title) (type: \(pluginResult.entryType))", category: .events)
-
-        memoryUpdatingTimeoutTask?.cancel()
-        memoryUpdatingTimeoutTask = nil
-
-        // Error case: database or server error — show briefly, then auto-dismiss
-        if pluginResult.entryType == "error" {
-            if let inProgressId = memoryUpdatingInProgressMessageId,
-               let index = messageIndex.index(for: inProgressId) {
-                withAnimation(.smooth(duration: 0.35)) {
-                    messages[index].content = .memoryUpdated(
-                        title: pluginResult.title.isEmpty ? "Memory update failed" : pluginResult.title,
-                        entryType: "error"
-                    )
-                }
-                let messageId = inProgressId
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(5))
-                    if let idx = messageIndex.index(for: messageId) {
-                        _ = withAnimation(.smooth(duration: 0.3)) {
-                            removeFromMessages(at: idx)
-                        }
-                    }
-                }
-            }
-            memoryUpdatingInProgressMessageId = nil
-            return
-        }
-
-        // "skipped" means ledger write determined nothing worth retaining
-        // Transition spinner → "Nothing new to retain" briefly, then auto-remove
-        if pluginResult.entryType == "skipped" {
-            if let inProgressId = memoryUpdatingInProgressMessageId,
-               let index = messageIndex.index(for: inProgressId) {
-                withAnimation(.smooth(duration: 0.35)) {
-                    messages[index].content = .memoryUpdated(title: "Nothing new to retain", entryType: "skipped")
-                }
-                let messageId = inProgressId
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(3))
-                    if let idx = messageIndex.index(for: messageId) {
-                        _ = withAnimation(.smooth(duration: 0.3)) {
-                            removeFromMessages(at: idx)
-                        }
-                    }
-                }
-            }
-            memoryUpdatingInProgressMessageId = nil
-            return
-        }
-
-        // Mutate content in-place to keep the same message identity → smooth animation
-        if let inProgressId = memoryUpdatingInProgressMessageId,
-           let index = messageIndex.index(for: inProgressId) {
-            withAnimation(.smooth(duration: 0.35)) {
-                messages[index].content = .memoryUpdated(title: pluginResult.title, entryType: pluginResult.entryType, eventId: pluginResult.eventId)
-            }
-            memoryUpdatingInProgressMessageId = nil
-        } else {
-            // No in-progress pill (e.g. reconstruction) — just append
-            let message = ChatMessage.memoryUpdated(
-                title: pluginResult.title,
-                entryType: pluginResult.entryType,
-                eventId: pluginResult.eventId
-            )
-            appendToMessages(message)
-        }
-    }
-
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         let tokensFreed = pluginResult.tokensBefore - pluginResult.tokensAfter
         logger.info("Context cleared: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
@@ -442,9 +345,6 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
-        memoryUpdatingTimeoutTask?.cancel()
-        memoryUpdatingTimeoutTask = nil
-        memoryUpdatingInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
@@ -489,9 +389,6 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
-        memoryUpdatingTimeoutTask?.cancel()
-        memoryUpdatingTimeoutTask = nil
-        memoryUpdatingInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

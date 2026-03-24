@@ -15,7 +15,6 @@ enum MessageBubbleTapAction {
     case commandTool(CommandToolChipData)
     case queryAgent(QueryAgentChipData)
     case waitForAgents(WaitForAgentsChipData)
-    case memoryUpdated(title: String, entryType: String, eventId: String?)
     case subagentResult(sessionId: String)
     case providerError(ProviderErrorDetailData)
 }

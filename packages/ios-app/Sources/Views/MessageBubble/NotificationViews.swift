@@ -469,74 +469,6 @@ struct TurnFailedNotificationView: View {
     }
 }
 
-// MARK: - Memory Notification View (unified in-progress → completed)
-
-struct MemoryNotificationView: View {
-    let isInProgress: Bool
-    var title: String = ""
-    var entryType: String = ""
-    var onTap: (() -> Void)? = nil
-
-    private let iconSize: CGFloat = TronTypography.sizeBody2
-    private var isSkipped: Bool { entryType == "skipped" }
-    private var isError: Bool { entryType == "error" }
-    private var tintColor: Color { isError ? .orange : .purple }
-
-    var body: some View {
-        NotificationPill(tint: tintColor, interactive: !isError, onTap: isInProgress || isSkipped || isError ? nil : onTap) {
-            HStack(spacing: 8) {
-                ZStack {
-                    if isInProgress {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                            .tint(.purple)
-                            .transition(.blurReplace)
-                    } else if isError {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.orange)
-                            .transition(.blurReplace)
-                    } else {
-                        Image(systemName: isSkipped ? "brain" : "brain.fill")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 1))
-                            .transition(.blurReplace)
-                    }
-                }
-                .frame(width: iconSize, height: iconSize)
-
-                if isError {
-                    Text(title.isEmpty ? "Memory update failed" : title)
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(.orange.opacity(0.9))
-                        .contentTransition(.interpolate)
-                } else {
-                    Text(isInProgress ? "Retaining memory..." : isSkipped ? "Nothing new to retain" : "Memory updated")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 0.9))
-                        .contentTransition(.interpolate)
-                }
-
-                if !isInProgress && !isSkipped && !isError && !title.isEmpty {
-                    Text("\u{2022}")
-                        .font(TronTypography.badge)
-                        .foregroundStyle(.purple.opacity(0.5))
-                        .transition(.blurReplace)
-
-                    Text(title)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.purple.opacity(0.7))
-                        .lineLimit(1)
-                        .transition(.blurReplace)
-                }
-            }
-            .animation(.smooth(duration: 0.35), value: isInProgress)
-            .animation(.smooth(duration: 0.35), value: isSkipped)
-            .animation(.smooth(duration: 0.35), value: isError)
-        }
-    }
-}
-
 // MARK: - Provider Error Notification View
 
 struct ProviderErrorNotificationView: View {
@@ -598,22 +530,3 @@ enum ErrorCategoryDisplay {
     }
 }
 
-// MARK: - Memories Loaded Notification View
-
-struct MemoriesLoadedNotificationView: View {
-    let count: Int
-
-    var body: some View {
-        NotificationPill(tint: .purple) {
-            HStack(spacing: 8) {
-                Image(systemName: "brain.head.profile")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.purple)
-
-                Text("Loaded \(count) \(count == 1 ? "memory" : "memories")")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.purple.opacity(0.9))
-            }
-        }
-    }
-}
