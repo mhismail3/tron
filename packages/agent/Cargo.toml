@@ -8,8 +8,7 @@ license = "MIT"
 repository = "https://github.com/moose/tron"
 
 [features]
-default = ["ort", "apns"]
-ort = ["dep:ort", "dep:tokenizers", "dep:hf-hub", "dep:ndarray"]
+default = ["apns"]
 apns = ["dep:jsonwebtoken"]
 browser-integration = []
 
@@ -98,12 +97,6 @@ bytes = "1"
 indexmap = "2"
 url = "2"
 urlencoding = "2"
-
-# Embeddings (optional)
-ort = { version = "2.0.0-rc.11", optional = true }
-tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
-hf-hub = { version = "0.4", default-features = false, features = ["ureq", "rustls-tls"], optional = true }
-ndarray = { version = "0.16", optional = true }
 
 # APNS (optional)
 jsonwebtoken = { version = "9", optional = true }

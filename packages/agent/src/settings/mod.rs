@@ -173,7 +173,6 @@ mod tests {
         assert_eq!(settings.agent.max_turns, 250);
         assert_eq!(settings.tools.bash.default_timeout_ms, 120_000);
         assert_eq!(settings.context.compactor.max_tokens, 25_000);
-        assert!(settings.context.memory.embedding.enabled);
         assert!(settings.guardrails.is_none());
     }
 
@@ -212,14 +211,14 @@ mod tests {
 
         // Start with defaults
         init_settings(TronSettings::default());
-        assert!(get_settings().context.memory.auto_inject.enabled);
+        assert!(get_settings().context.rules.discover_standalone_files);
 
-        // Write a settings file that disables auto-inject
+        // Write a settings file that disables standalone files discovery
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
-            r#"{"context": {"memory": {"autoInject": {"enabled": false}}}}"#,
+            r#"{"context": {"rules": {"discoverStandaloneFiles": false}}}"#,
         )
         .unwrap();
 
@@ -228,11 +227,10 @@ mod tests {
 
         let updated = get_settings();
         assert!(
-            !updated.context.memory.auto_inject.enabled,
-            "auto_inject should be disabled after reload"
+            !updated.context.rules.discover_standalone_files,
+            "discover_standalone_files should be disabled after reload"
         );
         // Other defaults should be preserved (deep merge)
-        assert!(updated.context.memory.embedding.enabled);
         assert_eq!(updated.server.ws_port, 8080);
 
         reset_settings();
@@ -265,9 +263,9 @@ mod tests {
         let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
 
-        // Simulate server startup: auto-inject enabled by default
+        // Simulate server startup: standalone files enabled by default
         init_settings(TronSettings::default());
-        assert!(get_settings().context.memory.auto_inject.enabled);
+        assert!(get_settings().context.rules.discover_standalone_files);
 
         // Simulate iOS settings.update: write merged settings to disk
         let dir = tempfile::tempdir().unwrap();
@@ -275,8 +273,8 @@ mod tests {
 
         // First: read current file (empty — new install)
         let current = serde_json::json!({});
-        // Apply the update (auto-inject disabled)
-        let update = serde_json::json!({"context": {"memory": {"autoInject": {"enabled": false}}}});
+        // Apply the update (standalone files disabled)
+        let update = serde_json::json!({"context": {"rules": {"discoverStandaloneFiles": false}}});
         let merged = deep_merge(current, update);
         std::fs::write(
             &settings_path,
@@ -289,8 +287,8 @@ mod tests {
 
         // Now get_settings should reflect the iOS toggle
         assert!(
-            !get_settings().context.memory.auto_inject.enabled,
-            "after reload, auto_inject should be disabled"
+            !get_settings().context.rules.discover_standalone_files,
+            "after reload, discover_standalone_files should be disabled"
         );
 
         reset_settings();

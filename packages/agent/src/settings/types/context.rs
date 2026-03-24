@@ -1,6 +1,6 @@
 //! Context management settings.
 //!
-//! Configuration for compaction, memory (embeddings, ledger), rules, and tasks.
+//! Configuration for compaction and rules.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,12 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct ContextSettings {
     /// Context compaction settings.
     pub compactor: CompactorSettings,
-    /// Memory system settings.
-    pub memory: MemorySettings,
     /// Rules discovery settings.
     pub rules: RulesSettings,
-    /// Task context injection settings.
-    pub tasks: TaskContextSettings,
 }
 
 /// Context compaction settings.
@@ -72,112 +68,6 @@ impl Default for CompactorSettings {
     }
 }
 
-/// Memory system settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct MemorySettings {
-    /// Maximum number of memory entries to retain.
-    pub max_entries: usize,
-    /// Embedding model settings.
-    pub embedding: MemoryEmbeddingSettings,
-    /// Automatic memory injection settings.
-    pub auto_inject: MemoryAutoInjectSettings,
-    /// Memory ledger settings.
-    pub ledger: MemoryLedgerSettings,
-}
-
-impl Default for MemorySettings {
-    fn default() -> Self {
-        Self {
-            max_entries: 1000,
-            embedding: MemoryEmbeddingSettings::default(),
-            auto_inject: MemoryAutoInjectSettings::default(),
-            ledger: MemoryLedgerSettings::default(),
-        }
-    }
-}
-
-/// Embedding model configuration for semantic memory.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct MemoryEmbeddingSettings {
-    /// Whether embeddings are enabled.
-    pub enabled: bool,
-    /// ONNX model identifier.
-    pub model: String,
-    /// Quantization dtype (e.g., `"q4"`).
-    pub dtype: String,
-    /// Output embedding dimensions (Matryoshka truncation).
-    pub dimensions: usize,
-    /// Local model cache directory.
-    pub cache_dir: String,
-    /// Maximum tokens for workspace lesson injection.
-    pub max_workspace_lessons_tokens: usize,
-    /// Maximum tokens for cross-project memory injection.
-    pub max_cross_project_tokens: usize,
-    /// Top-K results for cross-project search.
-    pub cross_project_top_k: usize,
-    /// Temporal decay half-life in days for memory ranking.
-    pub half_life_days: f64,
-}
-
-impl Default for MemoryEmbeddingSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            model: "onnx-community/embeddinggemma-300m-ONNX".to_string(),
-            dtype: "q4".to_string(),
-            dimensions: 512,
-            cache_dir: "~/.tron/mods/models".to_string(),
-            max_workspace_lessons_tokens: 2000,
-            max_cross_project_tokens: 1000,
-            cross_project_top_k: 5,
-            half_life_days: 30.0,
-        }
-    }
-}
-
-/// Automatic memory injection settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct MemoryAutoInjectSettings {
-    /// Whether auto-injection is enabled.
-    pub enabled: bool,
-    /// Number of memories to auto-inject (1–10).
-    pub count: usize,
-    /// Use the user's prompt to find semantically relevant past sessions
-    /// instead of purely chronological selection.
-    pub semantic_injection: bool,
-    /// Number of most-recent entries always included regardless of semantic
-    /// relevance (0–count). Clamped to `count` at runtime.
-    pub recency_anchor_count: usize,
-}
-
-impl Default for MemoryAutoInjectSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            count: 5,
-            semantic_injection: true,
-            recency_anchor_count: 2,
-        }
-    }
-}
-
-/// Memory ledger settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct MemoryLedgerSettings {
-    /// Whether the memory ledger is enabled.
-    pub enabled: bool,
-}
-
-impl Default for MemoryLedgerSettings {
-    fn default() -> Self {
-        Self { enabled: true }
-    }
-}
-
 /// Rules discovery settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -192,22 +82,6 @@ impl Default for RulesSettings {
             discover_standalone_files: true,
         }
     }
-}
-
-/// Task context injection settings.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct TaskContextSettings {
-    /// Automatic task context injection settings.
-    pub auto_inject: TaskAutoInjectSettings,
-}
-
-/// Automatic task context injection settings.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct TaskAutoInjectSettings {
-    /// Whether to auto-inject task context into prompts.
-    pub enabled: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,29 +141,9 @@ mod tests {
     }
 
     #[test]
-    fn memory_defaults() {
-        let m = MemorySettings::default();
-        assert_eq!(m.max_entries, 1000);
-        assert!(m.embedding.enabled);
-        assert_eq!(m.embedding.dtype, "q4");
-        assert_eq!(m.embedding.dimensions, 512);
-        assert!(m.auto_inject.enabled);
-        assert_eq!(m.auto_inject.count, 5);
-        assert!(m.auto_inject.semantic_injection);
-        assert_eq!(m.auto_inject.recency_anchor_count, 2);
-        assert!(m.ledger.enabled);
-    }
-
-    #[test]
     fn rules_defaults() {
         let r = RulesSettings::default();
         assert!(r.discover_standalone_files);
-    }
-
-    #[test]
-    fn task_defaults() {
-        let t = TaskContextSettings::default();
-        assert!(!t.auto_inject.enabled);
     }
 
     #[test]
@@ -304,6 +158,6 @@ mod tests {
         // Other compactor fields should be defaults
         assert!((ctx.compactor.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
         // Other sections should be defaults
-        assert!(ctx.memory.embedding.enabled);
+        assert!(ctx.rules.discover_standalone_files);
     }
 }

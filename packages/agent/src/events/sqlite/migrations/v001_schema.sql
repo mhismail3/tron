@@ -1,9 +1,7 @@
 -- v001: Consolidated schema — single source of truth
 --
 -- Tables: workspaces, sessions, events, blobs, branches,
---         logs, device_tokens, tasks, task_activity, task_backlog,
---         notification_read_state, cron_jobs, cron_runs, memory_vectors
--- FTS:    tasks_fts
+--         logs, device_tokens, notification_read_state, cron_jobs, cron_runs
 -- Meta:   schema_version
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -191,73 +189,6 @@ CREATE INDEX IF NOT EXISTS idx_device_tokens_workspace ON device_tokens(workspac
 CREATE INDEX IF NOT EXISTS idx_device_tokens_token     ON device_tokens(device_token);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Task Management (simplified v2)
--- ═══════════════════════════════════════════════════════════════════════════════
-
-CREATE TABLE IF NOT EXISTS tasks (
-  id                    TEXT PRIMARY KEY NOT NULL,
-  title                 TEXT NOT NULL,
-  description           TEXT,
-  active_form           TEXT,
-  notes                 TEXT,
-  status                TEXT NOT NULL DEFAULT 'pending'
-      CHECK(status IN ('pending','in_progress','completed','cancelled','stale')),
-  parent_task_id        TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-  started_at            TEXT,
-  completed_at          TEXT,
-  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
-  created_by_session_id TEXT,
-  last_session_id       TEXT,
-  last_session_at       TEXT,
-  metadata              TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_tasks_parent       ON tasks(parent_task_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status       ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_session      ON tasks(created_by_session_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_last_session ON tasks(last_session_id);
-
--- Task activity (audit trail)
-CREATE TABLE IF NOT EXISTS task_activity (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id    TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  session_id TEXT,
-  event_id   TEXT,
-  action     TEXT    NOT NULL
-      CHECK(action IN ('created', 'status_changed', 'updated', 'note_added', 'deleted')),
-  old_value  TEXT,
-  new_value  TEXT,
-  detail     TEXT,
-  timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_task_activity_task
-    ON task_activity(task_id, id DESC);
-
--- Task backlog (persisted incomplete tasks across sessions)
-CREATE TABLE IF NOT EXISTS task_backlog (
-  id                     TEXT PRIMARY KEY,
-  workspace_id           TEXT NOT NULL REFERENCES workspaces(id),
-  source_session_id      TEXT NOT NULL REFERENCES sessions(id),
-  content                TEXT NOT NULL,
-  active_form            TEXT NOT NULL,
-  status                 TEXT NOT NULL,
-  source                 TEXT NOT NULL,
-  created_at             TEXT NOT NULL,
-  completed_at           TEXT,
-  backlogged_at          TEXT NOT NULL,
-  backlog_reason         TEXT NOT NULL,
-  metadata               TEXT,
-  restored_to_session_id TEXT,
-  restored_at            TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_backlog_workspace ON task_backlog(workspace_id, backlogged_at DESC);
-CREATE INDEX IF NOT EXISTS idx_backlog_status    ON task_backlog(status, restored_to_session_id);
-CREATE INDEX IF NOT EXISTS idx_backlog_session   ON task_backlog(source_session_id);
-
--- ═══════════════════════════════════════════════════════════════════════════════
 -- Notification Read State
 -- ═══════════════════════════════════════════════════════════════════════════════
 
@@ -265,36 +196,6 @@ CREATE TABLE IF NOT EXISTS notification_read_state (
     event_id TEXT PRIMARY KEY,
     read_at  TEXT NOT NULL
 );
-
--- ═══════════════════════════════════════════════════════════════════════════════
--- Full-Text Search (tasks only)
--- ═══════════════════════════════════════════════════════════════════════════════
-
-CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
-  task_id UNINDEXED, title, description, notes,
-  tokenize='porter unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS tasks_fts_insert
-AFTER INSERT ON tasks
-BEGIN
-  INSERT INTO tasks_fts (task_id, title, description, notes)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS tasks_fts_update
-AFTER UPDATE ON tasks
-BEGIN
-  DELETE FROM tasks_fts WHERE task_id = OLD.id;
-  INSERT INTO tasks_fts (task_id, title, description, notes)
-  VALUES (NEW.id, NEW.title, COALESCE(NEW.description, ''), COALESCE(NEW.notes, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS tasks_fts_delete
-AFTER DELETE ON tasks
-BEGIN
-  DELETE FROM tasks_fts WHERE task_id = OLD.id;
-END;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Cron Scheduling
@@ -357,21 +258,3 @@ CREATE INDEX IF NOT EXISTS idx_cron_runs_status
 CREATE INDEX IF NOT EXISTS idx_cron_runs_created
     ON cron_runs(created_at);
 
--- ═══════════════════════════════════════════════════════════════════════════════
--- Semantic Memory (vector embeddings)
--- ═══════════════════════════════════════════════════════════════════════════════
-
-CREATE TABLE IF NOT EXISTS memory_vectors (
-    id TEXT PRIMARY KEY,
-    event_id TEXT NOT NULL,
-    workspace_id TEXT NOT NULL,
-    chunk_type TEXT NOT NULL DEFAULT 'summary',
-    chunk_index INTEGER NOT NULL DEFAULT 0,
-    entry_type TEXT,
-    created_at TEXT,
-    embedding BLOB NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_mv_event ON memory_vectors(event_id);
-CREATE INDEX IF NOT EXISTS idx_mv_workspace ON memory_vectors(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_mv_type ON memory_vectors(entry_type);

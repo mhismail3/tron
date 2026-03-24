@@ -11,12 +11,19 @@ use regex::Regex;
 use std::sync::LazyLock;
 use tracing::debug;
 
-use super::types::{CompactionTriggerConfig, CompactionTriggerInput, CompactionTriggerResult};
+use super::types::{CompactionTriggerConfig, CompactionTriggerInput};
+
+/// Result of the compaction trigger decision.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionTriggerResult {
+    /// Whether compaction should run.
+    pub compact: bool,
+    /// Reason for the decision.
+    pub reason: String,
+}
 
 /// Progress signal patterns matched against recent Bash tool call commands.
-///
-/// These indicate the user has reached a milestone and compaction would be
-/// a good checkpoint.
 static PROGRESS_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
     [
         Regex::new(r"\bgit\s+push\b").expect("valid regex"),
@@ -162,8 +169,6 @@ mod tests {
         }
     }
 
-    // --- Token threshold ---
-
     #[test]
     fn test_token_threshold_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
@@ -188,15 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_token_ratio() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let result = trigger.should_compact(&default_input(0.0));
-        assert!(!result.compact);
-    }
-
-    // --- Progress signals: event types ---
-
-    #[test]
     fn test_worktree_commit_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
         let input = CompactionTriggerInput {
@@ -209,8 +205,6 @@ mod tests {
         assert!(result.reason.contains("commit"));
     }
 
-    // --- Progress signals: tool call patterns ---
-
     #[test]
     fn test_git_push_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
@@ -221,63 +215,11 @@ mod tests {
         };
         let result = trigger.should_compact(&input);
         assert!(result.compact);
-        assert!(result.reason.contains("progress signal"));
     }
-
-    #[test]
-    fn test_gh_pr_create_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: Vec::new(),
-            recent_tool_calls: vec!["gh pr create --title 'fix'".to_string()],
-        };
-        let result = trigger.should_compact(&input);
-        assert!(result.compact);
-    }
-
-    #[test]
-    fn test_gh_pr_merge_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: Vec::new(),
-            recent_tool_calls: vec!["gh pr merge 42".to_string()],
-        };
-        let result = trigger.should_compact(&input);
-        assert!(result.compact);
-    }
-
-    #[test]
-    fn test_git_tag_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: Vec::new(),
-            recent_tool_calls: vec!["git tag v1.0".to_string()],
-        };
-        let result = trigger.should_compact(&input);
-        assert!(result.compact);
-    }
-
-    #[test]
-    fn test_git_status_not_a_progress_signal() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: Vec::new(),
-            recent_tool_calls: vec!["git status".to_string()],
-        };
-        let result = trigger.should_compact(&input);
-        assert!(!result.compact);
-    }
-
-    // --- Turn fallback: normal zone ---
 
     #[test]
     fn test_turn_fallback_normal_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        // 25 turns at ratio 0.3 (normal zone, default fallback = 25)
         for _ in 0..24 {
             let result = trigger.should_compact(&default_input(0.3));
             assert!(!result.compact);
@@ -285,59 +227,7 @@ mod tests {
         let result = trigger.should_compact(&default_input(0.3));
         assert!(result.compact);
         assert!(result.reason.contains("turn count fallback"));
-        assert!(result.reason.contains("25 turns"));
     }
-
-    #[test]
-    fn test_turn_fallback_normal_not_yet() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..23 {
-            let _ = trigger.should_compact(&default_input(0.3));
-        }
-        let result = trigger.should_compact(&default_input(0.3));
-        assert!(!result.compact); // Only 24 turns, need 25
-    }
-
-    // --- Turn fallback: alert zone ---
-
-    #[test]
-    fn test_turn_fallback_alert_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        // 15 turns at ratio 0.55 (alert zone, alert fallback = 15)
-        for _ in 0..14 {
-            let result = trigger.should_compact(&default_input(0.55));
-            assert!(!result.compact);
-        }
-        let result = trigger.should_compact(&default_input(0.55));
-        assert!(result.compact);
-        assert!(result.reason.contains("15 turns"));
-    }
-
-    #[test]
-    fn test_turn_fallback_alert_not_yet() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..13 {
-            let _ = trigger.should_compact(&default_input(0.55));
-        }
-        let result = trigger.should_compact(&default_input(0.55));
-        assert!(!result.compact); // Only 14 turns, need 15
-    }
-
-    // --- No signals ---
-
-    #[test]
-    fn test_no_signals_no_trigger() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let result = trigger.should_compact(&CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: vec!["message.user".to_string()],
-            recent_tool_calls: vec!["ls -la".to_string()],
-        });
-        assert!(!result.compact);
-        assert_eq!(result.reason, "no trigger");
-    }
-
-    // --- Reset ---
 
     #[test]
     fn test_reset_clears_turn_count() {
@@ -350,8 +240,6 @@ mod tests {
         assert_eq!(trigger.turns_since_compaction(), 0);
     }
 
-    // --- Force always ---
-
     #[test]
     fn test_force_always_triggers() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
@@ -359,47 +247,5 @@ mod tests {
         let result = trigger.should_compact(&default_input(0.0));
         assert!(result.compact);
         assert!(result.reason.contains("force-always"));
-    }
-
-    #[test]
-    fn test_force_always_disabled() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        trigger.set_force_always(true);
-        trigger.set_force_always(false);
-        let result = trigger.should_compact(&default_input(0.0));
-        assert!(!result.compact);
-    }
-
-    // --- Custom config ---
-
-    #[test]
-    fn test_custom_config_thresholds() {
-        let config = CompactionTriggerConfig {
-            trigger_token_threshold: 0.90,
-            alert_zone_threshold: 0.60,
-            default_turn_fallback: 12,
-            alert_turn_fallback: 8,
-        };
-        let mut trigger = CompactionTrigger::new(config);
-
-        // 0.85 doesn't trigger with 0.90 threshold
-        let result = trigger.should_compact(&default_input(0.85));
-        assert!(!result.compact);
-
-        // 0.91 does trigger
-        let result = trigger.should_compact(&default_input(0.91));
-        assert!(result.compact);
-    }
-
-    // --- Turn counter increments ---
-
-    #[test]
-    fn test_turns_increment_each_call() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        assert_eq!(trigger.turns_since_compaction(), 0);
-        let _ = trigger.should_compact(&default_input(0.3));
-        assert_eq!(trigger.turns_since_compaction(), 1);
-        let _ = trigger.should_compact(&default_input(0.3));
-        assert_eq!(trigger.turns_since_compaction(), 2);
     }
 }

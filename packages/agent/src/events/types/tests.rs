@@ -310,51 +310,6 @@ mod session_event_tests {
     }
 
     #[test]
-    fn typed_payload_memory_ledger() {
-        let event = make_event(
-            EventType::MemoryLedger,
-            json!({
-                "eventRange": {"firstEventId": "e1", "lastEventId": "e10"},
-                "turnRange": {"firstTurn": 1, "lastTurn": 5},
-                "title": "Test session",
-                "entryType": "feature",
-                "status": "completed",
-                "tags": ["rust"],
-                "input": "implement types",
-                "actions": ["created types"],
-                "files": [{"path": "src/lib.rs", "op": "M", "why": "add module"}],
-                "decisions": [{"choice": "flat struct", "reason": "wire compat"}],
-                "lessons": ["use serde rename"],
-                "thinkingInsights": [],
-                "tokenCost": {"input": 1000, "output": 500},
-                "model": "claude-opus-4-6",
-                "workingDirectory": "/project"
-            }),
-        );
-        let payload = event.typed_payload().unwrap();
-        match payload {
-            SessionEventPayload::MemoryLedger(p) => {
-                assert_eq!(p.title, "Test session");
-                assert_eq!(p.files.len(), 1);
-                assert_eq!(p.files[0].op, "M");
-            }
-            other => panic!("expected MemoryLedger, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn typed_payload_memory_loaded() {
-        let event = make_event(EventType::MemoryLoaded, json!({"some": "data"}));
-        let payload = event.typed_payload().unwrap();
-        match payload {
-            SessionEventPayload::MemoryLoaded(v) => {
-                assert_eq!(v["some"], "data");
-            }
-            other => panic!("expected MemoryLoaded, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn typed_payload_invalid_payload_returns_err() {
         let event = make_event(EventType::SessionStart, json!({"invalid": true}));
         assert!(event.typed_payload().is_err());
@@ -520,15 +475,6 @@ mod session_event_tests {
                 json!({"todos": [], "trigger": "tool"}),
             ),
             (
-                EventType::TaskCreated,
-                json!({"taskId": "t", "title": "t", "status": "pending", "projectId": null}),
-            ),
-            (
-                EventType::TaskUpdated,
-                json!({"taskId": "t", "title": "t", "status": "done", "changedFields": ["status"]}),
-            ),
-            (EventType::TaskDeleted, json!({"taskId": "t", "title": "t"})),
-            (
                 EventType::TurnFailed,
                 json!({"turn": 1, "error": "e", "recoverable": false}),
             ),
@@ -548,14 +494,9 @@ mod session_event_tests {
                 EventType::HookBackgroundCompleted,
                 json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
             ),
-            (
-                EventType::MemoryLedger,
-                json!({"eventRange": {"firstEventId": "e1", "lastEventId": "e2"}, "turnRange": {"firstTurn": 1, "lastTurn": 2}, "title": "t", "entryType": "feature", "status": "completed", "tags": [], "input": "i", "actions": [], "files": [], "decisions": [], "lessons": [], "thinkingInsights": [], "tokenCost": {"input": 0, "output": 0}, "model": "m", "workingDirectory": "/"}),
-            ),
-            (EventType::MemoryLoaded, json!({})),
         ];
 
-        assert_eq!(cases.len(), 54, "must cover all 54 event types");
+        assert_eq!(cases.len(), 49, "must cover all 49 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -667,12 +608,6 @@ mod type_guard_tests {
     fn rules_guards() {
         assert!(EventType::RulesLoaded.is_rules_type());
         assert!(EventType::RulesIndexed.is_rules_type());
-    }
-
-    #[test]
-    fn memory_guards() {
-        assert!(EventType::MemoryLedger.is_memory_type());
-        assert!(EventType::MemoryLoaded.is_memory_type());
     }
 
     #[test]

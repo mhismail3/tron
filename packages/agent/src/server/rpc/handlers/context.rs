@@ -755,78 +755,6 @@ mod tests {
         );
     }
 
-    // ── Memory from workspace ledger ──
-
-    #[tokio::test]
-    async fn get_detailed_snapshot_memory_from_ledger() {
-        let ctx = make_test_context();
-        let workspace_path = "/tmp/memory-test-ws";
-
-        // Create an older session in the same workspace with a ledger entry
-        let older_sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", workspace_path, Some("older"))
-            .unwrap();
-        let _ = ctx.event_store.append(&crate::events::AppendOptions {
-            session_id: &older_sid,
-            event_type: crate::events::EventType::MemoryLedger,
-            payload: json!({
-                "title": "Implemented dark mode",
-                "entryType": "feature",
-                "lessons": ["Use CSS variables for theming", "Test both light and dark"],
-            }),
-            parent_id: None,
-        });
-
-        // Create the current session in the same workspace
-        let sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", workspace_path, Some("current"))
-            .unwrap();
-
-        let result = GetDetailedSnapshotHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-
-        let memory = &result["memory"];
-        assert!(
-            memory.is_object(),
-            "memory should be populated from ledger, got: {memory}"
-        );
-        assert!(memory["count"].as_u64().unwrap() > 0);
-        assert!(memory["tokens"].as_u64().is_some());
-
-        let entries = memory["entries"].as_array().unwrap();
-        assert!(!entries.is_empty());
-        assert_eq!(entries[0]["title"], "Implemented dark mode");
-        let content = entries[0]["content"].as_str().unwrap();
-        assert!(
-            content.contains("dark mode"),
-            "entry content should contain title"
-        );
-        assert!(
-            content.contains("CSS variables"),
-            "entry content should contain lessons"
-        );
-    }
-
-    #[tokio::test]
-    async fn get_detailed_snapshot_memory_null_when_no_ledger() {
-        let (ctx, sid) = ctx_with_session();
-
-        let result = GetDetailedSnapshotHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-
-        // /tmp has no workspace ledger entries → memory should be null
-        assert!(
-            result["memory"].is_null(),
-            "memory should be null with no ledger entries"
-        );
-    }
-
     // ── composedSystemPrompt ──
 
     #[tokio::test]
@@ -1007,7 +935,6 @@ mod tests {
             session_manager: mgr.clone(),
             event_store: store,
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
-            task_pool: None,
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),

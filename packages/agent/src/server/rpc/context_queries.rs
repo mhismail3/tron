@@ -222,7 +222,7 @@ fn build_detailed_snapshot_response(
         "toolsContent": detailed.tools_content,
         "addedSkills": added_skills,
         "rules": build_rules_info(event_store, session_id, &session, &artifacts, detailed.snapshot.breakdown.rules),
-        "memory": build_memory_info(artifacts.memory.as_ref()),
+        "memory": null,
         "sessionMemories": build_session_memory_info(context_manager.get_session_memories()),
         "taskContext": null,
         "composedSystemPrompt": composed_system_prompt,
@@ -418,28 +418,6 @@ fn build_rules_info(
             "tokens": rules_tokens,
         }))
     }
-}
-
-fn build_memory_info(memory: Option<&crate::server::rpc::session_context::LoadedMemory>) -> Option<Value> {
-    let memory = memory?;
-    if memory.entries.is_empty() {
-        return None;
-    }
-    let entries: Vec<Value> = memory
-        .entries
-        .iter()
-        .map(|entry| {
-            json!({
-                "title": entry.title,
-                "content": entry.summary,
-            })
-        })
-        .collect();
-    Some(json!({
-        "count": entries.len(),
-        "tokens": memory.content_tokens_estimate(),
-        "entries": entries,
-    }))
 }
 
 fn build_session_memory_info(

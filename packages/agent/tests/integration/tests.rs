@@ -155,49 +155,6 @@ async fn e2e_model_list() {
 }
 
 #[tokio::test]
-async fn e2e_task_crud() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    // Create
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "tasks.create",
-        Some(json!({"title": "Test task"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    let task_id = resp["result"]["id"].as_str().unwrap().to_string();
-
-    // Get
-    let resp = rpc_call(&mut ws, 2, "tasks.get", Some(json!({"taskId": task_id}))).await;
-    assert_eq!(resp["success"], true, "tasks.get failed: {resp}");
-    assert_eq!(resp["result"]["title"], "Test task");
-
-    // Update
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "tasks.update",
-        Some(json!({"taskId": task_id, "status": "in_progress"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-
-    // List
-    let resp = rpc_call(&mut ws, 4, "tasks.list", None).await;
-    assert_eq!(resp["success"], true);
-
-    // Delete
-    let resp = rpc_call(&mut ws, 5, "tasks.delete", Some(json!({"taskId": task_id}))).await;
-    assert_eq!(resp["success"], true);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
 async fn e2e_agent_prompt_acknowledged() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
@@ -378,45 +335,6 @@ async fn e2e_rapid_fire_requests() {
         }
     }
     assert_eq!(received, 50);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_task_done_and_add_note() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "tasks.create",
-        Some(json!({"title": "Test task"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    let tid = resp["result"]["id"].as_str().unwrap().to_string();
-
-    let resp = rpc_call(
-        &mut ws,
-        2,
-        "tasks.addNote",
-        Some(json!({"taskId": tid, "note": "progress note"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert!(resp["result"]["notes"].as_str().unwrap().contains("progress note"));
-
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "tasks.done",
-        Some(json!({"taskId": tid})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert_eq!(resp["result"]["status"], "completed");
 
     server.shutdown().shutdown();
 }
@@ -613,35 +531,6 @@ async fn e2e_session_archive_unarchive() {
 }
 
 #[tokio::test]
-async fn e2e_memory_ledger() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": "/tmp"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert!(resp["result"]["entries"].is_array());
-
-    let resp = rpc_call(
-        &mut ws,
-        2,
-        "memory.updateLedger",
-        Some(json!({"workingDirectory": "/tmp"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert!(resp["result"].get("written").is_some());
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
 async fn e2e_session_create_enriched_response() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
@@ -697,29 +586,6 @@ async fn e2e_session_list_enriched_fields() {
     assert!(s.get("isActive").is_some());
     assert!(s.get("isArchived").is_some());
     assert!(s.get("eventCount").is_some());
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_task_batch_create() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "tasks.batchCreate",
-        Some(json!({"items": [{"title": "A"}, {"title": "B"}]})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert_eq!(resp["result"]["affected"], 2);
-
-    let resp = rpc_call(&mut ws, 2, "tasks.list", None).await;
-    assert_eq!(resp["success"], true);
-    assert_eq!(resp["result"]["total"], 2);
 
     server.shutdown().shutdown();
 }
@@ -1696,202 +1562,6 @@ async fn e2e_sequential_prompts_after_abort() {
 // Phase 12: Memory integration tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn e2e_memory_ledger_list() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": "/tmp/test"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert!(resp["result"]["entries"].is_array());
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_memory_ledger_by_workspace() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    // Different workspaces should be independent
-    let resp1 = rpc_call(
-        &mut ws,
-        1,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": "/tmp/ws1"})),
-    )
-    .await;
-    let resp2 = rpc_call(
-        &mut ws,
-        2,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": "/tmp/ws2"})),
-    )
-    .await;
-    assert_eq!(resp1["success"], true);
-    assert_eq!(resp2["success"], true);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_memory_empty_working_dir_returns_global_entries() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let ws1 = rpc_call(
-        &mut ws,
-        1,
-        "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp/ws1"})),
-    )
-    .await;
-    let sid1 = ws1["result"]["sessionId"].as_str().unwrap().to_string();
-
-    let ws2 = rpc_call(
-        &mut ws,
-        2,
-        "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp/ws2"})),
-    )
-    .await;
-    let sid2 = ws2["result"]["sessionId"].as_str().unwrap().to_string();
-
-    let _ = rpc_call(
-        &mut ws,
-        3,
-        "events.append",
-        Some(json!({
-            "sessionId": sid1,
-            "type": "memory.ledger",
-            "payload": {"title": "WS1 entry"}
-        })),
-    )
-    .await;
-    let _ = rpc_call(
-        &mut ws,
-        4,
-        "events.append",
-        Some(json!({
-            "sessionId": sid2,
-            "type": "memory.ledger",
-            "payload": {"title": "WS2 entry"}
-        })),
-    )
-    .await;
-
-    let resp = rpc_call(
-        &mut ws,
-        5,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": ""})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert_eq!(resp["result"]["entries"].as_array().unwrap().len(), 2);
-    assert_eq!(resp["result"]["totalCount"], 2);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_memory_update_trigger() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "memory.updateLedger",
-        Some(json!({"workingDirectory": "/tmp/test"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    assert!(resp["result"].get("written").is_some());
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_memory_empty_workspace() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(
-        &mut ws,
-        1,
-        "memory.getLedger",
-        Some(json!({"workingDirectory": "/nonexistent/workspace/path"})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    let entries = resp["result"]["entries"].as_array().unwrap();
-    assert!(entries.is_empty());
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_memory_entries_structure() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    // Append a memory.ledger event manually
-    let sid = create_and_bind_session(&mut ws, 1).await;
-    let _ = rpc_call(
-        &mut ws,
-        2,
-        "events.append",
-        Some(json!({
-            "sessionId": sid,
-            "type": "memory.ledger",
-            "payload": {
-                "eventRange": {"firstEventId": "e1", "lastEventId": "e2"},
-                "turnRange": {"firstTurn": 1, "lastTurn": 2},
-                "title": "Test memory entry",
-                "entryType": "feature",
-                "status": "completed",
-                "tags": ["test"],
-                "input": "user request",
-                "actions": ["did stuff"],
-                "files": [],
-                "decisions": [],
-                "lessons": ["learned things"],
-                "thinkingInsights": [],
-                "tokenCost": {"input": 100, "output": 50},
-                "model": "claude",
-                "workingDirectory": "/tmp"
-            }
-        })),
-    )
-    .await;
-
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "events.getHistory",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
-    assert_eq!(resp["success"], true);
-    let events = resp["result"]["events"].as_array().unwrap();
-    assert!(!events.is_empty());
-
-    server.shutdown().shutdown();
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 14: Prompt execution chain e2e tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2565,26 +2235,6 @@ async fn e2e_session_get_history_exists() {
     let result = &resp["result"];
     assert!(result["messages"].is_array());
     assert_eq!(result["hasMore"], false);
-
-    server.shutdown().shutdown();
-}
-
-#[tokio::test]
-async fn e2e_settings_get_ios_compat() {
-    let (url, server) = boot_server().await;
-    let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
-
-    let resp = rpc_call(&mut ws, 1, "settings.get", None).await;
-    let result = &resp["result"];
-    // Nested fields
-    assert!(result["server"].is_object());
-    assert!(result["server"]["defaultModel"].is_string());
-    assert!(result["server"]["maxConcurrentSessions"].is_number());
-    assert!(result["context"]["compactor"].is_object());
-    assert!(result["context"]["memory"].is_object());
-    // ModelSettings removed — no top-level "models" key
-    assert!(result.get("models").is_none());
 
     server.shutdown().shutdown();
 }

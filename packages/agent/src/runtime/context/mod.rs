@@ -10,8 +10,7 @@
 //! | `llm_summarizer` | Subagent-based summarization for compaction |
 //! | `summarizer` | Summarizer trait and fallback implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
-//! | `ledger_writer` | Writes memory.ledger events after each agent turn |
-//! | `loader` | Loads context parts (rules, memory, skills) from disk/DB |
+//! | `loader` | Loads context parts (rules, skills) from disk/DB |
 //! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
@@ -28,14 +27,14 @@
 //!
 //! ## Key Invariant
 //!
-//! Compaction always runs before ledger writing, ensuring `compact.boundary`
-//! events precede `memory.ledger` events in the event log.
+//! Compaction uses a multi-signal trigger (token threshold, progress signals,
+//! turn count fallback) to decide when to compact context.
 
 pub mod compaction_engine;
+pub mod compaction_trigger;
 pub mod constants;
 pub mod context_manager;
 pub mod context_snapshot_builder;
-pub mod ledger_writer;
 pub mod llm_summarizer;
 pub mod loader;
 pub mod message_store;

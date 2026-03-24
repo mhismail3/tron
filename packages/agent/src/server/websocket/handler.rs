@@ -105,7 +105,6 @@ mod tests {
             skill_registry: Arc::new(parking_lot::RwLock::new(
                 crate::skills::registry::SkillRegistry::new(),
             )),
-            task_pool: None,
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),

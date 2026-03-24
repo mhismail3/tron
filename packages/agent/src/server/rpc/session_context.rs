@@ -1,7 +1,6 @@
 //! Shared session-context data loading used by RPC handlers.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
@@ -63,34 +62,9 @@ impl LoadedRules {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MemoryEntry {
-    pub(crate) title: String,
-    pub(crate) summary: String,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LoadedMemory {
-    pub(crate) workspace_id: String,
-    pub(crate) raw_event_count: usize,
-    pub(crate) raw_payload_tokens: u64,
-    pub(crate) entries: Vec<MemoryEntry>,
-    pub(crate) content: String,
-}
-
-impl LoadedMemory {
-    pub(crate) fn content_tokens_estimate(&self) -> u64 {
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            (self.content.len() / 4) as u64
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SessionContextArtifacts {
     pub(crate) rules: LoadedRules,
-    pub(crate) memory: Option<LoadedMemory>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -105,8 +79,6 @@ struct ContextArtifactsKey {
     working_dir: String,
     is_chat: bool,
     discover_standalone_files: bool,
-    memory_enabled: bool,
-    memory_count: u32,
 }
 
 #[derive(Default)]
@@ -154,7 +126,6 @@ struct CachedArtifacts {
     artifacts: ResolvedContextArtifacts,
     rules_fingerprint: RulesFingerprint,
     rules_index_fingerprint: RulesIndexFingerprint,
-    memory_fingerprint: MemoryFingerprint,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,20 +137,6 @@ struct RulesFingerprint {
 struct RulesIndexFingerprint {
     scanned_dirs: Vec<PathFingerprint>,
     discovered_files: Vec<PathFingerprint>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum MemoryFingerprint {
-    Disabled,
-    MissingWorkspace {
-        working_dir: String,
-    },
-    Snapshot {
-        workspace_id: String,
-        working_dir: String,
-        count: i64,
-        event_ids: Vec<String>,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,8 +188,6 @@ impl ContextArtifactsService {
             working_dir: working_dir.to_owned(),
             is_chat,
             discover_standalone_files: settings.context.rules.discover_standalone_files,
-            memory_enabled: settings.context.memory.auto_inject.enabled,
-            memory_count: settings.context.memory.auto_inject.count.clamp(1, 10) as u32,
         };
 
         loop {
@@ -299,10 +254,9 @@ impl ContextArtifactsService {
         let rules = load_rules(working_dir_path, settings, home_dir);
         let rules_discovery = discover_rules_state(working_dir_path, settings);
         let rules_index = rules_index_from_discovery(&rules_discovery);
-        let memory = load_memory_from_workspace(event_store, workspace.as_ref(), settings);
         let workspace_id = workspace.as_ref().map(|workspace| workspace.id.clone());
 
-        let session = SessionContextArtifacts { rules, memory };
+        let session = SessionContextArtifacts { rules };
         let artifacts = ResolvedContextArtifacts {
             session,
             rules_index,
@@ -316,12 +270,6 @@ impl ContextArtifactsService {
                 &artifacts.session.rules,
             ),
             rules_index_fingerprint: build_rules_index_fingerprint(&rules_discovery),
-            memory_fingerprint: build_memory_fingerprint(
-                event_store,
-                working_dir,
-                workspace.as_ref(),
-                settings,
-            ),
             artifacts,
         }
     }
@@ -369,8 +317,7 @@ pub(crate) fn load_session_context_artifacts_with_home(
         .ok()
         .flatten();
     let rules = load_rules(wd_path, settings, home_dir);
-    let memory = load_memory_from_workspace(event_store, workspace.as_ref(), settings);
-    SessionContextArtifacts { rules, memory }
+    SessionContextArtifacts { rules }
 }
 
 pub(crate) fn collect_dynamic_rule_paths(
@@ -513,70 +460,6 @@ fn load_global_rules_with_path(home_dir: &Path) -> Option<(PathBuf, String)> {
     None
 }
 
-fn load_memory_from_workspace(
-    event_store: &EventStore,
-    workspace: Option<&crate::events::sqlite::row_types::WorkspaceRow>,
-    settings: &crate::settings::TronSettings,
-) -> Option<LoadedMemory> {
-    let auto_inject = &settings.context.memory.auto_inject;
-    if !auto_inject.enabled {
-        return None;
-    }
-
-    let workspace = workspace?;
-    #[allow(clippy::cast_possible_wrap)]
-    let count = auto_inject.count.clamp(1, 10) as i64;
-    let events = event_store
-        .get_events_by_workspace_and_types(&workspace.id, &["memory.ledger"], Some(count), None)
-        .unwrap_or_default();
-
-    if events.is_empty() {
-        return None;
-    }
-
-    let mut sections = vec!["# Memory\n\n## Recent sessions in this workspace".to_string()];
-    let mut entries = Vec::new();
-
-    for event in events.iter().rev() {
-        let Ok(payload) = serde_json::from_str::<Value>(&event.payload) else {
-            continue;
-        };
-        let title = payload
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("Untitled");
-        let mut summary = format!("### {title}");
-        if let Some(lessons) = payload.get("lessons").and_then(Value::as_array) {
-            for lesson in lessons
-                .iter()
-                .filter_map(Value::as_str)
-                .filter(|text| !text.is_empty())
-            {
-                let _ = write!(summary, "\n- {lesson}");
-            }
-        }
-        sections.push(format!("\n{summary}"));
-        entries.push(MemoryEntry {
-            title: title.to_string(),
-            summary,
-        });
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    let raw_payload_tokens: u64 = events
-        .iter()
-        .map(|event| (event.payload.len() / 4) as u64)
-        .sum();
-
-    Some(LoadedMemory {
-        workspace_id: workspace.id.clone(),
-        raw_event_count: events.len(),
-        raw_payload_tokens,
-        entries,
-        content: sections.join("\n"),
-    })
-}
-
 fn discover_rules_state(
     working_dir: &Path,
     settings: &crate::settings::TronSettings,
@@ -602,16 +485,13 @@ fn rules_index_from_discovery(discovery: &RulesDiscoveryResult) -> Option<RulesI
 impl CachedArtifacts {
     fn is_fresh(
         &self,
-        event_store: &EventStore,
-        working_dir: &str,
-        settings: &crate::settings::TronSettings,
-        home_dir: Option<&Path>,
+        _event_store: &EventStore,
+        _working_dir: &str,
+        _settings: &crate::settings::TronSettings,
+        _home_dir: Option<&Path>,
     ) -> bool {
         self.rules_fingerprint.is_fresh()
             && self.rules_index_fingerprint.is_fresh()
-            && self
-                .memory_fingerprint
-                .is_fresh(event_store, working_dir, settings, home_dir)
     }
 }
 
@@ -632,52 +512,6 @@ impl RulesIndexFingerprint {
                 .discovered_files
                 .iter()
                 .all(PathFingerprint::matches_current)
-    }
-}
-
-impl MemoryFingerprint {
-    fn is_fresh(
-        &self,
-        event_store: &EventStore,
-        working_dir: &str,
-        settings: &crate::settings::TronSettings,
-        _home_dir: Option<&Path>,
-    ) -> bool {
-        match self {
-            Self::Disabled => !settings.context.memory.auto_inject.enabled,
-            Self::MissingWorkspace {
-                working_dir: cached_working_dir,
-            } => {
-                cached_working_dir == working_dir
-                    && event_store
-                        .get_workspace_by_path(working_dir)
-                        .ok()
-                        .flatten()
-                        .is_none()
-            }
-            Self::Snapshot {
-                workspace_id,
-                working_dir: cached_working_dir,
-                count,
-                event_ids,
-            } => {
-                if cached_working_dir != working_dir {
-                    return false;
-                }
-                let current_ids: Vec<String> = event_store
-                    .get_events_by_workspace_and_types(
-                        workspace_id,
-                        &["memory.ledger"],
-                        Some(*count),
-                        None,
-                    )
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|event| event.id)
-                    .collect();
-                &current_ids == event_ids
-            }
-        }
     }
 }
 
@@ -770,40 +604,6 @@ fn build_rules_index_fingerprint(discovery: &RulesDiscoveryResult) -> RulesIndex
     }
 }
 
-fn build_memory_fingerprint(
-    event_store: &EventStore,
-    working_dir: &str,
-    workspace: Option<&crate::events::sqlite::row_types::WorkspaceRow>,
-    settings: &crate::settings::TronSettings,
-) -> MemoryFingerprint {
-    let auto_inject = &settings.context.memory.auto_inject;
-    if !auto_inject.enabled {
-        return MemoryFingerprint::Disabled;
-    }
-
-    let Some(workspace) = workspace else {
-        return MemoryFingerprint::MissingWorkspace {
-            working_dir: working_dir.to_owned(),
-        };
-    };
-
-    #[allow(clippy::cast_possible_wrap)]
-    let count = auto_inject.count.clamp(1, 10) as i64;
-    let event_ids = event_store
-        .get_events_by_workspace_and_types(&workspace.id, &["memory.ledger"], Some(count), None)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|event| event.id)
-        .collect();
-
-    MemoryFingerprint::Snapshot {
-        workspace_id: workspace.id.clone(),
-        working_dir: working_dir.to_owned(),
-        count,
-        event_ids,
-    }
-}
-
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
@@ -872,43 +672,6 @@ mod tests {
                 .unwrap_or("")
                 .contains("project rules")
         );
-    }
-
-    #[tokio::test]
-    async fn loads_workspace_memory_entries() {
-        let ctx = make_test_context();
-        let settings = crate::settings::TronSettings::default();
-
-        let working_dir = tempfile::tempdir().unwrap();
-        let working_dir_str = working_dir.path().to_str().unwrap();
-        let session_id = ctx
-            .session_manager
-            .create_session("claude-sonnet-4-20250514", working_dir_str, Some("test"))
-            .unwrap();
-
-        let _ = ctx.event_store.append(&AppendOptions {
-            session_id: &session_id,
-            event_type: EventType::MemoryLedger,
-            payload: serde_json::json!({
-                "title": "Previous session",
-                "lessons": ["Keep cache warm", "Avoid duplicate IO"]
-            }),
-            parent_id: None,
-        });
-
-        let artifacts = load_session_context_artifacts(
-            ctx.event_store.as_ref(),
-            working_dir_str,
-            &settings,
-            false,
-        );
-        let memory = artifacts.memory.expect("memory should be loaded");
-
-        assert_eq!(memory.raw_event_count, 1);
-        assert_eq!(memory.entries.len(), 1);
-        assert_eq!(memory.entries[0].title, "Previous session");
-        assert!(memory.entries[0].summary.contains("Keep cache warm"));
-        assert!(memory.content.contains("Recent sessions in this workspace"));
     }
 
     #[tokio::test]

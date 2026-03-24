@@ -318,7 +318,6 @@ async fn main() -> Result<()> {
         .unwrap_or(settings.server.max_concurrent_sessions);
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.clone()));
-    session_manager.set_task_pool(event_store.pool().clone());
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
@@ -548,13 +547,11 @@ async fn main() -> Result<()> {
     let settings_path_for_selftest = settings_path.clone();
     #[cfg(feature = "apns")]
     let pool_for_deploy = event_store.pool().clone();
-    let rpc_task_pool = event_store.pool().clone();
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
         skill_registry,
-        task_pool: Some(rpc_task_pool),
         settings_path,
         agent_deps,
         server_start_time: std::time::Instant::now(),
@@ -1184,7 +1181,6 @@ mod tests {
             session_manager,
             event_store,
             skill_registry,
-            task_pool: None,
             settings_path,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
@@ -1364,7 +1360,6 @@ mod tests {
             session_manager,
             event_store,
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
-            task_pool: None,
             settings_path: dir.path().join("settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),

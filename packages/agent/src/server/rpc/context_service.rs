@@ -71,10 +71,6 @@ pub(crate) fn build_context_manager_for_session(
     if !state.messages.is_empty() {
         context_manager.set_messages(state.messages.clone());
     }
-    if let Some(memory) = artifacts.memory.as_ref() {
-        context_manager.set_memory_content(Some(memory.content.clone()));
-    }
-
     let last_turn = session.last_turn_input_tokens;
     if last_turn > 0 {
         #[allow(clippy::cast_sign_loss)]

@@ -46,8 +46,6 @@ pub struct RpcContext {
     pub event_store: Arc<EventStore>,
     /// Skill registry (read/write).
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
-    /// Connection pool for task tables (same DB as events).
-    pub task_pool: Option<ConnectionPool>,
     /// Path to settings JSON file.
     pub settings_path: PathBuf,
     /// Agent execution dependencies (None = prompt handler returns error).
@@ -142,7 +140,6 @@ mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::{
         ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
-        make_test_context_with_tasks,
     };
 
     #[test]
@@ -285,20 +282,7 @@ mod tests {
         assert_eq!(ctx.session_manager.active_count(), 0);
         assert!(ctx.event_store.list_workspaces().is_ok());
         assert_eq!(ctx.skill_registry.read().list(None).len(), 0);
-        assert!(ctx.task_pool.is_none());
         assert!(!ctx.settings_path.as_os_str().is_empty());
-    }
-
-    #[test]
-    fn make_test_context_with_tasks_has_pool() {
-        let ctx = make_test_context_with_tasks();
-        assert!(ctx.task_pool.is_some());
-        let pool = ctx.task_pool.as_ref().unwrap();
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
     }
 
     // ── AgentDeps tests ──

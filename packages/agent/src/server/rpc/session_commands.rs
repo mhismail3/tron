@@ -420,27 +420,6 @@ fn emit_optimistic_context_events(
         });
     }
 
-    if let Some(memory) = artifacts.session.memory {
-        summary.loaded_memory = true;
-        #[allow(clippy::cast_possible_truncation)]
-        let count = memory.raw_event_count as u32;
-
-        let _ = event_store.append(&crate::events::AppendOptions {
-            session_id,
-            event_type: crate::events::EventType::MemoryLoaded,
-            payload: json!({
-                "count": count,
-                "tokens": memory.raw_payload_tokens,
-                "workspaceId": memory.workspace_id,
-            }),
-            parent_id: None,
-        });
-        let _ = broadcast.emit(TronEvent::MemoryLoaded {
-            base: BaseEvent::now(session_id),
-            count,
-        });
-    }
-
     summary
 }
 

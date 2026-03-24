@@ -138,16 +138,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_settings_returns_memory_in_context_section() {
-        let _guard = settings_test_guard().await;
-        let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["context"]["memory"].is_object());
-        assert!(result["context"]["memory"]["ledger"].is_object());
-        assert!(result["context"]["memory"]["autoInject"].is_object());
-    }
-
-    #[tokio::test]
     async fn get_settings_returns_tools() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
@@ -263,20 +253,19 @@ mod tests {
         assert!(
             crate::settings::get_settings()
                 .context
-                .memory
-                .auto_inject
-                .enabled,
-            "auto_inject should default to true"
+                .rules
+                .discover_standalone_files,
+            "discover_standalone_files should default to true"
         );
 
-        // Simulate client toggling auto-inject off via settings.update RPC
+        // Simulate client toggling discover_standalone_files off via settings.update RPC
         let _ = UpdateSettingsHandler
             .handle(
                 Some(json!({
                     "settings": {
                         "context": {
-                            "memory": {
-                                "autoInject": {"enabled": false}
+                            "rules": {
+                                "discoverStandaloneFiles": false
                             }
                         }
                     }
@@ -289,44 +278,8 @@ mod tests {
         // The cached singleton should now reflect the update
         let settings = crate::settings::get_settings();
         assert!(
-            !settings.context.memory.auto_inject.enabled,
-            "auto_inject should be false after settings.update RPC"
-        );
-    }
-
-    #[tokio::test]
-    async fn update_settings_reloads_ledger_toggle() {
-        let _guard = settings_test_guard().await;
-        let (ctx, _dir) = make_ctx_with_temp_settings();
-
-        // Prime the cache
-        crate::settings::reload_settings_from_path(&ctx.settings_path);
-        assert!(
-            crate::settings::get_settings().context.memory.ledger.enabled,
-            "ledger should default to true"
-        );
-
-        // Toggle ledger off
-        let _ = UpdateSettingsHandler
-            .handle(
-                Some(json!({
-                    "settings": {
-                        "context": {
-                            "memory": {
-                                "ledger": {"enabled": false}
-                            }
-                        }
-                    }
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let settings = crate::settings::get_settings();
-        assert!(
-            !settings.context.memory.ledger.enabled,
-            "ledger should be false after settings.update RPC"
+            !settings.context.rules.discover_standalone_files,
+            "discover_standalone_files should be false after settings.update RPC"
         );
     }
 }

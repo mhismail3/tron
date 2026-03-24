@@ -44,7 +44,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
     }
-    let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -56,7 +55,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         session_manager,
         event_store,
         skill_registry,
-        task_pool: Some(task_pool),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
@@ -322,7 +320,6 @@ async fn boot_server_with_provider_and_handles(
         let conn = pool.get().unwrap();
         let _ = tron::events::run_migrations(&conn).unwrap();
     }
-    let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -334,7 +331,6 @@ async fn boot_server_with_provider_and_handles(
         session_manager,
         event_store,
         skill_registry,
-        task_pool: Some(task_pool),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(provider)),

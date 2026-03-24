@@ -210,7 +210,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 rules_index: None,
                 pre_activated_rules: vec![],
                 subagent_manager: self.subagent_manager.clone(),
-                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             },
         );
 
@@ -271,14 +271,6 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         }
         self.session_manager.invalidate_session(&session_id);
 
-        // 13. Write memory ledger entry (fail-silent — never blocks the result)
-        let _ = write_cron_ledger(
-            &session_id,
-            &self.event_store,
-            &self.subagent_manager,
-        )
-        .await;
-
         Ok(crate::cron::AgentTurnResult {
             session_id,
             output,
@@ -300,37 +292,6 @@ impl Drop for SessionGuard {
     fn drop(&mut self) {
         self.session_manager.invalidate_session(&self.session_id);
     }
-}
-
-/// Write a memory ledger entry for a completed cron session.
-/// Returns `true` if written, `false` if skipped/failed (never errors).
-#[allow(clippy::ref_option)]
-async fn write_cron_ledger(
-    session_id: &str,
-    event_store: &Arc<crate::events::EventStore>,
-    subagent_manager: &Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
-) -> bool {
-    let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
-        event_store: event_store.clone(),
-        subagent_manager: subagent_manager.clone(),
-        shutdown_coordinator: None,
-    };
-    let result =
-        crate::server::rpc::memory_ledger::execute_ledger_write(session_id, &deps, "cron").await;
-    if result.written {
-        tracing::debug!(
-            session_id,
-            title = ?result.title,
-            "cron session ledger entry written"
-        );
-    } else {
-        tracing::debug!(
-            session_id,
-            reason = ?result.reason,
-            "cron session ledger write skipped"
-        );
-    }
-    result.written
 }
 
 // ── Push Notifications ──────────────────────────────────────────────
@@ -505,47 +466,7 @@ mod tests {
         (store, mgr)
     }
 
-    #[tokio::test]
-    async fn write_cron_ledger_no_subagent_manager() {
-        let (store, mgr) = make_test_store_and_manager();
-        let sid = mgr.create_session("mock", "/tmp", Some("test")).unwrap();
-        // Append a user message so compute_cycle_messages finds something
-        let _ = store.append(&crate::events::AppendOptions {
-            session_id: &sid,
-            event_type: crate::events::EventType::MessageUser,
-            payload: serde_json::json!({"content": "hello"}),
-            parent_id: None,
-        });
-        mgr.invalidate_session(&sid);
-
-        let result = write_cron_ledger(&sid, &store, &None).await;
-        assert!(!result, "should skip when subagent_manager is None");
-    }
-
-    #[tokio::test]
-    async fn write_cron_ledger_no_session_events() {
-        let (store, mgr) = make_test_store_and_manager();
-        let sid = mgr.create_session("mock", "/tmp", Some("empty")).unwrap();
-        mgr.invalidate_session(&sid);
-
-        let result = write_cron_ledger(&sid, &store, &None).await;
-        assert!(!result, "should skip for session with no messages");
-    }
-
-    #[tokio::test]
-    async fn write_cron_ledger_nonexistent_session() {
-        let (store, _mgr) = make_test_store_and_manager();
-        let result = write_cron_ledger(
-            "nonexistent",
-            &store,
-            &None,
-        )
-        .await;
-        // Must not panic — gracefully returns false
-        assert!(!result);
-    }
-
-    // ── Mock LLM that returns valid ledger JSON ──
+    // ── Provider retry tests ──────────────────────────────────────────
 
     use async_trait::async_trait;
     use futures::stream;
@@ -601,86 +522,6 @@ mod tests {
             Ok(Arc::new(LedgerMockProvider))
         }
     }
-
-    fn make_subagent_manager_with_mock_llm(
-        store: &Arc<crate::events::EventStore>,
-        mgr: &Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
-    ) -> Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager> {
-        let broadcast = Arc::new(crate::runtime::EventEmitter::new());
-        let manager = crate::runtime::orchestrator::subagent_manager::SubagentManager::new(
-            mgr.clone(),
-            store.clone(),
-            broadcast,
-            Arc::new(LedgerMockProviderFactory),
-            None,
-            None,
-        );
-        manager.set_tool_factory(Arc::new(crate::tools::registry::ToolRegistry::new));
-        Arc::new(manager)
-    }
-
-    /// Seed a session with a user + assistant message cycle for ledger generation.
-    fn seed_session_with_messages(
-        store: &crate::events::EventStore,
-        mgr: &crate::runtime::orchestrator::session_manager::SessionManager,
-    ) -> String {
-        let sid = mgr
-            .create_session("mock", "/tmp", Some("cron test"))
-            .unwrap();
-        let _ = store
-            .append(&crate::events::AppendOptions {
-                session_id: &sid,
-                event_type: crate::events::EventType::MessageUser,
-                payload: serde_json::json!({"content": "Hello from cron"}),
-                parent_id: None,
-            })
-            .unwrap();
-        // Assistant text must be >= 500 chars to pass cron no-op filter
-        let long_response = "x".repeat(600);
-        let _ = store
-            .append(&crate::events::AppendOptions {
-                session_id: &sid,
-                event_type: crate::events::EventType::MessageAssistant,
-                payload: serde_json::json!({
-                    "content": [{"type": "text", "text": long_response}],
-                    "turn": 1,
-                    "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
-                }),
-                parent_id: None,
-            })
-            .unwrap();
-        mgr.invalidate_session(&sid);
-        sid
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn write_cron_ledger_source_is_cron() {
-        let (store, mgr) = make_test_store_and_manager();
-        let sid = seed_session_with_messages(&store, &mgr);
-        let subagent = make_subagent_manager_with_mock_llm(&store, &mgr);
-
-        let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
-            event_store: store.clone(),
-            subagent_manager: Some(subagent),
-            shutdown_coordinator: None,
-        };
-        let lw = crate::server::rpc::memory_ledger::execute_ledger_write(&sid, &deps, "cron").await;
-        assert!(
-            lw.written,
-            "ledger write should succeed: reason={:?}",
-            lw.reason
-        );
-
-        // Verify the persisted memory.ledger event has source: "cron"
-        let events = store
-            .get_events_by_type(&sid, &["memory.ledger"], Some(10))
-            .unwrap();
-        assert_eq!(events.len(), 1, "should have exactly 1 ledger event");
-        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-        assert_eq!(payload["source"], "cron");
-    }
-
-    // ── Provider retry tests ──────────────────────────────────────────
 
     /// Mock factory that fails N times with a retryable error, then succeeds.
     struct RetryMockProviderFactory {

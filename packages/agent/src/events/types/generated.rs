@@ -99,12 +99,6 @@ define_events! {
         SubagentResultsConsumed => "subagent.results_consumed" => payloads::notification::SubagentResultsConsumedPayload,
         /// Todo list written.
         TodoWrite => "todo.write" => payloads::todo::TodoWritePayload,
-        /// Task created.
-        TaskCreated => "task.created" => payloads::task::TaskCreatedPayload,
-        /// Task updated.
-        TaskUpdated => "task.updated" => payloads::task::TaskUpdatedPayload,
-        /// Task deleted.
-        TaskDeleted => "task.deleted" => payloads::task::TaskDeletedPayload,
         /// Turn failed.
         TurnFailed => "turn.failed" => payloads::turn::TurnFailedPayload,
         /// Hook triggered.
@@ -115,12 +109,8 @@ define_events! {
         HookBackgroundStarted => "hook.background_started" => payloads::hook::HookBackgroundStartedPayload,
         /// Background hook completed.
         HookBackgroundCompleted => "hook.background_completed" => payloads::hook::HookBackgroundCompletedPayload,
-        /// Memory ledger entry.
-        MemoryLedger => "memory.ledger" => payloads::memory::MemoryLedgerPayload,
     }
     raw_events {
-        /// Memory loaded into context (raw payload).
-        MemoryLoaded => "memory.loaded" => serde_json::Value,
     }
     domain_groups {
         /// Whether this is a session lifecycle event (`session.*`).
@@ -143,10 +133,6 @@ define_events! {
         is_skill_type => [SkillAdded, SkillRemoved],
         /// Whether this is a rules event (`rules.*`).
         is_rules_type => [RulesLoaded, RulesIndexed, RulesActivated],
-        /// Whether this is a memory event (`memory.*`).
-        is_memory_type => [MemoryLedger, MemoryLoaded],
-        /// Whether this is a task CRUD event.
-        is_task_crud_type => [TaskCreated, TaskUpdated, TaskDeleted],
         /// Whether this is a file event (`file.*`).
         is_file_type => [FileRead, FileWrite, FileEdit],
     }
@@ -156,7 +142,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 54] = [
+    const EXPECTED: [(EventType, &str); 49] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -210,9 +196,6 @@ mod tests {
             "subagent.results_consumed",
         ),
         (EventType::TodoWrite, "todo.write"),
-        (EventType::TaskCreated, "task.created"),
-        (EventType::TaskUpdated, "task.updated"),
-        (EventType::TaskDeleted, "task.deleted"),
         (EventType::TurnFailed, "turn.failed"),
         (EventType::HookTriggered, "hook.triggered"),
         (EventType::HookCompleted, "hook.completed"),
@@ -221,13 +204,11 @@ mod tests {
             EventType::HookBackgroundCompleted,
             "hook.background_completed",
         ),
-        (EventType::MemoryLedger, "memory.ledger"),
-        (EventType::MemoryLoaded, "memory.loaded"),
     ];
 
     #[test]
-    fn all_event_types_constant_has_54_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 54);
+    fn all_event_types_constant_has_49_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 49);
     }
 
     #[test]
@@ -376,7 +357,6 @@ mod tests {
         assert_eq!(EventType::ErrorAgent.domain(), "error");
         assert_eq!(EventType::SubagentSpawned.domain(), "subagent");
         assert_eq!(EventType::HookTriggered.domain(), "hook");
-        assert_eq!(EventType::MemoryLedger.domain(), "memory");
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use parking_lot::RwLock;
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -14,7 +13,7 @@ use crate::server::rpc::context::{AgentDeps, RpcContext};
 
 use super::prompt_runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_skill_context, build_user_content_override,
-    build_user_event_payload, load_prompt_bootstrap, load_recent_events, load_session_model,
+    build_user_event_payload, load_prompt_bootstrap,
     load_session_update_data, persist_user_message_event, resume_prompt_session,
 };
 
@@ -30,69 +29,6 @@ pub struct PromptRequest {
     pub raw_skills_json: Option<Vec<Value>>,
     pub raw_spells_json: Option<Vec<Value>>,
     pub device_context: Option<String>,
-}
-
-struct RuntimeMemoryDeps {
-    subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
-    event_store: Arc<crate::events::EventStore>,
-    broadcast: Arc<crate::runtime::EventEmitter>,
-    session_id: String,
-    shutdown_coordinator: Option<Arc<crate::server::shutdown::ShutdownCoordinator>>,
-    ledger_enabled: bool,
-}
-
-#[async_trait]
-impl crate::events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
-    async fn write_ledger_entry(
-        &self,
-        _opts: &crate::events::memory::types::LedgerWriteOpts,
-    ) -> crate::events::memory::types::LedgerWriteResult {
-        let deps = crate::server::rpc::memory_ledger::LedgerWriteDeps {
-            event_store: self.event_store.clone(),
-            subagent_manager: self.subagent_manager.clone(),
-            shutdown_coordinator: self.shutdown_coordinator.clone(),
-        };
-        crate::server::rpc::memory_ledger::execute_ledger_write(&self.session_id, &deps, "auto").await
-    }
-
-    fn is_ledger_enabled(&self) -> bool {
-        self.ledger_enabled
-    }
-
-    fn emit_memory_updating(&self, _session_id: &str) {
-        let _ = self
-            .broadcast
-            .emit(crate::core::events::TronEvent::MemoryUpdating {
-                base: crate::core::events::BaseEvent::now(&self.session_id),
-            });
-    }
-
-    fn emit_memory_updated(
-        &self,
-        _session_id: &str,
-        title: Option<&str>,
-        entry_type: Option<&str>,
-        event_id: Option<&str>,
-    ) {
-        let _ = self
-            .broadcast
-            .emit(crate::core::events::TronEvent::MemoryUpdated {
-                base: crate::core::events::BaseEvent::now(&self.session_id),
-                title: title.map(String::from),
-                entry_type: entry_type.map(String::from),
-                event_id: event_id.map(String::from),
-            });
-    }
-
-    fn on_memory_written(&self, _payload: &serde_json::Value, _title: &str) {}
-
-    fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
-    fn workspace_id(&self) -> Option<&str> {
-        None
-    }
 }
 
 struct PromptRunPlan {
@@ -397,7 +333,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     };
 
     let messages = state.messages.clone();
-    let working_dir_for_memory = working_dir.clone();
     let model_for_error = model.clone();
 
     let provider = match provider_factory.create_for_model(&model).await {
@@ -574,61 +509,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     }
 
     run_cleanup.release();
-
-    let session_model = match load_session_model(session_manager.clone(), session_id.clone()).await
-    {
-        Ok(Some(session_model)) => session_model,
-        Ok(None) => String::new(),
-        Err(error) => {
-            warn!(
-                session_id = %session_id,
-                error = %error,
-                "failed to load session model for memory pipeline"
-            );
-            String::new()
-        }
-    };
-    let context_limit = crate::llm::model_context_window(&session_model);
-    let last_context_window = result.last_context_window_tokens.unwrap_or(0);
-    #[allow(clippy::cast_precision_loss)]
-    let token_ratio = if context_limit > 0 {
-        last_context_window as f64 / context_limit as f64
-    } else {
-        0.0
-    };
-
-    let memory_deps = RuntimeMemoryDeps {
-        subagent_manager: subagent_manager.clone(),
-        event_store: event_store.clone(),
-        broadcast: broadcast.clone(),
-        session_id: session_id.clone(),
-        shutdown_coordinator: shutdown_coordinator.clone(),
-        ledger_enabled: settings.context.memory.ledger.enabled,
-    };
-
-    let (recent_event_types, recent_tool_calls) =
-        match load_recent_events(event_store.clone(), session_id.clone()).await {
-            Ok(recent) => recent,
-            Err(error) => {
-                warn!(
-                    session_id = %session_id,
-                    error = %error,
-                    "failed to gather recent events for memory pipeline"
-                );
-                (Vec::new(), Vec::new())
-            }
-        };
-
-    let mut memory_manager = crate::events::memory::manager::MemoryManager::new(memory_deps);
-    memory_manager
-        .on_cycle_complete(crate::events::memory::types::CycleInfo {
-            model: session_model,
-            working_directory: working_dir_for_memory,
-            current_token_ratio: token_ratio,
-            recent_event_types,
-            recent_tool_calls,
-        })
-        .await;
 
     match load_session_update_data(
         session_manager.clone(),

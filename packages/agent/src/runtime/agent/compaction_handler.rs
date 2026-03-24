@@ -15,8 +15,8 @@ use crate::runtime::hooks::types::{HookAction, HookContext};
 use async_trait::async_trait;
 use crate::core::events::HookResult as EventHookResult;
 use crate::core::events::{BaseEvent, CompactionReason, TronEvent};
-use crate::events::memory::trigger::CompactionTrigger;
-use crate::events::memory::types::{CompactionTriggerConfig, CompactionTriggerInput};
+use crate::runtime::context::compaction_trigger::CompactionTrigger;
+use crate::runtime::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
 
 use metrics::{counter, histogram};
 use tracing::{debug, info, warn};

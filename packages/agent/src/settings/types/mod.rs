@@ -340,19 +340,14 @@ mod tests {
     fn deeply_nested_partial_override() {
         let json = serde_json::json!({
             "context": {
-                "memory": {
-                    "embedding": {
-                        "dimensions": 1024
-                    }
+                "compactor": {
+                    "maxTokens": 50000
                 }
             }
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.context.memory.embedding.dimensions, 1024);
-        // All other embedding fields should be defaults
-        assert!(settings.context.memory.embedding.enabled);
-        assert_eq!(settings.context.memory.embedding.dtype, "q4");
+        assert_eq!(settings.context.compactor.max_tokens, 50_000);
         // All other context fields should be defaults
-        assert_eq!(settings.context.compactor.max_tokens, 25_000);
+        assert!(settings.context.rules.discover_standalone_files);
     }
 }

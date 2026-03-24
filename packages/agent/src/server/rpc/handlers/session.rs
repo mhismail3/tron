@@ -1199,63 +1199,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    #[tokio::test]
-    async fn create_session_emits_memory_loaded_when_workspace_has_memory() {
-        let tmp =
-            std::env::temp_dir().join(format!("tron-session-test-memory-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let working_dir = tmp.to_string_lossy().to_string();
-
-        let ctx = make_test_context();
-        let existing = ctx
-            .session_manager
-            .create_session("m", &working_dir, Some("existing"))
-            .unwrap();
-        let _ = ctx.event_store.append(&crate::events::AppendOptions {
-            session_id: &existing,
-            event_type: crate::events::EventType::MemoryLedger,
-            payload: json!({
-                "title": "Existing memory",
-                "entryType": "lesson",
-                "input": "Already learned this"
-            }),
-            parent_id: None,
-        });
-
-        let mut rx = ctx.orchestrator.subscribe();
-
-        let result = CreateSessionHandler
-            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
-            .await
-            .unwrap();
-
-        let sid = result["sessionId"].as_str().unwrap();
-        let memory_events = wait_for_event_count(&ctx, sid, &["memory.loaded"], 1).await;
-        let payload: serde_json::Value = serde_json::from_str(&memory_events[0].payload).unwrap();
-        assert_eq!(payload["count"], 1);
-        assert!(payload["tokens"].as_u64().unwrap() > 0);
-
-        let e1 = rx.try_recv().unwrap();
-        assert_eq!(e1.event_type(), "session_created");
-        let e2 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                match rx.try_recv() {
-                    Ok(event) if event.event_type() == "memory_loaded" => break event,
-                    Ok(_) => {}
-                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    }
-                    Err(err) => panic!("unexpected broadcast error: {err}"),
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for memory_loaded broadcast");
-        assert_eq!(e2.event_type(), "memory_loaded");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
     // ── session.getChat tests ──
 
     #[tokio::test]

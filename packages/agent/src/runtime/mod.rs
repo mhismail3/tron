@@ -24,7 +24,6 @@ pub mod guardrails;
 pub mod hooks;
 pub mod orchestrator;
 pub mod pipeline;
-pub mod tasks;
 pub mod types;
 
 // Re-export main public API

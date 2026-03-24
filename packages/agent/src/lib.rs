@@ -16,7 +16,6 @@ pub mod transcription;
 pub mod events;
 pub mod llm;
 pub mod tools;
-pub mod embeddings;
 pub mod cron;
 pub mod worktree;
 
@@ -26,5 +25,3 @@ pub mod runtime;
 // Interface (depends on everything)
 pub mod server;
 
-// Binary wiring (backfill CLI)
-pub mod backfill;

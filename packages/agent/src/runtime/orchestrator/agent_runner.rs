@@ -180,7 +180,7 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             },
             "test-session".into(),
         )
@@ -316,7 +316,7 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             },
             "test-session".into(),
         );
@@ -393,7 +393,7 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             },
             "test-session".into(),
         );

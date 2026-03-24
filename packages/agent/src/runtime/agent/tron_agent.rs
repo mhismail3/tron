@@ -56,7 +56,7 @@ pub struct AgentDeps {
     /// Optional subagent manager for LLM-backed compaction summarization.
     pub subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     /// Compaction trigger configuration (from settings).
-    pub compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig,
+    pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -566,7 +566,7 @@ mod tests {
             hooks: None,
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
-            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
         }
     }
 
@@ -949,7 +949,7 @@ mod tests {
                 hooks: None,
                 context_manager: test_context_manager("mock-model"),
                 subagent_manager: None,
-                compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             },
             sid.clone(),
         );
@@ -1317,7 +1317,7 @@ mod tests {
             hooks: None,
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
-            compaction_trigger_config: crate::events::memory::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
         };
         for tool in tools {
             deps.registry.register(tool);

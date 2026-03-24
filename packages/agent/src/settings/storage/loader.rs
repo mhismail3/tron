@@ -376,7 +376,6 @@ mod tests {
             settings.context.compactor.max_tokens,
             defaults.context.compactor.max_tokens
         );
-        assert!(settings.context.memory.embedding.enabled);
         assert!(settings.guardrails.is_none());
     }
 
@@ -415,13 +414,13 @@ mod tests {
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
-            r#"{"context": {"memory": {"embedding": {"dimensions": 1024}}}}"#,
+            r#"{"context": {"compactor": {"maxTokens": 50000}}}"#,
         )
         .unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
-        assert_eq!(settings.context.memory.embedding.dimensions, 1024);
-        assert!(settings.context.memory.embedding.enabled);
+        assert_eq!(settings.context.compactor.max_tokens, 50_000);
+        assert!(settings.context.rules.discover_standalone_files);
     }
 
     #[test]

@@ -416,6 +416,69 @@ pub struct SummaryResult {
     pub narrative: String,
 }
 
+// =============================================================================
+// Compaction Trigger (migrated from events::memory::types)
+// =============================================================================
+
+/// Configuration for the compaction trigger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionTriggerConfig {
+    /// Token ratio that forces compaction (0.0–1.0). Default: 0.70.
+    pub trigger_token_threshold: f64,
+    /// Token ratio for alert zone (more aggressive compaction). Default: 0.50.
+    pub alert_zone_threshold: f64,
+    /// Turns before auto-compaction in normal zone. Default: 8.
+    pub default_turn_fallback: u32,
+    /// Turns before auto-compaction in alert zone. Default: 5.
+    pub alert_turn_fallback: u32,
+}
+
+impl Default for CompactionTriggerConfig {
+    fn default() -> Self {
+        Self {
+            trigger_token_threshold: 0.70,
+            alert_zone_threshold: 0.50,
+            default_turn_fallback: 25,
+            alert_turn_fallback: 15,
+        }
+    }
+}
+
+impl From<&crate::settings::CompactorSettings> for CompactionTriggerConfig {
+    fn from(cs: &crate::settings::CompactorSettings) -> Self {
+        let defaults = Self::default();
+        Self {
+            trigger_token_threshold: cs
+                .trigger_token_threshold
+                .unwrap_or(defaults.trigger_token_threshold),
+            alert_zone_threshold: cs
+                .alert_zone_threshold
+                .unwrap_or(defaults.alert_zone_threshold),
+            #[allow(clippy::cast_possible_truncation)]
+            default_turn_fallback: cs
+                .default_turn_fallback
+                .map_or(defaults.default_turn_fallback, |v| v as u32),
+            #[allow(clippy::cast_possible_truncation)]
+            alert_turn_fallback: cs
+                .alert_turn_fallback
+                .map_or(defaults.alert_turn_fallback, |v| v as u32),
+        }
+    }
+}
+
+/// Input to the compaction trigger decision engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionTriggerInput {
+    /// Current token usage ratio (0.0–1.0).
+    pub current_token_ratio: f64,
+    /// Recent event types from the current cycle.
+    pub recent_event_types: Vec<String>,
+    /// Recent Bash tool call commands.
+    pub recent_tool_calls: Vec<String>,
+}
+
 /// Provider re-export for context module convenience.
 pub use crate::core::messages::Provider;
 

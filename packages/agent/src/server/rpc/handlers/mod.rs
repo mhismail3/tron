@@ -32,7 +32,6 @@ pub mod events;
 pub mod filesystem;
 pub mod git;
 pub mod logs;
-pub mod memory;
 pub mod message;
 pub mod model;
 pub mod notifications;
@@ -42,7 +41,6 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod system;
-pub mod task;
 pub mod tool;
 pub mod transcription;
 pub mod tree;
@@ -133,11 +131,6 @@ fn register_core(registry: &mut MethodRegistry) {
     // Message
     registry.register("message.delete", message::DeleteMessageHandler);
 
-    // Memory
-    registry.register("memory.getLedger", memory::GetLedgerHandler);
-    registry.register("memory.updateLedger", memory::UpdateLedgerHandler);
-    registry.register("memory.search", memory::SearchMemoryHandler);
-
     // Logs
     registry.register("logs.ingest", logs::IngestLogsHandler);
 }
@@ -154,18 +147,6 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("filesystem.getHome", filesystem::GetHomeHandler);
     registry.register("filesystem.createDir", filesystem::CreateDirHandler);
     registry.register("file.read", filesystem::ReadFileHandler);
-
-    // Tasks
-    registry.register("tasks.create", task::CreateTaskHandler);
-    registry.register("tasks.get", task::GetTaskHandler);
-    registry.register("tasks.update", task::UpdateTaskHandler);
-    registry.register("tasks.list", task::ListTasksHandler);
-    registry.register("tasks.delete", task::DeleteTaskHandler);
-    registry.register("tasks.search", task::SearchTasksHandler);
-    registry.register("tasks.getActivity", task::GetTaskActivityHandler);
-    registry.register("tasks.done", task::DoneTaskHandler);
-    registry.register("tasks.addNote", task::AddNoteHandler);
-    registry.register("tasks.batchCreate", task::BatchCreateTasksHandler);
 
     // Tree
     registry.register("tree.getVisualization", tree::GetVisualizationHandler);
@@ -457,43 +438,6 @@ pub(crate) mod test_helpers {
             session_manager: mgr,
             event_store: store,
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
-            task_pool: None,
-            settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
-            agent_deps: None,
-            server_start_time: Instant::now(),
-            transcription_engine: Arc::new(std::sync::OnceLock::new()),
-            subagent_manager: None,
-            health_tracker: Arc::new(crate::llm::ProviderHealthTracker::new()),
-            shutdown_coordinator: None,
-            origin: "localhost:9847".to_string(),
-            cron_scheduler: None,
-            worktree_coordinator: None,
-            device_request_broker: None,
-            context_artifacts: Arc::new(ContextArtifactsService::new()),
-            auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
-            broadcast_manager: None,
-            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        }
-    }
-
-    /// Build an `RpcContext` with task tables (same DB as events).
-    pub fn make_test_context_with_tasks() -> RpcContext {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
-        {
-            let conn = pool.get().unwrap();
-            let _ = crate::events::run_migrations(&conn).unwrap();
-        }
-        let task_pool = pool.clone();
-        let store = Arc::new(EventStore::new(pool));
-        let mgr = Arc::new(SessionManager::new(store.clone()));
-        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
-
-        RpcContext {
-            orchestrator: orch,
-            session_manager: mgr,
-            event_store: store,
-            skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
-            task_pool: Some(task_pool),
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: Instant::now(),
@@ -535,8 +479,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            119,
-            "expected 119 methods, got {}",
+            106,
+            "expected 106 methods, got {}",
             reg.methods().len()
         );
     }
