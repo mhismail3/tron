@@ -167,7 +167,12 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         tron::tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
 
-    // 8: NotifyApp — real APNS when available, stub fallback
+    // 8: GetConfirmation
+    registry.register(Arc::new(
+        tron::tools::ui::get_confirmation::GetConfirmationTool::new(),
+    ));
+
+    // 9: NotifyApp — real APNS when available, stub fallback
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
         if let Some(ref apns) = config.apns_service {
@@ -1292,8 +1297,9 @@ mod tests {
         assert_eq!(names[4], "Search");
         assert_eq!(names[5], "Find");
         assert_eq!(names[6], "AskUserQuestion");
-        assert_eq!(names[7], "NotifyApp");
-        assert_eq!(names[8], "WebFetch");
+        assert_eq!(names[7], "GetConfirmation");
+        assert_eq!(names[8], "NotifyApp");
+        assert_eq!(names[9], "WebFetch");
     }
 
     #[test]
@@ -1307,11 +1313,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 9 tools without Brave API key (no WebSearch), without subagent tools
+        // 10 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            9,
-            "expected 9 tools (no WebSearch without Brave key), got: {:?}",
+            10,
+            "expected 10 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1325,8 +1331,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            10,
-            "expected 10 tools with WebSearch, got: {:?}",
+            11,
+            "expected 11 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }

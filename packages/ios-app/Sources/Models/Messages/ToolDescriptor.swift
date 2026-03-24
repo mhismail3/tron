@@ -40,9 +40,8 @@ enum ToolRegistry {
     /// Special tools with dedicated non-chip UI.
     static let specialToolNames: Set<String> = [
         "askuserquestion",
+        "getconfirmation",
         "spawnsubagent", "queryagent", "waitforagents",
-        "renderappui",
-        "taskmanager",
         "notifyapp"
     ]
 
@@ -217,6 +216,16 @@ enum ToolRegistry {
             displayName: "Ask User",
             completedDisplayName: "Asked",
             summaryExtractor: { _ in "" },
+            viewerFactory: nil
+        ),
+        "getconfirmation": ToolDescriptor(
+            icon: "checkmark.shield",
+            iconColor: .orange,
+            displayName: "Confirm",
+            completedDisplayName: "Confirmed",
+            summaryExtractor: { args in
+                (args as? [String: Any])?["action"] as? String ?? ""
+            },
             viewerFactory: nil
         ),
     ]
