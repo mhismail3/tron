@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillSource {
-    /// Loaded from `~/.tron/skills/`.
+    /// Loaded from `~/.tron/memory/skills/`.
     Global,
-    /// Loaded from project-local `.claude/skills/` or `.tron/skills/`.
+    /// Loaded from project-local `.claude/skills/` or `.tron/memory/skills/`.
     Project,
 }
 

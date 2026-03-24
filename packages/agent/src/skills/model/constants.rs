@@ -7,7 +7,7 @@ pub const MAX_SKILL_FILE_SIZE: u64 = 100 * 1024;
 pub const SKILL_MD_FILENAME: &str = "SKILL.md";
 
 /// Global skills directory name (relative to home).
-pub const GLOBAL_SKILLS_DIR: &str = ".tron/skills";
+pub const GLOBAL_SKILLS_DIR: &str = ".tron/memory/skills";
 
 /// Project skills directory names (relative to project root).
-pub const PROJECT_SKILLS_DIRS: &[&str] = &[".claude/skills", ".tron/skills"];
+pub const PROJECT_SKILLS_DIRS: &[&str] = &[".claude/skills", ".tron/memory/skills"];

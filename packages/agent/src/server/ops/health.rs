@@ -76,11 +76,11 @@ pub fn deep_health_check(
         // 2. Settings
         check_settings(&tron_home.join("settings.json")),
         // 3. Auth
-        check_auth(&tron_home.join("auth.json")),
+        check_auth(&tron_home.join("system").join("auth.json")),
         // 4. Skills
-        check_skills(&tron_home.join("skills")),
+        check_skills(&tron_home.join("memory").join("skills")),
         // 5. Binary
-        check_binary(&tron_home.join("tron")),
+        check_binary(&tron_home.join("system").join("bin").join("tron")),
         // 6. Deploy
         check_deploy(deploy_dir),
         // 7. Disk

@@ -265,8 +265,8 @@ async fn main() -> Result<()> {
             let _ = std::fs::create_dir_all(tron_home.join("memory").join(subdir));
         }
         let _ = std::fs::create_dir_all(tron_home.join("notes").join("voice"));
-        let _ = std::fs::create_dir_all(tron_home.join("skills"));
-        let _ = std::fs::create_dir_all(tron_home.join("rules"));
+        let _ = std::fs::create_dir_all(tron_home.join("memory").join("skills"));
+        let _ = std::fs::create_dir_all(tron_home.join("memory").join("rules"));
     }
 
     // Database (events + tasks share one SQLite file) — set up before logging

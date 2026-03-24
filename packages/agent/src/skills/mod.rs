@@ -3,8 +3,8 @@
 //! Skill loader, registry, and context injector.
 //!
 //! Skills are `SKILL.md` files with optional YAML frontmatter + markdown body.
-//! The system discovers skills from `~/.tron/skills/` (global) and project-local
-//! `.claude/skills/` or `.tron/skills/` directories.
+//! The system discovers skills from `~/.tron/memory/skills/` (global) and project-local
+//! `.claude/skills/` or `.tron/memory/skills/` directories.
 //!
 //! ## Module Overview
 //!

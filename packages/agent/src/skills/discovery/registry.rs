@@ -26,7 +26,7 @@ impl SkillRegistry {
 
     /// Initialize the registry by scanning skill directories.
     ///
-    /// Scans both global (`~/.tron/skills/`) and project-local skill directories.
+    /// Scans both global (`~/.tron/memory/skills/`) and project-local skill directories.
     /// Project skills take precedence over global skills with the same name.
     pub fn initialize(&mut self, working_dir: &str) {
         let (global_result, project_result) = loader::scan_all(working_dir);

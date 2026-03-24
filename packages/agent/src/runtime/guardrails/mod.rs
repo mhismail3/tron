@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn pattern_tron_delete_blocked() {
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron/skills/test"));
+        let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron/memory/skills/test"));
         assert!(eval.blocked);
         assert!(
             eval.triggered_rules
@@ -1673,7 +1673,7 @@ mod tests {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!(
-            "{home}/.tron/skills/test/SKILL.md"
+            "{home}/.tron/memory/skills/test/SKILL.md"
         )));
         assert!(!eval.blocked);
     }
