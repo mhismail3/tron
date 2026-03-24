@@ -95,8 +95,6 @@ final class DeviceRequestDispatcher {
             return try await CalendarService.shared.handle(action: action, params: params)
         case "contacts":
             return try await ContactsService.shared.handle(action: action, params: params)
-        case "health":
-            return try await HealthService.shared.handle(action: action, params: params)
         default:
             throw DeviceRequestError.unknownMethod(method)
         }

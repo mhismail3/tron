@@ -40,8 +40,7 @@ enum ToolRegistry {
         "remember",
         "manageautomations",
         "managecalendar",
-        "searchcontacts",
-        "readhealth"
+        "searchcontacts"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -306,16 +305,6 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 let query = ToolArgumentParser.query(from: args)
                 return query.isEmpty ? "" : "\"\(ToolArgumentParser.truncate(query, maxLength: 30))\""
-            },
-            viewerFactory: nil
-        ),
-        "readhealth": ToolDescriptor(
-            icon: "heart.fill",
-            iconColor: .pink,
-            displayName: "Health",
-            completedDisplayName: "Read",
-            summaryExtractor: { args in
-                ToolArgumentParser.action(from: args)
             },
             viewerFactory: nil
         ),

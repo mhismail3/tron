@@ -182,7 +182,7 @@ final class ChatViewModel {
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
-    /// Dispatches device requests to local services (calendar, contacts, health)
+    /// Dispatches device requests to local services (calendar, contacts)
     var deviceRequestDispatcher: DeviceRequestDispatcher?
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()

@@ -30,8 +30,6 @@
 	<string>Tron can read and manage your calendar events when the Calendar integration is enabled.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Tron can search your contacts when the Contacts integration is enabled.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Tron can read your health data (steps, sleep, workouts) when the Health integration is enabled.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Tron uses your location to provide context-aware responses when Location is enabled in settings.</string>
 	<key>NSAppTransportSecurity</key>

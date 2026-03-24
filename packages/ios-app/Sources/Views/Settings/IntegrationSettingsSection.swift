@@ -142,37 +142,6 @@ struct IntegrationSettingsSection: View {
                 .font(TronTypography.caption2)
         }
 
-        // MARK: - Health
-
-        Section {
-            Toggle(isOn: $settingsState.integrationHealthEnabled) {
-                Label("Health", systemImage: "heart.fill")
-                    .font(TronTypography.subheadline)
-            }
-            .tint(.tronEmerald)
-            .onChange(of: settingsState.integrationHealthEnabled) { _, newValue in
-                if newValue {
-                    Task { @MainActor in
-                        let granted = await HealthService.shared.requestPermission()
-                        if granted {
-                            updateServerSetting {
-                                ServerSettingsUpdate(integrations: .init(health: .init(enabled: true)))
-                            }
-                        } else {
-                            settingsState.integrationHealthEnabled = false
-                        }
-                    }
-                } else {
-                    updateServerSetting {
-                        ServerSettingsUpdate(integrations: .init(health: .init(enabled: false)))
-                    }
-                }
-            }
-        } footer: {
-            Text("Allows the agent to read health data (steps, sleep, workouts).")
-                .font(TronTypography.caption2)
-        }
-
         // MARK: - Location
 
         Section {

@@ -44,8 +44,6 @@ final class SettingsState {
     var integrationCalendarEnabled: Bool = false
     var integrationCalendarAllowWrite: Bool = false
     var integrationContactsEnabled: Bool = false
-    var integrationHealthEnabled: Bool = false
-    var integrationHealthDataTypes: [String] = []
     var integrationLocationEnabled: Bool = false
     var integrationLocationPrecision: String = "city"
 
@@ -123,8 +121,6 @@ final class SettingsState {
             integrationCalendarEnabled = settings.integrations.calendar.enabled
             integrationCalendarAllowWrite = settings.integrations.calendar.allowWrite
             integrationContactsEnabled = settings.integrations.contacts.enabled
-            integrationHealthEnabled = settings.integrations.health.enabled
-            integrationHealthDataTypes = settings.integrations.health.dataTypes
             integrationLocationEnabled = settings.integrations.location.enabled
             integrationLocationPrecision = settings.integrations.location.precision
 
@@ -190,8 +186,6 @@ final class SettingsState {
         integrationCalendarEnabled = false
         integrationCalendarAllowWrite = false
         integrationContactsEnabled = false
-        integrationHealthEnabled = false
-        integrationHealthDataTypes = []
         integrationLocationEnabled = false
         integrationLocationPrecision = "city"
         toolBrowserHeaded = false
@@ -235,7 +229,6 @@ final class SettingsState {
                 haptics: .init(enabled: false, onTaskComplete: true, onError: true, onNotification: true),
                 calendar: .init(enabled: false, allowWrite: false),
                 contacts: .init(enabled: false),
-                health: .init(enabled: false, dataTypes: []),
                 location: .init(enabled: false, precision: "city")
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))

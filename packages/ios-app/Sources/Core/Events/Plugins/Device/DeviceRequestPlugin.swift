@@ -3,7 +3,7 @@ import Foundation
 /// Plugin for handling device request events from the server.
 ///
 /// The server broadcasts `device.request` events when an agent tool needs data
-/// from the iOS device (calendar, contacts, health, etc.). This plugin parses
+/// from the iOS device (calendar, contacts, etc.). This plugin parses
 /// the request and dispatches to `DeviceRequestDispatcher` which routes to the
 /// appropriate local service and sends the result back via `device.respond` RPC.
 enum DeviceRequestPlugin: DispatchableEventPlugin {

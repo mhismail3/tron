@@ -325,27 +325,25 @@ struct ServerSettings: Decodable {
         let haptics: HapticsSettings
         let calendar: CalendarSettings
         let contacts: ContactsSettings
-        let health: HealthSettings
         let location: LocationSettings
 
         static let defaults = IntegrationSettings(
             deviceContext: .defaults, haptics: .defaults,
-            calendar: .defaults, contacts: .defaults, health: .defaults, location: .defaults
+            calendar: .defaults, contacts: .defaults, location: .defaults
         )
 
         private enum CodingKeys: String, CodingKey {
-            case deviceContext, haptics, calendar, contacts, health, location
+            case deviceContext, haptics, calendar, contacts, location
         }
 
         init(deviceContext: DeviceContextSettings,
              haptics: HapticsSettings, calendar: CalendarSettings,
-             contacts: ContactsSettings, health: HealthSettings,
+             contacts: ContactsSettings,
              location: LocationSettings) {
             self.deviceContext = deviceContext
             self.haptics = haptics
             self.calendar = calendar
             self.contacts = contacts
-            self.health = health
             self.location = location
         }
 
@@ -355,7 +353,6 @@ struct ServerSettings: Decodable {
             haptics = (try? container.decodeIfPresent(HapticsSettings.self, forKey: .haptics)) ?? .defaults
             calendar = (try? container.decodeIfPresent(CalendarSettings.self, forKey: .calendar)) ?? .defaults
             contacts = (try? container.decodeIfPresent(ContactsSettings.self, forKey: .contacts)) ?? .defaults
-            health = (try? container.decodeIfPresent(HealthSettings.self, forKey: .health)) ?? .defaults
             location = (try? container.decodeIfPresent(LocationSettings.self, forKey: .location)) ?? .defaults
         }
 
@@ -461,26 +458,6 @@ struct ServerSettings: Decodable {
                 enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
             }
             private enum CodingKeys: String, CodingKey { case enabled }
-        }
-
-        struct HealthSettings: Decodable {
-            let enabled: Bool
-            let dataTypes: [String]
-
-            static let defaults = HealthSettings(enabled: false, dataTypes: [])
-
-            private enum CodingKeys: String, CodingKey { case enabled, dataTypes }
-
-            init(enabled: Bool, dataTypes: [String]) {
-                self.enabled = enabled
-                self.dataTypes = dataTypes
-            }
-
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
-                dataTypes = (try? container.decodeIfPresent([String].self, forKey: .dataTypes)) ?? []
-            }
         }
 
         struct LocationSettings: Decodable {
@@ -605,7 +582,6 @@ struct ServerSettingsUpdate: Encodable {
         var haptics: HapticsUpdate?
         var calendar: CalendarUpdate?
         var contacts: ContactsUpdate?
-        var health: HealthUpdate?
         var location: LocationUpdate?
 
         struct DeviceContextUpdate: Encodable {
@@ -632,11 +608,6 @@ struct ServerSettingsUpdate: Encodable {
 
         struct ContactsUpdate: Encodable {
             var enabled: Bool?
-        }
-
-        struct HealthUpdate: Encodable {
-            var enabled: Bool?
-            var dataTypes: [String]?
         }
 
         struct LocationUpdate: Encodable {

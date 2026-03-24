@@ -250,7 +250,7 @@ final class MessagingCoordinator {
             context.appendInterruptedMessage()
             context.logInfo("Agent aborted successfully")
 
-            // Cancel active device requests (Health, Calendar, Contacts)
+            // Cancel active device requests (Calendar, Contacts)
             context.cancelActiveDeviceRequests()
             // Close browser session when agent is interrupted
             context.closeBrowserSession()

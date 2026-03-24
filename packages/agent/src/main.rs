@@ -374,14 +374,6 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
         if settings.integrations.contacts.enabled {
             registry.register(Arc::new(tron::tools::ui::contacts::SearchContactsTool::new(
-                device_delegate.clone(),
-            )));
-        }
-
-        if settings.integrations.health.enabled
-            && !settings.integrations.health.data_types.is_empty()
-        {
-            registry.register(Arc::new(tron::tools::ui::health::ReadHealthTool::new(
                 device_delegate,
             )));
         }

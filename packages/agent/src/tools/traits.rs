@@ -472,7 +472,7 @@ pub trait BlobStore: Send + Sync {
     ) -> Result<String, crate::tools::errors::ToolError>;
 }
 
-/// iOS device request/response (`ManageCalendar`, `SearchContacts`, `ReadHealth`).
+/// iOS device request/response (`ManageCalendar`, `SearchContacts`).
 #[async_trait]
 pub trait DeviceDelegate: Send + Sync {
     /// Send a request to the iOS device and await the response.

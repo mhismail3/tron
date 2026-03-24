@@ -142,7 +142,6 @@
 		35FB3C4F63A3A3A19FC1F7B6 /* DataComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3D7697F0436698A6B07A58 /* DataComponents.swift */; };
 		360CF18A69CB8CB190AE7605 /* FontSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DEF75386D4B60039A818B0F /* FontSettingsTests.swift */; };
 		364D5137C69CA36ECFA7A061 /* EventPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E53E2E7A3878380BE9F26E /* EventPlugin.swift */; };
-		36585375503D397BEF1A26F8 /* HealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01EC39E8D68F3F3C894599FE /* HealthService.swift */; };
 		36D34C283E1302ADA0FBE574 /* DefaultAgentRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA946809C70489B4E68EBC3 /* DefaultAgentRepository.swift */; };
 		384BD3DA151B485E849055E5 /* MessageRole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53DDBD358011DF4C6F8B9E05 /* MessageRole.swift */; };
 		38E4283F5D01D1F3B2AA3F2E /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C354688A011B9B926C2D15 /* Skill.swift */; };
@@ -661,7 +660,6 @@
 		00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabase.swift; sourceTree = "<group>"; };
 		00739C1F26626C7791649198 /* TronIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronIcons.swift; sourceTree = "<group>"; };
 		01E1022262C210A860B1851B /* InteractiveComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveComponents.swift; sourceTree = "<group>"; };
-		01EC39E8D68F3F3C894599FE /* HealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthService.swift; sourceTree = "<group>"; };
 		0219F4DBB1DFCBBD24A8011B /* TaskState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskState.swift; sourceTree = "<group>"; };
 		0248F14D0E46BB22AF7EEF3B /* TronStepper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronStepper.swift; sourceTree = "<group>"; };
 		02A53A339483B817ED6DA684 /* SharedContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentTests.swift; sourceTree = "<group>"; };
@@ -2366,7 +2364,6 @@
 				25837906CC059B91956BBB14 /* DeviceContextService.swift */,
 				E113845B2A5F779B707E791C /* DeviceRequestDispatcher.swift */,
 				95D02EF435D00FA2465513E3 /* HapticService.swift */,
-				01EC39E8D68F3F3C894599FE /* HealthService.swift */,
 				92C67F04630206061839C412 /* LocationService.swift */,
 			);
 			path = Device;
@@ -3327,7 +3324,6 @@
 				09B802F7029A8229775A3AE2 /* GlassActionSheet.swift in Sources */,
 				614314C3C1AF35450227E5D4 /* GlobToolDetailSheet.swift in Sources */,
 				B5DF3FA552F10D7BB46A8C95 /* HapticService.swift in Sources */,
-				36585375503D397BEF1A26F8 /* HealthService.swift in Sources */,
 				60F22FB87D2B5928A33384DB /* ImageCompressor.swift in Sources */,
 				CE43E4FE68B936BE07D57162 /* ImageContent.swift in Sources */,
 				4F3D5AF0B3F3952D5970F9FC /* ImagesContentView.swift in Sources */,

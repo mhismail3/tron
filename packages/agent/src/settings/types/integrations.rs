@@ -1,7 +1,7 @@
 //! iOS integration settings.
 //!
 //! Controls device-side features: context injection, haptics, calendar,
-//! contacts, health, and location. All default to `enabled: false` (opt-in).
+//! contacts, and location. All default to `enabled: false` (opt-in).
 //! Sub-toggles default to `true` when the parent is enabled.
 
 use serde::{Deserialize, Serialize};
@@ -19,8 +19,6 @@ pub struct IntegrationSettings {
     pub calendar: CalendarSettings,
     /// Contact search access.
     pub contacts: ContactsSettings,
-    /// `HealthKit` read access.
-    pub health: HealthSettings,
     /// Location awareness (enriches `DeviceContext`).
     pub location: LocationSettings,
 }
@@ -104,30 +102,6 @@ pub struct ContactsSettings {
     pub enabled: bool,
 }
 
-/// `HealthKit` read access.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct HealthSettings {
-    /// Master toggle for `HealthKit` read access.
-    pub enabled: bool,
-    /// Which `HealthKit` data types to expose.
-    pub data_types: Vec<String>,
-}
-
-impl Default for HealthSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            data_types: vec![
-                "steps".into(),
-                "sleep".into(),
-                "heartRate".into(),
-                "workouts".into(),
-            ],
-        }
-    }
-}
-
 /// Location awareness (enriches `DeviceContext`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -158,7 +132,6 @@ mod tests {
         assert!(!s.haptics.enabled);
         assert!(!s.calendar.enabled);
         assert!(!s.contacts.enabled);
-        assert!(!s.health.enabled);
         assert!(!s.location.enabled);
     }
 
@@ -177,7 +150,6 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: IntegrationSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.device_context.enabled, s.device_context.enabled);
-        assert_eq!(back.health.data_types, s.health.data_types);
         assert_eq!(back.location.precision, s.location.precision);
     }
 
@@ -198,7 +170,6 @@ mod tests {
         let s: IntegrationSettings = serde_json::from_str("{}").unwrap();
         assert!(!s.device_context.enabled);
         assert_eq!(s.location.precision, "city");
-        assert_eq!(s.health.data_types.len(), 4);
     }
 
     #[test]
@@ -213,21 +184,6 @@ mod tests {
         assert!(h.get("onError").is_some());
         let cal = json.get("calendar").unwrap();
         assert!(cal.get("allowWrite").is_some());
-        let health = json.get("health").unwrap();
-        assert!(health.get("dataTypes").is_some());
-    }
-
-    #[test]
-    fn health_custom_data_types() {
-        let json = serde_json::json!({
-            "health": {
-                "enabled": true,
-                "dataTypes": ["steps", "heartRate"]
-            }
-        });
-        let s: IntegrationSettings = serde_json::from_value(json).unwrap();
-        assert!(s.health.enabled);
-        assert_eq!(s.health.data_types, vec!["steps", "heartRate"]);
     }
 
     #[test]
