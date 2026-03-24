@@ -260,24 +260,24 @@ mod tests {
     #[test]
     fn test_is_path_within_exact() {
         assert!(is_path_within(
-            "/Users/test/.tron/app",
-            "/Users/test/.tron/app"
+            "/Users/test/.tron/system",
+            "/Users/test/.tron/system"
         ));
     }
 
     #[test]
     fn test_is_path_within_child() {
         assert!(is_path_within(
-            "/Users/test/.tron/app/server.js",
-            "/Users/test/.tron/app"
+            "/Users/test/.tron/system/db/log.db",
+            "/Users/test/.tron/system"
         ));
     }
 
     #[test]
     fn test_is_path_within_glob() {
         assert!(is_path_within(
-            "/Users/test/.tron/app/server.js",
-            "/Users/test/.tron/app/**"
+            "/Users/test/.tron/system/db/log.db",
+            "/Users/test/.tron/system/**"
         ));
     }
 
@@ -285,15 +285,15 @@ mod tests {
     fn test_is_path_not_within() {
         assert!(!is_path_within(
             "/Users/test/projects/foo.js",
-            "/Users/test/.tron/app"
+            "/Users/test/.tron/system"
         ));
     }
 
     #[test]
     fn test_is_path_partial_prefix_not_within() {
         assert!(!is_path_within(
-            "/Users/test/.tron/apps/other",
-            "/Users/test/.tron/app"
+            "/Users/test/.tron/systems/other",
+            "/Users/test/.tron/system"
         ));
     }
 

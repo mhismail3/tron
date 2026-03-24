@@ -14,7 +14,7 @@ pub(crate) fn containers_json_path() -> PathBuf {
     let home = crate::core::paths::home_dir();
     PathBuf::from(home)
         .join(".tron")
-        .join("workspace")
+        .join("system")
         .join("containers.json")
 }
 
