@@ -173,9 +173,21 @@ enum ToolRegistry {
             completedDisplayName: "Fetched",
             summaryExtractor: { args in
                 let url = ToolArgumentParser.url(from: args)
+                let method = ToolArgumentParser.string("method", from: args)?.uppercased()
                 let prompt = ToolArgumentParser.string("prompt", from: args) ?? ""
-                if !url.isEmpty {
-                    let domain = ToolArgumentParser.extractDomain(from: url)
+                let rawResponse = ToolArgumentParser.boolean("rawResponse", from: args) ?? false
+                let domain = !url.isEmpty ? ToolArgumentParser.extractDomain(from: url) : ""
+
+                // Raw mode: show method + domain
+                if rawResponse || (method != nil && method != "GET") || prompt.isEmpty {
+                    if let method, method != "GET", !domain.isEmpty {
+                        return "\(method) \(domain)"
+                    }
+                    if !domain.isEmpty { return domain }
+                }
+
+                // Summarization mode: show domain: prompt
+                if !domain.isEmpty {
                     if !prompt.isEmpty {
                         let shortPrompt = ToolArgumentParser.truncate(prompt, maxLength: 27)
                         return "\(domain): \(shortPrompt)"

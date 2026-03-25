@@ -118,6 +118,45 @@ struct WebFetchDetailParserTests {
     }
 }
 
+// MARK: - WebFetch Raw Mode Detail Tests
+
+@Suite("WebFetch Raw Mode Details")
+struct WebFetchRawModeDetailTests {
+
+    @Test("isCached returns false for raw mode responses")
+    func testNotCachedInRawMode() {
+        // Even if the text contains "fromCache" and "true", raw mode is never cached
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://example.com\n\nfromCache: true\nthe content is true",
+            arguments: "{\"url\": \"https://example.com\", \"rawResponse\": true}"
+        )
+        #expect(!parsed.isCached)
+    }
+
+    @Test("Error classification not applied in raw mode for non-2xx")
+    func testNoErrorClassificationInRawMode() {
+        // In raw mode, a 404 is not an error — it's just data
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 404 https://api.example.com/missing\n\n{\"error\": \"not_found\"}",
+            arguments: "{\"url\": \"https://api.example.com/missing\", \"rawResponse\": true}"
+        )
+        // error should be nil because raw mode doesn't classify HTTP errors
+        #expect(parsed.error == nil)
+        #expect(parsed.isRawMode)
+    }
+
+    @Test("Summarization mode still classifies errors")
+    func testSummarizationModeStillClassifiesErrors() {
+        let parsed = WebFetchParsedResult(
+            from: "Error: HTTP 404 - Page not found",
+            arguments: "{\"url\": \"https://example.com/bad\", \"prompt\": \"Read\"}"
+        )
+        #expect(!parsed.isRawMode)
+        #expect(parsed.error != nil)
+        #expect(parsed.error?.contains("404") == true)
+    }
+}
+
 // MARK: - WebSearchDetailParser Tests
 
 @Suite("WebSearchDetailParser")
@@ -204,7 +243,7 @@ struct WebFetchParsingTests {
     func testAnswerBeforeSource() {
         let result = WebFetchParsedResult(
             from: "Main content here.\n\nSource: https://example.com",
-            arguments: "{\"url\": \"https://example.com\"}"
+            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"Read\"}"
         )
         #expect(result.answer == "Main content here.")
     }
@@ -213,7 +252,7 @@ struct WebFetchParsingTests {
     func testAnswerBeforeSeparator() {
         let result = WebFetchParsedResult(
             from: "Content before separator.\n\n---\nUse WebFetch to read more.",
-            arguments: "{\"url\": \"https://example.com\"}"
+            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"Read\"}"
         )
         #expect(result.answer == "Content before separator.")
     }
@@ -222,7 +261,7 @@ struct WebFetchParsingTests {
     func testErrorResult() {
         let result = WebFetchParsedResult(
             from: "Error: HTTP 404 - Page not found",
-            arguments: "{\"url\": \"https://example.com/missing\"}"
+            arguments: "{\"url\": \"https://example.com/missing\", \"prompt\": \"Read\"}"
         )
         #expect(result.error != nil)
         #expect(result.answer.isEmpty)

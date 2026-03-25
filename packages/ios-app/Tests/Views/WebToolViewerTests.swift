@@ -173,6 +173,129 @@ struct WebFetchParsedResultTests {
     }
 }
 
+// MARK: - WebFetch Raw HTTP Mode Tests
+
+@Suite("WebFetch Raw HTTP Mode")
+struct WebFetchRawModeTests {
+
+    @Test("Detects raw mode when method is POST")
+    func testDetectsRawModeWithMethod() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 201 https://api.example.com/items\n\n{\"id\": 1}",
+            arguments: "{\"url\": \"https://api.example.com/items\", \"method\": \"POST\", \"body\": {\"name\": \"test\"}}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpMethod == "POST")
+        #expect(parsed.httpStatus == 201)
+    }
+
+    @Test("Detects raw mode when rawResponse is true")
+    func testDetectsRawModeWithRawResponse() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://api.example.com/health\n\n{\"status\": \"ok\"}",
+            arguments: "{\"url\": \"https://api.example.com/health\", \"rawResponse\": true}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpMethod == "GET")
+        #expect(parsed.httpStatus == 200)
+    }
+
+    @Test("Detects raw mode when prompt is absent")
+    func testDetectsRawModeNoPrompt() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://example.com\n\npage content",
+            arguments: "{\"url\": \"https://example.com\"}"
+        )
+        #expect(parsed.isRawMode)
+    }
+
+    @Test("Detects summarization mode when prompt is present")
+    func testDetectsSummarizationWithPrompt() {
+        let parsed = WebFetchParsedResult(
+            from: "The answer is 42.",
+            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"What is it?\"}"
+        )
+        #expect(!parsed.isRawMode)
+        #expect(parsed.httpMethod == nil)
+        #expect(parsed.httpStatus == nil)
+    }
+
+    @Test("Parses HTTP status and body from raw response")
+    func testParsesRawResponse() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://api.example.com/data\n\n{\"key\": \"value\", \"count\": 42}",
+            arguments: "{\"url\": \"https://api.example.com/data\", \"rawResponse\": true}"
+        )
+        #expect(parsed.httpStatus == 200)
+        #expect(parsed.answer.contains("\"key\": \"value\""))
+        #expect(parsed.error == nil)
+    }
+
+    @Test("Parses 404 in raw mode without treating as error")
+    func testRawMode404NotError() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 404 https://api.example.com/missing\n\n{\"error\": \"not_found\"}",
+            arguments: "{\"url\": \"https://api.example.com/missing\", \"rawResponse\": true}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpStatus == 404)
+        #expect(parsed.error == nil) // NOT treated as error in raw mode
+        #expect(parsed.answer.contains("not_found"))
+    }
+
+    @Test("Parses DELETE with empty body")
+    func testDeleteEmptyBody() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 204 https://api.example.com/items/42\n\n",
+            arguments: "{\"url\": \"https://api.example.com/items/42\", \"method\": \"DELETE\"}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpMethod == "DELETE")
+        #expect(parsed.httpStatus == 204)
+        #expect(parsed.answer.isEmpty)
+    }
+
+    @Test("Extracts source URL in raw mode")
+    func testRawModeSourceExtraction() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://api.example.com/data\n\nresponse body",
+            arguments: "{\"url\": \"https://api.example.com/data\", \"method\": \"GET\", \"rawResponse\": true}"
+        )
+        #expect(parsed.source?.url == "https://api.example.com/data")
+        #expect(parsed.source?.domain == "api.example.com")
+    }
+
+    @Test("Handles non-HTTP-prefixed raw response gracefully")
+    func testNonHttpPrefixedResponse() {
+        let parsed = WebFetchParsedResult(
+            from: "Just plain text response",
+            arguments: "{\"url\": \"https://example.com\", \"rawResponse\": true}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpStatus == nil)
+        #expect(parsed.answer == "Just plain text response")
+    }
+
+    @Test("isCached is false in raw mode")
+    func testIsCachedFalseInRawMode() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://example.com\n\nfromCache: true",
+            arguments: "{\"url\": \"https://example.com\", \"rawResponse\": true}"
+        )
+        #expect(!parsed.isCached)
+    }
+
+    @Test("Method is case-insensitive")
+    func testMethodCaseInsensitive() {
+        let parsed = WebFetchParsedResult(
+            from: "HTTP 200 https://example.com\n\nok",
+            arguments: "{\"url\": \"https://example.com\", \"method\": \"post\"}"
+        )
+        #expect(parsed.isRawMode)
+        #expect(parsed.httpMethod == "POST")
+    }
+}
+
 // MARK: - WebSearch Result Parsing Tests
 
 @Suite("WebSearchParsedResults Tests")

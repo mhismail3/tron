@@ -22,6 +22,10 @@ struct WebFetchToolDetailSheet: View {
         ToolArgumentParser.string("prompt", from: data.arguments) ?? ""
     }
 
+    private var method: String {
+        ToolArgumentParser.string("method", from: data.arguments)?.uppercased() ?? "GET"
+    }
+
     private var domain: String {
         ToolArgumentParser.extractDomain(from: url)
     }
@@ -32,6 +36,7 @@ struct WebFetchToolDetailSheet: View {
 
     private var isTruncated: Bool {
         data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
+            || (data.result?.contains("[Response truncated") == true)
     }
 
     var body: some View {
@@ -54,7 +59,11 @@ struct WebFetchToolDetailSheet: View {
                 sourceSection
                     .padding(.horizontal)
 
-                if !prompt.isEmpty {
+                if parsed.isRawMode {
+                    // Raw HTTP mode: show method + status instead of prompt
+                    rawHttpInfoSection
+                        .padding(.horizontal)
+                } else if !prompt.isEmpty {
                     promptSection
                         .padding(.horizontal)
                 }
@@ -68,8 +77,13 @@ struct WebFetchToolDetailSheet: View {
                         fetchErrorSection(error)
                             .padding(.horizontal)
                     } else if !parsed.answer.isEmpty {
-                        answerSection
-                            .padding(.horizontal)
+                        if parsed.isRawMode {
+                            rawResponseBodySection
+                                .padding(.horizontal)
+                        } else {
+                            answerSection
+                                .padding(.horizontal)
+                        }
                     } else {
                         emptyResultSection
                             .padding(.horizontal)
@@ -142,8 +156,18 @@ struct WebFetchToolDetailSheet: View {
 
     private var statusRow: some View {
         ToolStatusRow(status: data.status, durationMs: data.durationMs) {
-            if parsed.isCached {
+            if parsed.isRawMode, let status = parsed.httpStatus {
+                ToolInfoPill(
+                    icon: status < 400 ? "checkmark.circle" : "exclamationmark.circle",
+                    label: "HTTP \(status)",
+                    color: status < 300 ? .tronEmerald : status < 400 ? .tronAmber : .tronError
+                )
+            }
+            if !parsed.isRawMode && parsed.isCached {
                 ToolInfoPill(icon: "arrow.triangle.2.circlepath", label: "Cached", color: .tronEmerald)
+            }
+            if parsed.isRawMode {
+                ToolInfoPill(icon: "network", label: method, color: .tronInfo)
             }
             if isTruncated {
                 ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
@@ -178,10 +202,78 @@ struct WebFetchToolDetailSheet: View {
         }
     }
 
+    // MARK: - Raw HTTP Info Section
+
+    private var rawHttpInfoSection: some View {
+        ToolDetailSection(title: "Request", accent: .tronInfo, tint: tint) {
+            HStack(spacing: 12) {
+                // Method badge
+                Text(method)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(methodColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                // Status code
+                if let status = parsed.httpStatus {
+                    Text("→ \(status)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(statusColor(status))
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var methodColor: Color {
+        switch method {
+        case "POST": return .tronInfo
+        case "PUT", "PATCH": return .tronAmber
+        case "DELETE": return .tronError
+        default: return .tronInfo
+        }
+    }
+
+    private func statusColor(_ status: Int) -> Color {
+        switch status {
+        case 200..<300: return .tronEmerald
+        case 300..<400: return .tronAmber
+        default: return .tronError
+        }
+    }
+
+    // MARK: - Raw Response Body Section
+
+    private var rawResponseBodySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Response")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(tint.heading)
+
+                Spacer()
+
+                ToolCopyButton(content: parsed.answer, accent: .tronInfo)
+            }
+
+            Text(parsed.answer)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .foregroundStyle(tint.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .sectionFill(.tronInfo)
+        }
+    }
+
     // MARK: - Empty Result Section
 
     private var emptyResultSection: some View {
-        ToolEmptyState(title: "Answer", icon: "doc.text", message: "No content returned", accent: .tronInfo, tint: tint)
+        ToolEmptyState(title: parsed.isRawMode ? "Response" : "Answer", icon: "doc.text", message: "No content returned", accent: .tronInfo, tint: tint)
     }
 
     // MARK: - Error Section
@@ -322,9 +414,10 @@ enum WebFetchDetailParser {
 // MARK: - WebFetchParsedResult Extensions
 
 extension WebFetchParsedResult {
-    /// Whether the result came from cache.
+    /// Whether the result came from cache. Only applies to summarization mode.
     var isCached: Bool {
-        WebFetchDetailParser.isCached(answer)
+        guard !isRawMode else { return false }
+        return WebFetchDetailParser.isCached(answer)
     }
 }
 
@@ -457,6 +550,66 @@ extension WebFetchParsedResult {
             durationMs: 1800,
             arguments: "{\"url\": \"https://news.ycombinator.com\"}",
             result: "The top stories on Hacker News today include discussions about AI safety, a new programming language, and a startup funding announcement.",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("WebFetch - Raw POST") {
+    WebFetchToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_wf7",
+            toolName: "WebFetch",
+            normalizedName: "webfetch",
+            icon: "arrow.down.doc",
+            iconColor: .tronInfo,
+            displayName: "Web Fetch",
+            summary: "POST api.example.com",
+            status: .success,
+            durationMs: 450,
+            arguments: "{\"url\": \"https://api.example.com/items\", \"method\": \"POST\", \"body\": {\"name\": \"New Item\"}}",
+            result: "HTTP 201 https://api.example.com/items\n\n{\"id\": 42, \"name\": \"New Item\", \"created\": true}",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("WebFetch - Raw GET 404") {
+    WebFetchToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_wf8",
+            toolName: "WebFetch",
+            normalizedName: "webfetch",
+            icon: "arrow.down.doc",
+            iconColor: .tronInfo,
+            displayName: "Web Fetch",
+            summary: "api.example.com",
+            status: .success,
+            durationMs: 120,
+            arguments: "{\"url\": \"https://api.example.com/missing\", \"rawResponse\": true}",
+            result: "HTTP 404 https://api.example.com/missing\n\n{\"error\": \"not_found\", \"message\": \"Resource does not exist\"}",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("WebFetch - Raw DELETE") {
+    WebFetchToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_wf9",
+            toolName: "WebFetch",
+            normalizedName: "webfetch",
+            icon: "arrow.down.doc",
+            iconColor: .tronInfo,
+            displayName: "Web Fetch",
+            summary: "DELETE api.example.com",
+            status: .success,
+            durationMs: 200,
+            arguments: "{\"url\": \"https://api.example.com/items/42\", \"method\": \"DELETE\"}",
+            result: "HTTP 204 https://api.example.com/items/42\n\n",
             isResultTruncated: false
         )
     )
