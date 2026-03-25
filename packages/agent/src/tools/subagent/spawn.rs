@@ -439,6 +439,7 @@ mod tests {
             subagent_depth: depth,
             subagent_max_depth: max_depth,
             workspace_id: None,
+            output_tx: None,
         }
     }
 

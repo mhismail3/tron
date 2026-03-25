@@ -122,6 +122,7 @@ impl ComputerUseTool {
             shell: "bash".into(),
             interactive: false,
             pty_input: Vec::new(),
+            output_tx: None,
         };
         let output = self.runner.run_command(&command, &opts).await?;
         if output.exit_code != 0 {
@@ -147,6 +148,7 @@ impl ComputerUseTool {
             shell: "bash".into(),
             interactive: false,
             pty_input: Vec::new(),
+            output_tx: None,
         };
         self.runner.run_command(command, &opts).await
     }

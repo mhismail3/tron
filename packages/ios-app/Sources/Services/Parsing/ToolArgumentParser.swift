@@ -50,6 +50,42 @@ enum ToolArgumentParser {
         return value
     }
 
+    /// Extract a string-keyed dictionary from JSON arguments.
+    /// Non-string values are skipped.
+    static func dictionary(_ key: String, from args: String) -> [String: String]? {
+        guard let data = args.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let obj = json[key] as? [String: Any] else {
+            return nil
+        }
+        var result: [String: String] = [:]
+        for (k, v) in obj {
+            if let s = v as? String {
+                result[k] = s
+            }
+        }
+        return result
+    }
+
+    /// Extract an array of string-keyed dictionaries from JSON arguments.
+    /// Each element must be a `[String: String]` object.
+    static func objectArray(_ key: String, from args: String) -> [[String: String]]? {
+        guard let data = args.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json[key] as? [[String: Any]] else {
+            return nil
+        }
+        return arr.map { obj in
+            var result: [String: String] = [:]
+            for (k, v) in obj {
+                if let s = v as? String {
+                    result[k] = s
+                }
+            }
+            return result
+        }
+    }
+
     // MARK: - Typed Extractors
 
     /// Extract file path: tries "file_path" first, falls back to "path".

@@ -53,6 +53,7 @@ pub async fn ast_search(
         shell: "bash".into(),
         interactive: false,
         pty_input: Vec::new(),
+        output_tx: None,
     };
 
     let output = runner.run_command(&command, &opts).await?;

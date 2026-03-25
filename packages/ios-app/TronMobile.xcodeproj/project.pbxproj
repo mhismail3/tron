@@ -431,6 +431,7 @@
 		C727C48CD26E2D92D55D93D4 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139D63473EA8D93898D46617 /* DeepLinkRouter.swift */; };
 		C72BF007EBBE3AA681FC47DB /* ServerRestartingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD99C83E3D861FDAB93AC92B /* ServerRestartingPlugin.swift */; };
 		C7BA435955B6199C0A2B487C /* ChipStyleModifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FDDA3A3703ECEFA8C90E045 /* ChipStyleModifierTests.swift */; };
+		C8555FF29092C7D9005E4114 /* BashDetailsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDE9EDE373769E4143EE2948 /* BashDetailsHelper.swift */; };
 		C87A39DFF499F040CED85BF7 /* NotificationListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1817538DD89B8E55A2A987C7 /* NotificationListSheet.swift */; };
 		C8A4D4660D100CEB508A93EB /* NotificationInboxDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC61C5B1A148970EBF1E4FE /* NotificationInboxDetailSheet.swift */; };
 		C8D276EE7F2AA301B173EED0 /* DatabaseTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0765D88B5586B7D58BFBEE90 /* DatabaseTransport.swift */; };
@@ -1047,6 +1048,7 @@
 		CC475667BC6878E548D29BB1 /* LoggingContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoggingContext.swift; sourceTree = "<group>"; };
 		CD5A9DCC460E7BBE46A09448 /* RPCTypesDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTypesDiffTests.swift; sourceTree = "<group>"; };
 		CD7C8510A0D4957B1A99B2FE /* DispatchableEventPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchableEventPluginTests.swift; sourceTree = "<group>"; };
+		CDE9EDE373769E4143EE2948 /* BashDetailsHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashDetailsHelper.swift; sourceTree = "<group>"; };
 		CE92A6AE9E91E88CEF9CE5E2 /* StreamingPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingPayloads.swift; sourceTree = "<group>"; };
 		CEB09852325E4D08BEEFADF7 /* UseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseCase.swift; sourceTree = "<group>"; };
 		CEE3B9CE86236E7F465571D9 /* CommandToolTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandToolTypesTests.swift; sourceTree = "<group>"; };
@@ -1749,6 +1751,7 @@
 		679896B49F3F46122AB654EE /* Bash */ = {
 			isa = PBXGroup;
 			children = (
+				CDE9EDE373769E4143EE2948 /* BashDetailsHelper.swift */,
 				5CE7FB0A11EF8ABA88945BF3 /* BashOutputHelpers.swift */,
 				DDDB95C69285DC43F89A3446 /* BashToolDetailSheet.swift */,
 			);
@@ -2941,6 +2944,7 @@
 				54B8ADCEAA431214F15A9B08 /* AutomationRow.swift in Sources */,
 				843248DC166F1C7E0C499F6E /* AutomationRunDetailSheet.swift in Sources */,
 				0B7704F7E45DC0DDB020675B /* AutomationsDashboardView.swift in Sources */,
+				C8555FF29092C7D9005E4114 /* BashDetailsHelper.swift in Sources */,
 				E218CDC34D0AC8F755903671 /* BashOutputHelpers.swift in Sources */,
 				A5D9E014D5AD2A2D386AF034 /* BashToolDetailSheet.swift in Sources */,
 				625DD469D674DD4DC37F1886 /* BashToolViewer.swift in Sources */,

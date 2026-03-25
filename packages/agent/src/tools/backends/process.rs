@@ -83,6 +83,7 @@ impl TokioProcessRunner {
         let pty_input = opts.pty_input.clone();
         let stdin_data = opts.stdin.clone();
         let timeout_ms = opts.timeout_ms;
+        let pty_stream_tx = opts.output_tx.clone();
 
         // Run I/O in a blocking thread since portable-pty uses blocking I/O.
         // Both `child` and `pair.master` are moved into the closure so we can
@@ -95,6 +96,7 @@ impl TokioProcessRunner {
             let mut output = String::new();
             let mut buf = [0u8; 4096];
             let mut pattern_idx = 0;
+            let stream_tx = pty_stream_tx;
             let deadline = std::time::Instant::now()
                 + std::time::Duration::from_millis(timeout_ms);
 
@@ -131,6 +133,11 @@ impl TokioProcessRunner {
                     Ok(n) => {
                         let chunk = String::from_utf8_lossy(&buf[..n]);
                         output.push_str(&chunk);
+
+                        // Stream chunk to output channel
+                        if let Some(ref tx) = stream_tx {
+                            let _ = tx.send(chunk.into_owned());
+                        }
 
                         // Check for pattern matches
                         while pattern_idx < pty_input.len() {
@@ -264,13 +271,33 @@ impl ProcessRunner for TokioProcessRunner {
         // Take ownership of pipes before the select
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
+        let stream_tx = opts.output_tx.clone();
 
         let stdout_handle = tokio::spawn(async move {
-            let mut buf = Vec::new();
-            if let Some(pipe) = stdout_pipe {
-                let _ = pipe.take(MAX_OUTPUT_BYTES).read_to_end(&mut buf).await;
+            let mut total = Vec::new();
+            if let Some(mut pipe) = stdout_pipe {
+                let mut chunk_buf = [0u8; 8192];
+                loop {
+                    if total.len() as u64 >= MAX_OUTPUT_BYTES {
+                        break;
+                    }
+                    let remaining = MAX_OUTPUT_BYTES as usize - total.len();
+                    let to_read = chunk_buf.len().min(remaining);
+                    match pipe.read(&mut chunk_buf[..to_read]).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            total.extend_from_slice(&chunk_buf[..n]);
+                            // Stream chunk to output channel if available
+                            if let Some(ref tx) = stream_tx {
+                                let chunk_str = String::from_utf8_lossy(&chunk_buf[..n]);
+                                let _ = tx.send(chunk_str.into_owned());
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
-            buf
+            total
         });
         let stderr_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
@@ -358,6 +385,7 @@ mod tests {
             shell: "bash".into(),
             interactive: false,
             pty_input: Vec::new(),
+            output_tx: None,
         }
     }
 
@@ -719,5 +747,107 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[1;31mbold red\x1b[0m"), "bold red");
         assert_eq!(strip_ansi("no codes here"), "no codes here");
         assert_eq!(strip_ansi(""), "");
+    }
+
+    // ── PTY pattern-matching integration test ──
+
+    #[tokio::test]
+    async fn pty_input_pattern_matching() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.interactive = true;
+        opts.timeout_ms = 10_000;
+        // Use a bash script that prompts and reads input
+        opts.pty_input = vec![
+            ("continue".into(), "yes\n".into()),
+        ];
+        let result = runner
+            .run_command(
+                "echo 'Do you want to continue?'; read ANSWER; echo \"Got: $ANSWER\"",
+                &opts,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.stdout.contains("continue"),
+            "Output should contain the prompt: {}",
+            result.stdout
+        );
+        assert!(
+            result.stdout.contains("Got: yes"),
+            "Output should contain the response: {}",
+            result.stdout
+        );
+    }
+
+    // ── Streaming output test ──
+
+    #[tokio::test]
+    async fn streaming_output_sends_chunks() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        opts.output_tx = Some(tx);
+
+        let result = runner
+            .run_command("echo line1; echo line2; echo line3", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+
+        // Collect all streamed chunks
+        let mut chunks = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            chunks.push(chunk);
+        }
+        let combined: String = chunks.join("");
+        assert!(
+            combined.contains("line1"),
+            "Streamed output should contain line1: {combined}"
+        );
+        assert!(
+            combined.contains("line3"),
+            "Streamed output should contain line3: {combined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_output_none_works() {
+        // When output_tx is None, should work fine (no streaming)
+        let runner = TokioProcessRunner;
+        let opts = default_opts(); // output_tx is None
+        let result = runner
+            .run_command("echo hello", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout.trim(), "hello");
+    }
+
+    #[tokio::test]
+    async fn pty_streaming_output_sends_chunks() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.interactive = true;
+        opts.timeout_ms = 5_000;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        opts.output_tx = Some(tx);
+
+        let result = runner
+            .run_command("echo 'pty streaming test'", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+
+        let mut chunks = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            chunks.push(chunk);
+        }
+        let combined: String = chunks.join("");
+        assert!(
+            combined.contains("pty streaming test"),
+            "PTY streamed output should contain the text: {combined}"
+        );
     }
 }

@@ -468,7 +468,7 @@ mod tests {
     fn resource_timeout_exceeds_max_blocked() {
         let ctx = EvaluationContext {
             tool_name: "Bash".into(),
-            tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 700_000}),
+            tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 4_000_000}),
             session_id: None,
             tool_call_id: None,
         };
@@ -479,6 +479,26 @@ mod tests {
             eval.triggered_rules
                 .iter()
                 .any(|r| r.rule_id == "bash.timeout")
+        );
+    }
+
+    #[test]
+    fn resource_timeout_above_600s_warns_but_not_blocked() {
+        let ctx = EvaluationContext {
+            tool_name: "Bash".into(),
+            tool_arguments: serde_json::json!({"command": "build", "timeout": 900_000}),
+            session_id: None,
+            tool_call_id: None,
+        };
+        let mut engine = default_engine();
+        let eval = engine.evaluate(&ctx);
+        assert!(!eval.blocked, "900s should not be blocked (max is 3600s)");
+        assert!(eval.has_warnings, "900s should trigger a warning");
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.long-timeout"),
+            "bash.long-timeout warning should fire"
         );
     }
 
@@ -1340,7 +1360,7 @@ mod tests {
     fn engine_all_default_rules_registered() {
         let engine = default_engine();
         let rules = engine.get_rules();
-        assert_eq!(rules.len(), 9);
+        assert_eq!(rules.len(), 10);
     }
 
     #[test]

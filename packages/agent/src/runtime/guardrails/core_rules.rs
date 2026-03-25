@@ -64,6 +64,7 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         path_traversal(),
         path_hidden_mkdir(),
         bash_timeout(),
+        bash_long_timeout_warning(),
     ]
 }
 
@@ -323,13 +324,13 @@ fn path_hidden_mkdir() -> GuardrailRule {
     })
 }
 
-/// Standard rule: Enforce bash timeout limits (10 minutes max).
+/// Standard rule: Enforce bash timeout limits (60 minutes max).
 fn bash_timeout() -> GuardrailRule {
     GuardrailRule::Resource(ResourceRule {
         base: RuleBase {
             id: "bash.timeout".into(),
             name: "Bash Timeout Limit".into(),
-            description: "Enforces maximum timeout for bash commands (10 minutes)".into(),
+            description: "Enforces maximum timeout for bash commands (60 minutes)".into(),
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
@@ -339,7 +340,29 @@ fn bash_timeout() -> GuardrailRule {
             tags: vec!["resource-limits".into()],
         },
         target_argument: "timeout".into(),
-        max_value: Some(600_000.0), // 10 minutes
+        max_value: Some(3_600_000.0), // 60 minutes
+        min_value: None,
+    })
+}
+
+/// Standard rule: Warn when bash timeout exceeds 10 minutes.
+fn bash_long_timeout_warning() -> GuardrailRule {
+    GuardrailRule::Resource(ResourceRule {
+        base: RuleBase {
+            id: "bash.long-timeout".into(),
+            name: "Bash Long Timeout Warning".into(),
+            description: "Warns when bash timeout exceeds 10 minutes — use GetConfirmation first"
+                .into(),
+            severity: Severity::Warn,
+            scope: Scope::Tool,
+            tier: RuleTier::Standard,
+            tools: vec!["Bash".into()],
+            priority: 400,
+            enabled: true,
+            tags: vec!["resource-limits".into()],
+        },
+        target_argument: "timeout".into(),
+        max_value: Some(600_000.0), // 10 minutes — warn above this
         min_value: None,
     })
 }
@@ -363,7 +386,7 @@ mod tests {
     #[test]
     fn test_default_rules_count() {
         let rules = default_rules();
-        assert_eq!(rules.len(), 9); // 6 core + 3 standard
+        assert_eq!(rules.len(), 10); // 6 core + 4 standard
     }
 
     #[test]
@@ -507,6 +530,58 @@ mod tests {
         );
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "Write to ~/Desktop should be allowed");
+    }
+
+    // ── bash timeout guardrail tests ─────────────────────────────
+
+    #[test]
+    fn bash_timeout_blocks_above_3600s() {
+        let rule = find_rule("bash.timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "sleep 999", "timeout": 3_700_000}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Timeout above 60 min should be blocked");
+        assert_eq!(result.severity, Some(Severity::Block));
+    }
+
+    #[test]
+    fn bash_timeout_allows_up_to_3600s() {
+        let rule = find_rule("bash.timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "sleep 999", "timeout": 3_600_000}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Timeout at exactly 60 min should be allowed");
+    }
+
+    #[test]
+    fn bash_timeout_allows_600s() {
+        let rule = find_rule("bash.timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls", "timeout": 600_000}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Timeout at 10 min should be allowed");
+    }
+
+    #[test]
+    fn bash_long_timeout_warns_above_600s() {
+        let rule = find_rule("bash.long-timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "build", "timeout": 900_000}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Timeout above 10 min should trigger warning");
+        assert_eq!(result.severity, Some(Severity::Warn));
+    }
+
+    #[test]
+    fn bash_long_timeout_no_warn_at_600s() {
+        let rule = find_rule("bash.long-timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls", "timeout": 600_000}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "Timeout at 10 min should not warn");
+    }
+
+    #[test]
+    fn bash_long_timeout_no_warn_without_timeout() {
+        let rule = find_rule("bash.long-timeout");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(!result.triggered, "No timeout param should not warn");
     }
 
     #[test]

@@ -29,10 +29,46 @@ struct BashToolDetailSheet: View {
         ToolArgumentParser.integer("timeout", from: data.arguments)
     }
 
+    // MARK: - Phase 2 Argument Extraction
+
+    private var shell: String? {
+        ToolArgumentParser.string("shell", from: data.arguments)
+            ?? BashDetailsHelper.shell(from: data.details)
+    }
+
+    private var isInteractive: Bool {
+        ToolArgumentParser.boolean("interactive", from: data.arguments) == true
+            || BashDetailsHelper.isInteractive(from: data.details)
+    }
+
+    private var stdinContent: String? {
+        ToolArgumentParser.string("stdin", from: data.arguments)
+    }
+
+    private var envVars: [String: String]? {
+        ToolArgumentParser.dictionary("env", from: data.arguments)
+    }
+
+    private var sandboxMode: String? {
+        BashDetailsHelper.sandboxMode(from: data.arguments)
+    }
+
+    private var ptyInputPairs: [[String: String]]? {
+        if let fromArgs = ToolArgumentParser.objectArray("ptyInput", from: data.arguments) {
+            return BashDetailsHelper.redactPtyInput(fromArgs)
+        }
+        if let fromDetails = BashDetailsHelper.ptyInput(from: data.details) {
+            return fromDetails // already redacted server-side
+        }
+        return nil
+    }
+
     // MARK: - Result Analysis
 
     private var exitCode: Int? {
-        BashOutputHelpers.extractExitCode(from: data.result)
+        // Prefer structured details over regex
+        BashDetailsHelper.exitCode(from: data.details)
+            ?? BashOutputHelpers.extractExitCode(from: data.result)
     }
 
     private var isBlocked: Bool {
@@ -103,6 +139,20 @@ struct BashToolDetailSheet: View {
                 statusRow
                     .padding(.horizontal)
 
+                // Phase 2: contextual sections (stdin, env, ptyInput)
+                if let stdin = stdinContent, !stdin.isEmpty {
+                    stdinSection(stdin)
+                        .padding(.horizontal)
+                }
+                if let env = envVars, !env.isEmpty {
+                    envSection(env)
+                        .padding(.horizontal)
+                }
+                if let pairs = ptyInputPairs, !pairs.isEmpty {
+                    ptyInputSection(pairs)
+                        .padding(.horizontal)
+                }
+
                 switch data.status {
                 case .success:
                     if outputLines.isEmpty {
@@ -160,12 +210,90 @@ struct BashToolDetailSheet: View {
         ToolCopyButton(content: command, accent: .tronEmerald)
     }
 
+    // MARK: - stdin Section
+
+    private func stdinSection(_ content: String) -> some View {
+        ToolDetailSection(title: "stdin", accent: .tronEmerald, tint: tint) {
+            Text(content)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(tint.body)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Environment Variables Section
+
+    private func envSection(_ env: [String: String]) -> some View {
+        ToolDetailSection(title: "Environment", accent: .tronEmerald, tint: tint) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(env.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                    HStack(spacing: 4) {
+                        Text(key)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(tint.heading)
+                        Text("=")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(tint.subtle)
+                        Text(value)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(tint.body)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - ptyInput Section
+
+    private func ptyInputSection(_ pairs: [[String: String]]) -> some View {
+        ToolDetailSection(title: "Interactive Prompts", accent: .tronTeal, tint: tint) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+                    HStack(spacing: 6) {
+                        Text("wait")
+                            .font(TronTypography.pill)
+                            .foregroundStyle(.tronTextMuted)
+                        Text(pair["wait"] ?? "")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(tint.body)
+                        Image(systemName: "arrow.right")
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
+                            .foregroundStyle(.tronTextMuted)
+                        Text("send")
+                            .font(TronTypography.pill)
+                            .foregroundStyle(.tronTextMuted)
+                        Text(pair["send"] ?? "")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(pair["send"] == "[REDACTED]" ? .tronAmber : tint.body)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     // MARK: - Status Row
 
     private var statusRow: some View {
         ToolStatusRow(status: data.status, durationMs: data.durationMs) {
             if let code = exitCode, code != 0 {
                 ToolInfoPill(icon: "xmark.circle", label: "Exit \(code)", color: .tronError)
+            }
+            if let sh = shell, sh != "bash" {
+                ToolInfoPill(icon: "apple.terminal", label: sh, color: .tronIndigo)
+            }
+            if isInteractive {
+                ToolInfoPill(icon: "rectangle.connected.to.line.below", label: "PTY", color: .tronTeal)
+            }
+            if let sandbox = sandboxMode {
+                ToolInfoPill(icon: "lock.shield", label: sandbox == "docker" ? "Docker" : "Sandbox", color: .tronAmber)
+            }
+            if stdinContent != nil {
+                ToolInfoPill(icon: "arrow.right.doc", label: "stdin")
             }
             if outputLineCount > 0 {
                 ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(outputLineCount) lines")
@@ -566,6 +694,128 @@ enum BashErrorClassifier: ErrorClassifying {
             durationMs: 3,
             arguments: "{\"command\": \"echo hello\"}",
             result: "hello",
+            isResultTruncated: false
+        )
+    )
+}
+
+// MARK: - Phase 2 Previews
+
+@available(iOS 26.0, *)
+#Preview("Bash - zsh Shell") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_1",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "zsh: echo $0",
+            status: .success,
+            durationMs: 12,
+            arguments: "{\"command\": \"echo $0\", \"shell\": \"zsh\"}",
+            result: "zsh",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Bash - Interactive PTY") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_2",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "PTY: ssh user@host",
+            status: .success,
+            durationMs: 4500,
+            arguments: "{\"command\": \"ssh user@host\", \"interactive\": true, \"ptyInput\": [{\"wait\": \"password:\", \"send\": \"secret123\"}, {\"wait\": \"continue?\", \"send\": \"yes\"}]}",
+            result: "Last login: Mon Mar 24 10:30:00 2026\nuser@host:~$",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Bash - With Env Vars") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_3",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "echo $FOO",
+            status: .success,
+            durationMs: 8,
+            arguments: "{\"command\": \"echo $FOO\", \"env\": {\"FOO\": \"bar\", \"NODE_ENV\": \"production\", \"DEBUG\": \"true\"}}",
+            result: "bar",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Bash - With stdin") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_4",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "wc -l",
+            status: .success,
+            durationMs: 5,
+            arguments: "{\"command\": \"wc -l\", \"stdin\": \"line1\\nline2\\nline3\"}",
+            result: "       3",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Bash - Sandbox Mode") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_5",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "sandbox: ls -la",
+            status: .success,
+            durationMs: 120,
+            arguments: "{\"command\": \"ls -la\", \"sandbox\": true}",
+            result: "total 8\ndrwxr-xr-x  2 user  staff  64 Mar 24 10:00 .\n-rw-r--r--  1 user  staff  12 Mar 24 10:00 test.txt",
+            isResultTruncated: false
+        )
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Bash - Docker Sandbox") {
+    BashToolDetailSheet(
+        data: CommandToolChipData(
+            id: "call_p2_6",
+            toolName: "Bash",
+            normalizedName: "bash",
+            icon: "terminal",
+            iconColor: .tronEmerald,
+            displayName: "Bash",
+            summary: "docker: node -v",
+            status: .success,
+            durationMs: 2300,
+            arguments: "{\"command\": \"node -v\", \"sandbox\": \"docker\"}",
+            result: "v20.11.0",
             isResultTruncated: false
         )
     )

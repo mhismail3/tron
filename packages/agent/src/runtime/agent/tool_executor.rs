@@ -184,7 +184,8 @@ pub async fn execute_tool(
         tool_call_id, session_id, "tool execution started"
     );
 
-    // 5. Execute tool
+    // 5. Execute tool with streaming output channel
+    let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let tool_ctx = ToolContext {
         tool_call_id: tool_call_id.clone(),
         session_id: session_id.to_owned(),
@@ -193,7 +194,22 @@ pub async fn execute_tool(
         subagent_depth: ctx.subagent_depth,
         subagent_max_depth: ctx.subagent_max_depth,
         workspace_id: ctx.workspace_id.map(String::from),
+        output_tx: Some(output_tx),
     };
+
+    // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events
+    let stream_emitter = ctx.emitter.clone();
+    let stream_tool_call_id = tool_call_id.clone();
+    let stream_session_id = session_id.to_owned();
+    let stream_handle = tokio::spawn(async move {
+        while let Some(chunk) = output_rx.recv().await {
+            let _ = stream_emitter.emit(TronEvent::ToolExecutionUpdate {
+                base: BaseEvent::now(&stream_session_id),
+                tool_call_id: stream_tool_call_id.clone(),
+                update: chunk,
+            });
+        }
+    });
 
     let tool_result = if ctx.cancel.is_cancelled() {
         crate::core::tools::error_result("Operation cancelled")
@@ -212,6 +228,9 @@ pub async fn execute_tool(
             }
         }
     };
+    // Drop the ToolContext's sender so the stream_handle can complete
+    drop(tool_ctx);
+    let _ = stream_handle.await;
 
     let duration_ms = duration_ceil_ms(start.elapsed());
 

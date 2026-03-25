@@ -52,6 +52,9 @@ pub struct ToolContext {
     pub subagent_max_depth: u32,
     /// Workspace ID for scoping memory recall (resolved from working directory).
     pub workspace_id: Option<String>,
+    /// Channel for streaming tool output in real time (e.g., bash stdout chunks).
+    /// Tools send String chunks; the runtime forwards them as `ToolExecutionUpdate` events.
+    pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,6 +266,8 @@ pub struct ProcessOptions {
     /// Pattern-response pairs for interactive mode.
     /// Each entry: (wait_pattern, send_response).
     pub pty_input: Vec<(String, String)>,
+    /// Channel for streaming stdout chunks in real time.
+    pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 /// Output from a subprocess.
@@ -441,6 +446,7 @@ mod tests {
             subagent_depth: 0,
             subagent_max_depth: 0,
             workspace_id: None,
+            output_tx: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -457,6 +463,7 @@ mod tests {
             subagent_depth: 0,
             subagent_max_depth: 0,
             workspace_id: None,
+            output_tx: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -472,6 +479,7 @@ mod tests {
             subagent_depth: 2,
             subagent_max_depth: 5,
             workspace_id: None,
+            output_tx: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -543,6 +551,7 @@ mod tests {
             shell: "bash".into(),
             interactive: false,
             pty_input: Vec::new(),
+            output_tx: None,
         };
         assert_eq!(opts.timeout_ms, 120_000);
         assert!(opts.env.is_empty());

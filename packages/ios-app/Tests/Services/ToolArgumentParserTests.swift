@@ -311,4 +311,124 @@ struct ToolArgumentParserTests {
         let args = "{\"action\": \"click\", \"selector\": \"#submit-btn\"}"
         #expect(ToolArgumentParser.string("selector", from: args) == "#submit-btn")
     }
+
+    // MARK: - dictionary(_:from:)
+
+    @Test("Extracts string dictionary from JSON")
+    func testDictionaryExtraction() {
+        let args = "{\"env\": {\"FOO\": \"bar\", \"BAZ\": \"qux\"}}"
+        let result = ToolArgumentParser.dictionary("env", from: args)
+        #expect(result?["FOO"] == "bar")
+        #expect(result?["BAZ"] == "qux")
+    }
+
+    @Test("Returns nil for missing dictionary key")
+    func testDictionaryMissing() {
+        let args = "{\"command\": \"ls\"}"
+        #expect(ToolArgumentParser.dictionary("env", from: args) == nil)
+    }
+
+    @Test("Returns nil for non-object value")
+    func testDictionaryNonObject() {
+        let args = "{\"env\": \"not an object\"}"
+        #expect(ToolArgumentParser.dictionary("env", from: args) == nil)
+    }
+
+    @Test("Handles empty dictionary")
+    func testDictionaryEmpty() {
+        let args = "{\"env\": {}}"
+        let result = ToolArgumentParser.dictionary("env", from: args)
+        #expect(result != nil)
+        #expect(result?.isEmpty == true)
+    }
+
+    @Test("Skips non-string values in dictionary")
+    func testDictionaryMixedValues() {
+        let args = "{\"env\": {\"VALID\": \"value\", \"INVALID\": 42}}"
+        let result = ToolArgumentParser.dictionary("env", from: args)
+        #expect(result?["VALID"] == "value")
+        #expect(result?["INVALID"] == nil)
+    }
+
+    // MARK: - objectArray(_:from:)
+
+    @Test("Extracts array of objects from JSON")
+    func testObjectArrayExtraction() {
+        let args = "{\"ptyInput\": [{\"wait\": \"password:\", \"send\": \"secret\"}, {\"wait\": \"continue?\", \"send\": \"y\"}]}"
+        let result = ToolArgumentParser.objectArray("ptyInput", from: args)
+        #expect(result?.count == 2)
+        #expect(result?[0]["wait"] == "password:")
+        #expect(result?[1]["send"] == "y")
+    }
+
+    @Test("Returns nil for missing array key")
+    func testObjectArrayMissing() {
+        let args = "{\"command\": \"ls\"}"
+        #expect(ToolArgumentParser.objectArray("ptyInput", from: args) == nil)
+    }
+
+    @Test("Returns nil for non-array value")
+    func testObjectArrayNonArray() {
+        let args = "{\"ptyInput\": \"not an array\"}"
+        #expect(ToolArgumentParser.objectArray("ptyInput", from: args) == nil)
+    }
+
+    // MARK: - Phase 2 Bash argument parsing
+
+    @Test("Parses Bash args with shell field")
+    func testBashShellField() {
+        let args = "{\"command\": \"echo $0\", \"shell\": \"zsh\"}"
+        #expect(ToolArgumentParser.string("shell", from: args) == "zsh")
+    }
+
+    @Test("Parses Bash args with interactive field")
+    func testBashInteractiveField() {
+        let args = "{\"command\": \"ssh host\", \"interactive\": true}"
+        #expect(ToolArgumentParser.boolean("interactive", from: args) == true)
+    }
+
+    @Test("Parses Bash args with stdin field")
+    func testBashStdinField() {
+        let args = "{\"command\": \"cat\", \"stdin\": \"hello world\"}"
+        #expect(ToolArgumentParser.string("stdin", from: args) == "hello world")
+    }
+
+    @Test("Parses Bash args with env field")
+    func testBashEnvField() {
+        let args = "{\"command\": \"echo $FOO\", \"env\": {\"FOO\": \"bar\"}}"
+        let env = ToolArgumentParser.dictionary("env", from: args)
+        #expect(env?["FOO"] == "bar")
+    }
+
+    @Test("Parses Bash args with sandbox boolean")
+    func testBashSandboxBool() {
+        let args = "{\"command\": \"ls\", \"sandbox\": true}"
+        #expect(ToolArgumentParser.boolean("sandbox", from: args) == true)
+    }
+
+    @Test("Parses Bash args with sandbox string")
+    func testBashSandboxString() {
+        let args = "{\"command\": \"ls\", \"sandbox\": \"docker\"}"
+        #expect(ToolArgumentParser.string("sandbox", from: args) == "docker")
+    }
+
+    @Test("Parses Bash args with ptyInput")
+    func testBashPtyInput() {
+        let args = "{\"command\": \"ssh\", \"interactive\": true, \"ptyInput\": [{\"wait\": \"password:\", \"send\": \"pass123\"}]}"
+        let pty = ToolArgumentParser.objectArray("ptyInput", from: args)
+        #expect(pty?.count == 1)
+        #expect(pty?[0]["wait"] == "password:")
+    }
+
+    @Test("Parses full Phase 2 Bash args")
+    func testFullPhase2BashArgs() {
+        let args = """
+        {"command": "make build", "shell": "zsh", "env": {"CC": "clang"}, "timeout": 900000, "description": "Build project"}
+        """
+        #expect(ToolArgumentParser.command(from: args) == "make build")
+        #expect(ToolArgumentParser.string("shell", from: args) == "zsh")
+        #expect(ToolArgumentParser.dictionary("env", from: args)?["CC"] == "clang")
+        #expect(ToolArgumentParser.integer("timeout", from: args) == 900000)
+        #expect(ToolArgumentParser.string("description", from: args) == "Build project")
+    }
 }

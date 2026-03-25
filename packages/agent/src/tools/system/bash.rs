@@ -37,6 +37,8 @@ use crate::tools::utils::validation::{get_optional_bool, get_optional_string, ge
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 3_600_000;
+const PTY_MAX_TIMEOUT_MS: u64 = 120_000;
+const INTERACTIVE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_OUTPUT_CHARS: usize = 400_000;
 const INLINE_OUTPUT_LIMIT: usize = 30_000;
 const BLOB_HEAD_CHARS: usize = 20_000;
@@ -61,6 +63,51 @@ impl BashTool {
             }
         }
         None
+    }
+
+    /// Check if a PATH value points to suspicious locations (e.g., /tmp, hidden dirs).
+    fn is_suspicious_path(path: &str) -> bool {
+        let suspicious = ["/tmp/", "/var/tmp/", "/dev/shm/"];
+        for segment in path.split(':') {
+            let seg = segment.trim();
+            if seg.is_empty() {
+                continue;
+            }
+            // Suspicious: starts with temp dirs or hidden dirs in home
+            for prefix in &suspicious {
+                if seg.starts_with(prefix) {
+                    return true;
+                }
+            }
+            // Suspicious: hidden directory path (e.g., ~/.malware/bin)
+            if seg.contains("/.") && !seg.contains("/.tron") && !seg.contains("/.cargo")
+                && !seg.contains("/.local") && !seg.contains("/.nvm")
+                && !seg.contains("/.npm") && !seg.contains("/.bun")
+                && !seg.contains("/.pyenv") && !seg.contains("/.rbenv")
+                && !seg.contains("/.rustup") && !seg.contains("/.volta")
+                && !seg.contains("/.go") && !seg.contains("/.deno")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Redact ptyInput send values for password-like patterns in audit log.
+    fn redact_pty_input(pty_input: &[(String, String)]) -> Vec<Value> {
+        pty_input
+            .iter()
+            .map(|(wait, send)| {
+                let is_sensitive = wait.to_lowercase().contains("password")
+                    || wait.to_lowercase().contains("passphrase")
+                    || wait.to_lowercase().contains("secret")
+                    || wait.to_lowercase().contains("token");
+                json!({
+                    "wait": wait,
+                    "send": if is_sensitive { "[REDACTED]" } else { send.as_str() },
+                })
+            })
+            .collect()
     }
 }
 
@@ -178,6 +225,16 @@ impl TronTool for BashTool {
             })
             .unwrap_or_default();
 
+        // Guard: block suspicious PATH overrides
+        if let Some(path_val) = env_vars.get("PATH") {
+            if Self::is_suspicious_path(path_val) {
+                return Ok(error_result(
+                    "Blocked: env overrides PATH to a suspicious location. \
+                     Use absolute paths to binaries instead of modifying PATH.",
+                ));
+            }
+        }
+
         let shell = get_optional_string(&params, "shell")
             .unwrap_or_else(|| "bash".to_string());
 
@@ -205,9 +262,11 @@ impl TronTool for BashTool {
             })
             .unwrap_or_default();
 
-        // Interactive mode: shorter default timeout
-        let timeout_ms = if interactive && get_optional_u64(&params, "timeout").is_none() {
-            30_000_u64.min(MAX_TIMEOUT_MS) // 30s default for interactive
+        // Interactive mode: shorter default timeout, capped at PTY_MAX_TIMEOUT_MS
+        let timeout_ms = if interactive {
+            let base = get_optional_u64(&params, "timeout")
+                .unwrap_or(INTERACTIVE_DEFAULT_TIMEOUT_MS);
+            base.min(PTY_MAX_TIMEOUT_MS)
         } else {
             timeout_ms
         };
@@ -254,6 +313,7 @@ impl TronTool for BashTool {
                     shell,
                     interactive,
                     pty_input,
+                    output_tx: ctx.output_tx.clone(),
                 };
                 let docker_output = self.runner.run_command(&docker_cmd, &opts).await?;
                 let mut combined = docker_output.stdout;
@@ -289,6 +349,15 @@ impl TronTool for BashTool {
             ctx.working_directory.clone()
         };
 
+        // Capture audit info before moving into opts
+        let shell_used = shell.clone();
+        let is_interactive = interactive;
+        let pty_input_audit = if pty_input.is_empty() {
+            None
+        } else {
+            Some(Self::redact_pty_input(&pty_input))
+        };
+
         let opts = ProcessOptions {
             working_directory: working_dir,
             timeout_ms,
@@ -298,6 +367,7 @@ impl TronTool for BashTool {
             shell,
             interactive,
             pty_input,
+            output_tx: ctx.output_tx.clone(),
         };
 
         let output = self.runner.run_command(&command, &opts).await?;
@@ -363,7 +433,7 @@ impl TronTool for BashTool {
             combined = inline;
         }
 
-        let details = json!({
+        let mut details = json!({
             "command": command,
             "exitCode": output.exit_code,
             "durationMs": output.duration_ms,
@@ -375,6 +445,16 @@ impl TronTool for BashTool {
             "description": description,
             "blobId": blob_id,
         });
+        // Include shell/interactive/ptyInput in details for audit
+        if shell_used != "bash" {
+            details["shell"] = json!(shell_used);
+        }
+        if is_interactive {
+            details["interactive"] = json!(true);
+        }
+        if let Some(ref pty_audit) = pty_input_audit {
+            details["ptyInput"] = json!(pty_audit);
+        }
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
@@ -1034,5 +1114,261 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error.is_none());
+    }
+
+    // ── PTY timeout cap tests ──
+
+    #[tokio::test]
+    async fn interactive_default_timeout_30s() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "interactive": true}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        // Default interactive timeout is 30s (not 120s default)
+    }
+
+    #[tokio::test]
+    async fn interactive_timeout_capped_at_120s() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        // Even if user requests 600s, PTY caps at 120s
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "interactive": true, "timeout": 600_000}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn interactive_custom_timeout_within_cap() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        // 60s is within PTY cap, should be accepted
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "interactive": true, "timeout": 60_000}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    // ── PATH override guardrail tests ──
+
+    #[tokio::test]
+    async fn env_path_override_tmp_blocked() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "env": {"PATH": "/tmp/evil:/usr/bin"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("suspicious"));
+    }
+
+    #[tokio::test]
+    async fn env_path_override_hidden_dir_blocked() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "env": {"PATH": "/home/user/.evil/bin:/usr/bin"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn env_path_override_safe_allowed() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "env": {"PATH": "/usr/local/bin:/usr/bin"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn env_path_override_cargo_allowed() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "env": {"PATH": "/Users/me/.cargo/bin:/usr/bin"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn env_path_override_nvm_allowed() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "env": {"PATH": "/Users/me/.nvm/versions/node/v20/bin:/usr/bin"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn env_non_path_vars_unaffected() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo $FOO", "env": {"FOO": "/tmp/evil", "BAR": "test"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none(), "Non-PATH env vars should not be checked");
+    }
+
+    // ── ptyInput audit tests ──
+
+    #[tokio::test]
+    async fn pty_input_logged_in_details() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({
+                    "command": "echo test",
+                    "interactive": true,
+                    "ptyInput": [{"wait": "continue?", "send": "y\n"}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert!(d["interactive"].as_bool().unwrap());
+        let pty_audit = d["ptyInput"].as_array().unwrap();
+        assert_eq!(pty_audit.len(), 1);
+        assert_eq!(pty_audit[0]["wait"], "continue?");
+        assert_eq!(pty_audit[0]["send"], "y\n");
+    }
+
+    #[tokio::test]
+    async fn pty_input_password_redacted() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({
+                    "command": "ssh user@host",
+                    "interactive": true,
+                    "ptyInput": [{"wait": "password:", "send": "secret123\n"}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        let pty_audit = d["ptyInput"].as_array().unwrap();
+        assert_eq!(pty_audit[0]["send"], "[REDACTED]");
+    }
+
+    #[tokio::test]
+    async fn shell_logged_in_details_when_not_bash() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "shell": "zsh"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["shell"], "zsh");
+    }
+
+    #[tokio::test]
+    async fn shell_not_in_details_when_bash() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert!(d.get("shell").is_none() || d["shell"].is_null());
+    }
+
+    // ── is_suspicious_path unit tests ──
+
+    #[test]
+    fn suspicious_path_tmp() {
+        assert!(BashTool::is_suspicious_path("/tmp/evil:/usr/bin"));
+    }
+
+    #[test]
+    fn suspicious_path_hidden_dir() {
+        assert!(BashTool::is_suspicious_path("/home/user/.malware/bin:/usr/bin"));
+    }
+
+    #[test]
+    fn suspicious_path_var_tmp() {
+        assert!(BashTool::is_suspicious_path("/var/tmp/bad:/usr/bin"));
+    }
+
+    #[test]
+    fn safe_path_standard() {
+        assert!(!BashTool::is_suspicious_path("/usr/local/bin:/usr/bin:/bin"));
+    }
+
+    #[test]
+    fn safe_path_cargo() {
+        assert!(!BashTool::is_suspicious_path("/Users/me/.cargo/bin:/usr/bin"));
+    }
+
+    #[test]
+    fn safe_path_nvm() {
+        assert!(!BashTool::is_suspicious_path("/Users/me/.nvm/versions/node/v20/bin"));
+    }
+
+    #[test]
+    fn safe_path_local() {
+        assert!(!BashTool::is_suspicious_path("/Users/me/.local/bin:/usr/bin"));
+    }
+
+    // ── redact_pty_input unit tests ──
+
+    #[test]
+    fn redact_pty_input_normal() {
+        let pairs = vec![("continue?".into(), "y\n".into())];
+        let result = BashTool::redact_pty_input(&pairs);
+        assert_eq!(result[0]["send"], "y\n");
+    }
+
+    #[test]
+    fn redact_pty_input_password() {
+        let pairs = vec![("Enter password:".into(), "secret\n".into())];
+        let result = BashTool::redact_pty_input(&pairs);
+        assert_eq!(result[0]["send"], "[REDACTED]");
+    }
+
+    #[test]
+    fn redact_pty_input_token() {
+        let pairs = vec![("API token:".into(), "abc123\n".into())];
+        let result = BashTool::redact_pty_input(&pairs);
+        assert_eq!(result[0]["send"], "[REDACTED]");
     }
 }

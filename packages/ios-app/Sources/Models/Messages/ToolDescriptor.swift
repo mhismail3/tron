@@ -107,7 +107,7 @@ enum ToolRegistry {
             displayName: "Bash",
             completedDisplayName: "Ran",
             summaryExtractor: { args in
-                ToolArgumentParser.truncate(ToolArgumentParser.command(from: args))
+                BashSummaryHelper.summary(from: args)
             },
             viewerFactory: { tool, isExpanded in
                 AnyView(BashResultViewer(
