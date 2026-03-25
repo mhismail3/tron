@@ -49,6 +49,8 @@ struct ToolResultPayload {
     // Additional fields for display (may come from enrichment)
     let name: String?
     let arguments: String?
+    /// Tool-specific structured metadata (e.g. WebFetch: url, status, fromCache, responseHeaders).
+    let details: [String: AnyCodable]?
 
     init?(from payload: [String: AnyCodable]) {
         guard let toolCallId = payload.string("toolCallId") else {
@@ -73,6 +75,14 @@ struct ToolResultPayload {
             self.arguments = argsStr
         } else {
             self.arguments = nil
+        }
+
+        // Tool-specific details (new field persisted by Rust agent)
+        if let detailsValue = payload["details"],
+           let detailsDict = detailsValue.value as? [String: Any] {
+            self.details = detailsDict.mapValues { AnyCodable($0) }
+        } else {
+            self.details = nil
         }
     }
 }

@@ -230,7 +230,8 @@ enum InterleavedContentProcessor {
                 arguments: arguments,
                 status: status,
                 result: resultContent,
-                durationMs: result?.durationMs
+                durationMs: result?.durationMs,
+                details: result?.details
             )),
             timestamp: timestamp,
             tokenRecord: nil,

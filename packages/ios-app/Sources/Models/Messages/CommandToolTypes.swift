@@ -98,6 +98,8 @@ struct CommandToolChipData: Equatable, Identifiable {
     var isResultTruncated: Bool
     /// Streaming output while tool is running (nil when not running or after completion)
     var streamingOutput: String?
+    /// Tool-specific structured metadata (e.g. WebFetch: fromCache, status, method)
+    var details: [String: AnyCodable]?
 
     /// Formatted duration for display
     var formattedDuration: String? {
@@ -126,6 +128,7 @@ extension CommandToolChipData {
         self.arguments = ""
         self.result = data.fullResult
         self.isResultTruncated = false
+        self.details = nil
     }
 
     /// Create from WaitForAgentsChipData for detail sheet display
@@ -142,6 +145,7 @@ extension CommandToolChipData {
         self.arguments = ""
         self.result = data.fullResult
         self.isResultTruncated = false
+        self.details = nil
     }
 }
 
@@ -193,6 +197,7 @@ extension CommandToolChipData {
         self.result = truncatedResult
         self.isResultTruncated = wasTruncated
         self.streamingOutput = tool.streamingOutput
+        self.details = tool.details
     }
 
     /// Map ToolStatus to CommandToolStatus

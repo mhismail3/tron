@@ -157,6 +157,7 @@ async fn process_tool_results(
                         "content": result_text,
                         "isError": is_error,
                         "duration": exec_result.duration_ms,
+                        "details": exec_result.result.details,
                     }),
                 )
                 .await

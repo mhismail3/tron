@@ -163,7 +163,7 @@ struct WebFetchToolDetailSheet: View {
                     color: status < 300 ? .tronEmerald : status < 400 ? .tronAmber : .tronError
                 )
             }
-            if !parsed.isRawMode && parsed.isCached {
+            if !parsed.isRawMode && (parsed.isCached || WebFetchParsedResult.isCachedFromDetails(data.details)) {
                 ToolInfoPill(icon: "arrow.triangle.2.circlepath", label: "Cached", color: .tronEmerald)
             }
             if parsed.isRawMode {
@@ -415,9 +415,16 @@ enum WebFetchDetailParser {
 
 extension WebFetchParsedResult {
     /// Whether the result came from cache. Only applies to summarization mode.
+    /// Uses text heuristic; for structured detection, use `isCachedFromDetails`.
     var isCached: Bool {
         guard !isRawMode else { return false }
         return WebFetchDetailParser.isCached(answer)
+    }
+
+    /// Check cache status from structured details (persisted in tool.result event).
+    static func isCachedFromDetails(_ details: [String: AnyCodable]?) -> Bool {
+        guard let details else { return false }
+        return details["fromCache"]?.value as? Bool == true
     }
 }
 
