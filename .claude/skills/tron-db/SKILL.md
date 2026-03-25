@@ -30,16 +30,16 @@ DB="$HOME/.tron/system/db/log.db"
 A CLI tool is available for common queries:
 
 ```bash
-~/.tron/skills/tron-db/scripts/tron-db.py --help
+~/.tron/memory/skills/tron-db/scripts/tron-db.py --help
 
 # Filter by origin (prod vs beta)
-~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin prod
-~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin beta
+~/.tron/memory/skills/tron-db/scripts/tron-db.py sessions --origin prod
+~/.tron/memory/skills/tron-db/scripts/tron-db.py sessions --origin beta
 
 # iOS client logs (no session_id needed)
-~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client
-~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --level error
-~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
+~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client
+~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client --level error
+~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
 ```
 
 ## Schema Overview
@@ -565,7 +565,7 @@ SELECT
 
 ```bash
 # Open database
-sqlite3 ~/.tron/database/tron.db
+sqlite3 ~/.tron/system/db/log.db
 
 # Pretty output
 .mode column
@@ -593,44 +593,44 @@ SELECT * FROM sessions;
 
 1. **Find the session**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py sessions --limit 10
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py sessions --limit 10
    ```
 
 2. **Get session overview**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py session SESSION_ID
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py session SESSION_ID
    ```
 
 3. **Find errors**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py errors SESSION_ID
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py errors SESSION_ID
    ```
 
 4. **Get detailed logs**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py logs SESSION_ID --level error
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py logs SESSION_ID --level error
    ```
 
 5. **Examine specific turn**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py turn SESSION_ID 3
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py turn SESSION_ID 3
    ```
 
 ### Find Why Token Usage Spiked
 
 1. **List high-cost sessions**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py tokens --sort cost
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py tokens --sort cost
    ```
 
 2. **Get token breakdown by turn**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py tokens SESSION_ID
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py tokens SESSION_ID
    ```
 
 3. **Check for compaction events**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py events SESSION_ID --type compaction
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py events SESSION_ID --type compaction
    ```
 
 ### Investigate iOS Client Issues
@@ -639,34 +639,34 @@ iOS client logs are ingested into the same `logs` table (via `logs.ingest` RPC).
 
 1. **Get recent client logs**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client
    ```
 
 2. **Find client errors**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --level error
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client --level error
    ```
 
 3. **Filter by iOS component**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
-   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.RPC
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.RPC
    ```
 
 4. **Search client logs**
    ```bash
-   ~/.tron/skills/tron-db/scripts/tron-db.py search --logs "timeout OR disconnect"
+   ~/.tron/memory/skills/tron-db/scripts/tron-db.py search --logs "timeout OR disconnect"
    ```
 
 ### Compare Prod vs Beta
 
 ```bash
 # Show only prod sessions
-~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin prod
+~/.tron/memory/skills/tron-db/scripts/tron-db.py sessions --origin prod
 
 # Show only beta sessions
-~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin beta
+~/.tron/memory/skills/tron-db/scripts/tron-db.py sessions --origin beta
 
 # Stats for a specific origin
-~/.tron/skills/tron-db/scripts/tron-db.py stats --origin prod
+~/.tron/memory/skills/tron-db/scripts/tron-db.py stats --origin prod
 ```

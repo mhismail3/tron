@@ -48,12 +48,28 @@ const BLOB_TAIL_CHARS: usize = 8_000;
 pub struct BashTool {
     runner: Arc<dyn ProcessRunner>,
     blob_store: Option<Arc<dyn BlobStore>>,
+    /// Default Docker image for sandbox mode (from settings).
+    sandbox_default_image: String,
+    /// Whether Docker sandbox has network by default (from settings).
+    sandbox_network_enabled: bool,
 }
 
 impl BashTool {
     /// Create a new `Bash` tool with the given process runner and optional blob store.
     pub fn new(runner: Arc<dyn ProcessRunner>, blob_store: Option<Arc<dyn BlobStore>>) -> Self {
-        Self { runner, blob_store }
+        Self {
+            runner,
+            blob_store,
+            sandbox_default_image: "ubuntu:latest".to_string(),
+            sandbox_network_enabled: true,
+        }
+    }
+
+    /// Configure sandbox settings (called from factory with settings values).
+    pub fn with_sandbox_settings(mut self, default_image: String, network_enabled: bool) -> Self {
+        self.sandbox_default_image = default_image;
+        self.sandbox_network_enabled = network_enabled;
+        self
     }
 
     fn check_dangerous(command: &str) -> Option<String> {
@@ -280,11 +296,16 @@ impl TronTool for BashTool {
             .unwrap_or_default();
 
         // If sandbox mode is enabled, create a sandbox workspace and override working_directory
+        // Track which sandbox mode is active for details JSON
+        let mut active_sandbox_mode: Option<&str> = None;
         let sandbox_workspace = if let Some(sandbox_val) = sandbox_mode {
-            let is_lightweight = sandbox_val.as_bool() == Some(true);
+            // Handle both boolean true and string "true" from LLMs
+            let is_lightweight = sandbox_val.as_bool() == Some(true)
+                || sandbox_val.as_str() == Some("true");
             let is_docker = sandbox_val.as_str() == Some("docker");
 
             if is_lightweight {
+                active_sandbox_mode = Some("lightweight");
                 let config = crate::tools::system::sandbox::SandboxConfig {
                     copy_paths: Vec::new(),
                     readonly_mounts: sandbox_mounts,
@@ -295,8 +316,11 @@ impl TronTool for BashTool {
                 }
             } else if is_docker {
                 // Docker sandbox: build and run via docker command
+                // Apply settings: use configured default image and network
                 let docker_config = crate::tools::system::sandbox::DockerSandboxConfig {
+                    image: self.sandbox_default_image.clone(),
                     mounts: sandbox_mounts.iter().map(|m| (m.clone(), m.clone(), "ro".to_string())).collect(),
+                    network: self.sandbox_network_enabled,
                     ..Default::default()
                 };
                 if let Err(e) = crate::tools::system::sandbox::check_docker_available().await {
@@ -331,6 +355,7 @@ impl TronTool for BashTool {
                         "exitCode": docker_output.exit_code,
                         "durationMs": docker_output.duration_ms,
                         "sandbox": "docker",
+                        "image": self.sandbox_default_image,
                         "description": description,
                     })),
                     is_error,
@@ -454,6 +479,9 @@ impl TronTool for BashTool {
         }
         if let Some(ref pty_audit) = pty_input_audit {
             details["ptyInput"] = json!(pty_audit);
+        }
+        if let Some(sandbox) = active_sandbox_mode {
+            details["sandbox"] = json!(sandbox);
         }
 
         Ok(TronToolResult {
@@ -1370,5 +1398,78 @@ mod tests {
         let pairs = vec![("API token:".into(), "abc123\n".into())];
         let result = BashTool::redact_pty_input(&pairs);
         assert_eq!(result[0]["send"], "[REDACTED]");
+    }
+
+    // ── Sandbox tests ──
+
+    #[tokio::test]
+    async fn sandbox_true_boolean_creates_sandbox() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("sandbox output")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "sandbox": true}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let d = r.details.unwrap();
+        assert_eq!(d["sandbox"], "lightweight");
+    }
+
+    #[tokio::test]
+    async fn sandbox_true_string_creates_sandbox() {
+        // LLMs sometimes send "true" as a string instead of boolean
+        let tool = BashTool::new(Arc::new(MockRunner::ok("sandbox output")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "sandbox": "true"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let d = r.details.unwrap();
+        assert_eq!(d["sandbox"], "lightweight");
+    }
+
+    #[tokio::test]
+    async fn sandbox_false_no_sandbox() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "ls", "sandbox": false}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert!(d.get("sandbox").is_none() || d["sandbox"].is_null());
+    }
+
+    #[tokio::test]
+    async fn sandbox_no_param_no_sandbox() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(json!({"command": "ls"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert!(d.get("sandbox").is_none() || d["sandbox"].is_null());
+    }
+
+    #[tokio::test]
+    async fn sandbox_settings_applied_to_docker() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None)
+            .with_sandbox_settings("node:20-alpine".into(), false);
+        assert_eq!(tool.sandbox_default_image, "node:20-alpine");
+        assert!(!tool.sandbox_network_enabled);
+    }
+
+    #[tokio::test]
+    async fn sandbox_settings_default_values() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        assert_eq!(tool.sandbox_default_image, "ubuntu:latest");
+        assert!(tool.sandbox_network_enabled);
     }
 }

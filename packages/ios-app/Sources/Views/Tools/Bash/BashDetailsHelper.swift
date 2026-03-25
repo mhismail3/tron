@@ -46,7 +46,8 @@ enum BashDetailsHelper {
     /// Returns nil (no sandbox), "lightweight", or "docker".
     static func sandboxMode(from args: String) -> String? {
         if let sandboxStr = ToolArgumentParser.string("sandbox", from: args) {
-            return sandboxStr // e.g., "docker"
+            // "docker" stays as-is; "true" (LLM quirk) maps to "lightweight"
+            return sandboxStr == "true" ? "lightweight" : sandboxStr
         }
         if ToolArgumentParser.boolean("sandbox", from: args) == true {
             return "lightweight"

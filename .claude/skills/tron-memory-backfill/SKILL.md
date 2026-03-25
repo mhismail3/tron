@@ -17,7 +17,7 @@ Manage the Tron semantic memory system: back up the database, reset tables, and 
 ## Database Location
 
 ```bash
-DB="$HOME/.tron/database/tron.db"
+DB="$HOME/.tron/system/db/log.db"
 ```
 
 ## CLI Reference
@@ -68,7 +68,7 @@ cargo build --release
 Always back up before destructive operations:
 
 ```bash
-cp ~/.tron/database/tron.db ~/.tron/database/tron.db.backup-$(date +%Y%m%d-%H%M%S)
+cp ~/.tron/system/db/log.db ~/.tron/system/db/log.db.backup-$(date +%Y%m%d-%H%M%S)
 ```
 
 ### 2. Full Reset + Re-Ingest
@@ -77,10 +77,10 @@ Clear sessions, events, logs, and memory vectors, then re-ingest from LEDGER.jso
 
 ```bash
 # Back up first
-cp ~/.tron/database/tron.db ~/.tron/database/tron.db.backup-$(date +%Y%m%d-%H%M%S)
+cp ~/.tron/system/db/log.db ~/.tron/system/db/log.db.backup-$(date +%Y%m%d-%H%M%S)
 
 # Clear tables (preserves workspaces and tasks)
-sqlite3 ~/.tron/database/tron.db <<'SQL'
+sqlite3 ~/.tron/system/db/log.db <<'SQL'
 PRAGMA foreign_keys = OFF;
 DELETE FROM events_fts;
 DELETE FROM logs_fts;
@@ -120,7 +120,7 @@ RUST_LOG=info,ort=warn tron backfill-ledger embed --force
 
 ```bash
 # Table counts
-sqlite3 ~/.tron/database/tron.db -header -column \
+sqlite3 ~/.tron/system/db/log.db -header -column \
   "SELECT 'sessions' as tbl, COUNT(*) as cnt FROM sessions
    UNION ALL SELECT 'events', COUNT(*) FROM events
    UNION ALL SELECT 'logs', COUNT(*) FROM logs
@@ -128,11 +128,11 @@ sqlite3 ~/.tron/database/tron.db -header -column \
    UNION ALL SELECT 'workspaces', COUNT(*) FROM workspaces;"
 
 # Memory vector breakdown
-sqlite3 ~/.tron/database/tron.db -header -column \
+sqlite3 ~/.tron/system/db/log.db -header -column \
   "SELECT chunk_type, COUNT(*) as cnt FROM memory_vectors GROUP BY chunk_type;"
 
 # Database file size
-ls -lh ~/.tron/database/tron.db
+ls -lh ~/.tron/system/db/log.db
 ```
 
 ## Key Behaviors

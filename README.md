@@ -556,8 +556,8 @@ System prompt  (stable)
 Reusable context packages stored as `SKILL.md` files with optional YAML frontmatter.
 
 **Locations:**
-- `~/.tron/skills/` — Global (all projects)
-- `.claude/skills/` or `.tron/skills/` — Project-local (higher precedence)
+- `~/.tron/memory/skills/` — Global (all projects)
+- `.claude/skills/` or `.tron/memory/skills/` — Project-local (higher precedence)
 
 **Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context.
 
@@ -584,7 +584,7 @@ The memory system uses ONNX-based embeddings for cross-session knowledge retriev
 | **Normalization** | L2 re-normalization after truncation |
 | **Storage** | SQLite BLOB columns (no sqlite-vec virtual tables) |
 | **Search** | Brute-force KNN with cosine similarity |
-| **Model cache** | `~/.tron/mods/models/` |
+| **Model cache** | `~/.tron/system/mods/models/` |
 
 ### Memory Sources
 
@@ -600,7 +600,7 @@ When enabled, the top-k most relevant memories (default 5) are injected into the
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/database/tron.db`. WAL mode with 5s busy timeout for concurrent access.
+All data lives in a single SQLite file: `~/.tron/system/db/log.db`. WAL mode with 5s busy timeout for concurrent access.
 
 ### Core Tables
 
@@ -729,20 +729,26 @@ The deploy process:
 ```
 ~/.tron/
 +-- app/                  Server binary + production dependencies
-+-- database/
-|   +-- tron.db           Single SQLite file (events, tasks, logs, vectors)
 +-- settings.json         User settings (deep-merged over defaults)
 +-- auth.json             OAuth tokens + API keys (mode 600)
-+-- skills/               Global skills (SKILL.md files)
-+-- mods/
-|   +-- apns/             APNS credentials (p8 key + config)
-|   +-- models/           Cached ONNX models (embeddings, transcription)
-+-- knowledge/            Knowledge base (notes, voice notes, research)
-+-- workspace/
-|   +-- canvases/          Generated artifacts
-|   +-- deployment/        Deploy state files
-|   +-- scratch/           Downloads, temp files, experiments
-|   +-- cron/              Cron job working directories
++-- memory/
+|   +-- sessions/         Session compaction summaries
+|   +-- knowledge/        Knowledge base (notes, research)
+|   +-- skills/           Global skills (SKILL.md files)
+|   +-- rules/            Global rules
+|   +-- cron/             Cron job working directories
+|   +-- canvases/         Generated artifacts
++-- system/
+|   +-- bin/              CLI binaries
+|   +-- db/
+|   |   +-- log.db        Single SQLite file (events, tasks, logs, vectors)
+|   +-- deployment/       Deploy state files
+|   +-- scratch/          Downloads, temp files, experiments
+|   +-- mods/
+|       +-- apns/         APNS credentials (p8 key + config)
+|       +-- models/       Cached ONNX models (embeddings, transcription)
++-- user/
+    +-- voice/            Voice notes
 ```
 
 ### Service (launchd)
@@ -815,7 +821,7 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
 
-8. **Production DB guard**: Startup validates the database path is `~/.tron/database/tron.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
+8. **Production DB guard**: Startup validates the database path is `~/.tron/system/db/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
 
 ---
 

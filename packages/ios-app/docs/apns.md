@@ -40,11 +40,11 @@ iOS App                          Server
 ### 4. Store Credentials on Server
 
 ```bash
-mkdir -p ~/.tron/mods/apns
-mv ~/Downloads/AuthKey_ABC123DEFG.p8 ~/.tron/mods/apns/
-chmod 600 ~/.tron/mods/apns/AuthKey_*.p8
+mkdir -p ~/.tron/system/mods/apns
+mv ~/Downloads/AuthKey_ABC123DEFG.p8 ~/.tron/system/mods/apns/
+chmod 600 ~/.tron/system/mods/apns/AuthKey_*.p8
 
-cat > ~/.tron/mods/apns/config.json << 'EOF'
+cat > ~/.tron/system/mods/apns/config.json << 'EOF'
 {
   "keyId": "ABC123DEFG",
   "teamId": "XYZ789TEAM",
@@ -152,7 +152,7 @@ Push notifications don't work on Simulator. Use a physical device.
 
 ```bash
 # On server, trigger notification
-sqlite3 ~/.tron/database/prod.db "SELECT token FROM device_tokens LIMIT 1"
+sqlite3 ~/.tron/system/db/log.db "SELECT token FROM device_tokens LIMIT 1"
 
 # Use curl to test APNS directly (requires JWT generation)
 ```

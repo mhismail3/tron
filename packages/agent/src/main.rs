@@ -120,6 +120,8 @@ struct ToolRegistryConfig {
     apns_service: ApnsServiceOption,
     /// Shared HTTP client (connection pool reused across tools).
     http_client: reqwest::Client,
+    /// Sandbox settings for the Bash tool.
+    sandbox_settings: tron::settings::BashSandboxSettings,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -147,12 +149,15 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     registry.register(Arc::new(tron::tools::fs::write::WriteTool::new(fs.clone())));
     registry.register(Arc::new(tron::tools::fs::edit::EditTool::new(fs.clone())));
 
-    // 4: Bash (with blob store for large output storage)
+    // 4: Bash (with blob store for large output storage + sandbox settings)
     let blob_store: Arc<dyn tron::tools::traits::BlobStore> = config.event_store.clone();
-    registry.register(Arc::new(tron::tools::system::bash::BashTool::new(
-        runner.clone(),
-        Some(blob_store),
-    )));
+    registry.register(Arc::new(
+        tron::tools::system::bash::BashTool::new(runner.clone(), Some(blob_store))
+            .with_sandbox_settings(
+                config.sandbox_settings.default_image.clone(),
+                config.sandbox_settings.network_enabled,
+            ),
+    ));
 
     // 5: Search
     registry.register(Arc::new(tron::tools::search::search_tool::SearchTool::new(
@@ -374,6 +379,7 @@ async fn main() -> Result<()> {
         brave_api_key,
         apns_service,
         http_client: shared_http_client,
+        sandbox_settings: settings.tools.bash.sandbox.clone(),
     });
 
     // Check auth availability at startup (informational only — auth can be configured later).
@@ -615,6 +621,9 @@ async fn main() -> Result<()> {
             cron_cancel.cancel();
         });
     }
+
+    // Clean up stale sandbox directories from previous sessions (>24h old)
+    tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
 
     // Start cron scheduler (scheduler loop + config file watcher)
     let (cron_sched_handle, cron_watcher_handle) = cron_scheduler.clone().start();
@@ -1280,6 +1289,7 @@ mod tests {
             brave_api_key: None,
             apns_service: None,
             http_client: reqwest::Client::new(),
+            sandbox_settings: tron::settings::BashSandboxSettings::default(),
         }
     }
 
