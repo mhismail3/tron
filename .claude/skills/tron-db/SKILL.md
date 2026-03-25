@@ -18,7 +18,7 @@ Debug Tron agent behavior by querying the events database. Use this skill when i
 
 ```bash
 # Single unified database (prod and beta share one file)
-DB="$HOME/.tron/database/tron.db"
+DB="$HOME/.tron/system/db/log.db"
 
 # Sessions are distinguished by `origin` column:
 #   localhost:9847 = prod

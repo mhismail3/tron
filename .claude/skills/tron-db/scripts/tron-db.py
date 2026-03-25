@@ -19,7 +19,7 @@ Commands:
     stats       Database statistics
 
 Environment:
-    TRON_DB - Path to database (default: ~/.tron/database/tron.db)
+    TRON_DB - Path to database (default: ~/.tron/system/db/log.db)
 
 Origin filtering:
     --origin prod          Filter to production (localhost:9847)
@@ -50,11 +50,16 @@ def get_db_path():
     if os.environ.get("TRON_DB"):
         return os.environ["TRON_DB"]
 
-    db_path = Path.home() / ".tron" / "database" / "tron.db"
+    db_path = Path.home() / ".tron" / "system" / "db" / "log.db"
     if db_path.exists():
         return str(db_path)
 
-    print("Error: No Tron database found at ~/.tron/database/tron.db", file=sys.stderr)
+    # Legacy fallback
+    legacy_path = Path.home() / ".tron" / "database" / "tron.db"
+    if legacy_path.exists():
+        return str(legacy_path)
+
+    print("Error: No Tron database found at ~/.tron/system/db/log.db", file=sys.stderr)
     print("Set TRON_DB environment variable to specify database path", file=sys.stderr)
     sys.exit(1)
 
