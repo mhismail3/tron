@@ -109,6 +109,10 @@ define_events! {
         HookBackgroundStarted => "hook.background_started" => payloads::hook::HookBackgroundStartedPayload,
         /// Background hook completed.
         HookBackgroundCompleted => "hook.background_completed" => payloads::hook::HookBackgroundCompletedPayload,
+        /// Checkpoint saved for durable execution.
+        CheckpointSaved => "checkpoint.saved" => payloads::checkpoint::CheckpointSavedPayload,
+        /// Progress update during long-running task.
+        ProgressUpdate => "progress.update" => payloads::checkpoint::ProgressUpdatePayload,
     }
     raw_events {
     }
@@ -142,7 +146,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 49] = [
+    const EXPECTED: [(EventType, &str); 51] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -204,11 +208,13 @@ mod tests {
             EventType::HookBackgroundCompleted,
             "hook.background_completed",
         ),
+        (EventType::CheckpointSaved, "checkpoint.saved"),
+        (EventType::ProgressUpdate, "progress.update"),
     ];
 
     #[test]
-    fn all_event_types_constant_has_49_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 49);
+    fn all_event_types_constant_has_51_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 51);
     }
 
     #[test]

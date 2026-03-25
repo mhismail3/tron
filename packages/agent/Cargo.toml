@@ -92,6 +92,9 @@ bytemuck = { version = "1", features = ["derive"] }
 # Allocator
 mimalloc = { version = "0.1", default-features = false }
 
+# PTY support
+portable-pty = "0.8"
+
 # Misc
 bytes = "1"
 indexmap = "2"

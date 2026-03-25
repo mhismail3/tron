@@ -314,8 +314,9 @@ fn format_video_results(body: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use crate::tools::testutil::{extract_text, make_ctx};
-    use crate::tools::traits::HttpResponse;
+    use crate::tools::traits::{HttpRequest, HttpResponse};
 
     struct MockHttp {
         handler: Box<dyn Fn(&str) -> Result<HttpResponse, String> + Send + Sync>,
@@ -326,6 +327,10 @@ mod tests {
         async fn get(&self, url: &str) -> Result<HttpResponse, ToolError> {
             (self.handler)(url).map_err(|e| ToolError::Internal { message: e })
         }
+
+        async fn request(&self, req: &HttpRequest<'_>) -> Result<HttpResponse, ToolError> {
+            self.get(req.url).await
+        }
     }
 
     fn brave_web_response() -> MockHttp {
@@ -335,6 +340,7 @@ mod tests {
                 status: 200,
                 body: r#"{"web":{"results":[{"title":"Example","url":"https://example.com","description":"A test result"}]}}"#.into(),
                 content_type: Some("application/json".into()),
+                headers: HashMap::new(),
             })
             }),
         }
@@ -382,6 +388,7 @@ mod tests {
                     status: 200,
                     body: r#"{"results":[]}"#.into(),
                     content_type: Some("application/json".into()),
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -406,6 +413,7 @@ mod tests {
                     status: 200,
                     body: r#"{"web":{"results":[]}}"#.into(),
                     content_type: Some("application/json".into()),
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -426,6 +434,7 @@ mod tests {
                     status: 200,
                     body: r#"{"web":{"results":[]}}"#.into(),
                     content_type: Some("application/json".into()),
+                    headers: HashMap::new(),
                 })
             }),
         });

@@ -254,6 +254,15 @@ pub struct ProcessOptions {
     pub cancellation: CancellationToken,
     /// Additional environment variables.
     pub env: HashMap<String, String>,
+    /// Data to pipe to the process's stdin (closed after write).
+    pub stdin: Option<String>,
+    /// Shell to use for command execution ("bash", "zsh", "sh").
+    pub shell: String,
+    /// Whether to run in PTY/interactive mode.
+    pub interactive: bool,
+    /// Pattern-response pairs for interactive mode.
+    /// Each entry: (wait_pattern, send_response).
+    pub pty_input: Vec<(String, String)>,
 }
 
 /// Output from a subprocess.
@@ -374,6 +383,22 @@ pub struct HttpResponse {
     pub body: String,
     /// Content-Type header value.
     pub content_type: Option<String>,
+    /// Response headers (populated in raw/request mode).
+    pub headers: HashMap<String, String>,
+}
+
+/// HTTP request configuration for the universal `request()` method.
+pub struct HttpRequest<'a> {
+    /// Target URL.
+    pub url: &'a str,
+    /// HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD).
+    pub method: &'a str,
+    /// Request headers.
+    pub headers: Vec<(&'a str, &'a str)>,
+    /// Request body (raw string).
+    pub body: Option<&'a str>,
+    /// Whether to follow redirects.
+    pub follow_redirects: bool,
 }
 
 /// HTTP client for web operations (`WebFetch`, `WebSearch`).
@@ -393,6 +418,9 @@ pub trait HttpClient: Send + Sync {
         let _ = headers;
         self.get(url).await
     }
+
+    /// Perform a full HTTP request with method, headers, body, and redirect control.
+    async fn request(&self, req: &HttpRequest<'_>) -> Result<HttpResponse, ToolError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -511,8 +539,16 @@ mod tests {
             timeout_ms: 120_000,
             cancellation: CancellationToken::new(),
             env: HashMap::new(),
+            stdin: None,
+            shell: "bash".into(),
+            interactive: false,
+            pty_input: Vec::new(),
         };
         assert_eq!(opts.timeout_ms, 120_000);
         assert!(opts.env.is_empty());
+        assert!(opts.stdin.is_none());
+        assert_eq!(opts.shell, "bash");
+        assert!(!opts.interactive);
+        assert!(opts.pty_input.is_empty());
     }
 }

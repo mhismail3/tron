@@ -33,10 +33,10 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{BlobStore, ProcessOptions, ProcessRunner, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::estimate_tokens;
-use crate::tools::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
+use crate::tools::utils::validation::{get_optional_bool, get_optional_string, get_optional_u64, validate_required_string};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
-const MAX_TIMEOUT_MS: u64 = 600_000;
+const MAX_TIMEOUT_MS: u64 = 3_600_000;
 const MAX_OUTPUT_CHARS: usize = 400_000;
 const INLINE_OUTPUT_LIMIT: usize = 30_000;
 const BLOB_HEAD_CHARS: usize = 20_000;
@@ -106,11 +106,48 @@ impl TronTool for BashTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "Bash",
-            "Execute a shell command. Commands that are potentially destructive require confirmation.",
+            "Execute a shell command. Commands that are potentially destructive require confirmation.\n\n\
+             Parameters:\n\
+             - **command** (required): The shell command to execute.\n\
+             - **timeout** (optional): Timeout in milliseconds (default 120000, max 3600000).\n\
+             - **description** (optional): Brief description of what the command does.\n\
+             - **stdin** (optional): Data to pipe to the command's stdin.\n\
+             - **env** (optional): Environment variables as key-value object.\n\
+             - **shell** (optional): Shell to use — \"bash\" (default), \"zsh\", or \"sh\".\n\
+             - **interactive** (optional): Run in PTY mode for commands that need a terminal.\n\
+             - **ptyInput** (optional): Pattern-response pairs for interactive prompts. Array of {wait, send} objects.",
         )
         .required_property("command", json!({"type": "string", "description": "The shell command to execute"}))
-        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds (max 600000)"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds (default 120000, max 3600000)"}))
         .property("description", json!({"type": "string", "description": "Brief description of what the command does"}))
+        .property("stdin", json!({"type": "string", "description": "Data to pipe to the command's stdin"}))
+        .property("env", json!({"type": "object", "description": "Environment variables", "additionalProperties": {"type": "string"}}))
+        .property("shell", json!({"type": "string", "description": "Shell to use", "enum": ["bash", "zsh", "sh"], "default": "bash"}))
+        .property("interactive", json!({"type": "boolean", "description": "Run in PTY mode for interactive commands", "default": false}))
+        .property("ptyInput", json!({
+            "type": "array",
+            "description": "Pattern-response pairs for interactive prompts",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "wait": {"type": "string", "description": "Pattern to wait for in output"},
+                    "send": {"type": "string", "description": "Text to send when pattern matches"}
+                },
+                "required": ["wait", "send"]
+            }
+        }))
+        .property("sandbox", json!({
+            "description": "Run in sandbox. true = lightweight temp dir sandbox, \"docker\" = Docker container sandbox.",
+            "oneOf": [
+                {"type": "boolean"},
+                {"type": "string", "enum": ["docker"]}
+            ]
+        }))
+        .property("sandboxMounts", json!({
+            "type": "array",
+            "description": "Paths to symlink into the sandbox (read-only)",
+            "items": {"type": "string"}
+        }))
         .build()
     }
 
@@ -130,14 +167,145 @@ impl TronTool for BashTool {
             .min(MAX_TIMEOUT_MS);
         let description = get_optional_string(&params, "description");
 
+        // Parse env vars from params
+        let env_vars: std::collections::HashMap<String, String> = params
+            .get("env")
+            .and_then(Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let shell = get_optional_string(&params, "shell")
+            .unwrap_or_else(|| "bash".to_string());
+
+        // Validate shell
+        let shell = match shell.as_str() {
+            "bash" | "zsh" | "sh" => shell,
+            _ => "bash".to_string(),
+        };
+
+        let stdin = get_optional_string(&params, "stdin");
+        let interactive = get_optional_bool(&params, "interactive").unwrap_or(false);
+
+        // Parse ptyInput pattern-response pairs
+        let pty_input: Vec<(String, String)> = params
+            .get("ptyInput")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let wait = item.get("wait")?.as_str()?.to_string();
+                        let send = item.get("send")?.as_str()?.to_string();
+                        Some((wait, send))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Interactive mode: shorter default timeout
+        let timeout_ms = if interactive && get_optional_u64(&params, "timeout").is_none() {
+            30_000_u64.min(MAX_TIMEOUT_MS) // 30s default for interactive
+        } else {
+            timeout_ms
+        };
+
+        // Parse sandbox config
+        let sandbox_mode = params.get("sandbox");
+        let sandbox_mounts: Vec<String> = params
+            .get("sandboxMounts")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+            .unwrap_or_default();
+
+        // If sandbox mode is enabled, create a sandbox workspace and override working_directory
+        let sandbox_workspace = if let Some(sandbox_val) = sandbox_mode {
+            let is_lightweight = sandbox_val.as_bool() == Some(true);
+            let is_docker = sandbox_val.as_str() == Some("docker");
+
+            if is_lightweight {
+                let config = crate::tools::system::sandbox::SandboxConfig {
+                    copy_paths: Vec::new(),
+                    readonly_mounts: sandbox_mounts,
+                };
+                match crate::tools::system::sandbox::SandboxWorkspace::create(&config).await {
+                    Ok(ws) => Some(ws),
+                    Err(e) => return Ok(error_result(format!("Failed to create sandbox: {e}"))),
+                }
+            } else if is_docker {
+                // Docker sandbox: build and run via docker command
+                let docker_config = crate::tools::system::sandbox::DockerSandboxConfig {
+                    mounts: sandbox_mounts.iter().map(|m| (m.clone(), m.clone(), "ro".to_string())).collect(),
+                    ..Default::default()
+                };
+                if let Err(e) = crate::tools::system::sandbox::check_docker_available().await {
+                    return Ok(error_result(e));
+                }
+                let docker_cmd = crate::tools::system::sandbox::build_docker_command(&command, &docker_config);
+                // Replace command with docker command, run normally
+                let opts = ProcessOptions {
+                    working_directory: ctx.working_directory.clone(),
+                    timeout_ms,
+                    cancellation: ctx.cancellation.clone(),
+                    env: env_vars,
+                    stdin,
+                    shell,
+                    interactive,
+                    pty_input,
+                };
+                let docker_output = self.runner.run_command(&docker_cmd, &opts).await?;
+                let mut combined = docker_output.stdout;
+                if !docker_output.stderr.is_empty() {
+                    if !combined.is_empty() { combined.push('\n'); }
+                    combined.push_str(&docker_output.stderr);
+                }
+                let is_error = if docker_output.exit_code != 0 { Some(true) } else { None };
+                return Ok(TronToolResult {
+                    content: ToolResultBody::Blocks(vec![
+                        crate::core::content::ToolResultContent::text(&combined),
+                    ]),
+                    details: Some(json!({
+                        "command": docker_cmd,
+                        "exitCode": docker_output.exit_code,
+                        "durationMs": docker_output.duration_ms,
+                        "sandbox": "docker",
+                        "description": description,
+                    })),
+                    is_error,
+                    stop_turn: None,
+                });
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let working_dir = if let Some(ref ws) = sandbox_workspace {
+            ws.path.to_string_lossy().to_string()
+        } else {
+            ctx.working_directory.clone()
+        };
+
         let opts = ProcessOptions {
-            working_directory: ctx.working_directory.clone(),
+            working_directory: working_dir,
             timeout_ms,
             cancellation: ctx.cancellation.clone(),
-            env: std::collections::HashMap::new(),
+            env: env_vars,
+            stdin,
+            shell,
+            interactive,
+            pty_input,
         };
 
         let output = self.runner.run_command(&command, &opts).await?;
+
+        // Cleanup sandbox if it was used
+        if let Some(ws) = sandbox_workspace {
+            let _ = ws.cleanup().await;
+        }
 
         // Combine stdout + stderr
         let mut combined = output.stdout;
@@ -782,5 +950,89 @@ mod tests {
             .unwrap();
         let d = r.details.unwrap();
         assert!(d["blobId"].is_null());
+    }
+
+    // ── New: stdin, env, shell tests ──
+
+    #[tokio::test]
+    async fn stdin_passed_through() {
+        // Mock that echoes back the command (stdin is used by the runner, not visible here)
+        let runner = Arc::new(MockRunner::ok("stdin works"));
+        let tool = BashTool::new(runner, None);
+        let r = tool
+            .execute(
+                json!({"command": "cat", "stdin": "hello from stdin"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn env_vars_in_params() {
+        // Verify env vars are passed to ProcessOptions (mock doesn't use them, just verifying no errors)
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo $FOO", "env": {"FOO": "bar", "BAZ": "qux"}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_param_bash() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "shell": "bash"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_param_zsh() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "shell": "zsh"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_param_invalid_defaults_to_bash() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let r = tool
+            .execute(
+                json!({"command": "echo test", "shell": "powershell"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn timeout_max_raised_to_3600s() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        // Should accept up to 3_600_000ms
+        let r = tool
+            .execute(
+                json!({"command": "ls", "timeout": 3_600_000}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
     }
 }

@@ -49,6 +49,10 @@ pub async fn ast_search(
         timeout_ms: DEFAULT_TIMEOUT_MS,
         cancellation: tokio_util::sync::CancellationToken::new(),
         env: std::collections::HashMap::new(),
+        stdin: None,
+        shell: "bash".into(),
+        interactive: false,
+        pty_input: Vec::new(),
     };
 
     let output = runner.run_command(&command, &opts).await?;

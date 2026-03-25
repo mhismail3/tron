@@ -20,6 +20,27 @@ pub struct ToolSettings {
     pub web: WebToolSettings,
     /// Browser automation settings.
     pub browser: BrowserSettings,
+    /// Computer use (screenshot, click, type) settings.
+    pub computer_use: ComputerUseSettings,
+}
+
+/// Computer use tool settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ComputerUseSettings {
+    /// Whether mutating actions (click, type, keypress, scroll) require confirmation.
+    pub confirm_before_action: bool,
+    /// Minimum interval between screenshots in milliseconds.
+    pub screenshot_throttle_ms: u64,
+}
+
+impl Default for ComputerUseSettings {
+    fn default() -> Self {
+        Self {
+            confirm_before_action: true,
+            screenshot_throttle_ms: 500,
+        }
+    }
 }
 
 /// Bash tool settings.
@@ -34,6 +55,27 @@ pub struct BashToolSettings {
     pub max_output_length: usize,
     /// Regex patterns for detecting dangerous commands.
     pub dangerous_patterns: Vec<String>,
+    /// Sandbox settings.
+    pub sandbox: BashSandboxSettings,
+}
+
+/// Sandbox settings for the Bash tool.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BashSandboxSettings {
+    /// Default Docker image for `sandbox: "docker"` mode.
+    pub default_image: String,
+    /// Whether to enable network access in Docker sandbox by default.
+    pub network_enabled: bool,
+}
+
+impl Default for BashSandboxSettings {
+    fn default() -> Self {
+        Self {
+            default_image: "ubuntu:latest".to_string(),
+            network_enabled: true,
+        }
+    }
 }
 
 impl Default for BashToolSettings {
@@ -42,6 +84,7 @@ impl Default for BashToolSettings {
             default_timeout_ms: 120_000,
             max_timeout_ms: 600_000,
             max_output_length: 40_000,
+            sandbox: BashSandboxSettings::default(),
             dangerous_patterns: vec![
                 r"^rm\s+(-rf?|--force)\s+/\s*$".to_string(),
                 r"rm\s+-rf?\s+/".to_string(),

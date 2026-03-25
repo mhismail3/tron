@@ -82,6 +82,13 @@ impl ToolRegistry {
     pub fn contains(&self, name: &str) -> bool {
         self.tools.contains_key(name)
     }
+
+    /// Register multiple tools at once (e.g., from MCP server discovery).
+    pub fn register_many(&mut self, tools: Vec<Arc<dyn TronTool>>) {
+        for tool in tools {
+            self.register(tool);
+        }
+    }
 }
 
 impl Default for ToolRegistry {
@@ -265,6 +272,21 @@ mod tests {
         let names: Vec<&str> = defs2.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Read"));
         assert!(names.contains(&"Write"));
+    }
+
+    #[test]
+    fn register_many_adds_all() {
+        let mut reg = ToolRegistry::new();
+        let tools: Vec<Arc<dyn TronTool>> = vec![
+            Arc::new(StubTool::new("A")),
+            Arc::new(StubTool::new("B")),
+            Arc::new(StubTool::new("C")),
+        ];
+        reg.register_many(tools);
+        assert_eq!(reg.len(), 3);
+        assert!(reg.contains("A"));
+        assert!(reg.contains("B"));
+        assert!(reg.contains("C"));
     }
 
     #[test]

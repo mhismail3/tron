@@ -4,6 +4,7 @@
 //! All payloads use `camelCase` field naming for wire compatibility with
 //! TypeScript and iOS.
 
+pub mod checkpoint;
 pub mod compact;
 pub mod config;
 pub mod context;

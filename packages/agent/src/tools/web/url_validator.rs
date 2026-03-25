@@ -69,6 +69,8 @@ pub struct UrlValidatorConfig {
     pub allowed_domains: Vec<String>,
     /// Block these domains.
     pub blocked_domains: Vec<String>,
+    /// Allow private/internal network addresses (localhost, 127.x, 192.168.x, etc.).
+    pub allow_private_network: bool,
 }
 
 /// Validate and normalize a URL.
@@ -103,7 +105,7 @@ pub fn validate_url(raw_url: &str, config: &UrlValidatorConfig) -> Result<String
         .ok_or_else(|| UrlError::InvalidFormat("no host in URL".into()))?;
 
     // Internal address check
-    if is_internal_address(host) {
+    if !config.allow_private_network && is_internal_address(host) {
         return Err(UrlError::InternalAddress(host.into()));
     }
 

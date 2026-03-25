@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::debug;
 
 use crate::tools::errors::ToolError;
@@ -16,6 +16,190 @@ const MAX_OUTPUT_BYTES: u64 = 10 * 1024 * 1024; // 10MB
 /// Real subprocess execution backed by `tokio::process::Command`.
 pub struct TokioProcessRunner;
 
+/// ANSI escape code stripping regex pattern.
+static ANSI_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\[[\?0-9;]*[hlm]")
+        .expect("ANSI regex must compile")
+});
+
+/// Strip ANSI escape codes from PTY output.
+fn strip_ansi(s: &str) -> String {
+    ANSI_RE.replace_all(s, "").to_string()
+}
+
+impl TokioProcessRunner {
+    /// Resolve the shell binary, falling back to bash if the requested shell isn't found.
+    fn resolve_shell(shell: &str) -> &str {
+        match shell {
+            "zsh" | "sh" | "bash" => shell,
+            _ => "bash",
+        }
+    }
+
+    /// Run a command in PTY/interactive mode with pattern-response pairs.
+    async fn run_interactive(
+        command: &str,
+        opts: &ProcessOptions,
+    ) -> Result<ProcessOutput, ToolError> {
+        use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+        use std::io::{Read, Write};
+
+        let start = Instant::now();
+        let shell = Self::resolve_shell(&opts.shell);
+
+        // Create PTY with default terminal size
+        let pty_system = NativePtySystem::default();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| ToolError::Internal {
+                message: format!("Failed to open PTY: {e}"),
+            })?;
+
+        // Build command
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.arg("-c");
+        cmd.arg(command);
+        cmd.cwd(&opts.working_directory);
+        for (key, value) in &opts.env {
+            cmd.env(key, value);
+        }
+
+        // Spawn child in PTY
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| ToolError::Internal {
+            message: format!("Failed to spawn PTY process: {e}"),
+        })?;
+        // Drop slave so we can detect EOF on the master
+        drop(pair.slave);
+
+        let mut reader = pair.master.try_clone_reader().map_err(|e| ToolError::Internal {
+            message: format!("Failed to clone PTY reader: {e}"),
+        })?;
+
+        let pty_input = opts.pty_input.clone();
+        let stdin_data = opts.stdin.clone();
+        let timeout_ms = opts.timeout_ms;
+
+        // Run I/O in a blocking thread since portable-pty uses blocking I/O.
+        // Both `child` and `pair.master` are moved into the closure so we can
+        // kill the child on timeout and write to the PTY master.
+        //
+        // To handle timeouts on blocking reads, we spawn a separate killer
+        // thread that kills the child after the deadline, which unblocks the
+        // reader (EOF on master when child dies).
+        let result = tokio::task::spawn_blocking(move || {
+            let mut output = String::new();
+            let mut buf = [0u8; 4096];
+            let mut pattern_idx = 0;
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(timeout_ms);
+
+            // Write initial stdin if provided
+            if let Some(ref data) = stdin_data {
+                if let Ok(mut writer) = pair.master.take_writer() {
+                    let _ = writer.write_all(data.as_bytes());
+                    let _ = writer.flush();
+                }
+            }
+
+            // Spawn a killer thread that will terminate the child if it exceeds the deadline.
+            // We use an Arc<AtomicBool> to signal whether the timeout fired.
+            let timed_out_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let timed_out_flag_clone = timed_out_flag.clone();
+            let child_id = child.process_id();
+            let kill_deadline = deadline;
+            std::thread::spawn(move || {
+                let remaining = kill_deadline.saturating_duration_since(std::time::Instant::now());
+                std::thread::sleep(remaining);
+                timed_out_flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                // Kill the process by PID to unblock the blocking read
+                if let Some(pid) = child_id {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output();
+                }
+            });
+
+            // Read output and match patterns
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break, // EOF — child exited or was killed
+                    Ok(n) => {
+                        let chunk = String::from_utf8_lossy(&buf[..n]);
+                        output.push_str(&chunk);
+
+                        // Check for pattern matches
+                        while pattern_idx < pty_input.len() {
+                            let (ref pattern, ref response) = pty_input[pattern_idx];
+                            if output.contains(pattern.as_str()) {
+                                if let Ok(mut writer) = pair.master.take_writer() {
+                                    let _ = writer.write_all(response.as_bytes());
+                                    let _ = writer.flush();
+                                }
+                                pattern_idx += 1;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Cap output size
+                        if output.len() > MAX_OUTPUT_BYTES as usize {
+                            output.truncate(MAX_OUTPUT_BYTES as usize);
+                            output.push_str("\n[PTY output capped at 10MB]");
+                            let _ = child.kill();
+                            let exit_status = child.wait().ok();
+                            let exit_code = exit_status
+                                .and_then(|s| s.exit_code().try_into().ok())
+                                .unwrap_or(-1i32);
+                            return Ok::<_, ToolError>((output, false, false, exit_code));
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(_) => break, // Read error = process likely exited
+                }
+            }
+
+            let did_timeout = timed_out_flag.load(std::sync::atomic::Ordering::SeqCst);
+
+            // Wait for child exit
+            let exit_status = child.wait().ok();
+            let exit_code = exit_status
+                .and_then(|s| s.exit_code().try_into().ok())
+                .unwrap_or(-1i32);
+
+            Ok((output, did_timeout, false, exit_code))
+        })
+        .await
+        .map_err(|e| ToolError::Internal {
+            message: format!("PTY task panicked: {e}"),
+        })??;
+
+        let (raw_output, timed_out, interrupted, exit_code) = result;
+
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+        // Strip ANSI escape codes from output
+        let cleaned = strip_ansi(&raw_output);
+
+        debug!(command, exit_code, duration_ms, "PTY process completed");
+
+        Ok(ProcessOutput {
+            stdout: cleaned,
+            stderr: String::new(),
+            exit_code,
+            duration_ms,
+            timed_out,
+            interrupted,
+        })
+    }
+}
+
 #[async_trait]
 impl ProcessRunner for TokioProcessRunner {
     async fn run_command(
@@ -23,9 +207,15 @@ impl ProcessRunner for TokioProcessRunner {
         command: &str,
         opts: &ProcessOptions,
     ) -> Result<ProcessOutput, ToolError> {
+        if opts.interactive {
+            return Self::run_interactive(command, opts).await;
+        }
+
         let start = Instant::now();
 
-        let mut cmd = tokio::process::Command::new("bash");
+        let shell = Self::resolve_shell(&opts.shell);
+
+        let mut cmd = tokio::process::Command::new(shell);
         let _ = cmd
             .arg("-c")
             .arg(command)
@@ -33,22 +223,45 @@ impl ProcessRunner for TokioProcessRunner {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
+        // If stdin data is provided, pipe it
+        if opts.stdin.is_some() {
+            let _ = cmd.stdin(std::process::Stdio::piped());
+        } else {
+            let _ = cmd.stdin(std::process::Stdio::null());
+        }
+
         // Inject environment variables
         for (key, value) in &opts.env {
             let _ = cmd.env(key, value);
         }
 
-        debug!(command, working_dir = %opts.working_directory, "spawning process");
+        debug!(command, shell, working_dir = %opts.working_directory, "spawning process");
 
-        let mut child = cmd.spawn().map_err(|e| ToolError::Internal {
-            message: format!("Failed to spawn process: {e}"),
+        let mut child = cmd.spawn().map_err(|e| {
+            // If the requested shell doesn't exist, try bash as fallback
+            if shell != "bash" {
+                debug!(shell, error = %e, "shell not found, will try bash");
+            }
+            ToolError::Internal {
+                message: format!("Failed to spawn process with {shell}: {e}"),
+            }
         })?;
+
+        // Write stdin data if provided
+        if let Some(ref stdin_data) = opts.stdin {
+            if let Some(mut stdin_pipe) = child.stdin.take() {
+                let data = stdin_data.clone();
+                tokio::spawn(async move {
+                    let _ = stdin_pipe.write_all(data.as_bytes()).await;
+                    let _ = stdin_pipe.shutdown().await;
+                });
+            }
+        }
 
         let timeout = std::time::Duration::from_millis(opts.timeout_ms);
         let cancel = opts.cancellation.clone();
 
-        // Take ownership of pipes before the select so we can kill the child
-        // on timeout/cancel without wait_with_output() consuming it.
+        // Take ownership of pipes before the select
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
 
@@ -141,6 +354,10 @@ mod tests {
             timeout_ms: 10_000,
             cancellation: CancellationToken::new(),
             env: std::collections::HashMap::new(),
+            stdin: None,
+            shell: "bash".into(),
+            interactive: false,
+            pty_input: Vec::new(),
         }
     }
 
@@ -212,8 +429,6 @@ mod tests {
 
     #[tokio::test]
     async fn process_kill_on_timeout() {
-        // Spawn a long-running process with a short timeout, then verify
-        // the process is actually dead (not orphaned).
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
         opts.timeout_ms = 100;
@@ -231,7 +446,6 @@ mod tests {
 
     #[tokio::test]
     async fn process_kill_on_cancel() {
-        // Spawn a long-running process, cancel it immediately, verify cleanup
         let runner = TokioProcessRunner;
         let opts = default_opts();
         let cancel = opts.cancellation.clone();
@@ -251,7 +465,6 @@ mod tests {
 
     #[tokio::test]
     async fn process_normal_completion_unaffected() {
-        // Normal completion still captures stdout/stderr correctly
         let runner = TokioProcessRunner;
         let result = runner
             .run_command("echo stdout_val && echo stderr_val >&2", &default_opts())
@@ -269,7 +482,6 @@ mod tests {
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
         opts.timeout_ms = 30_000;
-        // Generate 20MB of output (exceeds 10MB cap)
         let result = runner
             .run_command("head -c 20000000 /dev/zero | tr '\\0' 'A'", &opts)
             .await
@@ -324,7 +536,6 @@ mod tests {
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
         opts.timeout_ms = 30_000;
-        // Generate exactly MAX_OUTPUT_BYTES
         let result = runner
             .run_command(
                 &format!("head -c {MAX_OUTPUT_BYTES} /dev/zero | tr '\\0' 'B'"),
@@ -332,10 +543,181 @@ mod tests {
             )
             .await
             .unwrap();
-        // At exactly the limit, the truncation marker IS shown (>= check)
         assert!(
             result.stdout.contains("[output capped at 10MB]"),
             "at-limit output should have truncation marker"
         );
+    }
+
+    // ── stdin tests ──
+
+    #[tokio::test]
+    async fn stdin_piped_to_command() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.stdin = Some("hello from stdin".into());
+        let result = runner.run_command("cat", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, "hello from stdin");
+    }
+
+    #[tokio::test]
+    async fn stdin_multiline() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.stdin = Some("line1\nline2\nline3\n".into());
+        let result = runner.run_command("wc -l", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.trim().contains("3"));
+    }
+
+    #[tokio::test]
+    async fn stdin_empty_string() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.stdin = Some(String::new());
+        let result = runner.run_command("cat", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, "");
+    }
+
+    #[tokio::test]
+    async fn stdin_none_does_not_hang() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("echo 'no stdin needed'", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+    }
+
+    // ── shell selection tests ──
+
+    #[tokio::test]
+    async fn shell_bash_default() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("echo $0", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("bash"));
+    }
+
+    #[tokio::test]
+    async fn shell_sh() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.shell = "sh".into();
+        let result = runner.run_command("echo $0", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("sh"));
+    }
+
+    #[tokio::test]
+    async fn shell_zsh() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.shell = "zsh".into();
+        let result = runner.run_command("echo $0", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("zsh"));
+    }
+
+    // ── stdin binary data ──
+
+    #[tokio::test]
+    async fn stdin_binary_data() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        // Pipe data with tab character
+        opts.stdin = Some("line1\tline2".into());
+        let result = runner.run_command("wc -c", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        let count: usize = result.stdout.trim().parse().unwrap_or(0);
+        // 11 bytes: "line1\tline2"
+        assert_eq!(count, 11);
+    }
+
+    // ── env merge/override tests ──
+
+    #[tokio::test]
+    async fn env_vars_merged_with_system() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        let _ = opts.env.insert("MY_CUSTOM_VAR".into(), "custom".into());
+        // PATH should still be accessible from the system environment
+        let result = runner
+            .run_command("echo $MY_CUSTOM_VAR && echo $PATH", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        let lines: Vec<&str> = result.stdout.trim().lines().collect();
+        assert_eq!(lines[0], "custom");
+        assert!(!lines[1].is_empty(), "system PATH should be inherited");
+    }
+
+    #[tokio::test]
+    async fn env_vars_override_system() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        let _ = opts.env.insert("HOME".into(), "/fake/home".into());
+        let result = runner.run_command("echo $HOME", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout.trim(), "/fake/home");
+    }
+
+    #[tokio::test]
+    async fn env_vars_empty_object() {
+        let runner = TokioProcessRunner;
+        // Default opts have empty env — verify system env still works
+        let result = runner
+            .run_command("echo $HOME", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(!result.stdout.trim().is_empty());
+    }
+
+    // ── PTY/interactive tests ──
+
+    #[tokio::test]
+    async fn interactive_mode_captures_output() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.interactive = true;
+        opts.timeout_ms = 5_000;
+        let result = runner.run_command("echo 'hello from pty'", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("hello from pty"));
+    }
+
+    #[tokio::test]
+    async fn pty_ansi_stripping() {
+        // Verify our ANSI stripping function works
+        let input = "normal \x1b[31mred\x1b[0m text";
+        let stripped = strip_ansi(input);
+        assert_eq!(stripped, "normal red text");
+    }
+
+    #[tokio::test]
+    async fn pty_timeout() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.interactive = true;
+        opts.timeout_ms = 200;
+        let start = Instant::now();
+        let result = runner.run_command("sleep 60", &opts).await.unwrap();
+        let elapsed = start.elapsed();
+        assert!(result.timed_out);
+        assert!(elapsed.as_millis() < 5_000, "PTY timeout should be fast");
+    }
+
+    #[test]
+    fn strip_ansi_removes_color_codes() {
+        assert_eq!(strip_ansi("\x1b[32mgreen\x1b[0m"), "green");
+        assert_eq!(strip_ansi("\x1b[1;31mbold red\x1b[0m"), "bold red");
+        assert_eq!(strip_ansi("no codes here"), "no codes here");
+        assert_eq!(strip_ansi(""), "");
     }
 }

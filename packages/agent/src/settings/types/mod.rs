@@ -70,6 +70,9 @@ pub struct TronSettings {
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
+    /// MCP (Model Context Protocol) server configuration.
+    #[serde(default)]
+    pub mcp: crate::mcp::types::McpSettings,
 }
 
 impl Default for TronSettings {
@@ -89,6 +92,7 @@ impl Default for TronSettings {
             session: SessionSettings::default(),
             ui: UiSettings::default(),
             guardrails: None,
+            mcp: crate::mcp::types::McpSettings::default(),
         }
     }
 }

@@ -215,6 +215,8 @@ pub struct SessionSettings {
     pub isolation: IsolationSettings,
     /// Default chat session settings.
     pub chat: ChatSettings,
+    /// Checkpointing settings for durable execution.
+    pub checkpointing: CheckpointingSettings,
 }
 
 impl Default for SessionSettings {
@@ -223,6 +225,26 @@ impl Default for SessionSettings {
             worktree_timeout_ms: 30_000,
             isolation: IsolationSettings::default(),
             chat: ChatSettings::default(),
+            checkpointing: CheckpointingSettings::default(),
+        }
+    }
+}
+
+/// Checkpointing settings for durable execution.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CheckpointingSettings {
+    /// Whether checkpointing is enabled.
+    pub enabled: bool,
+    /// Minimum number of turns between checkpoints.
+    pub min_turn_interval: u64,
+}
+
+impl Default for CheckpointingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_turn_interval: 5,
         }
     }
 }
