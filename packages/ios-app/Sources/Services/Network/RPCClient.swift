@@ -77,6 +77,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
 
+    /// MCP server management client (status, add, remove, enable, disable, restart, reload)
+    @ObservationIgnored
+    lazy var mcp: MCPClient = MCPClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
@@ -291,6 +295,11 @@ final class RPCClient: RPCTransport {
         // Handle auth updated — notify observers so Providers page refreshes
         if eventType == AuthUpdatedPlugin.eventType {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
+        }
+
+        // Handle MCP status changed — notify observers so MCP servers page refreshes
+        if eventType == MCPStatusChangedPlugin.eventType {
+            NotificationCenter.default.post(name: .mcpStatusChanged, object: nil)
         }
 
         // Publish event to async stream

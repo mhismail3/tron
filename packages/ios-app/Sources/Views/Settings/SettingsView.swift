@@ -31,9 +31,9 @@ struct SettingsView: View {
     @State private var showConnectionPage = false
     @State private var showSessionPage = false
     @State private var showContextPage = false
-    @State private var showToolsPage = false
     @State private var showProvidersPage = false
     @State private var showAppearancePage = false
+    @State private var showMCPServersPage = false
 
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
@@ -71,11 +71,6 @@ struct SettingsView: View {
                     .adaptivePresentationDetents([.medium, .large])
                     .presentationDragIndicator(.hidden)
             }
-            .sheet(isPresented: $showToolsPage) {
-                ToolsSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
-            }
             .sheet(isPresented: $showProvidersPage) {
                 ProvidersSettingsPage()
                     .adaptivePresentationDetents([.medium, .large])
@@ -87,6 +82,11 @@ struct SettingsView: View {
                         .adaptivePresentationDetents([.medium, .large])
                         .presentationDragIndicator(.hidden)
                 }
+            }
+            .sheet(isPresented: $showMCPServersPage) {
+                MCPServersPage()
+                    .adaptivePresentationDetents([.medium, .large])
+                    .presentationDragIndicator(.hidden)
             }
             .task {
                 await settingsState.load(using: rpcClient)
@@ -160,8 +160,8 @@ struct SettingsView: View {
                 Button { showContextPage = true } label: {
                     settingsRow("brain", "Context", "Compaction, memory, rules")
                 }
-                Button { showToolsPage = true } label: {
-                    settingsRow("wrench.and.screwdriver", "Tools", "Browser automation")
+                Button { showMCPServersPage = true } label: {
+                    settingsRow("server.rack", "MCP Servers", "External tool servers")
                 }
                 if #available(iOS 26.0, *) {
                     Button { showAppearancePage = true } label: {

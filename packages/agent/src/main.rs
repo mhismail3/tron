@@ -124,6 +124,10 @@ struct ToolRegistryConfig {
     sandbox_settings: tron::settings::BashSandboxSettings,
     /// Computer use settings.
     computer_use_settings: tron::settings::ComputerUseSettings,
+    /// McpSearch meta-tool (searches all MCP server tools by keyword).
+    mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
+    /// McpCall meta-tool (calls a tool on an MCP server).
+    mcp_call: Option<Arc<dyn tron::tools::traits::TronTool>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -221,6 +225,14 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     }
 
     // Subagent tools: registered separately via SubagentManager (see main)
+
+    // MCP meta-tools (McpSearch + McpCall replace individual tool registration)
+    if let Some(ref tool) = config.mcp_search {
+        registry.register(tool.clone());
+    }
+    if let Some(ref tool) = config.mcp_call {
+        registry.register(tool.clone());
+    }
 
     tracing::debug!(tool_count = registry.len(), tools = ?registry.names(), "tool registry created");
     registry
@@ -385,6 +397,52 @@ async fn main() -> Result<()> {
     #[cfg(feature = "apns")]
     let apns_for_deploy = apns_service.clone();
 
+    // MCP servers — create router, discover tools, register meta-tools.
+    let (mcp_search, mcp_call, mcp_router): (
+        Option<Arc<dyn tron::tools::traits::TronTool>>,
+        Option<Arc<dyn tron::tools::traits::TronTool>>,
+        Option<Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>>,
+    ) = {
+        let mcp_configs = settings.mcp.servers.clone();
+        if mcp_configs.is_empty() {
+            tracing::debug!("no MCP servers configured");
+            (None, None, None)
+        } else {
+            tracing::info!(count = mcp_configs.len(), "starting MCP servers");
+            let router = tron::mcp::router::McpRouter::new(
+                mcp_configs,
+                settings_path.clone(),
+            ).await;
+            let statuses = router.status();
+            let connected: Vec<_> = statuses.iter()
+                .filter(|s| s.health != tron::mcp::types::McpServerHealth::Failed)
+                .map(|s| s.name.as_str())
+                .collect();
+            if !connected.is_empty() {
+                let tool_count: usize = statuses.iter().map(|s| s.tool_count).sum();
+                tracing::info!(
+                    servers = ?connected,
+                    tool_count,
+                    "MCP meta-tools registered (McpSearch + McpCall)"
+                );
+            }
+            let router = Arc::new(tokio::sync::RwLock::new(router));
+            let search = Arc::new(tron::mcp::search_tool::McpSearchTool::new(router.clone()))
+                as Arc<dyn tron::tools::traits::TronTool>;
+            let call = Arc::new(tron::mcp::call_tool::McpCallTool::new(router.clone()))
+                as Arc<dyn tron::tools::traits::TronTool>;
+
+            // Register shutdown hook
+            let router_for_shutdown = router.clone();
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.ok();
+                router_for_shutdown.write().await.shutdown_all().await;
+            });
+
+            (Some(search), Some(call), Some(router))
+        }
+    };
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -393,6 +451,8 @@ async fn main() -> Result<()> {
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
+        mcp_search,
+        mcp_call,
     });
 
     // Check auth availability at startup (informational only — auth can be configured later).
@@ -590,6 +650,7 @@ async fn main() -> Result<()> {
         auth_path: auth_path(),
         broadcast_manager: None, // set by TronServer after creation
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        mcp_router,
     };
 
     // Method registry
@@ -1226,6 +1287,7 @@ mod tests {
             auth_path: dir.path().join("auth.json"),
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            mcp_router: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1308,6 +1370,8 @@ mod tests {
             http_client: reqwest::Client::new(),
             sandbox_settings: tron::settings::BashSandboxSettings::default(),
             computer_use_settings: tron::settings::ComputerUseSettings::default(),
+            mcp_search: None,
+            mcp_call: None,
         }
     }
 
@@ -1408,6 +1472,7 @@ mod tests {
             auth_path: dir.path().join("auth.json"),
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            mcp_router: None,
         };
 
         let mut registry = MethodRegistry::new();

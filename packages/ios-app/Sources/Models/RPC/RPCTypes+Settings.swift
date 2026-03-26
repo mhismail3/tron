@@ -17,12 +17,11 @@ struct ServerSettings: Decodable {
     let compaction: CompactionSettings
     let rules: RulesSettings
     let tasks: TaskSettings
-    let tools: ToolSettings
     let isolationMode: String
     let chatWorkingDirectory: String?
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, tools, session
+        case models, server, context, session
     }
 
     private enum SessionKeys: String, CodingKey {
@@ -82,8 +81,6 @@ struct ServerSettings: Decodable {
             rules = .defaults
             tasks = .defaults
         }
-
-        tools = (try? container.decodeIfPresent(ToolSettings.self, forKey: .tools)) ?? .defaults
 
         // session.isolation.mode + session.chat.workingDirectory
         if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session) {
@@ -191,78 +188,11 @@ struct ServerSettings: Decodable {
         }
     }
 
-    struct ToolSettings: Decodable {
-        let web: WebSettings
-        let browser: BrowserSettings
-        static let defaults = ToolSettings(web: .defaults, browser: .defaults)
-
-        private enum CodingKeys: String, CodingKey {
-            case web, browser
-        }
-
-        init(web: WebSettings, browser: BrowserSettings) {
-            self.web = web
-            self.browser = browser
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            web = (try? container.decodeIfPresent(WebSettings.self, forKey: .web)) ?? .defaults
-            browser = (try? container.decodeIfPresent(BrowserSettings.self, forKey: .browser)) ?? .defaults
-        }
-
-        struct BrowserSettings: Decodable {
-            let headed: Bool
-            static let defaults = BrowserSettings(headed: false)
-
-            init(headed: Bool) { self.headed = headed }
-
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                headed = (try? container.decodeIfPresent(Bool.self, forKey: .headed)) ?? false
-            }
-            private enum CodingKeys: String, CodingKey { case headed }
-        }
-
-        struct WebSettings: Decodable {
-            let fetch: FetchSettings
-            let cache: CacheSettings
-            static let defaults = WebSettings(fetch: .defaults, cache: .defaults)
-
-            private enum CodingKeys: String, CodingKey {
-                case fetch, cache
-            }
-
-            init(fetch: FetchSettings, cache: CacheSettings) {
-                self.fetch = fetch
-                self.cache = cache
-            }
-
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                fetch = (try? container.decodeIfPresent(FetchSettings.self, forKey: .fetch)) ?? .defaults
-                cache = (try? container.decodeIfPresent(CacheSettings.self, forKey: .cache)) ?? .defaults
-            }
-
-            struct FetchSettings: Decodable {
-                let timeoutMs: Int
-                static let defaults = FetchSettings(timeoutMs: 30000)
-            }
-
-            struct CacheSettings: Decodable {
-                let ttlMs: Int
-                let maxEntries: Int
-                static let defaults = CacheSettings(ttlMs: 900000, maxEntries: 100)
-            }
-        }
-    }
-
 }
 
 struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
-    var tools: ToolsUpdate?
     var session: SessionUpdate?
 
     struct ServerUpdate: Encodable {
@@ -296,29 +226,6 @@ struct ServerSettingsUpdate: Encodable {
 
             struct AutoInjectUpdate: Encodable {
                 var enabled: Bool?
-            }
-        }
-    }
-
-    struct ToolsUpdate: Encodable {
-        var web: WebUpdate?
-        var browser: BrowserUpdate?
-
-        struct BrowserUpdate: Encodable {
-            var headed: Bool?
-        }
-
-        struct WebUpdate: Encodable {
-            var fetch: FetchUpdate?
-            var cache: CacheUpdate?
-
-            struct FetchUpdate: Encodable {
-                var timeoutMs: Int?
-            }
-
-            struct CacheUpdate: Encodable {
-                var ttlMs: Int?
-                var maxEntries: Int?
             }
         }
     }

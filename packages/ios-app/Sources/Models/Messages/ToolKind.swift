@@ -17,6 +17,8 @@ enum ToolKind: Sendable, Equatable {
     case queryAgent
     case notifyApp
     case manageAutomations
+    case mcpSearch
+    case mcpCall
     case other(String)
 
     init(toolName: String) {
@@ -35,6 +37,8 @@ enum ToolKind: Sendable, Equatable {
         case "queryagent":        self = .queryAgent
         case "notifyapp":         self = .notifyApp
         case "manageautomations": self = .manageAutomations
+        case "mcpsearch":         self = .mcpSearch
+        case "mcpcall":           self = .mcpCall
         default:                  self = .other(toolName)
         }
     }

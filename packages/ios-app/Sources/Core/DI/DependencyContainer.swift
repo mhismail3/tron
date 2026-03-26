@@ -8,6 +8,8 @@ extension Notification.Name {
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
     /// Posted when auth.json changes on the server (via RPC or WebSocket event)
     static let authDidUpdate = Notification.Name("tron.authDidUpdate")
+    /// Posted when MCP server status changes (via WebSocket mcp.status_changed event)
+    static let mcpStatusChanged = Notification.Name("tron.mcpStatusChanged")
 }
 
 // MARK: - Dependency Container

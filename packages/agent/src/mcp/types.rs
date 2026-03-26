@@ -119,10 +119,17 @@ pub struct McpServerConfig {
     /// Per-tool-call timeout in milliseconds.
     #[serde(default = "default_tool_timeout")]
     pub tool_timeout_ms: u64,
+    /// Whether this server is enabled. Disabled servers are not started.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
 
 fn default_tool_timeout() -> u64 {
     30_000
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// MCP settings configuration.
@@ -132,6 +139,42 @@ pub struct McpSettings {
     #[serde(default)]
     pub servers: Vec<McpServerConfig>,
 }
+
+/// Health state for a single MCP server.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum McpServerHealth {
+    /// Connected and responsive.
+    Healthy,
+    /// Experienced transient failures but still operational.
+    Degraded,
+    /// Exceeded max failures — tools disabled until manual restart.
+    Failed,
+}
+
+/// Status snapshot for a single MCP server.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerStatus {
+    pub name: String,
+    pub health: McpServerHealth,
+    pub tool_count: usize,
+    pub consecutive_failures: u32,
+    pub last_error: Option<String>,
+    pub connected_at: Option<String>,
+}
+
+/// Maximum consecutive failures before a server is marked [`McpServerHealth::Failed`].
+pub const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
+/// Base delay for exponential backoff on restart (milliseconds).
+pub const BACKOFF_BASE_MS: u64 = 1_000;
+
+/// Maximum backoff delay (milliseconds).
+pub const BACKOFF_MAX_MS: u64 = 30_000;
+
+/// Supported MCP protocol versions (newest first).
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-03-26", "2024-11-05"];
 
 #[cfg(test)]
 mod tests {
@@ -212,6 +255,18 @@ mod tests {
         let config: McpServerConfig = serde_json::from_value(json).unwrap();
         assert_eq!(config.name, "sqlite");
         assert_eq!(config.tool_timeout_ms, 30_000);
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn mcp_server_config_disabled() {
+        let json = json!({
+            "name": "disabled",
+            "command": "echo",
+            "enabled": false
+        });
+        let config: McpServerConfig = serde_json::from_value(json).unwrap();
+        assert!(!config.enabled);
     }
 
     #[test]
@@ -222,5 +277,61 @@ mod tests {
             McpContentBlock::Text { text } => assert_eq!(text, "hello"),
             _ => panic!("Expected text block"),
         }
+    }
+
+    #[test]
+    fn server_health_serialization() {
+        let status = McpServerStatus {
+            name: "sqlite".into(),
+            health: McpServerHealth::Healthy,
+            tool_count: 3,
+            consecutive_failures: 0,
+            last_error: None,
+            connected_at: Some("2026-03-25T10:00:00Z".into()),
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["health"], "healthy");
+        assert_eq!(json["toolCount"], 3);
+    }
+
+    #[test]
+    fn server_health_degraded_with_error() {
+        let status = McpServerStatus {
+            name: "github".into(),
+            health: McpServerHealth::Degraded,
+            tool_count: 5,
+            consecutive_failures: 2,
+            last_error: Some("connection reset".into()),
+            connected_at: Some("2026-03-25T09:00:00Z".into()),
+        };
+        assert_eq!(status.health, McpServerHealth::Degraded);
+        assert_eq!(status.consecutive_failures, 2);
+    }
+
+    #[test]
+    fn server_health_failed() {
+        let status = McpServerStatus {
+            name: "broken".into(),
+            health: McpServerHealth::Failed,
+            tool_count: 0,
+            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+            last_error: Some("command not found".into()),
+            connected_at: None,
+        };
+        assert_eq!(status.health, McpServerHealth::Failed);
+        assert_eq!(status.consecutive_failures, MAX_CONSECUTIVE_FAILURES);
+    }
+
+    #[test]
+    fn backoff_constants_valid() {
+        assert!(BACKOFF_BASE_MS > 0);
+        assert!(BACKOFF_MAX_MS > BACKOFF_BASE_MS);
+        assert!(MAX_CONSECUTIVE_FAILURES > 0);
+    }
+
+    #[test]
+    fn supported_protocol_versions_not_empty() {
+        assert!(!SUPPORTED_PROTOCOL_VERSIONS.is_empty());
+        assert!(SUPPORTED_PROTOCOL_VERSIONS.contains(&"2024-11-05"));
     }
 }

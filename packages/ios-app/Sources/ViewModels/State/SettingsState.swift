@@ -23,10 +23,6 @@ final class SettingsState {
     var taskAutoInjectEnabled: Bool = false
     var isolationMode: String = "always"
 
-    // MARK: - Tool Settings
-
-    var toolBrowserHeaded: Bool = false
-
     // MARK: - Account Settings
 
     var anthropicAccounts: [String] = []
@@ -77,7 +73,6 @@ final class SettingsState {
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
             isolationMode = settings.isolationMode
-            toolBrowserHeaded = settings.tools.browser.headed
             anthropicAccounts = settings.anthropicAccounts ?? []
             selectedAnthropicAccount = settings.anthropicAccount
             if let workspace = settings.defaultWorkspace {
@@ -120,7 +115,6 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = true
         taskAutoInjectEnabled = false
         isolationMode = "always"
-        toolBrowserHeaded = false
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
     }
@@ -141,13 +135,6 @@ final class SettingsState {
                 ),
                 rules: .init(discoverStandaloneFiles: true),
                 tasks: .init(autoInject: .init(enabled: false))
-            ),
-            tools: .init(
-                web: .init(
-                    fetch: .init(timeoutMs: 30000),
-                    cache: .init(ttlMs: 900000, maxEntries: 100)
-                ),
-                browser: .init(headed: false)
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))
         )

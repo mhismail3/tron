@@ -111,6 +111,7 @@ final class EventRegistry: @unchecked Sendable {
         // Server events
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)
+        register(MCPStatusChangedPlugin.self)
 
         // Worktree events
         register(WorktreeAcquiredPlugin.self)

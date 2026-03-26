@@ -32,6 +32,7 @@ pub mod events;
 pub mod filesystem;
 pub mod git;
 pub mod logs;
+pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod notifications;
@@ -136,6 +137,15 @@ fn register_core(registry: &mut MethodRegistry) {
 }
 
 fn register_capabilities(registry: &mut MethodRegistry) {
+    // MCP
+    registry.register("mcp.status", mcp::McpStatusHandler);
+    registry.register("mcp.addServer", mcp::McpAddServerHandler);
+    registry.register("mcp.removeServer", mcp::McpRemoveServerHandler);
+    registry.register("mcp.enableServer", mcp::McpEnableServerHandler);
+    registry.register("mcp.disableServer", mcp::McpDisableServerHandler);
+    registry.register("mcp.restartServer", mcp::McpRestartServerHandler);
+    registry.register("mcp.reload", mcp::McpReloadHandler);
+
     // Skills
     registry.register("skill.list", skills::ListSkillsHandler);
     registry.register("skill.get", skills::GetSkillHandler);
@@ -453,6 +463,7 @@ pub(crate) mod test_helpers {
             auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            mcp_router: None,
         }
     }
 }
@@ -471,6 +482,9 @@ mod tests {
         assert!(reg.has_method("agent.prompt"));
         assert!(reg.has_method("git.clone"));
         assert!(!reg.has_method("memory.getHandoffs"));
+        assert!(reg.has_method("mcp.status"));
+        assert!(reg.has_method("mcp.addServer"));
+        assert!(reg.has_method("mcp.reload"));
     }
 
     #[test]
@@ -479,8 +493,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            106,
-            "expected 106 methods, got {}",
+            113,
+            "expected 113 methods (106 + 7 MCP), got {}",
             reg.methods().len()
         );
     }

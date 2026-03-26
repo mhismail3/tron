@@ -1,4 +1,7 @@
 //! MCP client — stdio and HTTP transport for JSON-RPC communication.
+//!
+//! Handles protocol initialization with version negotiation, graceful
+//! shutdown, and structured error classification for upstream retry logic.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -10,9 +13,74 @@ use tracing::{debug, warn};
 
 use crate::mcp::types::{
     JsonRpcRequest, JsonRpcResponse, McpServerConfig, McpToolDef, McpToolResult,
+    SUPPORTED_PROTOCOL_VERSIONS,
 };
 
+/// Classification of MCP client errors for upstream retry decisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpErrorKind {
+    /// Server process exited or connection closed — requires restart.
+    ConnectionLost,
+    /// Request timed out — may succeed on retry.
+    Timeout,
+    /// Server returned a JSON-RPC error — retrying won't help.
+    Protocol(String),
+    /// Transient I/O error — may succeed on retry.
+    Transient(String),
+    /// Server's protocol version is incompatible.
+    VersionMismatch(String),
+}
+
+impl std::fmt::Display for McpErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConnectionLost => write!(f, "connection lost"),
+            Self::Timeout => write!(f, "request timed out"),
+            Self::Protocol(msg) => write!(f, "protocol error: {msg}"),
+            Self::Transient(msg) => write!(f, "transient error: {msg}"),
+            Self::VersionMismatch(msg) => write!(f, "version mismatch: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for McpError {}
+
+/// Structured error from MCP client operations.
+#[derive(Debug, Clone)]
+pub struct McpError {
+    pub server: String,
+    pub kind: McpErrorKind,
+    pub message: String,
+}
+
+impl McpError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(self.kind, McpErrorKind::Timeout | McpErrorKind::Transient(_))
+    }
+
+    pub fn requires_restart(&self) -> bool {
+        matches!(self.kind, McpErrorKind::ConnectionLost)
+    }
+}
+
+impl std::fmt::Display for McpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MCP server '{}': {}", self.server, self.message)
+    }
+}
+
+impl From<McpError> for String {
+    fn from(e: McpError) -> Self {
+        e.to_string()
+    }
+}
+
+/// Timeout for graceful shutdown notification before hard kill (ms).
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS: u64 = 2_000;
+
 /// MCP client connected to a single server.
+///
+/// `Debug` is implemented manually because `Transport` holds non-Debug process handles.
 pub struct McpClient {
     /// Server name (for logging and tool prefixing).
     pub name: String,
@@ -22,9 +90,20 @@ pub struct McpClient {
     next_id: AtomicU64,
     /// Tool call timeout.
     tool_timeout_ms: u64,
+    /// Protocol version negotiated with the server.
+    pub negotiated_version: Mutex<Option<String>>,
 }
 
-enum Transport {
+impl std::fmt::Debug for McpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpClient")
+            .field("name", &self.name)
+            .field("tool_timeout_ms", &self.tool_timeout_ms)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) enum Transport {
     /// Stdio transport — communicates via child process stdin/stdout.
     Stdio {
         child: Child,
@@ -36,13 +115,31 @@ enum Transport {
         url: String,
         client: reqwest::Client,
     },
+    /// Placeholder for failed servers (never used for I/O).
+    Placeholder,
 }
 
 impl McpClient {
+    /// Create a placeholder client for failed servers (never used for I/O).
+    ///
+    /// Any call to `send_request` will return `ConnectionLost`.
+    pub fn failed_placeholder(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            transport: Mutex::new(Transport::Placeholder),
+            next_id: AtomicU64::new(1),
+            tool_timeout_ms: 0,
+            negotiated_version: Mutex::new(None),
+        }
+    }
+
     /// Create a client with stdio transport (spawn server process).
-    pub async fn connect_stdio(config: &McpServerConfig) -> Result<Self, String> {
-        let command = config.command.as_ref()
-            .ok_or_else(|| "MCP server config must have 'command' for stdio transport".to_string())?;
+    pub async fn connect_stdio(config: &McpServerConfig) -> Result<Self, McpError> {
+        let command = config.command.as_ref().ok_or_else(|| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Protocol("missing 'command'".into()),
+            message: "MCP server config must have 'command' for stdio transport".into(),
+        })?;
 
         let mut cmd = Command::new(command);
         for arg in &config.args {
@@ -56,14 +153,26 @@ impl McpClient {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
 
-        let mut child = cmd.spawn().map_err(|e| {
-            format!("Failed to spawn MCP server '{}' (command: {command}): {e}", config.name)
+        let mut child = cmd.spawn().map_err(|e| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Transient(format!("spawn failed: {e}")),
+            message: format!(
+                "Failed to spawn MCP server '{}' (command: {command}): {e}. \
+                 Ensure '{command}' is installed and on PATH.",
+                config.name
+            ),
         })?;
 
-        let stdin = child.stdin.take()
-            .ok_or_else(|| "Failed to capture MCP server stdin".to_string())?;
-        let stdout = child.stdout.take()
-            .ok_or_else(|| "Failed to capture MCP server stdout".to_string())?;
+        let stdin = child.stdin.take().ok_or_else(|| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Transient("no stdin".into()),
+            message: "Failed to capture MCP server stdin".into(),
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Transient("no stdout".into()),
+            message: "Failed to capture MCP server stdout".into(),
+        })?;
 
         let writer = tokio::io::BufWriter::new(stdin);
         let reader = BufReader::new(stdout);
@@ -75,23 +184,30 @@ impl McpClient {
             transport: Mutex::new(Transport::Stdio { child, writer, reader }),
             next_id: AtomicU64::new(1),
             tool_timeout_ms: config.tool_timeout_ms,
+            negotiated_version: Mutex::new(None),
         };
 
-        // Initialize the connection
         client.initialize().await?;
 
         Ok(client)
     }
 
     /// Create a client with HTTP transport.
-    pub async fn connect_http(config: &McpServerConfig) -> Result<Self, String> {
-        let url = config.url.as_ref()
-            .ok_or_else(|| "MCP server config must have 'url' for HTTP transport".to_string())?;
+    pub async fn connect_http(config: &McpServerConfig) -> Result<Self, McpError> {
+        let url = config.url.as_ref().ok_or_else(|| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Protocol("missing 'url'".into()),
+            message: "MCP server config must have 'url' for HTTP transport".into(),
+        })?;
 
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_millis(config.tool_timeout_ms))
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+            .map_err(|e| McpError {
+                server: config.name.clone(),
+                kind: McpErrorKind::Transient(format!("HTTP client: {e}")),
+                message: format!("Failed to create HTTP client: {e}"),
+            })?;
 
         debug!(server = %config.name, url, "connecting to MCP server via HTTP");
 
@@ -103,6 +219,7 @@ impl McpClient {
             }),
             next_id: AtomicU64::new(1),
             tool_timeout_ms: config.tool_timeout_ms,
+            negotiated_version: Mutex::new(None),
         };
 
         client.initialize().await?;
@@ -110,10 +227,12 @@ impl McpClient {
         Ok(client)
     }
 
-    /// Send the MCP initialize handshake.
-    async fn initialize(&self) -> Result<(), String> {
+    /// Send the MCP initialize handshake with protocol version negotiation.
+    async fn initialize(&self) -> Result<(), McpError> {
+        let preferred_version = SUPPORTED_PROTOCOL_VERSIONS[0];
+
         let result = self.send_request("initialize", Some(json!({
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": preferred_version,
             "capabilities": {},
             "clientInfo": {
                 "name": "tron-agent",
@@ -121,7 +240,37 @@ impl McpClient {
             }
         }))).await?;
 
-        debug!(server = %self.name, result = %result, "MCP server initialized");
+        // Validate protocol version from server response
+        let server_version = result
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+
+        if !SUPPORTED_PROTOCOL_VERSIONS.contains(&server_version) {
+            warn!(
+                server = %self.name,
+                server_version,
+                supported = ?SUPPORTED_PROTOCOL_VERSIONS,
+                "MCP server returned unsupported protocol version"
+            );
+            return Err(McpError {
+                server: self.name.clone(),
+                kind: McpErrorKind::VersionMismatch(server_version.to_string()),
+                message: format!(
+                    "MCP server '{}' uses protocol version '{server_version}' which is not \
+                     in supported versions: {:?}",
+                    self.name, SUPPORTED_PROTOCOL_VERSIONS,
+                ),
+            });
+        }
+
+        *self.negotiated_version.lock().await = Some(server_version.to_string());
+
+        debug!(
+            server = %self.name,
+            version = server_version,
+            "MCP server initialized"
+        );
 
         // Send initialized notification
         self.send_notification("notifications/initialized", None).await?;
@@ -130,7 +279,7 @@ impl McpClient {
     }
 
     /// Discover available tools from the server.
-    pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, String> {
+    pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, McpError> {
         let result = self.send_request("tools/list", None).await?;
 
         let tools: Vec<McpToolDef> = result
@@ -152,14 +301,34 @@ impl McpClient {
         &self,
         tool_name: &str,
         arguments: Value,
-    ) -> Result<McpToolResult, String> {
+    ) -> Result<McpToolResult, McpError> {
         let result = self.send_request("tools/call", Some(json!({
             "name": tool_name,
             "arguments": arguments,
         }))).await?;
 
-        serde_json::from_value(result.clone())
-            .map_err(|e| format!("Failed to parse tool result: {e}"))
+        serde_json::from_value(result.clone()).map_err(|e| McpError {
+            server: self.name.clone(),
+            kind: McpErrorKind::Protocol(format!("bad tool result: {e}")),
+            message: format!("Failed to parse tool result: {e}"),
+        })
+    }
+
+    /// Check if the underlying transport is still alive.
+    pub async fn is_alive(&self) -> bool {
+        let mut transport = self.transport.lock().await;
+        match &mut *transport {
+            Transport::Placeholder => false,
+            Transport::Stdio { child, .. } => {
+                // try_wait returns Ok(Some(status)) if exited, Ok(None) if still running
+                match child.try_wait() {
+                    Ok(Some(_)) => false,
+                    Ok(None) => true,
+                    Err(_) => false,
+                }
+            }
+            Transport::Http { .. } => true,
+        }
     }
 
     /// Send a JSON-RPC request and wait for the response.
@@ -167,62 +336,174 @@ impl McpClient {
         &self,
         method: &str,
         params: Option<Value>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, McpError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = JsonRpcRequest::new(id, method, params);
 
         let mut transport = self.transport.lock().await;
 
         let response: JsonRpcResponse = match &mut *transport {
+            Transport::Placeholder => {
+                return Err(McpError {
+                    server: self.name.clone(),
+                    kind: McpErrorKind::ConnectionLost,
+                    message: format!("MCP server '{}' is not connected", self.name),
+                });
+            }
             Transport::Stdio { writer, reader, .. } => {
-                // Write request as JSON line
-                let json_line = serde_json::to_string(&request)
-                    .map_err(|e| format!("Failed to serialize request: {e}"))?;
-                writer.write_all(json_line.as_bytes()).await
-                    .map_err(|e| format!("Failed to write to MCP server: {e}"))?;
-                writer.write_all(b"\n").await
-                    .map_err(|e| format!("Failed to write newline: {e}"))?;
-                writer.flush().await
-                    .map_err(|e| format!("Failed to flush to MCP server: {e}"))?;
+                let json_line = serde_json::to_string(&request).map_err(|e| McpError {
+                    server: self.name.clone(),
+                    kind: McpErrorKind::Protocol(format!("serialize: {e}")),
+                    message: format!("Failed to serialize request: {e}"),
+                })?;
 
-                // Read response line
-                let mut line = String::new();
-                let bytes_read = tokio::time::timeout(
-                    std::time::Duration::from_millis(self.tool_timeout_ms),
-                    reader.read_line(&mut line),
-                ).await
-                    .map_err(|_| format!("MCP server '{}' timed out after {}ms", self.name, self.tool_timeout_ms))?
-                    .map_err(|e| format!("Failed to read from MCP server: {e}"))?;
-
-                if bytes_read == 0 {
-                    return Err(format!("MCP server '{}' closed connection (stdin EOF)", self.name));
+                // Write request
+                if let Err(e) = writer.write_all(json_line.as_bytes()).await {
+                    return Err(McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::ConnectionLost,
+                        message: format!("Failed to write to MCP server: {e}"),
+                    });
+                }
+                if let Err(e) = writer.write_all(b"\n").await {
+                    return Err(McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::ConnectionLost,
+                        message: format!("Failed to write newline: {e}"),
+                    });
+                }
+                if let Err(e) = writer.flush().await {
+                    return Err(McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::ConnectionLost,
+                        message: format!("Failed to flush to MCP server: {e}"),
+                    });
                 }
 
-                serde_json::from_str(line.trim())
-                    .map_err(|e| format!("Invalid JSON-RPC response from MCP server: {e}"))?
+                // Read response with timeout, skipping JSON-RPC notifications
+                let timeout = std::time::Duration::from_millis(self.tool_timeout_ms);
+                let deadline = tokio::time::Instant::now() + timeout;
+                loop {
+                    let mut line = String::new();
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        return Err(McpError {
+                            server: self.name.clone(),
+                            kind: McpErrorKind::Timeout,
+                            message: format!(
+                                "MCP server '{}' timed out after {}ms",
+                                self.name, self.tool_timeout_ms
+                            ),
+                        });
+                    }
+
+                    let bytes_read = tokio::time::timeout(remaining, reader.read_line(&mut line))
+                        .await
+                        .map_err(|_| McpError {
+                            server: self.name.clone(),
+                            kind: McpErrorKind::Timeout,
+                            message: format!(
+                                "MCP server '{}' timed out after {}ms",
+                                self.name, self.tool_timeout_ms
+                            ),
+                        })?
+                        .map_err(|e| McpError {
+                            server: self.name.clone(),
+                            kind: McpErrorKind::ConnectionLost,
+                            message: format!("Failed to read from MCP server: {e}"),
+                        })?;
+
+                    if bytes_read == 0 {
+                        return Err(McpError {
+                            server: self.name.clone(),
+                            kind: McpErrorKind::ConnectionLost,
+                            message: format!(
+                                "MCP server '{}' closed connection (stdout EOF)",
+                                self.name
+                            ),
+                        });
+                    }
+
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+
+                    // Parse the line — skip server-initiated notifications (no id field)
+                    let parsed: Value = serde_json::from_str(trimmed).map_err(|e| McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::Protocol(format!("invalid JSON: {e}")),
+                        message: format!("Invalid JSON-RPC response from MCP server: {e}"),
+                    })?;
+
+                    // Notifications have no "id" — skip them
+                    if parsed.get("id").is_none() || parsed.get("id") == Some(&Value::Null) {
+                        debug!(
+                            server = %self.name,
+                            method = parsed.get("method").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                            "skipping server notification"
+                        );
+                        continue;
+                    }
+
+                    break serde_json::from_value(parsed).map_err(|e| McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::Protocol(format!("bad response: {e}")),
+                        message: format!("Invalid JSON-RPC response structure: {e}"),
+                    })?;
+                }
             }
             Transport::Http { url, client } => {
-                let resp = client.post(url.as_str())
+                let resp = client
+                    .post(url.as_str())
                     .json(&request)
                     .send()
                     .await
-                    .map_err(|e| format!("HTTP request to MCP server failed: {e}"))?;
+                    .map_err(|e| {
+                        let kind = if e.is_timeout() {
+                            McpErrorKind::Timeout
+                        } else if e.is_connect() {
+                            McpErrorKind::ConnectionLost
+                        } else {
+                            McpErrorKind::Transient(format!("HTTP: {e}"))
+                        };
+                        McpError {
+                            server: self.name.clone(),
+                            kind,
+                            message: format!("HTTP request to MCP server failed: {e}"),
+                        }
+                    })?;
 
                 if !resp.status().is_success() {
-                    return Err(format!("MCP server returned HTTP {}", resp.status()));
+                    return Err(McpError {
+                        server: self.name.clone(),
+                        kind: McpErrorKind::Protocol(format!("HTTP {}", resp.status())),
+                        message: format!("MCP server returned HTTP {}", resp.status()),
+                    });
                 }
 
-                resp.json().await
-                    .map_err(|e| format!("Failed to parse MCP server response: {e}"))?
+                resp.json().await.map_err(|e| McpError {
+                    server: self.name.clone(),
+                    kind: McpErrorKind::Protocol(format!("bad response body: {e}")),
+                    message: format!("Failed to parse MCP server response: {e}"),
+                })?
             }
         };
 
         // Check for JSON-RPC error
         if let Some(error) = response.error {
-            return Err(error.to_string());
+            return Err(McpError {
+                server: self.name.clone(),
+                kind: McpErrorKind::Protocol(error.to_string()),
+                message: error.to_string(),
+            });
         }
 
-        response.result.ok_or_else(|| "MCP server returned no result".to_string())
+        response.result.ok_or_else(|| McpError {
+            server: self.name.clone(),
+            kind: McpErrorKind::Protocol("no result".into()),
+            message: "MCP server returned no result".into(),
+        })
     }
 
     /// Send a JSON-RPC notification (no response expected).
@@ -230,7 +511,7 @@ impl McpClient {
         &self,
         method: &str,
         params: Option<Value>,
-    ) -> Result<(), String> {
+    ) -> Result<(), McpError> {
         let notification = json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -240,34 +521,55 @@ impl McpClient {
         let mut transport = self.transport.lock().await;
 
         match &mut *transport {
+            Transport::Placeholder => {}
             Transport::Stdio { writer, .. } => {
-                let json_line = serde_json::to_string(&notification)
-                    .map_err(|e| format!("Failed to serialize notification: {e}"))?;
-                writer.write_all(json_line.as_bytes()).await
-                    .map_err(|e| format!("Failed to write notification: {e}"))?;
-                writer.write_all(b"\n").await
-                    .map_err(|e| format!("Failed to write newline: {e}"))?;
-                writer.flush().await
-                    .map_err(|e| format!("Failed to flush notification: {e}"))?;
+                let json_line = serde_json::to_string(&notification).map_err(|e| McpError {
+                    server: self.name.clone(),
+                    kind: McpErrorKind::Protocol(format!("serialize: {e}")),
+                    message: format!("Failed to serialize notification: {e}"),
+                })?;
+                // Best-effort — don't fail the caller if notification can't be sent
+                let _ = writer.write_all(json_line.as_bytes()).await;
+                let _ = writer.write_all(b"\n").await;
+                let _ = writer.flush().await;
             }
             Transport::Http { url, client } => {
-                let _ = client.post(url.as_str())
-                    .json(&notification)
-                    .send()
-                    .await;
+                let _ = client.post(url.as_str()).json(&notification).send().await;
             }
         }
 
         Ok(())
     }
 
-    /// Shut down the MCP server connection.
+    /// Graceful shutdown: send protocol notification, then kill process.
     pub async fn shutdown(&self) {
+        // Attempt graceful shutdown notification (best-effort)
+        let _ = self.send_notification("notifications/cancelled", Some(json!({
+            "reason": "agent shutting down"
+        }))).await;
+
         let mut transport = self.transport.lock().await;
         match &mut *transport {
-            Transport::Stdio { child, .. } => {
-                let _ = child.kill().await;
-                debug!(server = %self.name, "killed MCP server process");
+            Transport::Placeholder => {}
+            Transport::Stdio { child, writer, .. } => {
+                // Close stdin to signal the server
+                drop(writer.get_ref());
+
+                // Wait briefly for graceful exit, then force kill
+                let timeout = std::time::Duration::from_millis(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+                match tokio::time::timeout(timeout, child.wait()).await {
+                    Ok(Ok(status)) => {
+                        debug!(
+                            server = %self.name,
+                            code = status.code(),
+                            "MCP server exited gracefully"
+                        );
+                    }
+                    _ => {
+                        let _ = child.kill().await;
+                        debug!(server = %self.name, "force-killed MCP server process");
+                    }
+                }
             }
             Transport::Http { .. } => {
                 debug!(server = %self.name, "disconnected from MCP HTTP server");
@@ -303,5 +605,62 @@ mod tests {
         let req = JsonRpcRequest::new(1, "tools/call", Some(json!({"name": "query"})));
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["params"]["name"], "query");
+    }
+
+    #[test]
+    fn error_kind_display() {
+        assert_eq!(McpErrorKind::ConnectionLost.to_string(), "connection lost");
+        assert_eq!(McpErrorKind::Timeout.to_string(), "request timed out");
+        assert!(McpErrorKind::Protocol("bad".into()).to_string().contains("bad"));
+    }
+
+    #[test]
+    fn error_retryable_classification() {
+        let timeout_err = McpError {
+            server: "test".into(),
+            kind: McpErrorKind::Timeout,
+            message: "timed out".into(),
+        };
+        assert!(timeout_err.is_retryable());
+        assert!(!timeout_err.requires_restart());
+
+        let conn_err = McpError {
+            server: "test".into(),
+            kind: McpErrorKind::ConnectionLost,
+            message: "EOF".into(),
+        };
+        assert!(!conn_err.is_retryable());
+        assert!(conn_err.requires_restart());
+
+        let proto_err = McpError {
+            server: "test".into(),
+            kind: McpErrorKind::Protocol("bad".into()),
+            message: "bad response".into(),
+        };
+        assert!(!proto_err.is_retryable());
+        assert!(!proto_err.requires_restart());
+    }
+
+    #[test]
+    fn error_display_includes_server() {
+        let err = McpError {
+            server: "sqlite".into(),
+            kind: McpErrorKind::Timeout,
+            message: "timed out after 30s".into(),
+        };
+        let display = err.to_string();
+        assert!(display.contains("sqlite"));
+        assert!(display.contains("timed out"));
+    }
+
+    #[test]
+    fn version_mismatch_error() {
+        let err = McpError {
+            server: "legacy".into(),
+            kind: McpErrorKind::VersionMismatch("1.0.0".into()),
+            message: "unsupported version".into(),
+        };
+        assert!(!err.is_retryable());
+        assert!(!err.requires_restart());
     }
 }

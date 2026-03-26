@@ -35,7 +35,8 @@ enum ToolRegistry {
         "bash",
         "search", "glob", "find",
         "webfetch", "websearch",
-        "computeruse"
+        "computeruse",
+        "mcpsearch", "mcpcall"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -237,6 +238,36 @@ enum ToolRegistry {
                     isExpanded: isExpanded
                 ))
             }
+        ),
+        "mcpsearch": ToolDescriptor(
+            icon: "magnifyingglass.circle",
+            iconColor: .tronInfo,
+            displayName: "MCP Search",
+            completedDisplayName: "Searched MCP",
+            summaryExtractor: { args in
+                let query = ToolArgumentParser.string("query", from: args) ?? ""
+                let server = ToolArgumentParser.string("server", from: args)
+                if let server, !server.isEmpty {
+                    return "\"\(ToolArgumentParser.truncate(query, maxLength: 25))\" on \(server)"
+                }
+                return query.isEmpty ? "" : "\"\(ToolArgumentParser.truncate(query, maxLength: 37))\""
+            },
+            viewerFactory: nil
+        ),
+        "mcpcall": ToolDescriptor(
+            icon: "server.rack",
+            iconColor: .tronEmerald,
+            displayName: "MCP Call",
+            completedDisplayName: "Called MCP",
+            summaryExtractor: { args in
+                let server = ToolArgumentParser.string("server", from: args) ?? ""
+                let tool = ToolArgumentParser.string("tool", from: args) ?? ""
+                if !server.isEmpty && !tool.isEmpty {
+                    return "\(server).\(tool)"
+                }
+                return server.isEmpty ? tool : server
+            },
+            viewerFactory: nil
         ),
         "askuserquestion": ToolDescriptor(
             icon: "questionmark.circle.fill",

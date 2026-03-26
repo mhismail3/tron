@@ -76,6 +76,8 @@ pub struct RpcContext {
     pub broadcast_manager: Option<Arc<BroadcastManager>>,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>>>,
+    /// MCP router for managing MCP servers (None = no MCP servers configured).
+    pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
 }
 
 impl RpcContext {

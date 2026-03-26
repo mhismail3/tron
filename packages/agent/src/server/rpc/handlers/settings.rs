@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::require_param;
+use crate::server::rpc::handlers::{mcp, require_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::settings_service;
 
@@ -33,11 +33,22 @@ impl MethodHandler for UpdateSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let updates = require_param(params.as_ref(), "settings")?.clone();
+        let has_mcp_changes = updates.get("mcp").is_some();
         let settings_path = ctx.settings_path.clone();
         ctx.run_blocking("settings.update", move || {
             settings_service::update_settings(&settings_path, updates)
         })
         .await?;
+
+        // Hot-reload MCP servers when the mcp section changes
+        if has_mcp_changes {
+            if let Some(ref router) = ctx.mcp_router {
+                let mut guard = router.write().await;
+                let _ = guard.reload_from_settings().await;
+                drop(guard);
+                mcp::broadcast_status_changed(ctx).await;
+            }
+        }
 
         Ok(serde_json::json!({ "success": true }))
     }
