@@ -392,6 +392,8 @@ struct ChatView: View {
             sheetCoordinator.showSkillDetail(spell, mode: .spell)
         case .askUserQuestion(let data):
             viewModel.openAskUserQuestionSheet(for: data)
+        case .getConfirmation(let data):
+            viewModel.openGetConfirmationSheet(for: data)
         case .thinking(let content):
             sheetCoordinator.showThinkingDetail(content)
         case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):

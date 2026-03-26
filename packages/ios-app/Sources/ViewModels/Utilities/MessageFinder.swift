@@ -54,6 +54,8 @@ enum MessageFinder {
                 return data.toolCallId == toolCallId
             case .askUserQuestion(let data):
                 return data.toolCallId == toolCallId
+            case .getConfirmation(let data):
+                return data.toolCallId == toolCallId
             default:
                 return false
             }
@@ -66,6 +68,18 @@ enum MessageFinder {
     static func lastIndexOfAskUserQuestion(toolCallId: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
             if case .askUserQuestion(let data) = message.content {
+                return data.toolCallId == toolCallId
+            }
+            return false
+        })
+    }
+
+    // MARK: - By GetConfirmation
+
+    /// Find LAST message index with matching toolCallId in getConfirmation content.
+    static func lastIndexOfGetConfirmation(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+        messages.lastIndex(where: { message in
+            if case .getConfirmation(let data) = message.content {
                 return data.toolCallId == toolCallId
             }
             return false

@@ -30,6 +30,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Number of questions from the last AskUserQuestion answer submission
     var lastAnsweredQuestionCount: Int { get }
 
+    /// Whether the last GetConfirmation submission was an approval
+    var lastConfirmationWasApproval: Bool { get }
+
     /// Send prompt to the server
     func sendPromptToServer(
         text: String,
@@ -50,6 +53,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Mark pending AskUserQuestion chips as superseded
     func markPendingQuestionsAsSuperseded()
+
+    /// Mark pending GetConfirmation chips as superseded
+    func markPendingConfirmationsAsSuperseded()
 
     /// Dismiss pending subagent results (user chose to send a different message)
     func dismissPendingSubagentResults()
@@ -109,12 +115,18 @@ final class MessagingCoordinator {
 
         // Check if this is a special prompt that should not trigger certain dismissals
         let isAnswerPrompt = text.hasPrefix(AgentProtocol.askUserAnswerPrefix)
+        let isConfirmationPrompt = text.hasPrefix(AgentProtocol.confirmationAnswerPrefix)
         let isSubagentResultPrompt = text.hasPrefix(AgentProtocol.subagentResultPrefix)
 
         if !isAnswerPrompt {
             // Mark any pending AskUserQuestion chips as superseded
             // (user chose to send a different message instead of answering)
             context.markPendingQuestionsAsSuperseded()
+        }
+
+        if !isConfirmationPrompt {
+            // Mark any pending GetConfirmation chips as superseded
+            context.markPendingConfirmationsAsSuperseded()
         }
 
         if !isSubagentResultPrompt {
@@ -140,6 +152,15 @@ final class MessagingCoordinator {
                 )
                 context.appendMessage(answerChip)
                 context.logDebug("Added answered questions chip")
+            } else if isConfirmationPrompt {
+                // Show an approved/denied chip instead of the raw prompt text
+                let approved = context.lastConfirmationWasApproval
+                let confirmChip = ChatMessage(
+                    role: .user,
+                    content: .confirmedAction(approved: approved)
+                )
+                context.appendMessage(confirmChip)
+                context.logDebug("Added confirmed action chip (approved=\(approved))")
             } else {
                 let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
                 context.appendMessage(userMessage)

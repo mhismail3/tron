@@ -35,6 +35,16 @@ enum MessageHandlers {
             )
         }
 
+        // GetConfirmation response prompts - render as a chip instead of full text
+        if parsed.content.contains(AgentProtocol.confirmationAnswerPrefix) {
+            let parsedResponse = GetConfirmationDetector.parseConfirmationResponse(from: parsed.content)
+            return ChatMessage(
+                role: .user,
+                content: .confirmedAction(approved: parsedResponse.decision == .approved),
+                timestamp: timestamp
+            )
+        }
+
         // Skip empty user messages (unless they have attachments, skills, or spells)
         guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil || parsed.spells != nil else { return nil }
 

@@ -34,6 +34,11 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showAskUserQuestion()
                 }
             }
+            .onChange(of: viewModel.getConfirmationState.showSheet) { _, show in
+                if show, sheetCoordinator.activeSheet == nil {
+                    sheetCoordinator.showGetConfirmation()
+                }
+            }
             .onChange(of: viewModel.subagentState.showDetailSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
                     sheetCoordinator.showSubagentDetail()
@@ -50,6 +55,7 @@ struct ChatSheetModifier: ViewModifier {
 
     private func onDismiss() {
         viewModel.askUserQuestionState.showSheet = false
+        viewModel.getConfirmationState.showSheet = false
         viewModel.subagentState.showDetailSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()

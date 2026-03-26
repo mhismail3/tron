@@ -18,7 +18,9 @@ enum MessageContent: Equatable {
 
     // Special tool invocations (rendered as interactive chips)
     case askUserQuestion(AskUserQuestionToolData)
+    case getConfirmation(GetConfirmationToolData)
     case answeredQuestions(questionCount: Int)
+    case confirmedAction(approved: Bool)
     case subagent(SubagentToolData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
@@ -106,8 +108,12 @@ enum MessageContent: Equatable {
             return event.textContent
         case .askUserQuestion(let data):
             return "[\(data.params.questions.count) questions]"
+        case .getConfirmation(let data):
+            return data.params.action
         case .answeredQuestions(let count):
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
+        case .confirmedAction(let approved):
+            return approved ? "Approved" : "Denied"
         case .subagent(let data):
             switch data.status {
             case .running:
@@ -138,6 +144,13 @@ enum MessageContent: Equatable {
 
     var isAskUserQuestion: Bool {
         if case .askUserQuestion = self {
+            return true
+        }
+        return false
+    }
+
+    var isGetConfirmation: Bool {
+        if case .getConfirmation = self {
             return true
         }
         return false

@@ -6,6 +6,7 @@ enum MessageBubbleTapAction {
     case skill(Skill)
     case spell(Skill)
     case askUserQuestion(AskUserQuestionToolData)
+    case getConfirmation(GetConfirmationToolData)
     case thinking(String)
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     case subagent(SubagentToolData)

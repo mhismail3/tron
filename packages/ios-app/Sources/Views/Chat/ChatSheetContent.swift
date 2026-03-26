@@ -65,6 +65,9 @@ struct ChatSheetContent: View {
         case .askUserQuestion:
             askUserQuestionSheet
 
+        case .getConfirmation:
+            getConfirmationSheet
+
         case .subagentDetail:
             subagentDetailSheet
 
@@ -165,6 +168,26 @@ struct ChatSheetContent: View {
                     viewModel.dismissAskUserQuestionSheet()
                 },
                 readOnly: data.status == .answered
+            )
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var getConfirmationSheet: some View {
+        if let data = viewModel.getConfirmationState.currentData {
+            GetConfirmationSheet(
+                toolData: data,
+                onSubmit: { decision, note in
+                    Task {
+                        await viewModel.submitGetConfirmationDecision(decision, note: note)
+                    }
+                },
+                onDismiss: {
+                    viewModel.dismissGetConfirmationSheet()
+                },
+                readOnly: data.status == .approved || data.status == .denied
             )
         } else {
             EmptyView()

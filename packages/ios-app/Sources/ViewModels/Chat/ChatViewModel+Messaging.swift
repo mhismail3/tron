@@ -9,6 +9,10 @@ extension ChatViewModel: MessagingContext {
         askUserQuestionState.lastAnsweredQuestionCount
     }
 
+    var lastConfirmationWasApproval: Bool {
+        getConfirmationState.lastDecisionWasApproval
+    }
+
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,

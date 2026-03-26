@@ -96,6 +96,11 @@ final class SheetCoordinator {
         present(.askUserQuestion)
     }
 
+    /// Show get confirmation sheet
+    func showGetConfirmation() {
+        present(.getConfirmation)
+    }
+
     /// Show subagent detail sheet
     func showSubagentDetail() {
         present(.subagentDetail)

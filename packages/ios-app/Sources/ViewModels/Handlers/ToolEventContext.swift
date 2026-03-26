@@ -48,6 +48,11 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
     /// Open the AskUserQuestion sheet for a tool call
     func openAskUserQuestionSheet(for data: AskUserQuestionToolData)
 
+    // MARK: - GetConfirmation
+
+    /// Open the GetConfirmation sheet for a tool call
+    func openGetConfirmationSheet(for data: GetConfirmationToolData)
+
     // MARK: - Thinking State
 
     /// Reset thinking state for a new thinking block

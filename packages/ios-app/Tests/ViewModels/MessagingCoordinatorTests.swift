@@ -384,6 +384,7 @@ final class MockMessagingContext: MessagingContext {
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     var lastAnsweredQuestionCount: Int = 0
+    var lastConfirmationWasApproval: Bool = false
 
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false
@@ -395,6 +396,7 @@ final class MockMessagingContext: MessagingContext {
     var appendedMessages: [ChatMessage] = []
     var appendedInterruptedMessage = false
     var markPendingQuestionsAsSupersededCalled = false
+    var markPendingConfirmationsAsSupersededCalled = false
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
@@ -449,6 +451,10 @@ final class MockMessagingContext: MessagingContext {
 
     func markPendingQuestionsAsSuperseded() {
         markPendingQuestionsAsSupersededCalled = true
+    }
+
+    func markPendingConfirmationsAsSuperseded() {
+        markPendingConfirmationsAsSupersededCalled = true
     }
 
     func dismissPendingSubagentResults() {

@@ -33,8 +33,9 @@ final class TurnLifecycleCoordinator {
     ) {
         context.logInfo("Turn \(pluginResult.turnNumber) started")
 
-        // Reset AskUserQuestion tracking for the new turn
+        // Reset interactive tool tracking for the new turn
         context.askUserQuestionCalledInTurn = false
+        context.getConfirmationCalledInTurn = false
 
         // Finalize any streaming text from the previous turn
         if context.hasActiveStreaming {

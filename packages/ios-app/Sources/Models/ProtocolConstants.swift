@@ -29,6 +29,8 @@ enum CompactionReason: String, Sendable {
 enum AgentProtocol {
     /// Prefix for AskUserQuestion answer prompts
     static let askUserAnswerPrefix = "[Answers to your questions]"
+    /// Prefix for GetConfirmation response prompts
+    static let confirmationAnswerPrefix = "[Confirmation response]"
     /// Prefix for subagent result prompts
     static let subagentResultPrefix = "[SUBAGENT RESULTS"
 }

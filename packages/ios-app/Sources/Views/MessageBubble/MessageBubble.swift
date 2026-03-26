@@ -116,7 +116,7 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .askUserQuestion:
+            case .askUserQuestion, .getConfirmation:
                 ToolResultRouter(tool: tool)
             default:
                 let chipData = CommandToolChipData(from: tool)
@@ -158,8 +158,20 @@ struct MessageBubble: View {
                 AskUserQuestionFallbackView(questionCount: data.params.questions.count)
             }
 
+        case .getConfirmation(let data):
+            if #available(iOS 26.0, *) {
+                GetConfirmationToolViewer(data: data) {
+                    onTap?(.getConfirmation(data))
+                }
+            } else {
+                GetConfirmationFallbackView(action: data.params.action)
+            }
+
         case .answeredQuestions(let count):
             AnsweredQuestionsChipView(questionCount: count)
+
+        case .confirmedAction(let approved):
+            ConfirmedActionChipView(approved: approved)
 
         case .subagent(let data):
             SubagentChip(data: data) {
@@ -183,6 +195,29 @@ struct AnsweredQuestionsChipView: View {
                 .foregroundStyle(.tronSuccess)
 
             Text("Answered agent's questions")
+                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronSurface.opacity(0.6))
+        .clipShape(Capsule())
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+// MARK: - Confirmed Action Chip View
+
+struct ConfirmedActionChipView: View {
+    let approved: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(approved ? .tronSuccess : .tronError)
+
+            Text(approved ? "Approved action" : "Denied action")
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }

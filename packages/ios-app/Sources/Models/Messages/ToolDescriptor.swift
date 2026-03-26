@@ -252,7 +252,7 @@ enum ToolRegistry {
             displayName: "Confirm",
             completedDisplayName: "Confirmed",
             summaryExtractor: { args in
-                (args as? [String: Any])?["action"] as? String ?? ""
+                ToolArgumentParser.string("action", from: args) ?? ""
             },
             viewerFactory: nil
         ),

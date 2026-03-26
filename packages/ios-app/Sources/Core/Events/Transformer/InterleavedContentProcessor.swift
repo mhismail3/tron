@@ -63,13 +63,14 @@ enum InterleavedContentProcessor {
 
         var messages: [ChatMessage] = []
         var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
+        var sawGetConfirmation = false  // Track if GetConfirmation was seen
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
 
-            // If AskUserQuestion was already processed, skip subsequent text blocks
-            // (the question UI replaces the text response)
-            if sawAskUserQuestion && blockType == ContentBlockType.text.rawValue {
+            // If AskUserQuestion or GetConfirmation was already processed, skip subsequent text blocks
+            // (the interactive UI replaces the text response)
+            if (sawAskUserQuestion || sawGetConfirmation) && blockType == ContentBlockType.text.rawValue {
                 continue
             }
 
@@ -104,6 +105,22 @@ enum InterleavedContentProcessor {
                         allEvents: allEvents
                     ) {
                         messages.append(askUserMessage)
+                    }
+                    continue
+                }
+
+                // Check if this is GetConfirmation - handle specially
+                if toolName == "GetConfirmation" {
+                    sawGetConfirmation = true
+                    if let confirmMessage = GetConfirmationTransformer.transform(
+                        toolUseId: toolUseId,
+                        toolCall: toolCall,
+                        contentBlock: block,
+                        timestamp: timestamp,
+                        turn: parsed.turn,
+                        allEvents: allEvents
+                    ) {
+                        messages.append(confirmMessage)
                     }
                     continue
                 }

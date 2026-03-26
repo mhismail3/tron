@@ -189,6 +189,8 @@ final class MessageIndex {
             return data.toolCallId
         case .askUserQuestion(let data):
             return data.toolCallId
+        case .getConfirmation(let data):
+            return data.toolCallId
         case .subagent(let data):
             return data.toolCallId
         default:

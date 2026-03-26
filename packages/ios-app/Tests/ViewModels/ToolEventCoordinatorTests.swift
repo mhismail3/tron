@@ -711,6 +711,15 @@ final class MockToolEventContext: ToolEventContext {
         openedAskUserQuestionData = data
     }
 
+    var getConfirmationCalledInTurn = false
+    var getConfirmationSheetOpened = false
+    var openedGetConfirmationData: GetConfirmationToolData?
+
+    func openGetConfirmationSheet(for data: GetConfirmationToolData) {
+        getConfirmationSheetOpened = true
+        openedGetConfirmationData = data
+    }
+
     func resetThinkingForNewBlock() {
         resetThinkingForNewBlockCalled = true
     }

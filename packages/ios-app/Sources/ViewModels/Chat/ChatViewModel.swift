@@ -60,6 +60,8 @@ final class ChatViewModel {
 
     /// AskUserQuestion state (sheet, current data, answers)
     let askUserQuestionState = AskUserQuestionState()
+    /// GetConfirmation state (sheet, current data)
+    let getConfirmationState = GetConfirmationState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)
@@ -82,6 +84,12 @@ final class ChatViewModel {
     var askUserQuestionCalledInTurn: Bool {
         get { askUserQuestionState.calledInTurn }
         set { askUserQuestionState.calledInTurn = newValue }
+    }
+
+    /// Whether GetConfirmation was called in the current turn (ToolEventContext)
+    var getConfirmationCalledInTurn: Bool {
+        get { getConfirmationState.calledInTurn }
+        set { getConfirmationState.calledInTurn = newValue }
     }
 
     /// Make a tool visible for rendering (ToolEventContext)
@@ -154,6 +162,8 @@ final class ChatViewModel {
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates AskUserQuestion event handling and user interaction
     let askUserQuestionCoordinator = AskUserQuestionCoordinator()
+    /// Coordinates GetConfirmation event handling and user interaction
+    let getConfirmationCoordinator = GetConfirmationCoordinator()
     /// Coordinates voice recording and transcription
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments

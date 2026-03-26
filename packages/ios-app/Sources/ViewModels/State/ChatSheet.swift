@@ -46,6 +46,7 @@ enum ChatSheet: Identifiable, Equatable {
 
     // Tool sheets
     case askUserQuestion
+    case getConfirmation
     case subagentDetail
 
     // Notification sheets
@@ -76,6 +77,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "compaction"
         case .askUserQuestion:
             return "askUserQuestion"
+        case .getConfirmation:
+            return "getConfirmation"
         case .subagentDetail:
             return "subagent"
         case .notifyApp(let data):
@@ -108,6 +111,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
         case (.askUserQuestion, .askUserQuestion):
+            return true
+        case (.getConfirmation, .getConfirmation):
             return true
         case (.subagentDetail, .subagentDetail):
             return true
