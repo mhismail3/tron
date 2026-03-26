@@ -313,13 +313,13 @@ def main():
     try:
         if not args.external:
             binary = find_binary()
-            # DB path policy restricts to $HOME/.tron/database/tron.db.
+            # DB path policy restricts to $HOME/.tron/system/db/log.db.
             # Use a temp HOME to isolate from production data.
             tmpdir = tempfile.mkdtemp(prefix="tron-bench-")
             fake_home = tmpdir
-            db_dir = os.path.join(fake_home, ".tron", "database")
+            db_dir = os.path.join(fake_home, ".tron", "system", "db")
             os.makedirs(db_dir, exist_ok=True)
-            db_path = os.path.join(db_dir, "tron.db")
+            db_path = os.path.join(db_dir, "log.db")
 
             print(f"Booting server on port {args.port}...", file=sys.stderr)
             proc = boot_server(binary, db_path, args.port, home_dir=fake_home)

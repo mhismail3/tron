@@ -5,15 +5,15 @@
 # Usage: scripts/reset-db
 #
 # Stops the tron server, clears all session/event/log/task data from
-# tron.db, vacuums, and restarts the server. Memory vectors and
+# log.db, vacuums, and restarts the server. Memory vectors and
 # schema_version are preserved.
 
 set -euo pipefail
 
-TRON_HOME="${TRON_HOME:-$HOME/.tron}"
-DB_DIR="$TRON_HOME/database"
-PLIST_NAME="com.tron.server"
-PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+# Source shared library for paths
+source "$(dirname "$0")/tron-lib.sh"
+
+DB_DIR="$TRON_HOME/system/db"
 
 # Tables to clear — everything except memory_vectors* and schema_version
 DATA_TABLES=(
@@ -29,17 +29,13 @@ FTS_TABLES=(events_fts tasks_fts areas_fts)
 usage() {
   echo "Usage: $(basename "$0")"
   echo ""
-  echo "Clears session/event/log data from tron.db while preserving memory vectors."
+  echo "Clears session/event/log data from log.db while preserving memory vectors."
   echo "Stops the server, clears data, vacuums, and restarts."
   exit 0
 }
 
-is_server_running() {
-  launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
-}
-
 stop_server() {
-  if is_server_running; then
+  if service_is_running; then
     echo "Stopping tron server..."
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     sleep 1
@@ -102,10 +98,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
 fi
 
-db_path="$DB_DIR/tron.db"
+db_path="$DB_DIR/log.db"
 
 # Confirm
-echo "This will DELETE all sessions, events, logs, tasks from tron.db"
+echo "This will DELETE all sessions, events, logs, tasks from log.db"
 echo "Memory vectors will be preserved."
 read -rp "Continue? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -114,7 +110,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 was_running=false
-if is_server_running; then
+if service_is_running; then
   was_running=true
   stop_server
 fi

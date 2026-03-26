@@ -5,8 +5,12 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
-LOG_FILE="$TRON_HOME/workspace/deployment/auto-deploy.log"
+
+# Source shared library for TRON_HOME and path config
+source "$(dirname "$0")/tron-lib.sh"
+
+# Auto-deploy specific paths
+LOG_FILE="$DEPLOY_DIR/auto-deploy.log"
 PAUSE_FILE="$TRON_HOME/auto-deploy.pause"
 LOCK_FILE="$TRON_HOME/auto-deploy.lock"
 DEPLOY_LOCK="$TRON_HOME/deploy.lock"

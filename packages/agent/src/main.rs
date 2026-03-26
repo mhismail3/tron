@@ -122,6 +122,8 @@ struct ToolRegistryConfig {
     http_client: reqwest::Client,
     /// Sandbox settings for the Bash tool.
     sandbox_settings: tron::settings::BashSandboxSettings,
+    /// Computer use settings.
+    computer_use_settings: tron::settings::ComputerUseSettings,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -160,6 +162,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     ));
 
     // 5: Search
+    let cu_runner = runner.clone();
     registry.register(Arc::new(tron::tools::search::search_tool::SearchTool::new(
         runner,
     )));
@@ -200,7 +203,16 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         http.clone(),
     )));
 
-    // 10: WebSearch — conditional on Brave API key
+    // 11: ComputerUse (screenshot, click, type, keypress, scroll, window management)
+    registry.register(Arc::new(
+        tron::tools::ui::computer_use::ComputerUseTool::new(
+            cu_runner,
+            config.computer_use_settings.confirm_before_action,
+            config.computer_use_settings.screenshot_throttle_ms,
+        ),
+    ));
+
+    // 12: WebSearch — conditional on Brave API key
     if let Some(ref api_key) = config.brave_api_key {
         registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
             http,
@@ -245,7 +257,7 @@ async fn main() -> Result<()> {
                 eprintln!(
                     "DEPLOY SAFETY: {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts exceeded, auto-rolling back"
                 );
-                let binary_path = tron::settings::tron_home_dir().join("tron");
+                let binary_path = tron::settings::tron_home_dir().join("system").join("bin").join("tron");
                 tron::server::deploy::auto_rollback(
                     &deploy_dir,
                     &binary_path,
@@ -380,6 +392,7 @@ async fn main() -> Result<()> {
         apns_service,
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
+        computer_use_settings: settings.tools.computer_use.clone(),
     });
 
     // Check auth availability at startup (informational only — auth can be configured later).
@@ -625,6 +638,10 @@ async fn main() -> Result<()> {
     // Clean up stale sandbox directories from previous sessions (>24h old)
     tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
 
+    // Check macOS permissions for ComputerUse (Accessibility + Screen Recording).
+    // Triggers OS permission prompts on first run so users don't hit errors mid-session.
+    tokio::spawn(async { tron::tools::ui::computer_use::check_permissions_on_startup().await });
+
     // Start cron scheduler (scheduler loop + config file watcher)
     let (cron_sched_handle, cron_watcher_handle) = cron_scheduler.clone().start();
 
@@ -636,7 +653,7 @@ async fn main() -> Result<()> {
             && sentinel.status == "restarting"
         {
             let auth = auth_path();
-            let binary_path = tron::settings::tron_home_dir().join("tron");
+            let binary_path = tron::settings::tron_home_dir().join("system").join("bin").join("tron");
             let test_result = tron::server::deploy::run_self_test(
                 &db_path,
                 &settings_path_for_selftest,
@@ -1290,6 +1307,7 @@ mod tests {
             apns_service: None,
             http_client: reqwest::Client::new(),
             sandbox_settings: tron::settings::BashSandboxSettings::default(),
+            computer_use_settings: tron::settings::ComputerUseSettings::default(),
         }
     }
 
@@ -1308,6 +1326,7 @@ mod tests {
         assert_eq!(names[7], "GetConfirmation");
         assert_eq!(names[8], "NotifyApp");
         assert_eq!(names[9], "WebFetch");
+        assert_eq!(names[10], "ComputerUse");
     }
 
     #[test]
@@ -1321,11 +1340,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 10 tools without Brave API key (no WebSearch), without subagent tools
+        // 11 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            10,
-            "expected 10 tools (no WebSearch without Brave key), got: {:?}",
+            11,
+            "expected 11 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1339,8 +1358,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            11,
-            "expected 11 tools with WebSearch, got: {:?}",
+            12,
+            "expected 12 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }

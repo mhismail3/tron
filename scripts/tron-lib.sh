@@ -1,0 +1,775 @@
+#!/bin/bash
+# tron-lib.sh - Shared library for Tron CLI scripts
+#
+# SINGLE SOURCE OF TRUTH for all paths, config, and shared functions.
+# Sourced by: scripts/tron, scripts/tron-cli, scripts/auto-deploy, scripts/reset-db
+#
+# Do NOT execute this file directly.
+
+#=============================================================================
+# CONFIGURATION
+#=============================================================================
+
+TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
+BIN_DIR="$HOME/.local/bin"
+
+# Installed binary
+INSTALLED_BINARY="$TRON_HOME/system/bin/tron"
+
+# Service configuration
+PLIST_NAME="com.tron.server"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+PROD_PORT=9847
+
+# File paths
+DEPLOY_DIR="$TRON_HOME/system/deployment"
+PROD_LOG_FILE="$DEPLOY_DIR/server.log"
+DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
+
+# Database
+DB_PATH="$TRON_HOME/system/db/log.db"
+
+# OAuth
+AUTH_FILE="$TRON_HOME/system/auth.json"
+OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
+OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
+OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
+OAUTH_SCOPES="org:create_api_key user:profile user:inference"
+
+#=============================================================================
+# COLORS & PRINT HELPERS
+#=============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+print_status()  { echo -e "${BLUE}▸${NC} $1"; }
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_error()   { echo -e "${RED}✗${NC} $1"; }
+print_warning() { echo -e "${YELLOW}!${NC} $1"; }
+print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+
+#=============================================================================
+# UTILITY FUNCTIONS
+#=============================================================================
+
+require_installed() {
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Tron not installed. Run: tron install"
+        exit 1
+    fi
+}
+
+confirm_action() {
+    read -p "$1 (y/N) " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]]
+}
+
+ensure_tron_home() {
+    mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns,scratch}
+    mkdir -p "$TRON_HOME"/memory/{sessions,knowledge,cron,skills,rules}
+    mkdir -p "$TRON_HOME"/user/voice
+}
+
+wait_for_port_free() {
+    local port=$1
+    local max_wait=${2:-10}
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        if ! lsof -t -i :"$port" -sTCP:LISTEN &>/dev/null; then
+            return 0
+        fi
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+#=============================================================================
+# SERVICE FUNCTIONS
+#=============================================================================
+
+service_is_running() {
+    launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
+}
+
+get_service_pid() {
+    lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true
+}
+
+validate_prod_binary() {
+    [ -f "$INSTALLED_BINARY" ] && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O"
+}
+
+# Base version: restores from backup only.
+# Workspace script overrides this to also try $RELEASE_BINARY.
+ensure_prod_binary() {
+    if validate_prod_binary; then
+        return 0
+    fi
+
+    print_warning "Production binary is missing or corrupt"
+
+    if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
+        print_status "Restoring from backup..."
+        cp "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
+        chmod +x "$INSTALLED_BINARY"
+        codesign_binary "$INSTALLED_BINARY"
+        print_success "Restored from backup"
+        return 0
+    fi
+
+    print_error "No valid binary found. Run: tron deploy"
+    return 1
+}
+
+service_start() {
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Service not installed. Run: tron install"
+        return 1
+    fi
+    if ! ensure_prod_binary; then
+        return 1
+    fi
+
+    print_status "Starting service..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    launchctl load "$PLIST_PATH"
+    sleep 2
+
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Service started (PID: ${pid:-unknown})"
+        echo "  Server: http://localhost:$PROD_PORT"
+        echo "  Health: http://localhost:$PROD_PORT/health"
+    else
+        print_error "Failed to start service. Check: tron errors"
+        return 1
+    fi
+}
+
+service_stop() {
+    if ! service_is_running; then
+        print_warning "Service is not running"
+        return 0
+    fi
+
+    print_status "Stopping service..."
+    launchctl unload "$PLIST_PATH"
+
+    if wait_for_port_free "$PROD_PORT" 10; then
+        print_success "Service stopped"
+    else
+        print_error "Failed to stop service"
+        return 1
+    fi
+}
+
+health_check() {
+    local response
+    response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PROD_PORT/health" 2>/dev/null || echo "000")
+    [ "$response" = "200" ]
+}
+
+# Sign binary with first available codesigning identity so macOS TCC
+# permissions (Full Disk Access, folder access) persist across updates.
+codesign_binary() {
+    local binary="$1"
+    local identity
+    identity=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed -n 's/.*"\(.*\)".*/\1/p')
+    if [ -z "$identity" ]; then
+        return 0
+    fi
+    if codesign --force --sign "$identity" "$binary" 2>/dev/null; then
+        print_status "Signed binary (${identity})"
+    fi
+}
+
+#=============================================================================
+# LOG FUNCTIONS
+#=============================================================================
+
+query_logs() {
+    local level=""
+    local output=""
+    local limit=50
+    local tail_mode=false
+    local session=""
+    local search=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -l|--level)   level="$2"; shift 2 ;;
+            -o|--output)  output="$2"; shift 2 ;;
+            -n|--limit)   limit="$2"; shift 2 ;;
+            -t|--tail)    tail_mode=true; shift ;;
+            -s|--session) session="$2"; shift 2 ;;
+            -q|--search)  search="$2"; shift 2 ;;
+            -h|--help)
+                echo ""
+                echo -e "${CYAN}tron logs${NC} - Query database logs"
+                echo ""
+                echo "Usage: tron logs [options]"
+                echo ""
+                echo "Options:"
+                echo "  -l, --level LEVEL    Filter by level (trace/debug/info/warn/error)"
+                echo "  -n, --limit N        Number of logs to show (default: 50)"
+                echo "  -o, --output FILE    Write output to file"
+                echo "  -s, --session ID     Filter by session ID"
+                echo "  -q, --search TEXT    Search log messages"
+                echo "  -t, --tail           Tail file logs instead of querying database"
+                echo ""
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    # Tail mode
+    if [ "$tail_mode" = true ]; then
+        if [ ! -f "$PROD_LOG_FILE" ]; then
+            print_error "Log file not found: $PROD_LOG_FILE"
+            return 1
+        fi
+        echo -e "${BLUE}Tailing log${NC}"
+        echo -e "${DIM}$PROD_LOG_FILE${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        tail -f "$PROD_LOG_FILE"
+        return 0
+    fi
+
+    # Database mode
+    if [ ! -f "$DB_PATH" ]; then
+        print_error "Database not found: $DB_PATH"
+        echo "The server may not have been started yet."
+        return 1
+    fi
+
+    local table_exists
+    table_exists=$(sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='logs';" 2>/dev/null)
+    if [ -z "$table_exists" ]; then
+        print_error "Logs table not found in database"
+        return 1
+    fi
+
+    # Build SQL query
+    local conditions=()
+
+    if [ -n "$level" ]; then
+        local level_num
+        case "$level" in
+            trace) level_num=10 ;;
+            debug) level_num=20 ;;
+            info)  level_num=30 ;;
+            warn)  level_num=40 ;;
+            error) level_num=50 ;;
+            *)
+                print_error "Invalid level: $level (valid: trace/debug/info/warn/error)"
+                return 1
+                ;;
+        esac
+        conditions+=("level_num >= $level_num")
+    fi
+
+    [ -n "$session" ] && conditions+=("session_id LIKE '%$session%'")
+
+    local where_clause=""
+    if [ ${#conditions[@]} -gt 0 ]; then
+        where_clause="WHERE $(IFS=' AND '; echo "${conditions[*]}")"
+    fi
+
+    local sql
+    if [ -n "$search" ]; then
+        local escaped_search="${search//\'/\'\'}"
+        local search_cond="(message LIKE '%${escaped_search}%' OR component LIKE '%${escaped_search}%' OR error_message LIKE '%${escaped_search}%')"
+        sql="SELECT timestamp, level, component, message, session_id, error_message
+             FROM logs
+             WHERE ${search_cond}
+             ${where_clause:+AND ${where_clause#WHERE }}
+             ORDER BY timestamp DESC
+             LIMIT $limit"
+    else
+        sql="SELECT timestamp, level, component, message, session_id, error_message
+             FROM logs
+             $where_clause
+             ORDER BY timestamp DESC
+             LIMIT $limit"
+    fi
+
+    local result
+    result=$(sqlite3 -separator '|' "$DB_PATH" "$sql" 2>&1)
+
+    if [ $? -ne 0 ]; then
+        print_error "Database query failed: $result"
+        return 1
+    fi
+
+    if [ -z "$result" ]; then
+        echo -e "${DIM}No logs found matching criteria${NC}"
+        return 0
+    fi
+
+    if [ -n "$output" ]; then
+        echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
+            local line="${ts} ${lvl} [${comp}] ${msg}"
+            [ -n "$sess" ] && line="$line (${sess})"
+            [ -n "$err" ] && line="$line | Error: $err"
+            echo "$line"
+        done > "$output"
+        print_success "Wrote $(wc -l < "$output" | tr -d ' ') logs to $output"
+    else
+        echo -e "${CYAN}Database Logs${NC}"
+        echo -e "${DIM}Database: $DB_PATH${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
+            local color=""
+            case "$lvl" in
+                TRACE|DEBUG|trace|debug) color="$DIM" ;;
+                INFO|info)  color="$GREEN" ;;
+                WARN|warn)  color="$YELLOW" ;;
+                ERROR|error) color="$RED" ;;
+            esac
+
+            local time_part="${ts:11:8}"
+            local line="${time_part} ${color}${lvl}${NC} [${comp}] ${msg}"
+            [ -n "$sess" ] && line="$line ${DIM}(${sess:0:12}...)${NC}"
+            [ -n "$err" ] && line="$line\n  ${RED}Error: $err${NC}"
+
+            echo -e "$line"
+        done
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        local count=$(echo "$result" | wc -l | tr -d ' ')
+        echo -e "${DIM}Showing $count logs (limit: $limit)${NC}"
+    fi
+}
+
+#=============================================================================
+# DEPLOYMENT HELPERS
+#=============================================================================
+
+write_deployment_result() {
+    local status="$1"
+    local error_msg="${2:-null}"
+    local commit
+    local previous_commit
+
+    commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+
+    if [ "$error_msg" = "null" ]; then
+        error_msg="null"
+    else
+        error_msg="\"$error_msg\""
+    fi
+
+    cat > "$DEPLOY_DIR/last-deployment.json" << RESULT
+{
+  "status": "$status",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "commit": "$commit",
+  "previousCommit": "$previous_commit",
+  "error": $error_msg
+}
+RESULT
+}
+
+#=============================================================================
+# COMMAND HANDLERS
+#=============================================================================
+
+cmd_status() {
+    # $PROJECT_DIR is set by workspace script; otherwise try workspace-path file
+    local git_dir="${PROJECT_DIR:-}"
+    if [ -z "$git_dir" ] && [ -f "$DEPLOY_DIR/workspace-path" ]; then
+        git_dir=$(cat "$DEPLOY_DIR/workspace-path")
+    fi
+
+    echo ""
+    echo -e "${CYAN}Tron Service Status${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Prod:    ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
+        echo "  Server: http://localhost:$PROD_PORT"
+        echo "  Health: http://localhost:$PROD_PORT/health"
+
+        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+            [ -n "$uptime" ] && echo "  Uptime: $uptime"
+        fi
+
+        if health_check; then
+            echo -e "  Status: ${GREEN}Healthy${NC}"
+        else
+            echo -e "  Status: ${YELLOW}Not responding${NC}"
+        fi
+
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            local commit_msg=""
+            if [ -n "$git_dir" ] && [ -d "$git_dir/.git" ]; then
+                commit_msg=$(cd "$git_dir" 2>/dev/null && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
+            fi
+            if [ -n "$commit_msg" ]; then
+                echo "  Deployed: ${deployed_commit:0:7} - $commit_msg"
+            else
+                echo "  Deployed: ${deployed_commit:0:7}"
+            fi
+        fi
+
+        [ -f "$INSTALLED_BINARY" ] && echo "  Binary: $INSTALLED_BINARY"
+    else
+        print_warning "Service: ${YELLOW}STOPPED${NC}"
+        [ -f "$DEPLOYED_COMMIT_FILE" ] && echo "  Last deployed: $(cat "$DEPLOYED_COMMIT_FILE" | head -c 7)"
+        [ -f "$INSTALLED_BINARY" ] && echo "  Binary: $INSTALLED_BINARY"
+    fi
+
+    # Dev takeover status
+    if ! service_is_running; then
+        local dev_pid
+        dev_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$dev_pid" ]; then
+            echo ""
+            print_success "Dev takeover: ${GREEN}ACTIVE${NC} (PID: $dev_pid)"
+            echo "  Server: http://localhost:$PROD_PORT"
+            local dev_uptime=$(ps -o etime= -p "$dev_pid" 2>/dev/null | tr -d ' ')
+            [ -n "$dev_uptime" ] && echo "  Uptime: $dev_uptime"
+        fi
+    fi
+
+    echo ""
+    echo -e "${DIM}Logs:${NC}"
+    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
+    [ -f "$PROD_LOG_FILE" ] && echo -e "  ${DIM}Log:   $PROD_LOG_FILE${NC}"
+    echo ""
+}
+
+cmd_start() {
+    if service_is_running; then
+        print_warning "Service is already running"
+        return 0
+    fi
+    service_start
+}
+
+cmd_stop() {
+    service_stop
+}
+
+cmd_restart() {
+    print_status "Restarting service..."
+    service_stop 2>/dev/null || true
+    sleep 1
+    service_start
+}
+
+cmd_errors() {
+    if [ -f "$DB_PATH" ]; then
+        echo -e "${RED}Recent errors from database:${NC}"
+        sqlite3 -header -column "$DB_PATH" \
+            "SELECT timestamp as time, level, message
+             FROM logs
+             WHERE level_num >= 50
+             ORDER BY timestamp DESC
+             LIMIT 20;" 2>/dev/null || echo "  No logs table found"
+    fi
+
+    if [ -f "$PROD_LOG_FILE" ]; then
+        echo ""
+        echo -e "${RED}Recent errors from file log:${NC}"
+        grep -i "error\|fatal\|exception" "$PROD_LOG_FILE" 2>/dev/null | tail -10 || echo "  No errors found"
+    fi
+}
+
+cmd_rollback() {
+    local skip_confirm=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes) skip_confirm=true; shift ;;
+            *)     shift ;;
+        esac
+    done
+
+    print_header "Rolling Back to Previous Binary"
+
+    if [ ! -f "$DEPLOY_DIR/tron.bak" ]; then
+        print_error "No backup found. Cannot rollback."
+        echo "  A backup is only available immediately after a deploy."
+        exit 1
+    fi
+
+    if ! $skip_confirm; then
+        if ! confirm_action "Restore previous binary from backup?"; then
+            print_error "Aborted."
+            exit 1
+        fi
+    fi
+
+    # Stop service
+    print_status "Stopping service..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
+
+    # Restore backup
+    print_status "Restoring backup..."
+    mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
+    codesign_binary "$INSTALLED_BINARY"
+
+    # Start service
+    launchctl load "$PLIST_PATH"
+    sleep 3
+
+    if service_is_running; then
+        print_success "Service restarted from backup"
+    else
+        print_error "Failed to restart service after rollback"
+    fi
+
+    write_deployment_result "rolled_back" "Manual rollback"
+
+    echo ""
+    print_success "Rollback complete!"
+    echo ""
+}
+
+#=============================================================================
+# AUTH COMMANDS
+#=============================================================================
+
+base64url_encode() {
+    openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+cmd_login() {
+    local label=""
+    local host_override=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) label="$2"; shift 2 ;;
+            --host) host_override="$2"; shift 2 ;;
+            --status) cmd_login_status; return ;;
+            -h|--help)
+                echo ""
+                echo "Usage: tron login [--label <name>] [--host <hostname>] [--status]"
+                echo ""
+                echo "  --label <name>       Account label (default: \$USER@hostname)"
+                echo "  --host <hostname>    Override hostname portion of default label"
+                echo "  --status             Show current auth status"
+                echo ""
+                echo "Each machine should have its own OAuth session to avoid token"
+                echo "conflicts. The default label uses your hostname to ensure this."
+                echo ""
+                return ;;
+            *) print_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    # Show existing accounts
+    if [[ -f "$AUTH_FILE" ]]; then
+        local account_count
+        account_count=$(jq -r '.providers.anthropic.accounts // [] | length' "$AUTH_FILE" 2>/dev/null)
+        if [[ "$account_count" -gt 0 ]]; then
+            local now_ms=$(( $(date +%s) * 1000 ))
+            echo ""
+            echo -e "${DIM}Existing Anthropic accounts:${NC}"
+            jq -r --argjson now "$now_ms" '
+                .providers.anthropic.accounts | to_entries[] |
+                .value.label as $l |
+                .value.oauth.expiresAt as $e |
+                (.key + 1) as $i |
+                if $e > $now then
+                    "  \($i). \($l)  (expires \($e / 1000 | strftime("%Y-%m-%d %H:%M")) \u2014 \u001b[32mvalid\u001b[0m)"
+                else
+                    "  \($i). \($l)  (expires \($e / 1000 | strftime("%Y-%m-%d %H:%M")) \u2014 \u001b[31mEXPIRED\u001b[0m)"
+                end
+            ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+            echo ""
+        fi
+    fi
+
+    # Determine account label
+    if [[ -z "$label" ]]; then
+        local hostname_short
+        hostname_short="${host_override:-$(hostname -s 2>/dev/null || hostname | cut -d. -f1)}"
+        local default_label="${USER:-default}@${hostname_short}"
+        printf "Account label [${BOLD}%s${NC}]: " "$default_label"
+        read -r label
+        label="${label:-$default_label}"
+    fi
+
+    # Generate PKCE
+    local code_verifier
+    code_verifier=$(openssl rand 32 | base64url_encode)
+    local code_challenge
+    code_challenge=$(printf '%s' "$code_verifier" | openssl dgst -sha256 -binary | base64url_encode)
+
+    local encoded_redirect_uri encoded_scope
+    encoded_redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OAUTH_REDIRECT_URI}''', safe=''))")
+    encoded_scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OAUTH_SCOPES}''', safe=''))")
+    local auth_url="${OAUTH_AUTH_ENDPOINT}?code=true&client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${encoded_redirect_uri}&scope=${encoded_scope}&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
+
+    echo ""
+    print_status "Opening browser for authentication..."
+    echo -e "  Account: ${BOLD}${label}${NC}"
+    echo ""
+    echo "If browser doesn't open, visit:"
+    echo "$auth_url"
+    echo ""
+
+    open "$auth_url"
+
+    echo "After signing in, copy the FULL URL from your browser's address bar."
+    printf "Paste the redirect URL: "
+    read -r auth_input
+    echo ""
+
+    if [[ -z "$auth_input" ]]; then
+        print_error "No input provided"
+        return 1
+    fi
+
+    local code=""
+    local state=""
+
+    if [[ "$auth_input" == http* ]]; then
+        code=$(python3 -c "
+import sys, urllib.parse
+q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
+print(q.get('code',[''])[0])
+" "$auth_input" 2>/dev/null)
+        state=$(python3 -c "
+import sys, urllib.parse
+q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
+print(q.get('state',[''])[0])
+" "$auth_input" 2>/dev/null)
+    else
+        code="$auth_input"
+        state="$code_verifier"
+    fi
+
+    if [[ -z "$code" ]]; then
+        print_error "Could not extract authorization code from input"
+        return 1
+    fi
+
+    print_status "Exchanging authorization code..."
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" -X POST "$OAUTH_TOKEN_ENDPOINT" \
+        -H "Content-Type: application/json" \
+        -H "User-Agent: tron-agent/1.0" \
+        -d "{
+            \"grant_type\": \"authorization_code\",
+            \"client_id\": \"${OAUTH_CLIENT_ID}\",
+            \"code\": \"${code}\",
+            \"state\": \"${state}\",
+            \"redirect_uri\": \"${OAUTH_REDIRECT_URI}\",
+            \"code_verifier\": \"${code_verifier}\"
+        }")
+
+    local http_code
+    http_code=$(echo "$response" | tail -1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+        print_error "Token exchange failed (HTTP $http_code): $body"
+        return 1
+    fi
+
+    local access_token refresh_token expires_in expires_at
+    access_token=$(echo "$body" | jq -r '.access_token')
+    refresh_token=$(echo "$body" | jq -r '.refresh_token')
+    expires_in=$(echo "$body" | jq -r '.expires_in')
+    expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
+
+    if [[ ! -f "$AUTH_FILE" ]]; then
+        echo '{"version":1,"providers":{}}' > "$AUTH_FILE"
+        chmod 600 "$AUTH_FILE"
+    fi
+
+    local tmp_file="${AUTH_FILE}.tmp"
+
+    jq --arg label "$label" \
+       --arg at "$access_token" \
+       --arg rt "$refresh_token" \
+       --argjson ea "$expires_at" \
+       '
+       .providers.anthropic.accounts //= [] |
+       (.providers.anthropic.accounts | map(.label) | index($label)) as $idx |
+       if $idx != null then
+           .providers.anthropic.accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
+       else
+           .providers.anthropic.accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
+       end |
+       .lastUpdated = (now | todate)
+       ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
+    chmod 600 "$AUTH_FILE"
+
+    print_success "Saved tokens for account \"${label}\""
+
+    local hours_left=$(( expires_in / 3600 ))
+    echo -e "  ${DIM}Token expires in ~${hours_left}h${NC}"
+    echo ""
+}
+
+cmd_login_status() {
+    if [[ ! -f "$AUTH_FILE" ]]; then
+        echo ""
+        print_warning "No auth file found"
+        echo ""
+        return
+    fi
+
+    echo ""
+    print_status "Anthropic auth status:"
+    echo ""
+
+    local now_ms=$(( $(date +%s) * 1000 ))
+
+    local account_count
+    account_count=$(jq -r '.providers.anthropic.accounts // [] | length' "$AUTH_FILE" 2>/dev/null)
+    if [[ "$account_count" -gt 0 ]]; then
+        jq -r --argjson now "$now_ms" '
+            .providers.anthropic.accounts[] |
+            .label as $l |
+            .oauth.expiresAt as $e |
+            .oauth.accessToken[0:20] as $t |
+            if $e > $now then
+                "  \(.label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
+            else
+                "  \(.label): \u001b[31mexpired\u001b[0m  \($t)..."
+            end
+        ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+    fi
+
+    local has_oauth
+    has_oauth=$(jq -r '.providers.anthropic.oauth // empty | .accessToken' "$AUTH_FILE" 2>/dev/null)
+    if [[ -n "$has_oauth" ]]; then
+        local label="(default)"
+        [[ "$account_count" -gt 0 ]] && label="(legacy)"
+        jq -r --argjson now "$now_ms" --arg label "$label" '
+            .providers.anthropic.oauth |
+            .expiresAt as $e |
+            .accessToken[0:20] as $t |
+            if $e > $now then
+                "  \($label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
+            else
+                "  \($label): \u001b[31mexpired\u001b[0m  \($t)..."
+            end
+        ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+    fi
+
+    echo ""
+}
