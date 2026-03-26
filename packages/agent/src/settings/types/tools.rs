@@ -400,4 +400,49 @@ mod tests {
         // Other tool sections should still be defaults
         assert_eq!(tools.bash.default_timeout_ms, 120_000);
     }
+
+    #[test]
+    fn computer_use_defaults() {
+        let cu = ComputerUseSettings::default();
+        assert!(cu.confirm_before_action);
+        assert_eq!(cu.screenshot_throttle_ms, 500);
+    }
+
+    #[test]
+    fn computer_use_serde_roundtrip() {
+        let cu = ComputerUseSettings {
+            confirm_before_action: false,
+            screenshot_throttle_ms: 1000,
+        };
+        let json = serde_json::to_value(&cu).unwrap();
+        assert_eq!(json["confirmBeforeAction"], false);
+        assert_eq!(json["screenshotThrottleMs"], 1000);
+        let back: ComputerUseSettings = serde_json::from_value(json).unwrap();
+        assert!(!back.confirm_before_action);
+        assert_eq!(back.screenshot_throttle_ms, 1000);
+    }
+
+    #[test]
+    fn computer_use_partial_json() {
+        let json = serde_json::json!({"confirmBeforeAction": false});
+        let cu: ComputerUseSettings = serde_json::from_value(json).unwrap();
+        assert!(!cu.confirm_before_action);
+        // Default for screenshot_throttle_ms
+        assert_eq!(cu.screenshot_throttle_ms, 500);
+    }
+
+    #[test]
+    fn tool_settings_with_computer_use_partial_json() {
+        let json = serde_json::json!({
+            "computerUse": {
+                "confirmBeforeAction": false,
+                "screenshotThrottleMs": 250
+            }
+        });
+        let tools: ToolSettings = serde_json::from_value(json).unwrap();
+        assert!(!tools.computer_use.confirm_before_action);
+        assert_eq!(tools.computer_use.screenshot_throttle_ms, 250);
+        // Other tool sections should still be defaults
+        assert_eq!(tools.bash.default_timeout_ms, 120_000);
+    }
 }

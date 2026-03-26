@@ -34,7 +34,8 @@ enum ToolRegistry {
         "read", "write", "edit",
         "bash",
         "search", "glob", "find",
-        "webfetch", "websearch"
+        "webfetch", "websearch",
+        "computeruse"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -218,6 +219,21 @@ enum ToolRegistry {
                 AnyView(WebSearchResultViewer(
                     result: tool.result ?? "",
                     arguments: tool.arguments,
+                    isExpanded: isExpanded
+                ))
+            }
+        ),
+        "computeruse": ToolDescriptor(
+            icon: "desktopcomputer",
+            iconColor: .purple,
+            displayName: "Computer Use",
+            completedDisplayName: "Used",
+            summaryExtractor: { args in
+                ComputerUseSummaryHelper.summary(from: args)
+            },
+            viewerFactory: { tool, isExpanded in
+                AnyView(ComputerUseResultViewer(
+                    result: tool.result ?? "",
                     isExpanded: isExpanded
                 ))
             }

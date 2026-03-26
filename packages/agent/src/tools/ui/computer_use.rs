@@ -1,11 +1,12 @@
-//! `ComputerUse` tool — screenshot, click, type, keypress via macOS APIs.
+//! `ComputerUse` tool — screenshot, click, type, keypress, scroll via macOS APIs.
 //!
 //! Provides GUI automation through `screencapture` CLI and `osascript` (AppleScript).
-//! All mutating actions (click, type, keypress, scroll) are gated behind a
+//! All mutating actions (click, type, keypress, scroll, moveMouse) are gated behind a
 //! configurable confirmation flag. Read-only actions (screenshot, getWindows)
 //! are always allowed.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -15,26 +16,49 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{ProcessRunner, ProcessOptions, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::{
-    get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
+    get_optional_f64, get_optional_string, get_optional_u64, validate_required_string,
 };
 
-/// Minimum interval between screenshots to prevent abuse (ms).
-const SCREENSHOT_THROTTLE_MS: u64 = 500;
+/// Actions that modify system state and require confirmation when enabled.
+const MUTATING_ACTIONS: &[&str] = &["click", "type", "keypress", "scroll", "moveMouse"];
 
 /// The `ComputerUse` tool provides GUI automation on macOS.
 pub struct ComputerUseTool {
     runner: Arc<dyn ProcessRunner>,
     /// Whether mutating actions require confirmation (default: true in production).
     confirm_before_action: bool,
+    /// Minimum interval between screenshots in milliseconds.
+    screenshot_throttle_ms: u64,
+    /// Timestamp (ms since epoch) of the last screenshot.
+    last_screenshot_ms: AtomicU64,
 }
 
 impl ComputerUseTool {
     /// Create a new `ComputerUse` tool.
-    pub fn new(runner: Arc<dyn ProcessRunner>, confirm_before_action: bool) -> Self {
+    pub fn new(
+        runner: Arc<dyn ProcessRunner>,
+        confirm_before_action: bool,
+        screenshot_throttle_ms: u64,
+    ) -> Self {
         Self {
             runner,
             confirm_before_action,
+            screenshot_throttle_ms,
+            last_screenshot_ms: AtomicU64::new(0),
         }
+    }
+
+    /// Check if an action is mutating (click, type, keypress, scroll, moveMouse).
+    fn is_mutating(action: &str) -> bool {
+        MUTATING_ACTIONS.contains(&action)
+    }
+
+    /// Get current time in milliseconds since epoch.
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
     }
 }
 
@@ -57,14 +81,19 @@ impl TronTool for ComputerUseTool {
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the screen or a specific window. Returns base64 PNG.\n\
-             - **click**: Click at screen coordinates.\n\
-             - **type**: Type a text string.\n\
-             - **keypress**: Press key combinations (e.g., cmd+c, enter, tab).\n\
-             - **scroll**: Scroll at a position.\n\
-             - **getWindows**: List all visible windows with their bounds.\n\
+             - **screenshot**: Capture the full screen, or a specific window by name/title (uses window ID lookup internally). Returns base64 PNG. Only needs Screen Recording permission.\n\
+             - **click**: Click at screen coordinates. Needs Accessibility permission for osascript.\n\
+             - **type**: Type a text string. Needs Accessibility permission.\n\
+             - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
+             - **scroll**: Scroll at a position. Uses Quartz scroll wheel events.\n\
+             - **getWindows**: List all visible windows with their process name, title, position, and size. Needs Accessibility permission.\n\
              - **focusWindow**: Bring a window to front by title.\n\
-             - **moveMouse**: Move the mouse cursor without clicking.",
+             - **moveMouse**: Move the mouse cursor without clicking.\n\n\
+             NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
+             calling GetConfirmation first if confirmation is enabled.\n\n\
+             IMPORTANT: If you get a permission error, tell the user to grant the permission in \
+             System Settings > Privacy & Security. Do NOT attempt workarounds like GetWindowID, \
+             python3 AppKit, or other approaches — the tool handles window ID lookup internally.",
         )
         .required_property("action", json!({
             "type": "string",
@@ -80,6 +109,7 @@ impl TronTool for ComputerUseTool {
         .property("window", json!({"type": "string", "description": "Window title (for screenshot, focusWindow)"}))
         .property("direction", json!({"type": "string", "description": "Scroll direction: up, down, left, right", "enum": ["up", "down", "left", "right"]}))
         .property("amount", json!({"type": "number", "description": "Scroll amount in pixels (default: 100)", "default": 100}))
+        .property("confirmed", json!({"type": "boolean", "description": "Set to true after user has confirmed via GetConfirmation (bypasses confirmation gate)"}))
         .build()
     }
 
@@ -88,6 +118,19 @@ impl TronTool for ComputerUseTool {
             Ok(a) => a,
             Err(e) => return Ok(e),
         };
+
+        // Confirmation gate: mutating actions require GetConfirmation first
+        if self.confirm_before_action && Self::is_mutating(&action) {
+            let confirmed = params.get("confirmed").and_then(Value::as_bool).unwrap_or(false);
+            if !confirmed {
+                let desc = self.describe_action(&action, &params);
+                return Ok(error_result(format!(
+                    "Action '{action}' requires confirmation. Call GetConfirmation first with \
+                     action='{desc}' and riskLevel='medium', then retry this ComputerUse call \
+                     with confirmed=true."
+                )));
+            }
+        }
 
         match action.as_str() {
             "screenshot" => self.take_screenshot(&params, ctx).await,
@@ -106,6 +149,49 @@ impl TronTool for ComputerUseTool {
 }
 
 impl ComputerUseTool {
+    /// Generate a human-readable description of the action for confirmation.
+    fn describe_action(&self, action: &str, params: &Value) -> String {
+        match action {
+            "click" => {
+                let x = get_optional_f64(params, "x").unwrap_or(0.0);
+                let y = get_optional_f64(params, "y").unwrap_or(0.0);
+                let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
+                if clicks > 1 {
+                    format!("Double-click at ({x}, {y})")
+                } else {
+                    format!("Click at ({x}, {y})")
+                }
+            }
+            "type" => {
+                let text = get_optional_string(params, "text").unwrap_or_default();
+                let preview = if text.len() > 30 {
+                    format!("{}...", &text[..27])
+                } else {
+                    text
+                };
+                format!("Type text: \"{preview}\"")
+            }
+            "keypress" => {
+                let keys: Vec<String> = params.get("keys")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                format!("Press keys: {}", keys.join("+"))
+            }
+            "scroll" => {
+                let dir = get_optional_string(params, "direction").unwrap_or_else(|| "down".into());
+                let amount = get_optional_u64(params, "amount").unwrap_or(100);
+                format!("Scroll {dir} by {amount}px")
+            }
+            "moveMouse" => {
+                let x = get_optional_f64(params, "x").unwrap_or(0.0);
+                let y = get_optional_f64(params, "y").unwrap_or(0.0);
+                format!("Move mouse to ({x}, {y})")
+            }
+            _ => action.to_string(),
+        }
+    }
+
     /// Run an osascript command via the process runner.
     async fn run_osascript(
         &self,
@@ -153,36 +239,121 @@ impl ComputerUseTool {
         self.runner.run_command(command, &opts).await
     }
 
+    /// Get screen resolution (width, height) via osascript.
+    async fn screen_bounds(&self, ctx: &ToolContext) -> Option<(f64, f64)> {
+        let script = r#"tell application "Finder" to get bounds of window of desktop"#;
+        match self.run_osascript(script, ctx).await {
+            Ok(output) => {
+                // Output: "0, 0, 1920, 1080\n"
+                let parts: Vec<f64> = output.trim()
+                    .split(", ")
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                if parts.len() >= 4 {
+                    Some((parts[2], parts[3]))
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Validate coordinates are within screen bounds.
+    /// Returns an error result if coordinates are out of bounds.
+    async fn validate_coordinates(
+        &self,
+        x: f64,
+        y: f64,
+        ctx: &ToolContext,
+    ) -> Option<TronToolResult> {
+        // Negative coordinates are always invalid
+        if x < 0.0 || y < 0.0 {
+            return Some(error_result(format!(
+                "Invalid coordinates ({x}, {y}): coordinates must be non-negative"
+            )));
+        }
+
+        if let Some((max_x, max_y)) = self.screen_bounds(ctx).await {
+            if x > max_x || y > max_y {
+                return Some(error_result(format!(
+                    "Coordinates ({x}, {y}) are outside screen bounds ({max_x}x{max_y}). \
+                     Use getWindows to see where windows are positioned."
+                )));
+            }
+        }
+        None
+    }
+
     async fn take_screenshot(
         &self,
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let tmp_path = format!("/tmp/tron-screenshot-{}.png", uuid::Uuid::now_v7());
-        let window = get_optional_string(params, "window");
-
-        let command = if let Some(ref w) = window {
-            // Capture a specific window by title
-            format!(
-                "screencapture -x -t png -l $(osascript -e 'tell application \"System Events\" to get id of first window of (first process whose name contains \"{w}\")') {tmp_path}"
-            )
-        } else {
-            format!("screencapture -x -t png {tmp_path}")
-        };
-
-        let output = self.run_shell(&command, ctx).await?;
-        if output.exit_code != 0 {
+        // Screenshot throttle
+        let now = Self::now_ms();
+        let last = self.last_screenshot_ms.load(Ordering::Relaxed);
+        if last > 0 && now.saturating_sub(last) < self.screenshot_throttle_ms {
+            let wait = self.screenshot_throttle_ms - (now - last);
             return Ok(error_result(format!(
-                "Screenshot failed: {}. You may need to grant Screen Recording permission in System Settings > Privacy & Security.",
-                output.stderr
+                "Screenshot throttled. Please wait {wait}ms before taking another screenshot."
             )));
         }
 
+        let tmp_path = format!("/tmp/tron-screenshot-{}.png", uuid::Uuid::now_v7());
+        let window = get_optional_string(params, "window");
+
+        if let Some(ref w) = window {
+            // Window-specific capture: use CGWindowListCopyWindowInfo via Swift to find
+            // the window ID, then screencapture -l <id>. This approach only requires
+            // Screen Recording permission (NOT Accessibility permission).
+            let escaped = w.replace('\\', "\\\\").replace('"', "\\\"");
+            let swift_script = format!(
+                r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print(w[kCGWindowNumber as String] as! Int); Foundation.exit(0) }} }}; fputs("Window not found: {escaped}\n", stderr); Foundation.exit(1)"#
+            );
+            let wid_command = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
+            let wid_output = self.run_shell(&wid_command, ctx).await?;
+
+            if wid_output.exit_code != 0 {
+                return Ok(error_result(format!(
+                    "Window '{}' not found. Use getWindows to list available windows.",
+                    w
+                )));
+            }
+
+            let window_id = wid_output.stdout.trim().to_string();
+            let capture_command = format!("screencapture -x -t png -l {window_id} {tmp_path}");
+            let output = self.run_shell(&capture_command, ctx).await?;
+            if output.exit_code != 0 {
+                return Ok(error_result(format!(
+                    "Window screenshot failed: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
+                    output.stderr
+                )));
+            }
+        } else {
+            // Full screen capture
+            let command = format!("screencapture -x -t png {tmp_path}");
+            let output = self.run_shell(&command, ctx).await?;
+            if output.exit_code != 0 {
+                return Ok(error_result(format!(
+                    "Screenshot failed: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
+                    output.stderr
+                )));
+            }
+        }
+
         // Read the screenshot file
-        let image_data = tokio::fs::read(&tmp_path).await.map_err(|e| ToolError::Internal {
-            message: format!("Failed to read screenshot: {e}"),
-        })?;
+        let image_data = match tokio::fs::read(&tmp_path).await {
+            Ok(data) => data,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Ok(error_result(format!("Failed to read screenshot: {e}")));
+            }
+        };
         let _ = tokio::fs::remove_file(&tmp_path).await;
+
+        // Update throttle timestamp
+        self.last_screenshot_ms.store(Self::now_ms(), Ordering::Relaxed);
 
         // Return as base64 image
         use base64::Engine;
@@ -214,20 +385,27 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_u64(params, "x")
+        let x = get_optional_f64(params, "x")
             .ok_or_else(|| ToolError::Validation { message: "click requires x coordinate".into() })?;
-        let y = get_optional_u64(params, "y")
+        let y = get_optional_f64(params, "y")
             .ok_or_else(|| ToolError::Validation { message: "click requires y coordinate".into() })?;
+
+        if let Some(err) = self.validate_coordinates(x, y, ctx).await {
+            return Ok(err);
+        }
+
         let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
+        let xi = x as i64;
+        let yi = y as i64;
 
         let click_script = if clicks > 1 {
             format!(
-                "tell application \"System Events\" to click at {{{x}, {y}}}\n\
+                "tell application \"System Events\" to click at {{{xi}, {yi}}}\n\
                  delay 0.05\n\
-                 tell application \"System Events\" to click at {{{x}, {y}}}"
+                 tell application \"System Events\" to click at {{{xi}, {yi}}}"
             )
         } else {
-            format!("tell application \"System Events\" to click at {{{x}, {y}}}")
+            format!("tell application \"System Events\" to click at {{{xi}, {yi}}}")
         };
 
         match self.run_osascript(&click_script, ctx).await {
@@ -242,7 +420,7 @@ impl ComputerUseTool {
                 stop_turn: None,
             }),
             Err(e) => Ok(error_result(format!(
-                "Click failed: {e}. You may need to grant Accessibility permission in System Settings > Privacy & Security."
+                "Click failed: {e}. Grant Accessibility permission to osascript/Terminal in System Settings > Privacy & Security > Accessibility."
             ))),
         }
     }
@@ -355,39 +533,96 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_u64(params, "x").unwrap_or(0);
-        let y = get_optional_u64(params, "y").unwrap_or(0);
+        let x = get_optional_f64(params, "x").unwrap_or(0.0);
+        let y = get_optional_f64(params, "y").unwrap_or(0.0);
+
+        // Validate scroll position coordinates
+        if x != 0.0 || y != 0.0 {
+            if let Some(err) = self.validate_coordinates(x, y, ctx).await {
+                return Ok(err);
+            }
+        }
+
         let direction = get_optional_string(params, "direction")
             .unwrap_or_else(|| "down".to_string());
         let amount = get_optional_u64(params, "amount").unwrap_or(100) as i64;
 
-        let (dx, dy) = match direction.as_str() {
-            "up" => (0, amount),
-            "down" => (0, -amount),
-            "left" => (amount, 0),
-            "right" => (-amount, 0),
+        // Convert pixel amount to scroll units (roughly 10px per scroll unit)
+        let scroll_units = (amount / 10).max(1);
+
+        let (scroll_y, scroll_x) = match direction.as_str() {
+            "up" => (scroll_units, 0),
+            "down" => (-scroll_units, 0),
+            "left" => (0, scroll_units),
+            "right" => (0, -scroll_units),
             _ => return Ok(error_result(format!("Unknown scroll direction: {direction}"))),
         };
 
-        // Use cliclick for scrolling (AppleScript has limited scroll support)
-        // Fall back to osascript with System Events
-        let script = format!(
-            "tell application \"System Events\"\n\
-             set position of mouse to {{{x}, {y}}}\n\
-             end tell"
+        // Use Python Quartz CGEventCreateScrollWheelEvent for reliable scroll
+        let xi = x as i64;
+        let yi = y as i64;
+        let command = format!(
+            "python3 -c \"\
+import Quartz\n\
+# Move mouse to scroll position\n\
+move = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, ({xi}, {yi}), 0)\n\
+Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)\n\
+# Scroll\n\
+scroll = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitPixel, 2, {scroll_y}, {scroll_x})\n\
+Quartz.CGEventPost(Quartz.kCGHIDEventTap, scroll)\
+\""
         );
-        let _ = self.run_osascript(&script, ctx).await;
 
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Scrolled {direction} by {amount} at ({x}, {y})"
-                )),
-            ]),
-            details: Some(json!({"action": "scroll", "x": x, "y": y, "direction": direction, "amount": amount, "dx": dx, "dy": dy})),
-            is_error: None,
-            stop_turn: None,
-        })
+        match self.run_shell(&command, ctx).await {
+            Ok(output) if output.exit_code == 0 => Ok(TronToolResult {
+                content: ToolResultBody::Blocks(vec![
+                    crate::core::content::ToolResultContent::text(format!(
+                        "Scrolled {direction} by {amount}px at ({x}, {y})"
+                    )),
+                ]),
+                details: Some(json!({
+                    "action": "scroll", "x": x, "y": y,
+                    "direction": direction, "amount": amount,
+                })),
+                is_error: None,
+                stop_turn: None,
+            }),
+            _ => {
+                // Fallback: AppleScript mouse position + key-based scroll
+                let key_code = match direction.as_str() {
+                    "up" => 126,   // up arrow
+                    "down" => 125, // down arrow
+                    "left" => 123, // left arrow
+                    "right" => 124, // right arrow
+                    _ => 125,
+                };
+                let repeat = (scroll_units as u64).min(20);
+                let script = format!(
+                    "tell application \"System Events\"\n\
+                     repeat {repeat} times\n\
+                     key code {key_code}\n\
+                     end repeat\n\
+                     end tell"
+                );
+                match self.run_osascript(&script, ctx).await {
+                    Ok(_) => Ok(TronToolResult {
+                        content: ToolResultBody::Blocks(vec![
+                            crate::core::content::ToolResultContent::text(format!(
+                                "Scrolled {direction} by {amount}px at ({x}, {y}) (keyboard fallback)"
+                            )),
+                        ]),
+                        details: Some(json!({
+                            "action": "scroll", "x": x, "y": y,
+                            "direction": direction, "amount": amount,
+                            "fallback": true,
+                        })),
+                        is_error: None,
+                        stop_turn: None,
+                    }),
+                    Err(e) => Ok(error_result(format!("Scroll failed: {e}"))),
+                }
+            }
+        }
     }
 
     async fn get_windows(
@@ -429,7 +664,7 @@ return windowList"#;
                 })
             }
             Err(e) => Ok(error_result(format!(
-                "Failed to list windows: {e}. Grant Accessibility permission in System Settings."
+                "Failed to list windows: {e}. Grant Accessibility permission to osascript/Terminal in System Settings > Privacy & Security > Accessibility."
             ))),
         }
     }
@@ -472,14 +707,21 @@ end tell"#
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_u64(params, "x")
+        let x = get_optional_f64(params, "x")
             .ok_or_else(|| ToolError::Validation { message: "moveMouse requires x coordinate".into() })?;
-        let y = get_optional_u64(params, "y")
+        let y = get_optional_f64(params, "y")
             .ok_or_else(|| ToolError::Validation { message: "moveMouse requires y coordinate".into() })?;
 
-        // Use python for mouse positioning (more reliable than osascript for pure mouse move)
+        if let Some(err) = self.validate_coordinates(x, y, ctx).await {
+            return Ok(err);
+        }
+
+        let xi = x as i64;
+        let yi = y as i64;
+
+        // Use Python Quartz for mouse positioning (more reliable than osascript)
         let command = format!(
-            "python3 -c \"import Quartz; Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, ({x}, {y}), 0))\""
+            "python3 -c \"import Quartz; Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, ({xi}, {yi}), 0))\""
         );
 
         match self.run_shell(&command, ctx).await {
@@ -496,7 +738,7 @@ end tell"#
             _ => {
                 // Fallback to osascript
                 let script = format!(
-                    "tell application \"System Events\" to set position of mouse to {{{x}, {y}}}"
+                    "tell application \"System Events\" to set position of mouse to {{{xi}, {yi}}}"
                 );
                 match self.run_osascript(&script, ctx).await {
                     Ok(_) => Ok(TronToolResult {
@@ -516,12 +758,161 @@ end tell"#
     }
 }
 
+// MARK: - Startup Permission Check
+
+/// Check macOS permissions needed by the agent at server startup.
+///
+/// Probes three capabilities and logs results:
+/// 1. **Accessibility** — needed for osascript System Events (click, type, keypress).
+///    Tested with a `keystroke ""` no-op. Triggers the native OS prompt on first run.
+/// 2. **Screen Recording** — needed for screencapture.
+///    Tested with a silent capture. Triggers the native OS prompt on first run.
+/// 3. **Full Disk Access** — needed for reading/writing protected locations
+///    (e.g., ~/Library/Mail, ~/Library/Safari). No native prompt exists for FDA,
+///    so we open System Settings directly on first detection (one-time, sentinel-gated).
+///
+/// No-op on non-macOS platforms.
+pub async fn check_permissions_on_startup() {
+    if std::env::consts::OS != "macos" {
+        return;
+    }
+
+    tracing::info!("checking macOS permissions...");
+
+    // 1. Accessibility: test with a no-op keystroke. This exercises the exact same
+    //    System Events path that click/type/keypress use. On first run, macOS shows
+    //    its native Accessibility permission dialog.
+    let accessibility = tokio::process::Command::new("osascript")
+        .args(["-e", "tell application \"System Events\" to keystroke \"\""])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+
+    match accessibility {
+        Ok(output) if output.status.success() => {
+            tracing::info!("Accessibility permission: granted");
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("not allowed assistive access") {
+                tracing::warn!(
+                    "Accessibility permission not granted for osascript. \
+                     ComputerUse click/type/keypress/getWindows will not work. \
+                     Grant via: System Settings > Privacy & Security > Accessibility \
+                     (add your terminal app, e.g. Ghostty, Terminal, or iTerm2)"
+                );
+            } else {
+                tracing::warn!("Accessibility check returned unexpected error: {}", stderr.trim());
+            }
+        }
+        Err(e) => {
+            tracing::warn!("could not check Accessibility permission: {e}");
+        }
+    }
+
+    // 2. Screen Recording: test with a silent screencapture. On first run, macOS
+    //    shows its native Screen Recording permission dialog.
+    let tmp = format!("/tmp/tron-permission-check-{}.png", std::process::id());
+    let screen_recording = tokio::process::Command::new("screencapture")
+        .args(["-x", "-t", "png", &tmp])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+
+    let file_ok = tokio::fs::metadata(&tmp).await.map(|m| m.len() > 0).unwrap_or(false);
+    let _ = tokio::fs::remove_file(&tmp).await;
+
+    match screen_recording {
+        Ok(output) if output.status.success() && file_ok => {
+            tracing::info!("Screen Recording permission: granted");
+        }
+        Ok(_) => {
+            tracing::warn!(
+                "Screen Recording permission not granted. \
+                 ComputerUse screenshots will not work. \
+                 Grant via: System Settings > Privacy & Security > Screen Recording \
+                 (add your terminal app)"
+            );
+        }
+        Err(e) => {
+            tracing::warn!("could not check Screen Recording permission: {e}");
+        }
+    }
+
+    // 3. Full Disk Access: test by reading a protected path. Unlike Accessibility
+    //    and Screen Recording, FDA has NO native prompt — the only way to grant it
+    //    is via System Settings. We use a sentinel file so we only prompt once.
+    let sentinel = format!("{}/.tron/system/.fda-granted", crate::core::paths::home_dir());
+    if tokio::fs::metadata(&sentinel).await.is_ok() {
+        tracing::info!("Full Disk Access: previously granted (sentinel exists)");
+        return;
+    }
+
+    // Try reading a protected path to check FDA status
+    let fda_check = tokio::fs::read_dir(
+        format!("{}/Library/Mail", crate::core::paths::home_dir())
+    ).await;
+
+    match fda_check {
+        Ok(_) => {
+            tracing::info!("Full Disk Access: granted");
+            // Write sentinel so we don't check again
+            let _ = tokio::fs::write(&sentinel, "granted").await;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(
+                "Full Disk Access not granted. The agent may hang when accessing \
+                 protected system locations. Opening System Settings to grant FDA..."
+            );
+            // FDA has no native prompt — System Settings is the only way.
+            // Open directly to the Full Disk Access pane.
+            let _ = tokio::process::Command::new("open")
+                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+        Err(_) => {
+            // Path doesn't exist or other non-permission error — FDA likely granted
+            // or Mail.app not installed. Check an alternative path.
+            let alt_check = tokio::fs::read_dir(
+                format!("{}/Library/Safari", crate::core::paths::home_dir())
+            ).await;
+            match alt_check {
+                Ok(_) => {
+                    tracing::info!("Full Disk Access: granted");
+                    let _ = tokio::fs::write(&sentinel, "granted").await;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    tracing::warn!(
+                        "Full Disk Access not granted. Opening System Settings..."
+                    );
+                    let _ = tokio::process::Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .await;
+                }
+                Err(_) => {
+                    tracing::info!("Full Disk Access: likely granted (no protected paths to test)");
+                    let _ = tokio::fs::write(&sentinel, "granted").await;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tools::traits::ProcessOutput;
     use crate::tools::testutil::{extract_text, make_ctx};
 
+    /// Mock runner that captures commands and returns configurable output.
     struct MockRunner {
         handler: Box<dyn Fn(&str) -> ProcessOutput + Send + Sync>,
     }
@@ -554,6 +945,14 @@ mod tests {
                 }),
             }
         }
+
+        /// Runner that responds differently based on command content.
+        fn with_handler<F>(handler: F) -> Self
+        where
+            F: Fn(&str) -> ProcessOutput + Send + Sync + 'static,
+        {
+            Self { handler: Box::new(handler) }
+        }
     }
 
     #[async_trait]
@@ -567,10 +966,20 @@ mod tests {
         }
     }
 
+    fn tool(confirm: bool) -> ComputerUseTool {
+        ComputerUseTool::new(Arc::new(MockRunner::success("")), confirm, 500)
+    }
+
+    fn tool_with_runner(runner: MockRunner, confirm: bool) -> ComputerUseTool {
+        ComputerUseTool::new(Arc::new(runner), confirm, 500)
+    }
+
+    // ─── Schema tests ───
+
     #[test]
     fn schema_has_action_parameter() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), true);
-        let def = tool.definition();
+        let t = tool(true);
+        let def = t.definition();
         assert_eq!(def.name, "ComputerUse");
         let props = def.parameters.properties.unwrap();
         assert!(props.contains_key("action"));
@@ -580,78 +989,164 @@ mod tests {
 
     #[test]
     fn schema_action_enum_values() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), true);
-        let def = tool.definition();
+        let t = tool(true);
+        let def = t.definition();
         let props = def.parameters.properties.unwrap();
         let action = &props["action"];
         let enum_values = action["enum"].as_array().unwrap();
-        assert!(enum_values.contains(&json!("screenshot")));
-        assert!(enum_values.contains(&json!("click")));
-        assert!(enum_values.contains(&json!("type")));
-        assert!(enum_values.contains(&json!("keypress")));
-        assert!(enum_values.contains(&json!("scroll")));
-        assert!(enum_values.contains(&json!("getWindows")));
-        assert!(enum_values.contains(&json!("focusWindow")));
-        assert!(enum_values.contains(&json!("moveMouse")));
+        for expected in ["screenshot", "click", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"] {
+            assert!(enum_values.contains(&json!(expected)), "missing: {expected}");
+        }
+    }
+
+    #[test]
+    fn schema_has_confirmed_property() {
+        let t = tool(true);
+        let def = t.definition();
+        let props = def.parameters.properties.unwrap();
+        assert!(props.contains_key("confirmed"), "should have confirmed property for confirmation bypass");
+    }
+
+    #[test]
+    fn serialized_execution_mode() {
+        let t = tool(true);
+        assert_eq!(
+            t.execution_mode(),
+            crate::tools::traits::ExecutionMode::Serialized("computer_use".into())
+        );
+    }
+
+    #[test]
+    fn screenshot_action_no_required_params() {
+        let t = tool(false);
+        let def = t.definition();
+        let required = def.parameters.required.unwrap();
+        assert_eq!(required.len(), 1);
+        assert_eq!(required[0], "action");
+    }
+
+    // ─── Confirmation gating tests ───
+
+    #[tokio::test]
+    async fn mutating_action_requires_confirmation_when_enabled() {
+        let t = tool(true);
+        for action in MUTATING_ACTIONS {
+            let mut params = json!({"action": action});
+            // Add required params for each action
+            match *action {
+                "click" | "moveMouse" => {
+                    params["x"] = json!(100);
+                    params["y"] = json!(200);
+                }
+                "type" => { params["text"] = json!("hello"); }
+                "keypress" => { params["keys"] = json!(["enter"]); }
+                _ => {}
+            }
+            let r = t.execute(params, &make_ctx()).await.unwrap();
+            assert_eq!(r.is_error, Some(true), "action '{action}' should require confirmation");
+            assert!(
+                extract_text(&r).contains("requires confirmation"),
+                "action '{action}' error should mention confirmation"
+            );
+        }
     }
 
     #[tokio::test]
+    async fn mutating_action_proceeds_with_confirmed_flag() {
+        let t = tool(true);
+        let r = t.execute(
+            json!({"action": "type", "text": "hello", "confirmed": true}),
+            &make_ctx(),
+        ).await.unwrap();
+        assert!(r.is_error.is_none(), "should proceed when confirmed=true");
+    }
+
+    #[tokio::test]
+    async fn mutating_action_proceeds_when_confirmation_disabled() {
+        let t = tool(false);
+        let r = t.execute(
+            json!({"action": "type", "text": "hello"}),
+            &make_ctx(),
+        ).await.unwrap();
+        assert!(r.is_error.is_none(), "should proceed when confirm_before_action=false");
+    }
+
+    #[tokio::test]
+    async fn readonly_actions_skip_confirmation() {
+        let t = tool(true);
+        // screenshot is read-only
+        // Note: screenshot will fail with mock since there's no file, but it shouldn't hit confirmation
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "getWindows should not require confirmation");
+    }
+
+    // ─── Action tests ───
+
+    #[tokio::test]
     async fn unknown_action_returns_error() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), true);
-        let r = tool.execute(json!({"action": "dance"}), &make_ctx()).await.unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "dance"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Unknown action"));
     }
 
     #[tokio::test]
     async fn missing_action_returns_error() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), true);
-        let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn click_requires_coordinates() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool.execute(json!({"action": "click"}), &make_ctx()).await;
-        // Should be a ToolError::Validation
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click"}), &make_ctx()).await;
         assert!(r.is_err());
     }
 
     #[tokio::test]
     async fn click_at_coordinates() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "click", "x": 100, "y": 200}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click", "x": 100, "y": 200}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("Clicked at (100, 200)"));
         let d = r.details.unwrap();
         assert_eq!(d["action"], "click");
-        assert_eq!(d["x"], 100);
-        assert_eq!(d["y"], 200);
+        assert_eq!(d["x"], 100.0);
+        assert_eq!(d["y"], 200.0);
+    }
+
+    #[tokio::test]
+    async fn click_accepts_float_coordinates() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click", "x": 100.5, "y": 200.7}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        let d = r.details.unwrap();
+        assert_eq!(d["x"], 100.5);
+        assert_eq!(d["y"], 200.7);
+    }
+
+    #[tokio::test]
+    async fn click_negative_coordinates_rejected() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click", "x": -10, "y": 200}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("non-negative"));
     }
 
     #[tokio::test]
     async fn double_click() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "click", "x": 50, "y": 50, "clicks": 2}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click", "x": 50, "y": 50, "clicks": 2}), &make_ctx()).await.unwrap();
         let text = extract_text(&r);
         assert!(text.contains("double-click"));
     }
 
     #[tokio::test]
     async fn type_text() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "type", "text": "hello world"}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "type", "text": "hello world"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("Typed 11 characters"));
@@ -659,185 +1154,478 @@ mod tests {
 
     #[tokio::test]
     async fn type_requires_text() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "type"}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "type"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
-    async fn keypress_enter() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "keypress", "keys": ["enter"]}), &make_ctx())
-            .await
-            .unwrap();
+    async fn type_special_characters() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "type", "text": "hello \"world\" & 'test'"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Pressed: enter"));
+    }
+
+    #[tokio::test]
+    async fn type_unicode() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "type", "text": "café résumé 日本語"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn keypress_enter() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": ["enter"]}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Pressed: enter"));
     }
 
     #[tokio::test]
     async fn keypress_cmd_c() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "keypress", "keys": ["cmd", "c"]}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": ["cmd", "c"]}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Pressed: cmd+c"));
+        assert!(extract_text(&r).contains("Pressed: cmd+c"));
+    }
+
+    #[tokio::test]
+    async fn keypress_multi_modifier() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": ["cmd", "shift", "s"]}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Pressed: cmd+shift+s"));
     }
 
     #[tokio::test]
     async fn keypress_invalid_key() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "keypress", "keys": ["superduperkey"]}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": ["superduperkey"]}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Unknown key"));
     }
 
     #[tokio::test]
+    async fn keypress_empty_keys() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": []}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
     async fn get_windows_returns_list() {
-        let tool = ComputerUseTool::new(
-            Arc::new(MockRunner::success("Safari | Google | 0,0 | 1920,1080\n")),
+        let t = tool_with_runner(
+            MockRunner::success("Safari | Google | 0,0 | 1920,1080\n"),
             false,
         );
-        let r = tool
-            .execute(json!({"action": "getWindows"}), &make_ctx())
-            .await
-            .unwrap();
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Safari"));
+        assert!(extract_text(&r).contains("Safari"));
+    }
+
+    #[tokio::test]
+    async fn get_windows_empty() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("No visible windows"));
+    }
+
+    #[tokio::test]
+    async fn focus_window_by_title() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Focused window: Safari"));
     }
 
     #[tokio::test]
     async fn focus_window_not_found() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::failing("not found")), false);
-        let r = tool
-            .execute(json!({"action": "focusWindow", "window": "NonExistent"}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool_with_runner(MockRunner::failing("not found"), false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "NonExistent"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Window not found"));
     }
 
     #[tokio::test]
-    async fn scroll_down() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(
-                json!({"action": "scroll", "x": 500, "y": 500, "direction": "down", "amount": 200}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Scrolled down"));
-    }
-
-    #[tokio::test]
-    async fn move_mouse() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "moveMouse", "x": 300, "y": 400}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Moved mouse to (300, 400)"));
-    }
-
-    #[test]
-    fn serialized_execution_mode() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), true);
-        assert_eq!(
-            tool.execution_mode(),
-            crate::tools::traits::ExecutionMode::Serialized("computer_use".into())
-        );
-    }
-
-    #[test]
-    fn screenshot_action_no_required_params() {
-        // screenshot only needs "action", no x/y/text
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let def = tool.definition();
-        let required = def.parameters.required.unwrap();
-        // Only "action" is required
-        assert_eq!(required.len(), 1);
-        assert_eq!(required[0], "action");
-    }
-
-    #[tokio::test]
-    async fn type_special_characters() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "type", "text": "hello \"world\" & 'test'"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Typed"));
-    }
-
-    #[tokio::test]
-    async fn type_unicode() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "type", "text": "café résumé 日本語"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn keypress_multi_modifier() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "keypress", "keys": ["cmd", "shift", "s"]}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Pressed: cmd+shift+s"));
-    }
-
-    #[tokio::test]
-    async fn focus_window_by_title() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx())
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Focused window: Safari"));
-    }
-
-    #[tokio::test]
     async fn focus_window_requires_window_param() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "focusWindow"}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "focusWindow"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn scroll_down() {
+        let t = tool(false);
+        let r = t.execute(
+            json!({"action": "scroll", "x": 500, "y": 500, "direction": "down", "amount": 200}),
+            &make_ctx(),
+        ).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Scrolled down"));
     }
 
     #[tokio::test]
     async fn scroll_invalid_direction() {
-        let tool = ComputerUseTool::new(Arc::new(MockRunner::success("")), false);
-        let r = tool
-            .execute(json!({"action": "scroll", "direction": "diagonal"}), &make_ctx())
-            .await
-            .unwrap();
+        let t = tool(false);
+        let r = t.execute(json!({"action": "scroll", "direction": "diagonal"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn scroll_defaults_to_down() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "scroll"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Scrolled down"));
+    }
+
+    #[tokio::test]
+    async fn scroll_negative_coordinates_rejected() {
+        let t = tool(false);
+        let r = t.execute(
+            json!({"action": "scroll", "x": -10, "y": 100, "direction": "down"}),
+            &make_ctx(),
+        ).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("non-negative"));
+    }
+
+    #[tokio::test]
+    async fn scroll_out_of_bounds_rejected() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("bounds of window of desktop") {
+                ProcessOutput {
+                    stdout: "0, 0, 1920, 1080\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(
+            json!({"action": "scroll", "x": 5000, "y": 500, "direction": "down"}),
+            &make_ctx(),
+        ).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("outside screen bounds"));
+    }
+
+    #[tokio::test]
+    async fn scroll_zero_coordinates_skip_validation() {
+        // Default (0, 0) should skip validation entirely
+        let t = tool(false);
+        let r = t.execute(json!({"action": "scroll", "direction": "up"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn move_mouse() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "moveMouse", "x": 300, "y": 400}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("Moved mouse to (300, 400)"));
+    }
+
+    #[tokio::test]
+    async fn move_mouse_negative_rejected() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "moveMouse", "x": -5, "y": 100}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("non-negative"));
+    }
+
+    #[tokio::test]
+    async fn move_mouse_requires_coordinates() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "moveMouse"}), &make_ctx()).await;
+        assert!(r.is_err());
+    }
+
+    // ─── Screenshot throttle tests ───
+
+    #[tokio::test]
+    async fn screenshot_throttle_blocks_rapid_calls() {
+        // Use a runner that returns a valid PNG-ish file for screenshots
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("screencapture") {
+                // Create a tiny fake file at the path
+                // The actual file creation is handled by the runner, but in tests
+                // the file won't exist. The tool will fail at read, which is fine
+                // for throttle testing.
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+
+        let t = ComputerUseTool::new(Arc::new(runner), false, 500);
+
+        // Simulate that a screenshot was just taken
+        t.last_screenshot_ms.store(ComputerUseTool::now_ms(), Ordering::Relaxed);
+
+        // Immediate second call should be throttled
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("throttled"));
+    }
+
+    #[tokio::test]
+    async fn screenshot_throttle_allows_after_interval() {
+        let t = ComputerUseTool::new(Arc::new(MockRunner::success("")), false, 500);
+
+        // Set last screenshot to well in the past
+        let past = ComputerUseTool::now_ms() - 1000;
+        t.last_screenshot_ms.store(past, Ordering::Relaxed);
+
+        // This call should NOT be throttled (but will fail at file read, which is OK)
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        // It shouldn't be a throttle error (it may fail for other reasons in test env)
+        if r.is_error == Some(true) {
+            assert!(!extract_text(&r).contains("throttled"));
+        }
+    }
+
+    #[tokio::test]
+    async fn screenshot_custom_throttle_value() {
+        let t = ComputerUseTool::new(Arc::new(MockRunner::success("")), false, 2000);
+
+        // Set last screenshot to 1 second ago — should still be throttled with 2000ms setting
+        let past = ComputerUseTool::now_ms() - 1000;
+        t.last_screenshot_ms.store(past, Ordering::Relaxed);
+
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("throttled"));
+    }
+
+    // ─── Coordinate bounds tests ───
+
+    #[tokio::test]
+    async fn click_out_of_bounds_rejected() {
+        // Mock runner that returns screen bounds for Finder query
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("bounds of window of desktop") {
+                ProcessOutput {
+                    stdout: "0, 0, 1920, 1080\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "click", "x": 3000, "y": 500}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("outside screen bounds"));
+    }
+
+    #[tokio::test]
+    async fn click_within_bounds_succeeds() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("bounds of window of desktop") {
+                ProcessOutput {
+                    stdout: "0, 0, 1920, 1080\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "click", "x": 960, "y": 540}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn move_mouse_out_of_bounds_rejected() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("bounds of window of desktop") {
+                ProcessOutput {
+                    stdout: "0, 0, 1920, 1080\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "moveMouse", "x": 100, "y": 2000}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("outside screen bounds"));
+    }
+
+    // ─── Confirmation describe_action tests ───
+
+    #[test]
+    fn describe_click_action() {
+        let t = tool(true);
+        let desc = t.describe_action("click", &json!({"x": 100, "y": 200}));
+        assert_eq!(desc, "Click at (100, 200)");
+    }
+
+    #[test]
+    fn describe_double_click_action() {
+        let t = tool(true);
+        let desc = t.describe_action("click", &json!({"x": 100, "y": 200, "clicks": 2}));
+        assert_eq!(desc, "Double-click at (100, 200)");
+    }
+
+    #[test]
+    fn describe_type_action_truncated() {
+        let t = tool(true);
+        let desc = t.describe_action("type", &json!({"text": "This is a very long string that should be truncated in the description"}));
+        assert!(desc.contains("..."));
+        assert!(desc.len() < 60);
+    }
+
+    #[test]
+    fn describe_keypress_action() {
+        let t = tool(true);
+        let desc = t.describe_action("keypress", &json!({"keys": ["cmd", "c"]}));
+        assert_eq!(desc, "Press keys: cmd+c");
+    }
+
+    // ─── is_mutating tests ───
+
+    #[test]
+    fn mutating_actions_identified() {
+        assert!(ComputerUseTool::is_mutating("click"));
+        assert!(ComputerUseTool::is_mutating("type"));
+        assert!(ComputerUseTool::is_mutating("keypress"));
+        assert!(ComputerUseTool::is_mutating("scroll"));
+        assert!(ComputerUseTool::is_mutating("moveMouse"));
+    }
+
+    #[test]
+    fn readonly_actions_not_mutating() {
+        assert!(!ComputerUseTool::is_mutating("screenshot"));
+        assert!(!ComputerUseTool::is_mutating("getWindows"));
+        assert!(!ComputerUseTool::is_mutating("focusWindow"));
+    }
+
+    // ─── Details/audit logging tests ───
+
+    #[tokio::test]
+    async fn click_details_include_coordinates() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "click", "x": 42, "y": 99}), &make_ctx()).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "click");
+        assert_eq!(d["x"], 42.0);
+        assert_eq!(d["y"], 99.0);
+        assert_eq!(d["clicks"], 1);
+    }
+
+    #[tokio::test]
+    async fn scroll_details_include_direction() {
+        let t = tool(false);
+        let r = t.execute(
+            json!({"action": "scroll", "direction": "up", "amount": 50}),
+            &make_ctx(),
+        ).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "scroll");
+        assert_eq!(d["direction"], "up");
+        assert_eq!(d["amount"], 50);
+    }
+
+    #[tokio::test]
+    async fn type_details_include_length() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "type", "text": "test"}), &make_ctx()).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "type");
+        assert_eq!(d["length"], 4);
+    }
+
+    #[tokio::test]
+    async fn keypress_details_include_keys() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "keypress", "keys": ["cmd", "v"]}), &make_ctx()).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "keypress");
+        let keys = d["keys"].as_array().unwrap();
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_windows_details() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "getWindows");
+    }
+
+    #[tokio::test]
+    async fn focus_window_details() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Xcode"}), &make_ctx()).await.unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "focusWindow");
+        assert_eq!(d["window"], "Xcode");
     }
 }

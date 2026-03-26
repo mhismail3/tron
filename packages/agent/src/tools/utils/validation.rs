@@ -53,6 +53,13 @@ pub fn get_optional_u64(args: &Value, param: &str) -> Option<u64> {
     args.get(param).and_then(Value::as_u64)
 }
 
+/// Extract an optional floating-point parameter.
+///
+/// Also accepts integers (converts to f64).
+pub fn get_optional_f64(args: &Value, param: &str) -> Option<f64> {
+    args.get(param).and_then(Value::as_f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +135,23 @@ mod tests {
     fn get_optional_string_missing() {
         let args = json!({});
         assert_eq!(get_optional_string(&args, "key"), None);
+    }
+
+    #[test]
+    fn get_optional_f64_from_float() {
+        let args = json!({"x": 100.5});
+        assert_eq!(get_optional_f64(&args, "x"), Some(100.5));
+    }
+
+    #[test]
+    fn get_optional_f64_from_integer() {
+        let args = json!({"x": 42});
+        assert_eq!(get_optional_f64(&args, "x"), Some(42.0));
+    }
+
+    #[test]
+    fn get_optional_f64_missing() {
+        let args = json!({});
+        assert_eq!(get_optional_f64(&args, "x"), None);
     }
 }

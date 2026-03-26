@@ -188,7 +188,7 @@ struct ToolRegistryTests {
 
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch", "computeruse"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 
@@ -210,7 +210,7 @@ struct ToolRegistryTests {
 
     @Test("Command tools have viewer factories")
     func testViewerFactories() {
-        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch"] {
+        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch", "computeruse"] {
             let d = ToolRegistry.descriptor(for: name)
             #expect(d.viewerFactory != nil, "Expected viewer factory for \(name)")
         }

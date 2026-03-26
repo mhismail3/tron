@@ -201,6 +201,8 @@ struct CommandToolDetailSheet: View {
             return extractUrl(from: data.arguments)
         case "websearch":
             return extractQuery(from: data.arguments)
+        case "computeruse":
+            return ComputerUseSummaryHelper.summary(from: data.arguments)
         case "manageautomations":
             return extractAutomationDetails(from: data.arguments)
         default:
@@ -333,6 +335,11 @@ struct CommandToolDetailSheet: View {
         case "find", "glob":
             FindResultViewer(
                 pattern: extractPattern(from: data.arguments),
+                result: result,
+                isExpanded: $isResultExpanded
+            )
+        case "computeruse":
+            ComputerUseResultViewer(
                 result: result,
                 isExpanded: $isResultExpanded
             )
