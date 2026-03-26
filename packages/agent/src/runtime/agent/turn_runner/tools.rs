@@ -144,8 +144,10 @@ async fn process_tool_results(
         outcome.tool_calls_executed += 1;
 
         let result_text = extract_result_text(&exec_result);
+        let result_content = extract_result_content(&exec_result);
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
+        // Persist text-only to events DB (no images — too large for storage)
         if let Some(persister) = params.persister
             && let Err(error) = persister
                 .append_background(
@@ -171,9 +173,10 @@ async fn process_tool_results(
             );
         }
 
+        // Add full content (including images) to LLM conversation context
         params.context_manager.add_message(Message::ToolResult {
             tool_call_id: tool_call.id.clone(),
-            content: ToolResultMessageContent::Text(result_text),
+            content: result_content,
             is_error: if is_error { Some(true) } else { None },
         });
 
@@ -247,6 +250,7 @@ pub(super) fn build_execution_waves(
     waves
 }
 
+/// Extract text-only content from a tool result (for event persistence — no images in DB).
 fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
     match &exec_result.result.content {
         crate::core::tools::ToolResultBody::Text(text) => text.clone(),
@@ -258,5 +262,141 @@ fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n"),
+    }
+}
+
+/// Extract full content from a tool result, preserving image blocks for the LLM.
+///
+/// If no images are present, flattens to `Text` for efficiency.
+/// When images exist, returns `Blocks` so the LLM can see them.
+fn extract_result_content(exec_result: &ToolExecutionResult) -> ToolResultMessageContent {
+    match &exec_result.result.content {
+        crate::core::tools::ToolResultBody::Text(text) => {
+            ToolResultMessageContent::Text(text.clone())
+        }
+        crate::core::tools::ToolResultBody::Blocks(blocks) => {
+            let has_images = blocks.iter().any(|b| {
+                matches!(b, crate::core::content::ToolResultContent::Image { .. })
+            });
+            if has_images {
+                ToolResultMessageContent::Blocks(blocks.clone())
+            } else {
+                let text = blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        crate::core::content::ToolResultContent::Text { text } => {
+                            Some(text.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                ToolResultMessageContent::Text(text)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::content::ToolResultContent;
+    use crate::core::tools::{ToolResultBody, TronToolResult};
+    use crate::runtime::types::ToolExecutionResult;
+
+    fn make_exec_result(content: ToolResultBody) -> ToolExecutionResult {
+        ToolExecutionResult {
+            tool_call_id: "test".into(),
+            result: TronToolResult {
+                content,
+                details: None,
+                is_error: None,
+                stop_turn: None,
+            },
+            duration_ms: 100,
+            blocked_by_hook: false,
+            blocked_by_guardrail: false,
+            is_interactive: false,
+            stops_turn: false,
+        }
+    }
+
+    // ── extract_result_content tests ──
+
+    #[test]
+    fn extract_result_content_text_body_passthrough() {
+        let exec = make_exec_result(ToolResultBody::Text("hello".into()));
+        let content = extract_result_content(&exec);
+        assert!(matches!(content, ToolResultMessageContent::Text(ref t) if t == "hello"));
+    }
+
+    #[test]
+    fn extract_result_content_text_blocks_flatten() {
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![
+            ToolResultContent::text("line 1"),
+            ToolResultContent::text("line 2"),
+        ]));
+        let content = extract_result_content(&exec);
+        assert!(matches!(content, ToolResultMessageContent::Text(ref t) if t == "line 1\nline 2"));
+    }
+
+    #[test]
+    fn extract_result_content_mixed_blocks_preserve() {
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![
+            ToolResultContent::text("screenshot taken"),
+            ToolResultContent::image("base64data", "image/png"),
+        ]));
+        let content = extract_result_content(&exec);
+        match content {
+            ToolResultMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 2);
+                assert!(matches!(&blocks[0], ToolResultContent::Text { text } if text == "screenshot taken"));
+                assert!(matches!(&blocks[1], ToolResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png"));
+            }
+            _ => panic!("expected Blocks variant"),
+        }
+    }
+
+    #[test]
+    fn extract_result_content_image_only_blocks() {
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![
+            ToolResultContent::image("imgdata", "image/jpeg"),
+        ]));
+        let content = extract_result_content(&exec);
+        match content {
+            ToolResultMessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                assert!(matches!(&blocks[0], ToolResultContent::Image { .. }));
+            }
+            _ => panic!("expected Blocks variant"),
+        }
+    }
+
+    // ── extract_result_text regression tests ──
+
+    #[test]
+    fn extract_result_text_drops_images() {
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![
+            ToolResultContent::text("captured"),
+            ToolResultContent::image("base64data", "image/png"),
+        ]));
+        let text = extract_result_text(&exec);
+        assert_eq!(text, "captured");
+        assert!(!text.contains("base64"));
+    }
+
+    #[test]
+    fn extract_result_text_joins_text_blocks() {
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![
+            ToolResultContent::text("a"),
+            ToolResultContent::text("b"),
+        ]));
+        assert_eq!(extract_result_text(&exec), "a\nb");
+    }
+
+    #[test]
+    fn extract_result_text_body_passthrough() {
+        let exec = make_exec_result(ToolResultBody::Text("plain".into()));
+        assert_eq!(extract_result_text(&exec), "plain");
     }
 }

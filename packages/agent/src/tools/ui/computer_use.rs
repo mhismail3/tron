@@ -307,17 +307,23 @@ impl ComputerUseTool {
             // Window-specific capture: use CGWindowListCopyWindowInfo via Swift to find
             // the window ID, then screencapture -l <id>. This approach only requires
             // Screen Recording permission (NOT Accessibility permission).
+            // Uses optionAll to find windows on all desktops/spaces, not just current.
             let escaped = w.replace('\\', "\\\\").replace('"', "\\\"");
             let swift_script = format!(
-                r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print(w[kCGWindowNumber as String] as! Int); Foundation.exit(0) }} }}; fputs("Window not found: {escaped}\n", stderr); Foundation.exit(1)"#
+                r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print(w[kCGWindowNumber as String] as! Int); Foundation.exit(0) }} }}; fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1)"#
             );
             let wid_command = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
             let wid_output = self.run_shell(&wid_command, ctx).await?;
 
             if wid_output.exit_code != 0 {
+                let available = wid_output.stderr.trim();
+                let list = if available.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Available windows:\n{available}")
+                };
                 return Ok(error_result(format!(
-                    "Window '{}' not found. Use getWindows to list available windows.",
-                    w
+                    "Window '{}' not found.{list}", w
                 )));
             }
 
@@ -342,38 +348,76 @@ impl ComputerUseTool {
             }
         }
 
-        // Read the screenshot file
-        let image_data = match tokio::fs::read(&tmp_path).await {
+        // Read the raw PNG screenshot
+        let raw_data = match tokio::fs::read(&tmp_path).await {
             Ok(data) => data,
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 return Ok(error_result(format!("Failed to read screenshot: {e}")));
             }
         };
+        let original_size = raw_data.len();
+
+        // Compress: resize to max 1280px, convert to JPEG 70% quality using macOS `sips`.
+        // Falls back to original PNG if sips is unavailable or fails.
+        let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
+        let sips_cmd = format!(
+            "sips --resampleHeightWidthMax 1280 --setProperty format jpeg --setProperty formatOptions 70 '{}' --out '{}'",
+            tmp_path, jpg_path
+        );
+        let sips_result = self.run_shell(&sips_cmd, ctx).await;
         let _ = tokio::fs::remove_file(&tmp_path).await;
+
+        let (image_data, mime_type) = match sips_result {
+            Ok(output) if output.exit_code == 0 => {
+                match tokio::fs::read(&jpg_path).await {
+                    Ok(data) if !data.is_empty() => {
+                        let _ = tokio::fs::remove_file(&jpg_path).await;
+                        (data, "image/jpeg")
+                    }
+                    _ => {
+                        let _ = tokio::fs::remove_file(&jpg_path).await;
+                        (raw_data, "image/png")
+                    }
+                }
+            }
+            _ => {
+                let _ = tokio::fs::remove_file(&jpg_path).await;
+                (raw_data, "image/png")
+            }
+        };
 
         // Update throttle timestamp
         self.last_screenshot_ms.store(Self::now_ms(), Ordering::Relaxed);
 
-        // Return as base64 image
         use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
+
+        // Size guard: if a window capture is suspiciously small, it's likely
+        // blank/minimized/off-screen. Warn the agent so it can focus the window first.
+        let size_warning = if window.is_some() && image_data.len() < 10_000 {
+            " WARNING: Screenshot appears blank or very small — the window may be minimized or on another desktop. Try using focusWindow first to bring it to the current screen, then retry the screenshot."
+        } else {
+            ""
+        };
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::Image {
                     data: b64,
-                    mime_type: "image/png".into(),
+                    mime_type: mime_type.into(),
                 },
                 crate::core::content::ToolResultContent::text(format!(
-                    "Screenshot captured ({} bytes)",
-                    image_data.len()
+                    "Screenshot captured ({} bytes, compressed from {} bytes){size_warning}",
+                    image_data.len(), original_size
                 )),
             ]),
             details: Some(json!({
                 "action": "screenshot",
                 "window": window,
                 "sizeBytes": image_data.len(),
+                "originalSizeBytes": original_size,
+                "mimeType": mime_type,
             })),
             is_error: None,
             stop_turn: None,
@@ -397,31 +441,71 @@ impl ComputerUseTool {
         let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
         let xi = x as i64;
         let yi = y as i64;
+        let button = get_optional_string(params, "button").unwrap_or_else(|| "left".into());
 
-        let click_script = if clicks > 1 {
-            format!(
-                "tell application \"System Events\" to click at {{{xi}, {yi}}}\n\
-                 delay 0.05\n\
-                 tell application \"System Events\" to click at {{{xi}, {yi}}}"
-            )
-        } else {
-            format!("tell application \"System Events\" to click at {{{xi}, {yi}}}")
+        // Use CGEvent API via Swift for clicking — works reliably from backgrounded
+        // processes (unlike System Events which fails with -25204 when ppid=1).
+        // Swift has CoreGraphics built-in, no extra dependencies needed.
+        let (down_type, up_type, cg_button) = match button.as_str() {
+            "right" => (".rightMouseDown", ".rightMouseUp", ".right"),
+            _ => (".leftMouseDown", ".leftMouseUp", ".left"),
         };
 
-        match self.run_osascript(&click_script, ctx).await {
-            Ok(_) => Ok(TronToolResult {
+        let click_count = clicks.max(1);
+        let mut swift_lines = vec!["import Cocoa".to_string()];
+        swift_lines.push(format!("let p = CGPoint(x: {xi}, y: {yi})"));
+        for i in 0..click_count {
+            if i > 0 {
+                swift_lines.push("Thread.sleep(forTimeInterval: 0.05)".to_string());
+            }
+            swift_lines.push(format!(
+                "let d{i} = CGEvent(mouseEventSource: nil, mouseType: {down_type}, mouseCursorPosition: p, mouseButton: {cg_button})!"
+            ));
+            swift_lines.push(format!("d{i}.setIntegerValueField(.mouseEventClickState, value: Int64({click_count}))"));
+            swift_lines.push(format!("d{i}.post(tap: .cghidEventTap)"));
+            swift_lines.push(format!(
+                "let u{i} = CGEvent(mouseEventSource: nil, mouseType: {up_type}, mouseCursorPosition: p, mouseButton: {cg_button})!"
+            ));
+            swift_lines.push(format!("u{i}.setIntegerValueField(.mouseEventClickState, value: Int64({click_count}))"));
+            swift_lines.push(format!("u{i}.post(tap: .cghidEventTap)"));
+        }
+
+        let swift_code = swift_lines.join("\n");
+        let command = format!("swift -e '{}'", swift_code.replace('\'', "'\\''"));
+        match self.run_shell(&command, ctx).await {
+            Ok(output) if output.exit_code == 0 => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Clicked at ({x}, {y}){}", if clicks > 1 { " (double-click)" } else { "" }
                     )),
                 ]),
-                details: Some(json!({"action": "click", "x": x, "y": y, "clicks": clicks})),
+                details: Some(json!({"action": "click", "x": x, "y": y, "clicks": clicks, "button": button})),
                 is_error: None,
                 stop_turn: None,
             }),
-            Err(e) => Ok(error_result(format!(
-                "Click failed: {e}. Grant Accessibility permission to osascript/Terminal in System Settings > Privacy & Security > Accessibility."
-            ))),
+            Ok(output) => {
+                // CGEvent failed — fall back to osascript System Events
+                let fallback_script = format!(
+                    "tell application \"System Events\" to click at {{{xi}, {yi}}}"
+                );
+                match self.run_osascript(&fallback_script, ctx).await {
+                    Ok(_) => Ok(TronToolResult {
+                        content: ToolResultBody::Blocks(vec![
+                            crate::core::content::ToolResultContent::text(format!(
+                                "Clicked at ({x}, {y}){}", if clicks > 1 { " (double-click)" } else { "" }
+                            )),
+                        ]),
+                        details: Some(json!({"action": "click", "x": x, "y": y, "clicks": clicks, "fallback": true})),
+                        is_error: None,
+                        stop_turn: None,
+                    }),
+                    Err(e) => Ok(error_result(format!(
+                        "Click failed: {e} (CGEvent also failed: {})",
+                        output.stderr.trim()
+                    ))),
+                }
+            }
+            Err(e) => Ok(error_result(format!("Click failed: {e}"))),
         }
     }
 
@@ -669,6 +753,41 @@ return windowList"#;
         }
     }
 
+    /// Find a window's owner using CGWindowList (case-insensitive contains).
+    /// Returns `(ownerName, windowName, ownerPID)` or error with list of available windows.
+    async fn find_window_owner(
+        &self,
+        search: &str,
+        ctx: &ToolContext,
+    ) -> Result<(String, String, u64), TronToolResult> {
+        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
+        let swift_script = format!(
+            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; let pid = w[kCGWindowOwnerPID as String] as? Int ?? 0; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print("\(owner)\t\(name)\t\(pid)"); Foundation.exit(0) }} }}; fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1)"#
+        );
+        let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
+        let output = self.run_shell(&cmd, ctx).await.map_err(|e| {
+            error_result(format!("Window lookup failed: {e}"))
+        })?;
+
+        if output.exit_code == 0 {
+            let parts: Vec<&str> = output.stdout.trim().splitn(3, '\t').collect();
+            let owner = parts.first().unwrap_or(&"").to_string();
+            let name = parts.get(1).unwrap_or(&"").to_string();
+            let pid: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok((owner, name, pid))
+        } else {
+            let available = output.stderr.trim();
+            let list = if available.is_empty() {
+                "No windows found.".to_string()
+            } else {
+                format!("Available windows:\n{available}")
+            };
+            Err(error_result(format!(
+                "Window '{search}' not found. {list}"
+            )))
+        }
+    }
+
     async fn focus_window(
         &self,
         params: &Value,
@@ -679,26 +798,32 @@ return windowList"#;
             Err(e) => return Ok(e),
         };
 
-        let escaped = window.replace('"', "\\\"");
+        // Use CGWindowList to find the owner PID, then activate by PID.
+        // This avoids app name mismatches (e.g., "Things" vs "Things3").
+        let (owner, _name, pid) = match self.find_window_owner(&window, ctx).await {
+            Ok(result) => result,
+            Err(err_result) => return Ok(err_result),
+        };
+
+        // Activate by PID — reliable regardless of app display name vs bundle name
         let script = format!(
-            r#"tell application "System Events"
-set targetProc to first process whose visible is true and (name of first window contains "{escaped}")
-set frontmost of targetProc to true
-end tell"#
+            "tell application \"System Events\" to set frontmost of (first process whose unix id is {pid}) to true"
         );
 
         match self.run_osascript(&script, ctx).await {
             Ok(_) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
-                        "Focused window: {window}"
+                        "Focused window: {window} (app: {owner})"
                     )),
                 ]),
-                details: Some(json!({"action": "focusWindow", "window": window})),
+                details: Some(json!({"action": "focusWindow", "window": window, "app": owner, "pid": pid})),
                 is_error: None,
                 stop_turn: None,
             }),
-            Err(_) => Ok(error_result(format!("Window not found: {window}"))),
+            Err(_) => Ok(error_result(format!(
+                "Found window '{window}' (app: {owner}, pid: {pid}) but failed to activate it."
+            ))),
         }
     }
 
@@ -1244,7 +1369,8 @@ mod tests {
         let t = tool_with_runner(MockRunner::failing("not found"), false);
         let r = t.execute(json!({"action": "focusWindow", "window": "NonExistent"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("Window not found"));
+        let text = extract_text(&r);
+        assert!(text.contains("not found"), "error should mention not found: {text}");
     }
 
     #[tokio::test]
