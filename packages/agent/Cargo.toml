@@ -107,6 +107,9 @@ jsonwebtoken = { version = "9", optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+enigo = { version = "0.6.1", default-features = false }
+
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
