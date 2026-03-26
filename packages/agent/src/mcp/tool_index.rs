@@ -3,6 +3,8 @@
 //! Pure data structure with zero external dependencies. Indexes tools
 //! discovered from MCP servers and supports keyword search with scoring.
 
+use std::fmt::Write;
+
 use serde::Serialize;
 
 use crate::mcp::types::McpToolDef;
@@ -12,9 +14,13 @@ use serde_json::Value;
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParamSummary {
+    /// Parameter name.
     pub name: String,
+    /// JSON Schema type (e.g., "string", "integer").
     pub param_type: String,
+    /// Whether this parameter is required.
     pub required: bool,
+    /// Human-readable parameter description.
     pub description: String,
 }
 
@@ -32,10 +38,15 @@ struct IndexedTool {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolMatch {
+    /// MCP server name.
     pub server: String,
+    /// Tool name.
     pub tool: String,
+    /// Tool description.
     pub description: String,
+    /// Parameter summaries for this tool.
     pub params: Vec<ParamSummary>,
+    /// Relevance score (higher is better).
     pub score: u32,
 }
 
@@ -44,7 +55,14 @@ pub struct ToolIndex {
     tools: Vec<IndexedTool>,
 }
 
+impl Default for ToolIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolIndex {
+    /// Create an empty tool index.
     pub fn new() -> Self {
         Self { tools: Vec::new() }
     }
@@ -77,7 +95,7 @@ impl ToolIndex {
         let keywords: Vec<String> = tokenize(query);
 
         let mut results: Vec<ToolMatch> = self.tools.iter()
-            .filter(|t| server_filter.map_or(true, |s| t.server_name == s))
+            .filter(|t| server_filter.is_none_or(|s| t.server_name == s))
             .filter_map(|t| {
                 let score = score_tool(t, &keywords);
                 if !keywords.is_empty() && score == 0 {
@@ -119,7 +137,7 @@ impl ToolIndex {
 
         let mut out = format!("Found {} tool(s):\n", matches.len());
         for m in matches {
-            out.push_str(&format!("\n[{}] {} — {}\n", m.server, m.tool, m.description));
+            let _ = write!(out, "\n[{}] {} — {}\n", m.server, m.tool, m.description);
             if m.params.is_empty() {
                 out.push_str("  params: (none)\n");
             } else {
@@ -130,7 +148,7 @@ impl ToolIndex {
                         format!("{} ({})", p.name, p.param_type)
                     }
                 }).collect();
-                out.push_str(&format!("  params: {}\n", param_strs.join(", ")));
+                let _ = writeln!(out, "  params: {}", param_strs.join(", "));
             }
         }
         out
@@ -183,9 +201,8 @@ fn score_tool(tool: &IndexedTool, keywords: &[String]) -> u32 {
 
 /// Extract parameter summaries from a JSON Schema `input_schema`.
 fn extract_params(schema: &Value) -> Vec<ParamSummary> {
-    let properties = match schema.get("properties").and_then(Value::as_object) {
-        Some(p) => p,
-        None => return Vec::new(),
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return Vec::new();
     };
 
     let required_set: Vec<&str> = schema

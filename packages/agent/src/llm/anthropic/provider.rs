@@ -159,6 +159,7 @@ impl AnthropicProvider {
     }
 
     /// Build tool definitions with cache breakpoints.
+    #[allow(clippy::unused_self)]
     fn build_tools(&self, context: &Context) -> Option<Vec<AnthropicTool>> {
         let tools = context.tools.as_ref()?;
         if tools.is_empty() {

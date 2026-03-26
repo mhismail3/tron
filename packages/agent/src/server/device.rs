@@ -194,8 +194,6 @@ impl DeviceRequestBroker {
     }
 }
 
-const DEVICE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Errors from device request/response.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceRequestError {

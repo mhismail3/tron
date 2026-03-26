@@ -18,6 +18,7 @@ pub struct McpCallTool {
 }
 
 impl McpCallTool {
+    /// Create a new `McpCallTool` backed by the given router.
     pub fn new(router: Arc<tokio::sync::RwLock<McpRouter>>) -> Self {
         Self { router }
     }
@@ -55,13 +56,11 @@ impl TronTool for McpCallTool {
     }
 
     async fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
-        let server = match params.get("server").and_then(Value::as_str) {
-            Some(s) => s,
-            None => return Ok(error_result("Missing required parameter: server")),
+        let Some(server) = params.get("server").and_then(Value::as_str) else {
+            return Ok(error_result("Missing required parameter: server"));
         };
-        let tool = match params.get("tool").and_then(Value::as_str) {
-            Some(t) => t,
-            None => return Ok(error_result("Missing required parameter: tool")),
+        let Some(tool) = params.get("tool").and_then(Value::as_str) else {
+            return Ok(error_result("Missing required parameter: tool"));
         };
         let arguments = params.get("arguments")
             .cloned()

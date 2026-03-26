@@ -287,7 +287,7 @@ fn extract_result_content(exec_result: &ToolExecutionResult) -> ToolResultMessag
                         crate::core::content::ToolResultContent::Text { text } => {
                             Some(text.as_str())
                         }
-                        _ => None,
+                        crate::core::content::ToolResultContent::Image { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -353,7 +353,7 @@ mod tests {
                 assert!(matches!(&blocks[0], ToolResultContent::Text { text } if text == "screenshot taken"));
                 assert!(matches!(&blocks[1], ToolResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png"));
             }
-            _ => panic!("expected Blocks variant"),
+            ToolResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
     }
 
@@ -368,7 +368,7 @@ mod tests {
                 assert_eq!(blocks.len(), 1);
                 assert!(matches!(&blocks[0], ToolResultContent::Image { .. }));
             }
-            _ => panic!("expected Blocks variant"),
+            ToolResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
     }
 

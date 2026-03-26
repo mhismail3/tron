@@ -301,7 +301,7 @@ async fn execute_shell(
 ) -> Result<ExecutionOutput, CronError> {
     const MAX_OUTPUT: usize = 1_048_576; // 1MB
     let dir = working_dir.map_or_else(
-        || crate::core::paths::home_dir(),
+        crate::core::paths::home_dir,
         String::from,
     );
 

@@ -18,7 +18,7 @@ use crate::core::messages::Provider;
 ///
 /// Resolution order:
 /// 1. Explicit prefix (e.g., `"openai/gpt-5"` → `OpenAi`)
-/// 2. Registry lookup (exact match in provider HashMap — O(1))
+/// 2. Registry lookup (exact match in provider `HashMap` — O(1))
 ///
 /// Unknown model IDs always return `None` (strict fail-fast behavior).
 pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {

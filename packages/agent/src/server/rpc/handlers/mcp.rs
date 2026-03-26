@@ -39,6 +39,7 @@ pub(crate) async fn broadcast_status_changed(ctx: &RpcContext) {
 
 // ─── mcp.status ──────────────────────────────────────────────────────────
 
+/// Handler for the `mcp.status` RPC method.
 pub struct McpStatusHandler;
 
 #[async_trait]
@@ -56,6 +57,7 @@ impl MethodHandler for McpStatusHandler {
 
 // ─── mcp.addServer ───────────────────────────────────────────────────────
 
+/// Handler for the `mcp.addServer` RPC method.
 pub struct McpAddServerHandler;
 
 #[async_trait]
@@ -109,6 +111,7 @@ impl MethodHandler for McpAddServerHandler {
 
 // ─── mcp.removeServer ────────────────────────────────────────────────────
 
+/// Handler for the `mcp.removeServer` RPC method.
 pub struct McpRemoveServerHandler;
 
 #[async_trait]
@@ -130,6 +133,7 @@ impl MethodHandler for McpRemoveServerHandler {
 
 // ─── mcp.enableServer ────────────────────────────────────────────────────
 
+/// Handler for the `mcp.enableServer` RPC method.
 pub struct McpEnableServerHandler;
 
 #[async_trait]
@@ -153,6 +157,7 @@ impl MethodHandler for McpEnableServerHandler {
 
 // ─── mcp.disableServer ───────────────────────────────────────────────────
 
+/// Handler for the `mcp.disableServer` RPC method.
 pub struct McpDisableServerHandler;
 
 #[async_trait]
@@ -176,6 +181,7 @@ impl MethodHandler for McpDisableServerHandler {
 
 // ─── mcp.restartServer ───────────────────────────────────────────────────
 
+/// Handler for the `mcp.restartServer` RPC method.
 pub struct McpRestartServerHandler;
 
 #[async_trait]
@@ -202,6 +208,7 @@ impl MethodHandler for McpRestartServerHandler {
 
 // ─── mcp.reload ──────────────────────────────────────────────────────────
 
+/// Handler for the `mcp.reload` RPC method.
 pub struct McpReloadHandler;
 
 #[async_trait]
@@ -227,6 +234,7 @@ impl MethodHandler for McpReloadHandler {
 
 // ─── mcp.listTools ───────────────────────────────────────────────────
 
+/// Handler for the `mcp.listTools` RPC method.
 pub struct McpListToolsHandler;
 
 #[async_trait]

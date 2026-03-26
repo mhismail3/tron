@@ -17,6 +17,7 @@ pub struct McpSearchTool {
 }
 
 impl McpSearchTool {
+    /// Create a new `McpSearchTool` backed by the given router.
     pub fn new(router: Arc<tokio::sync::RwLock<McpRouter>>) -> Self {
         Self { router }
     }
@@ -78,7 +79,7 @@ mod tests {
 
     #[test]
     fn search_tool_definition_has_query_param() {
-        let router = Arc::new(tokio::sync::RwLock::new(()));
+        let _router = Arc::new(tokio::sync::RwLock::new(()));
         // We can't easily construct a real McpRouter here, so test the schema directly
         let tool = ToolSchemaBuilder::new("McpSearch", "Search")
             .required_property("query", json!({"type": "string"}))

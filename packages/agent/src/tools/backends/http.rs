@@ -30,7 +30,7 @@ impl ReqwestHttpClient {
         Self { client }
     }
 
-    /// Extract response headers into a HashMap.
+    /// Extract response headers into a `HashMap`.
     fn extract_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
@@ -103,15 +103,15 @@ impl HttpClient for ReqwestHttpClient {
         };
 
         // Build a client with the right redirect policy if needed
-        let client = if !req.follow_redirects {
+        let client = if req.follow_redirects {
+            self.client.clone()
+        } else {
             reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent("tron-agent/1.0")
                 .build()
                 .unwrap_or_default()
-        } else {
-            self.client.clone()
         };
 
         let mut request_builder = client.request(reqwest_method, req.url);

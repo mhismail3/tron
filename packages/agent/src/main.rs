@@ -124,9 +124,9 @@ struct ToolRegistryConfig {
     sandbox_settings: tron::settings::BashSandboxSettings,
     /// Computer use settings.
     computer_use_settings: tron::settings::ComputerUseSettings,
-    /// McpSearch meta-tool (searches all MCP server tools by keyword).
+    /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
     mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
-    /// McpCall meta-tool (calls a tool on an MCP server).
+    /// `McpCall` meta-tool (calls a tool on an MCP server).
     mcp_call: Option<Arc<dyn tron::tools::traits::TronTool>>,
 }
 
@@ -135,7 +135,7 @@ struct ToolRegistryConfig {
 /// Called once per agent run to create a fresh registry. Registration matches
 /// the TypeScript server:
 /// - Tools with real backends use real providers
-/// - NotifyApp: conditionally registered (only with APNS backend)
+/// - `NotifyApp`: conditionally registered (only with APNS backend)
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
@@ -434,8 +434,8 @@ async fn main() -> Result<()> {
 
             // Register shutdown hook
             let router_for_shutdown = router.clone();
-            tokio::spawn(async move {
-                tokio::signal::ctrl_c().await.ok();
+            let _shutdown_hook = tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
                 router_for_shutdown.write().await.shutdown_all().await;
             });
 
@@ -697,11 +697,11 @@ async fn main() -> Result<()> {
     }
 
     // Clean up stale sandbox directories from previous sessions (>24h old)
-    tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
+    let _sandbox_cleanup = tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
 
     // Check macOS permissions for ComputerUse (Accessibility + Screen Recording).
     // Triggers OS permission prompts on first run so users don't hit errors mid-session.
-    tokio::spawn(async { tron::tools::ui::computer_use::check_permissions_on_startup().await });
+    let _permissions_check = tokio::spawn(async { tron::tools::ui::computer_use::check_permissions_on_startup().await });
 
     // Start cron scheduler (scheduler loop + config file watcher)
     let (cron_sched_handle, cron_watcher_handle) = cron_scheduler.clone().start();
@@ -936,7 +936,7 @@ mod tests {
     use tron::settings::TronSettings;
 
     /// Small pool size for tests — prevents FD exhaustion when many tests
-    /// run in parallel, each opening a file-backed SQLite pool.
+    /// run in parallel, each opening a file-backed `SQLite` pool.
     fn test_db_config() -> ConnectionConfig {
         ConnectionConfig {
             pool_size: 2,

@@ -472,7 +472,7 @@ impl OpenAIModelInfo {
     }
 }
 
-/// All OpenAI models serialized for the `model.list` API, sorted by `sort_order`.
+/// All `OpenAI` models serialized for the `model.list` API, sorted by `sort_order`.
 pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = OPENAI_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);

@@ -63,8 +63,7 @@ impl McpRouter {
             server: server.to_string(),
             kind: crate::mcp::client::McpErrorKind::Protocol("unknown server".into()),
             message: format!(
-                "Tool '{}' not found on server '{}'. Use McpSearch to discover available tools.",
-                tool, server
+                "Tool '{tool}' not found on server '{server}'. Use McpSearch to discover available tools.",
             ),
         })?;
 
@@ -86,19 +85,18 @@ impl McpRouter {
                             message: format!("Server '{server}' restart succeeded but client unavailable"),
                         })?;
 
-                        client.call_tool(tool, args).await.map(|result| {
+                        client.call_tool(tool, args).await.inspect(|_| {
                             self.manager.record_success(server);
-                            result
                         })
                     }
                     Err(restart_err) => {
-                        self.manager.record_failure(server, &restart_err.message);
+                        let _ = self.manager.record_failure(server, &restart_err.message);
                         Err(e)
                     }
                 }
             }
             Err(e) => {
-                self.manager.record_failure(server, &e.message);
+                let _ = self.manager.record_failure(server, &e.message);
                 Err(e)
             }
         }
@@ -190,10 +188,10 @@ impl McpRouter {
 
         // Add new servers
         for config in &new_configs {
-            if !current_names.contains(&config.name) {
-                if let Err(e) = self.add_server(config.clone()).await {
-                    warn!(server = %config.name, error = %e, "failed to add server during reload");
-                }
+            if !current_names.contains(&config.name)
+                && let Err(e) = self.add_server(config.clone()).await
+            {
+                warn!(server = %config.name, error = %e, "failed to add server during reload");
             }
         }
 

@@ -141,44 +141,44 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
 
     for choice in &chunk.choices {
         // Process reasoning content
-        if let Some(ref reasoning) = choice.delta.reasoning_content {
-            if !reasoning.is_empty() {
-                if !state.in_thinking {
-                    state.in_thinking = true;
-                    events.push(StreamEvent::ThinkingStart);
-                }
-                state.thinking_text.push_str(reasoning);
-                events.push(StreamEvent::ThinkingDelta {
-                    delta: reasoning.clone(),
-                });
+        if let Some(ref reasoning) = choice.delta.reasoning_content
+            && !reasoning.is_empty()
+        {
+            if !state.in_thinking {
+                state.in_thinking = true;
+                events.push(StreamEvent::ThinkingStart);
             }
+            state.thinking_text.push_str(reasoning);
+            events.push(StreamEvent::ThinkingDelta {
+                delta: reasoning.clone(),
+            });
         }
 
         // Process text content
-        if let Some(ref content) = choice.delta.content {
-            if !content.is_empty() {
-                // End thinking if transitioning to text
-                if state.in_thinking {
-                    state.in_thinking = false;
-                    let thinking = std::mem::take(&mut state.thinking_text);
-                    state.content_blocks.push(AssistantContent::Thinking {
-                        thinking: thinking.clone(),
-                        signature: None,
-                    });
-                    events.push(StreamEvent::ThinkingEnd {
-                        thinking,
-                        signature: None,
-                    });
-                }
-                if !state.in_text {
-                    state.in_text = true;
-                    events.push(StreamEvent::TextStart);
-                }
-                state.text_content.push_str(content);
-                events.push(StreamEvent::TextDelta {
-                    delta: content.clone(),
+        if let Some(ref content) = choice.delta.content
+            && !content.is_empty()
+        {
+            // End thinking if transitioning to text
+            if state.in_thinking {
+                state.in_thinking = false;
+                let thinking = std::mem::take(&mut state.thinking_text);
+                state.content_blocks.push(AssistantContent::Thinking {
+                    thinking: thinking.clone(),
+                    signature: None,
+                });
+                events.push(StreamEvent::ThinkingEnd {
+                    thinking,
+                    signature: None,
                 });
             }
+            if !state.in_text {
+                state.in_text = true;
+                events.push(StreamEvent::TextStart);
+            }
+            state.text_content.push_str(content);
+            events.push(StreamEvent::TextDelta {
+                delta: content.clone(),
+            });
         }
 
         // Process tool calls
@@ -232,18 +232,16 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 }
 
                 // Accumulate arguments
-                if let Some(ref func) = tc.function {
-                    if let Some(ref args) = func.arguments {
-                        if !args.is_empty() {
-                            if let Some(ref mut active) = state.active_tools[idx] {
-                                active.arguments.push_str(args);
-                                events.push(StreamEvent::ToolCallDelta {
-                                    tool_call_id: active.id.clone(),
-                                    arguments_delta: args.clone(),
-                                });
-                            }
-                        }
-                    }
+                if let Some(ref func) = tc.function
+                    && let Some(ref args) = func.arguments
+                    && !args.is_empty()
+                    && let Some(ref mut active) = state.active_tools[idx]
+                {
+                    active.arguments.push_str(args);
+                    events.push(StreamEvent::ToolCallDelta {
+                        tool_call_id: active.id.clone(),
+                        arguments_delta: args.clone(),
+                    });
                 }
             }
         }
@@ -304,7 +302,7 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
     }
 
     // End any open tool calls
-    for slot in state.active_tools.iter_mut() {
+    for slot in &mut state.active_tools {
         if let Some(active) = slot.take() {
             let arguments: Map<String, Value> = serde_json::from_str(&active.arguments)
                 .unwrap_or_default();

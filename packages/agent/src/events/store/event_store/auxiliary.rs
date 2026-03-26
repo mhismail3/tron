@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn event_store_implements_blob_store() {
-        fn _assert<T: crate::tools::traits::BlobStore>() {}
-        _assert::<EventStore>();
+        fn assert_blob_store<T: crate::tools::traits::BlobStore>() {}
+        assert_blob_store::<EventStore>();
     }
 }

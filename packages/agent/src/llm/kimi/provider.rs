@@ -1,6 +1,6 @@
 //! Kimi provider implementing the [`Provider`] trait.
 //!
-//! Uses Kimi's OpenAI chat completions-compatible endpoint with Bearer auth.
+//! Uses Kimi's `OpenAI` chat completions-compatible endpoint with Bearer auth.
 //! Custom message converter and stream handler for the chat completions wire format.
 
 use async_trait::async_trait;
@@ -128,13 +128,12 @@ impl KimiProvider {
         body["messages"] = Value::Array(api_messages);
 
         // Tools (only for tool-capable models)
-        if self.model_supports_tools() {
-            if let Some(ref tools) = context.tools {
-                if !tools.is_empty() {
-                    let tool_defs = convert_tools(tools);
-                    body["tools"] = serde_json::to_value(&tool_defs).unwrap_or_default();
-                }
-            }
+        if self.model_supports_tools()
+            && let Some(ref tools) = context.tools
+            && !tools.is_empty()
+        {
+            let tool_defs = convert_tools(tools);
+            body["tools"] = serde_json::to_value(&tool_defs).unwrap_or_default();
         }
 
         // Thinking configuration (only for thinking-capable models)
@@ -162,7 +161,7 @@ impl KimiProvider {
 
         let headers = self.build_headers()?;
 
-        let msg_count = body["messages"].as_array().map_or(0, |a| a.len());
+        let msg_count = body["messages"].as_array().map_or(0, std::vec::Vec::len);
         debug!(
             model = %self.config.model,
             max_tokens = %body["max_completion_tokens"],
@@ -253,7 +252,6 @@ impl Provider for KimiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     fn test_config() -> KimiConfig {
         KimiConfig {

@@ -351,6 +351,7 @@ pub fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
 /// Gather recent event types and Bash tool call commands since the last compact.boundary.
 ///
 /// Returns `(event_types, bash_commands)` for the compaction trigger's progress-signal check.
+#[cfg(test)]
 pub fn gather_recent_events(
     event_store: &crate::events::EventStore,
     session_id: &str,
@@ -551,32 +552,6 @@ pub async fn build_skill_context(
         let skill_refs: Vec<&SkillMetadata> = found.iter().collect();
         let context = crate::skills::injector::build_skill_context(&skill_refs);
         Ok((!context.is_empty()).then_some(context))
-    })
-    .await
-}
-
-pub async fn load_recent_events(
-    event_store: Arc<EventStore>,
-    session_id: String,
-) -> Result<(Vec<String>, Vec<String>), RpcError> {
-    run_blocking_task("agent.prompt.recent_events", move || {
-        Ok(gather_recent_events(event_store.as_ref(), &session_id))
-    })
-    .await
-}
-
-pub async fn load_session_model(
-    session_manager: Arc<SessionManager>,
-    session_id: String,
-) -> Result<Option<String>, RpcError> {
-    run_blocking_task("agent.prompt.session_model", move || {
-        let session =
-            session_manager
-                .get_session(&session_id)
-                .map_err(|error| RpcError::Internal {
-                    message: error.to_string(),
-                })?;
-        Ok(session.map(|session| session.latest_model))
     })
     .await
 }

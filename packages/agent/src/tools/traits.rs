@@ -264,7 +264,7 @@ pub struct ProcessOptions {
     /// Whether to run in PTY/interactive mode.
     pub interactive: bool,
     /// Pattern-response pairs for interactive mode.
-    /// Each entry: (wait_pattern, send_response).
+    /// Each entry: (`wait_pattern`, `send_response`).
     pub pty_input: Vec<(String, String)>,
     /// Channel for streaming stdout chunks in real time.
     pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,

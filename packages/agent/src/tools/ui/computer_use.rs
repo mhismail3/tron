@@ -1,8 +1,8 @@
 //! `ComputerUse` tool — screenshot, click, type, keypress, scroll via macOS APIs.
 //!
-//! Provides GUI automation through `screencapture` CLI and `osascript` (AppleScript).
-//! All mutating actions (click, type, keypress, scroll, moveMouse) are gated behind a
-//! configurable confirmation flag. Read-only actions (screenshot, getWindows)
+//! Provides GUI automation through `screencapture` CLI and `osascript` (`AppleScript`).
+//! All mutating actions (click, type, keypress, scroll, `moveMouse`) are gated behind a
+//! configurable confirmation flag. Read-only actions (screenshot, `getWindows`)
 //! are always allowed.
 
 use std::sync::Arc;
@@ -31,6 +31,9 @@ pub struct ComputerUseTool {
     screenshot_throttle_ms: u64,
     /// Timestamp (ms since epoch) of the last screenshot.
     last_screenshot_ms: AtomicU64,
+    /// Use Rust-native enigo for input (true in production, false in tests for mocking).
+    #[cfg(target_os = "macos")]
+    use_native_input: bool,
 }
 
 impl ComputerUseTool {
@@ -45,6 +48,8 @@ impl ComputerUseTool {
             confirm_before_action,
             screenshot_throttle_ms,
             last_screenshot_ms: AtomicU64::new(0),
+            #[cfg(target_os = "macos")]
+            use_native_input: true,
         }
     }
 
@@ -150,6 +155,7 @@ impl TronTool for ComputerUseTool {
 
 impl ComputerUseTool {
     /// Generate a human-readable description of the action for confirmation.
+    #[allow(clippy::unused_self)]
     fn describe_action(&self, action: &str, params: &Value) -> String {
         match action {
             "click" => {
@@ -239,23 +245,18 @@ impl ComputerUseTool {
         self.runner.run_command(command, &opts).await
     }
 
-    /// Get screen resolution (width, height) via osascript.
-    async fn screen_bounds(&self, ctx: &ToolContext) -> Option<(f64, f64)> {
-        let script = r#"tell application "Finder" to get bounds of window of desktop"#;
-        match self.run_osascript(script, ctx).await {
-            Ok(output) => {
-                // Output: "0, 0, 1920, 1080\n"
-                let parts: Vec<f64> = output.trim()
-                    .split(", ")
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                if parts.len() >= 4 {
-                    Some((parts[2], parts[3]))
-                } else {
-                    None
-                }
+    /// Get screen resolution (width, height) via enigo (CGEvent-based, no subprocess).
+    async fn screen_bounds(&self) -> Option<(f64, f64)> {
+        #[cfg(target_os = "macos")]
+        {
+            match super::input::screen_size().await {
+                Ok((w, h)) => Some((f64::from(w), f64::from(h))),
+                Err(_) => None,
             }
-            Err(_) => None,
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
         }
     }
 
@@ -265,22 +266,20 @@ impl ComputerUseTool {
         &self,
         x: f64,
         y: f64,
-        ctx: &ToolContext,
     ) -> Option<TronToolResult> {
-        // Negative coordinates are always invalid
         if x < 0.0 || y < 0.0 {
             return Some(error_result(format!(
                 "Invalid coordinates ({x}, {y}): coordinates must be non-negative"
             )));
         }
 
-        if let Some((max_x, max_y)) = self.screen_bounds(ctx).await {
-            if x > max_x || y > max_y {
-                return Some(error_result(format!(
-                    "Coordinates ({x}, {y}) are outside screen bounds ({max_x}x{max_y}). \
-                     Use getWindows to see where windows are positioned."
-                )));
-            }
+        if let Some((max_x, max_y)) = self.screen_bounds().await
+            && (x > max_x || y > max_y)
+        {
+            return Some(error_result(format!(
+                "Coordinates ({x}, {y}) are outside screen bounds ({max_x}x{max_y}). \
+                 Use getWindows to see where windows are positioned."
+            )));
         }
         None
     }
@@ -290,6 +289,8 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
+        use base64::Engine;
+
         // Screenshot throttle
         let now = Self::now_ms();
         let last = self.last_screenshot_ms.load(Ordering::Relaxed);
@@ -317,13 +318,13 @@ impl ComputerUseTool {
 
             if wid_output.exit_code != 0 {
                 let available = wid_output.stderr.trim();
-                let list = if available.is_empty() {
+                let window_list = if available.is_empty() {
                     String::new()
                 } else {
                     format!(" Available windows:\n{available}")
                 };
                 return Ok(error_result(format!(
-                    "Window '{}' not found.{list}", w
+                    "Window '{w}' not found.{window_list}",
                 )));
             }
 
@@ -362,8 +363,7 @@ impl ComputerUseTool {
         // Falls back to original PNG if sips is unavailable or fails.
         let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
         let sips_cmd = format!(
-            "sips --resampleHeightWidthMax 1280 --setProperty format jpeg --setProperty formatOptions 70 '{}' --out '{}'",
-            tmp_path, jpg_path
+            "sips --resampleHeightWidthMax 1280 --setProperty format jpeg --setProperty formatOptions 70 '{tmp_path}' --out '{jpg_path}'",
         );
         let sips_result = self.run_shell(&sips_cmd, ctx).await;
         let _ = tokio::fs::remove_file(&tmp_path).await;
@@ -390,7 +390,6 @@ impl ComputerUseTool {
         // Update throttle timestamp
         self.last_screenshot_ms.store(Self::now_ms(), Ordering::Relaxed);
 
-        use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
 
         // Size guard: if a window capture is suspiciously small, it's likely
@@ -434,46 +433,35 @@ impl ComputerUseTool {
         let y = get_optional_f64(params, "y")
             .ok_or_else(|| ToolError::Validation { message: "click requires y coordinate".into() })?;
 
-        if let Some(err) = self.validate_coordinates(x, y, ctx).await {
+        if let Some(err) = self.validate_coordinates(x, y).await {
             return Ok(err);
         }
 
         let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
-        let xi = x as i64;
-        let yi = y as i64;
         let button = get_optional_string(params, "button").unwrap_or_else(|| "left".into());
 
-        // Use CGEvent API via Swift for clicking — works reliably from backgrounded
-        // processes (unlike System Events which fails with -25204 when ppid=1).
-        // Swift has CoreGraphics built-in, no extra dependencies needed.
-        let (down_type, up_type, cg_button) = match button.as_str() {
-            "right" => (".rightMouseDown", ".rightMouseUp", ".right"),
-            _ => (".leftMouseDown", ".leftMouseUp", ".left"),
+        let result = {
+            #[cfg(target_os = "macos")]
+            {
+                if self.use_native_input {
+                    super::input::click(x, y, &button, clicks).await
+                } else {
+                    // Test/fallback path: use osascript
+                    let xi = x as i64;
+                    let yi = y as i64;
+                    let script = format!("tell application \"System Events\" to click at {{{xi}, {yi}}}");
+                    self.run_osascript(&script, ctx).await.map(|_| ())
+                        .map_err(|e| format!("{e}"))
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err::<(), String>("ComputerUse click is only supported on macOS".into())
+            }
         };
 
-        let click_count = clicks.max(1);
-        let mut swift_lines = vec!["import Cocoa".to_string()];
-        swift_lines.push(format!("let p = CGPoint(x: {xi}, y: {yi})"));
-        for i in 0..click_count {
-            if i > 0 {
-                swift_lines.push("Thread.sleep(forTimeInterval: 0.05)".to_string());
-            }
-            swift_lines.push(format!(
-                "let d{i} = CGEvent(mouseEventSource: nil, mouseType: {down_type}, mouseCursorPosition: p, mouseButton: {cg_button})!"
-            ));
-            swift_lines.push(format!("d{i}.setIntegerValueField(.mouseEventClickState, value: Int64({click_count}))"));
-            swift_lines.push(format!("d{i}.post(tap: .cghidEventTap)"));
-            swift_lines.push(format!(
-                "let u{i} = CGEvent(mouseEventSource: nil, mouseType: {up_type}, mouseCursorPosition: p, mouseButton: {cg_button})!"
-            ));
-            swift_lines.push(format!("u{i}.setIntegerValueField(.mouseEventClickState, value: Int64({click_count}))"));
-            swift_lines.push(format!("u{i}.post(tap: .cghidEventTap)"));
-        }
-
-        let swift_code = swift_lines.join("\n");
-        let command = format!("swift -e '{}'", swift_code.replace('\'', "'\\''"));
-        match self.run_shell(&command, ctx).await {
-            Ok(output) if output.exit_code == 0 => Ok(TronToolResult {
+        match result {
+            Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Clicked at ({x}, {y}){}", if clicks > 1 { " (double-click)" } else { "" }
@@ -483,28 +471,6 @@ impl ComputerUseTool {
                 is_error: None,
                 stop_turn: None,
             }),
-            Ok(output) => {
-                // CGEvent failed — fall back to osascript System Events
-                let fallback_script = format!(
-                    "tell application \"System Events\" to click at {{{xi}, {yi}}}"
-                );
-                match self.run_osascript(&fallback_script, ctx).await {
-                    Ok(_) => Ok(TronToolResult {
-                        content: ToolResultBody::Blocks(vec![
-                            crate::core::content::ToolResultContent::text(format!(
-                                "Clicked at ({x}, {y}){}", if clicks > 1 { " (double-click)" } else { "" }
-                            )),
-                        ]),
-                        details: Some(json!({"action": "click", "x": x, "y": y, "clicks": clicks, "fallback": true})),
-                        is_error: None,
-                        stop_turn: None,
-                    }),
-                    Err(e) => Ok(error_result(format!(
-                        "Click failed: {e} (CGEvent also failed: {})",
-                        output.stderr.trim()
-                    ))),
-                }
-            }
             Err(e) => Ok(error_result(format!("Click failed: {e}"))),
         }
     }
@@ -519,11 +485,26 @@ impl ComputerUseTool {
             Err(e) => return Ok(e),
         };
 
-        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!("tell application \"System Events\" to keystroke \"{escaped}\"");
+        let result = {
+            #[cfg(target_os = "macos")]
+            {
+                if self.use_native_input {
+                    super::input::type_text(&text).await
+                } else {
+                    let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+                    let script = format!("tell application \"System Events\" to keystroke \"{escaped}\"");
+                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = ctx;
+                Err::<(), String>("ComputerUse type is only supported on macOS".into())
+            }
+        };
 
-        match self.run_osascript(&script, ctx).await {
-            Ok(_) => Ok(TronToolResult {
+        match result {
+            Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Typed {} characters", text.len()
@@ -554,51 +535,33 @@ impl ComputerUseTool {
             return Ok(error_result("keys array must not be empty".to_string()));
         }
 
-        // Separate modifiers from the main key
-        let modifiers: Vec<&str> = key_names.iter()
-            .filter(|k| matches!(k.as_str(), "cmd" | "command" | "ctrl" | "control" | "alt" | "option" | "shift"))
-            .map(String::as_str)
-            .collect();
-
-        let main_keys: Vec<&str> = key_names.iter()
-            .filter(|k| !matches!(k.as_str(), "cmd" | "command" | "ctrl" | "control" | "alt" | "option" | "shift"))
-            .map(String::as_str)
-            .collect();
-
-        let modifier_str = if modifiers.is_empty() {
-            String::new()
-        } else {
-            let mapped: Vec<&str> = modifiers.iter().map(|m| match *m {
-                "cmd" | "command" => "command down",
-                "ctrl" | "control" => "control down",
-                "alt" | "option" => "option down",
-                "shift" => "shift down",
-                _ => "",
-            }).filter(|s| !s.is_empty()).collect();
-            format!(" using {{{}}}", mapped.join(", "))
-        };
-
-        let key = main_keys.first().copied().unwrap_or("return");
-        let script = match key {
-            "enter" | "return" => format!("tell application \"System Events\" to key code 36{modifier_str}"),
-            "tab" => format!("tell application \"System Events\" to key code 48{modifier_str}"),
-            "escape" | "esc" => format!("tell application \"System Events\" to key code 53{modifier_str}"),
-            "space" => format!("tell application \"System Events\" to key code 49{modifier_str}"),
-            "delete" | "backspace" => format!("tell application \"System Events\" to key code 51{modifier_str}"),
-            "up" => format!("tell application \"System Events\" to key code 126{modifier_str}"),
-            "down" => format!("tell application \"System Events\" to key code 125{modifier_str}"),
-            "left" => format!("tell application \"System Events\" to key code 123{modifier_str}"),
-            "right" => format!("tell application \"System Events\" to key code 124{modifier_str}"),
-            single if single.len() == 1 => {
-                format!("tell application \"System Events\" to keystroke \"{single}\"{modifier_str}")
+        // Validate all key names before dispatching
+        #[cfg(target_os = "macos")]
+        for k in &key_names {
+            if super::input::map_key(k).is_none() {
+                return Ok(error_result(format!("Unknown key: {k}")));
             }
-            other => {
-                return Ok(error_result(format!("Unknown key: {other}")));
+        }
+
+        let result = {
+            #[cfg(target_os = "macos")]
+            {
+                if self.use_native_input {
+                    super::input::key_press(&key_names).await
+                } else {
+                    // Test fallback: treat as success (mock runner handles osascript)
+                    let script = "tell application \"System Events\" to keystroke \"\"".to_string();
+                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err::<(), String>("ComputerUse keypress is only supported on macOS".into())
             }
         };
 
-        match self.run_osascript(&script, ctx).await {
-            Ok(_) => Ok(TronToolResult {
+        match result {
+            Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Pressed: {}", key_names.join("+")
@@ -620,45 +583,39 @@ impl ComputerUseTool {
         let x = get_optional_f64(params, "x").unwrap_or(0.0);
         let y = get_optional_f64(params, "y").unwrap_or(0.0);
 
-        // Validate scroll position coordinates
-        if x != 0.0 || y != 0.0 {
-            if let Some(err) = self.validate_coordinates(x, y, ctx).await {
-                return Ok(err);
-            }
+        if (x != 0.0 || y != 0.0)
+            && let Some(err) = self.validate_coordinates(x, y).await
+        {
+            return Ok(err);
         }
 
         let direction = get_optional_string(params, "direction")
             .unwrap_or_else(|| "down".to_string());
-        let amount = get_optional_u64(params, "amount").unwrap_or(100) as i64;
+        let amount = get_optional_u64(params, "amount").unwrap_or(100) as i32;
 
-        // Convert pixel amount to scroll units (roughly 10px per scroll unit)
-        let scroll_units = (amount / 10).max(1);
+        // Validate direction before dispatching
+        if !matches!(direction.as_str(), "up" | "down" | "left" | "right") {
+            return Ok(error_result(format!("Unknown scroll direction: {direction}")));
+        }
 
-        let (scroll_y, scroll_x) = match direction.as_str() {
-            "up" => (scroll_units, 0),
-            "down" => (-scroll_units, 0),
-            "left" => (0, scroll_units),
-            "right" => (0, -scroll_units),
-            _ => return Ok(error_result(format!("Unknown scroll direction: {direction}"))),
+        let result = {
+            #[cfg(target_os = "macos")]
+            {
+                if self.use_native_input {
+                    super::input::scroll(&direction, amount, x, y).await
+                } else {
+                    let script = "tell application \"System Events\" to key code 125".to_string();
+                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err::<(), String>("ComputerUse scroll is only supported on macOS".into())
+            }
         };
 
-        // Use Python Quartz CGEventCreateScrollWheelEvent for reliable scroll
-        let xi = x as i64;
-        let yi = y as i64;
-        let command = format!(
-            "python3 -c \"\
-import Quartz\n\
-# Move mouse to scroll position\n\
-move = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, ({xi}, {yi}), 0)\n\
-Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)\n\
-# Scroll\n\
-scroll = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitPixel, 2, {scroll_y}, {scroll_x})\n\
-Quartz.CGEventPost(Quartz.kCGHIDEventTap, scroll)\
-\""
-        );
-
-        match self.run_shell(&command, ctx).await {
-            Ok(output) if output.exit_code == 0 => Ok(TronToolResult {
+        match result {
+            Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Scrolled {direction} by {amount}px at ({x}, {y})"
@@ -671,41 +628,7 @@ Quartz.CGEventPost(Quartz.kCGHIDEventTap, scroll)\
                 is_error: None,
                 stop_turn: None,
             }),
-            _ => {
-                // Fallback: AppleScript mouse position + key-based scroll
-                let key_code = match direction.as_str() {
-                    "up" => 126,   // up arrow
-                    "down" => 125, // down arrow
-                    "left" => 123, // left arrow
-                    "right" => 124, // right arrow
-                    _ => 125,
-                };
-                let repeat = (scroll_units as u64).min(20);
-                let script = format!(
-                    "tell application \"System Events\"\n\
-                     repeat {repeat} times\n\
-                     key code {key_code}\n\
-                     end repeat\n\
-                     end tell"
-                );
-                match self.run_osascript(&script, ctx).await {
-                    Ok(_) => Ok(TronToolResult {
-                        content: ToolResultBody::Blocks(vec![
-                            crate::core::content::ToolResultContent::text(format!(
-                                "Scrolled {direction} by {amount}px at ({x}, {y}) (keyboard fallback)"
-                            )),
-                        ]),
-                        details: Some(json!({
-                            "action": "scroll", "x": x, "y": y,
-                            "direction": direction, "amount": amount,
-                            "fallback": true,
-                        })),
-                        is_error: None,
-                        stop_turn: None,
-                    }),
-                    Err(e) => Ok(error_result(format!("Scroll failed: {e}"))),
-                }
-            }
+            Err(e) => Ok(error_result(format!("Scroll failed: {e}"))),
         }
     }
 
@@ -753,7 +676,7 @@ return windowList"#;
         }
     }
 
-    /// Find a window's owner using CGWindowList (case-insensitive contains).
+    /// Find a window's owner using `CGWindowList` (case-insensitive contains).
     /// Returns `(ownerName, windowName, ownerPID)` or error with list of available windows.
     async fn find_window_owner(
         &self,
@@ -837,20 +760,30 @@ return windowList"#;
         let y = get_optional_f64(params, "y")
             .ok_or_else(|| ToolError::Validation { message: "moveMouse requires y coordinate".into() })?;
 
-        if let Some(err) = self.validate_coordinates(x, y, ctx).await {
+        if let Some(err) = self.validate_coordinates(x, y).await {
             return Ok(err);
         }
 
-        let xi = x as i64;
-        let yi = y as i64;
+        let result = {
+            #[cfg(target_os = "macos")]
+            {
+                if self.use_native_input {
+                    super::input::move_mouse(x, y).await
+                } else {
+                    let xi = x as i64;
+                    let yi = y as i64;
+                    let script = format!("tell application \"System Events\" to set position of mouse to {{{xi}, {yi}}}");
+                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err::<(), String>("ComputerUse moveMouse is only supported on macOS".into())
+            }
+        };
 
-        // Use Python Quartz for mouse positioning (more reliable than osascript)
-        let command = format!(
-            "python3 -c \"import Quartz; Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, ({xi}, {yi}), 0))\""
-        );
-
-        match self.run_shell(&command, ctx).await {
-            Ok(output) if output.exit_code == 0 => Ok(TronToolResult {
+        match result {
+            Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
                         "Moved mouse to ({x}, {y})"
@@ -860,25 +793,7 @@ return windowList"#;
                 is_error: None,
                 stop_turn: None,
             }),
-            _ => {
-                // Fallback to osascript
-                let script = format!(
-                    "tell application \"System Events\" to set position of mouse to {{{xi}, {yi}}}"
-                );
-                match self.run_osascript(&script, ctx).await {
-                    Ok(_) => Ok(TronToolResult {
-                        content: ToolResultBody::Blocks(vec![
-                            crate::core::content::ToolResultContent::text(format!(
-                                "Moved mouse to ({x}, {y})"
-                            )),
-                        ]),
-                        details: Some(json!({"action": "moveMouse", "x": x, "y": y})),
-                        is_error: None,
-                        stop_turn: None,
-                    }),
-                    Err(e) => Ok(error_result(format!("moveMouse failed: {e}"))),
-                }
-            }
+            Err(e) => Ok(error_result(format!("moveMouse failed: {e}"))),
         }
     }
 }
@@ -887,14 +802,14 @@ return windowList"#;
 
 /// Check macOS permissions needed by the agent at server startup.
 ///
-/// Probes three capabilities and logs results:
-/// 1. **Accessibility** — needed for osascript System Events (click, type, keypress).
-///    Tested with a `keystroke ""` no-op. Triggers the native OS prompt on first run.
-/// 2. **Screen Recording** — needed for screencapture.
+/// Probes two capabilities and logs results:
+/// 1. **Screen Recording** — needed for screencapture.
 ///    Tested with a silent capture. Triggers the native OS prompt on first run.
-/// 3. **Full Disk Access** — needed for reading/writing protected locations
-///    (e.g., ~/Library/Mail, ~/Library/Safari). No native prompt exists for FDA,
-///    so we open System Settings directly on first detection (one-time, sentinel-gated).
+/// 2. **Full Disk Access** — needed for reading/writing protected locations.
+///    No native prompt exists for FDA, so we open System Settings on first detection.
+///
+/// Note: Accessibility for input simulation is handled by the enigo crate, which
+/// auto-prompts via `Settings::open_prompt_to_get_permissions = true` on first use.
 ///
 /// No-op on non-macOS platforms.
 pub async fn check_permissions_on_startup() {
@@ -903,38 +818,6 @@ pub async fn check_permissions_on_startup() {
     }
 
     tracing::info!("checking macOS permissions...");
-
-    // 1. Accessibility: test with a no-op keystroke. This exercises the exact same
-    //    System Events path that click/type/keypress use. On first run, macOS shows
-    //    its native Accessibility permission dialog.
-    let accessibility = tokio::process::Command::new("osascript")
-        .args(["-e", "tell application \"System Events\" to keystroke \"\""])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await;
-
-    match accessibility {
-        Ok(output) if output.status.success() => {
-            tracing::info!("Accessibility permission: granted");
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("not allowed assistive access") {
-                tracing::warn!(
-                    "Accessibility permission not granted for osascript. \
-                     ComputerUse click/type/keypress/getWindows will not work. \
-                     Grant via: System Settings > Privacy & Security > Accessibility \
-                     (add your terminal app, e.g. Ghostty, Terminal, or iTerm2)"
-                );
-            } else {
-                tracing::warn!("Accessibility check returned unexpected error: {}", stderr.trim());
-            }
-        }
-        Err(e) => {
-            tracing::warn!("could not check Accessibility permission: {e}");
-        }
-    }
 
     // 2. Screen Recording: test with a silent screencapture. On first run, macOS
     //    shows its native Screen Recording permission dialog.
@@ -1092,11 +975,17 @@ mod tests {
     }
 
     fn tool(confirm: bool) -> ComputerUseTool {
-        ComputerUseTool::new(Arc::new(MockRunner::success("")), confirm, 500)
+        let mut t = ComputerUseTool::new(Arc::new(MockRunner::success("")), confirm, 500);
+        #[cfg(target_os = "macos")]
+        { t.use_native_input = false; }
+        t
     }
 
     fn tool_with_runner(runner: MockRunner, confirm: bool) -> ComputerUseTool {
-        ComputerUseTool::new(Arc::new(runner), confirm, 500)
+        let mut t = ComputerUseTool::new(Arc::new(runner), confirm, 500);
+        #[cfg(target_os = "macos")]
+        { t.use_native_input = false; }
+        t
     }
 
     // ─── Schema tests ───

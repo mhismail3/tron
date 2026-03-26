@@ -257,7 +257,7 @@ impl MiniMaxModelInfo {
     }
 }
 
-/// All MiniMax models serialized for the `model.list` API, sorted by `sort_order`.
+/// All `MiniMax` models serialized for the `model.list` API, sorted by `sort_order`.
 pub fn all_minimax_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = MINIMAX_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);

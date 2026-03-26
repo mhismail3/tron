@@ -48,16 +48,21 @@ impl std::error::Error for McpError {}
 /// Structured error from MCP client operations.
 #[derive(Debug, Clone)]
 pub struct McpError {
+    /// Name of the MCP server that produced this error.
     pub server: String,
+    /// Categorized error kind for programmatic handling.
     pub kind: McpErrorKind,
+    /// Human-readable error description.
     pub message: String,
 }
 
 impl McpError {
+    /// Returns `true` if this error is transient and the operation can be retried.
     pub fn is_retryable(&self) -> bool {
         matches!(self.kind, McpErrorKind::Timeout | McpErrorKind::Transient(_))
     }
 
+    /// Returns `true` if this error indicates the connection is lost and the server must be restarted.
     pub fn requires_restart(&self) -> bool {
         matches!(self.kind, McpErrorKind::ConnectionLost)
     }
@@ -105,11 +110,7 @@ impl std::fmt::Debug for McpClient {
 
 pub(crate) enum Transport {
     /// Stdio transport — communicates via child process stdin/stdout.
-    Stdio {
-        child: Child,
-        writer: tokio::io::BufWriter<tokio::process::ChildStdin>,
-        reader: BufReader<tokio::process::ChildStdout>,
-    },
+    Stdio(Box<StdioTransport>),
     /// HTTP transport — sends requests to a URL.
     Http {
         url: String,
@@ -117,6 +118,12 @@ pub(crate) enum Transport {
     },
     /// Placeholder for failed servers (never used for I/O).
     Placeholder,
+}
+
+pub(crate) struct StdioTransport {
+    pub child: Child,
+    pub writer: tokio::io::BufWriter<tokio::process::ChildStdin>,
+    pub reader: BufReader<tokio::process::ChildStdout>,
 }
 
 impl McpClient {
@@ -181,7 +188,7 @@ impl McpClient {
 
         let client = Self {
             name: config.name.clone(),
-            transport: Mutex::new(Transport::Stdio { child, writer, reader }),
+            transport: Mutex::new(Transport::Stdio(Box::new(StdioTransport { child, writer, reader }))),
             next_id: AtomicU64::new(1),
             tool_timeout_ms: config.tool_timeout_ms,
             negotiated_version: Mutex::new(None),
@@ -319,12 +326,11 @@ impl McpClient {
         let mut transport = self.transport.lock().await;
         match &mut *transport {
             Transport::Placeholder => false,
-            Transport::Stdio { child, .. } => {
+            Transport::Stdio(stdio) => {
                 // try_wait returns Ok(Some(status)) if exited, Ok(None) if still running
-                match child.try_wait() {
-                    Ok(Some(_)) => false,
+                match stdio.child.try_wait() {
+                    Ok(Some(_)) | Err(_) => false,
                     Ok(None) => true,
-                    Err(_) => false,
                 }
             }
             Transport::Http { .. } => true,
@@ -350,7 +356,7 @@ impl McpClient {
                     message: format!("MCP server '{}' is not connected", self.name),
                 });
             }
-            Transport::Stdio { writer, reader, .. } => {
+            Transport::Stdio(stdio) => {
                 let json_line = serde_json::to_string(&request).map_err(|e| McpError {
                     server: self.name.clone(),
                     kind: McpErrorKind::Protocol(format!("serialize: {e}")),
@@ -358,21 +364,21 @@ impl McpClient {
                 })?;
 
                 // Write request
-                if let Err(e) = writer.write_all(json_line.as_bytes()).await {
+                if let Err(e) = stdio.writer.write_all(json_line.as_bytes()).await {
                     return Err(McpError {
                         server: self.name.clone(),
                         kind: McpErrorKind::ConnectionLost,
                         message: format!("Failed to write to MCP server: {e}"),
                     });
                 }
-                if let Err(e) = writer.write_all(b"\n").await {
+                if let Err(e) = stdio.writer.write_all(b"\n").await {
                     return Err(McpError {
                         server: self.name.clone(),
                         kind: McpErrorKind::ConnectionLost,
                         message: format!("Failed to write newline: {e}"),
                     });
                 }
-                if let Err(e) = writer.flush().await {
+                if let Err(e) = stdio.writer.flush().await {
                     return Err(McpError {
                         server: self.name.clone(),
                         kind: McpErrorKind::ConnectionLost,
@@ -397,7 +403,7 @@ impl McpClient {
                         });
                     }
 
-                    let bytes_read = tokio::time::timeout(remaining, reader.read_line(&mut line))
+                    let bytes_read = tokio::time::timeout(remaining, stdio.reader.read_line(&mut line))
                         .await
                         .map_err(|_| McpError {
                             server: self.name.clone(),
@@ -522,16 +528,16 @@ impl McpClient {
 
         match &mut *transport {
             Transport::Placeholder => {}
-            Transport::Stdio { writer, .. } => {
+            Transport::Stdio(stdio) => {
                 let json_line = serde_json::to_string(&notification).map_err(|e| McpError {
                     server: self.name.clone(),
                     kind: McpErrorKind::Protocol(format!("serialize: {e}")),
                     message: format!("Failed to serialize notification: {e}"),
                 })?;
                 // Best-effort — don't fail the caller if notification can't be sent
-                let _ = writer.write_all(json_line.as_bytes()).await;
-                let _ = writer.write_all(b"\n").await;
-                let _ = writer.flush().await;
+                let _ = stdio.writer.write_all(json_line.as_bytes()).await;
+                let _ = stdio.writer.write_all(b"\n").await;
+                let _ = stdio.writer.flush().await;
             }
             Transport::Http { url, client } => {
                 let _ = client.post(url.as_str()).json(&notification).send().await;
@@ -551,24 +557,21 @@ impl McpClient {
         let mut transport = self.transport.lock().await;
         match &mut *transport {
             Transport::Placeholder => {}
-            Transport::Stdio { child, writer, .. } => {
-                // Close stdin to signal the server
-                drop(writer.get_ref());
+            Transport::Stdio(stdio) => {
+                // Shutdown stdin to signal the server
+                let _ = stdio.writer.shutdown().await;
 
                 // Wait briefly for graceful exit, then force kill
                 let timeout = std::time::Duration::from_millis(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
-                match tokio::time::timeout(timeout, child.wait()).await {
-                    Ok(Ok(status)) => {
-                        debug!(
-                            server = %self.name,
-                            code = status.code(),
-                            "MCP server exited gracefully"
-                        );
-                    }
-                    _ => {
-                        let _ = child.kill().await;
-                        debug!(server = %self.name, "force-killed MCP server process");
-                    }
+                if let Ok(Ok(status)) = tokio::time::timeout(timeout, stdio.child.wait()).await {
+                    debug!(
+                        server = %self.name,
+                        code = status.code(),
+                        "MCP server exited gracefully"
+                    );
+                } else {
+                    let _ = stdio.child.kill().await;
+                    debug!(server = %self.name, "force-killed MCP server process");
                 }
             }
             Transport::Http { .. } => {

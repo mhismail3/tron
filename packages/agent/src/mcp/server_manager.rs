@@ -71,7 +71,7 @@ impl McpServerManager {
                         tool_count,
                         "MCP server connected"
                     );
-                    self.servers.insert(config.name.clone(), ServerState {
+                    let _ = self.servers.insert(config.name.clone(), ServerState {
                         client,
                         tool_count,
                         health: McpServerHealth::Healthy,
@@ -83,7 +83,7 @@ impl McpServerManager {
                 }
                 Err(e) => {
                     warn!(server = %config.name, error = %e, "failed to connect MCP server");
-                    self.servers.insert(config.name.clone(), ServerState {
+                    let _ = self.servers.insert(config.name.clone(), ServerState {
                         client: Arc::new(McpClient::failed_placeholder(&config.name)),
                         tool_count: 0,
                         health: McpServerHealth::Failed,
@@ -181,8 +181,7 @@ impl McpServerManager {
     /// them in the tool registry (replacing stale entries).
     pub async fn restart_server(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
         let attempt = self.servers.get(name)
-            .map(|s| s.consecutive_failures)
-            .unwrap_or(0);
+            .map_or(0, |s| s.consecutive_failures);
 
         // Exponential backoff: base * 2^(attempt-1), capped at max
         if attempt > 0 {
@@ -211,7 +210,7 @@ impl McpServerManager {
             Ok((client, tool_defs)) => {
                 let tool_count = tool_defs.len();
                 info!(server = %name, tool_count, "MCP server restarted successfully");
-                self.servers.insert(name.to_string(), ServerState {
+                let _ = self.servers.insert(name.to_string(), ServerState {
                     client,
                     tool_count,
                     health: McpServerHealth::Healthy,
@@ -280,8 +279,7 @@ impl McpServerManager {
     /// Check if a specific server is connected and operational.
     pub fn is_connected(&self, name: &str) -> bool {
         self.servers.get(name)
-            .map(|s| s.health != McpServerHealth::Failed)
-            .unwrap_or(false)
+            .is_some_and(|s| s.health != McpServerHealth::Failed)
     }
 
     /// Get the health state of a specific server.
@@ -369,7 +367,7 @@ mod tests {
     fn record_success_resets_failures() {
         let mut manager = McpServerManager::new(Vec::new());
         // Manually insert a degraded server state
-        manager.servers.insert("test".into(), ServerState {
+        let _ = manager.servers.insert("test".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("test")),
             tool_count: 2,
             health: McpServerHealth::Degraded,
@@ -388,7 +386,7 @@ mod tests {
     #[test]
     fn record_failure_degrades_then_fails() {
         let mut manager = McpServerManager::new(Vec::new());
-        manager.servers.insert("test".into(), ServerState {
+        let _ = manager.servers.insert("test".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("test")),
             tool_count: 1,
             health: McpServerHealth::Healthy,
@@ -479,7 +477,7 @@ mod tests {
     #[test]
     fn connected_servers_excludes_failed() {
         let mut manager = McpServerManager::new(Vec::new());
-        manager.servers.insert("healthy".into(), ServerState {
+        let _ = manager.servers.insert("healthy".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("healthy")),
             tool_count: 3,
             health: McpServerHealth::Healthy,
@@ -487,7 +485,7 @@ mod tests {
             last_error: None,
             connected_at: "2026-03-25T10:00:00Z".into(),
         });
-        manager.servers.insert("broken".into(), ServerState {
+        let _ = manager.servers.insert("broken".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("broken")),
             tool_count: 0,
             health: McpServerHealth::Failed,
@@ -495,7 +493,7 @@ mod tests {
             last_error: Some("crashed".into()),
             connected_at: "2026-03-25T10:00:00Z".into(),
         });
-        manager.servers.insert("degraded".into(), ServerState {
+        let _ = manager.servers.insert("degraded".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("degraded")),
             tool_count: 1,
             health: McpServerHealth::Degraded,
@@ -514,7 +512,7 @@ mod tests {
     #[test]
     fn client_returns_none_for_failed() {
         let mut manager = McpServerManager::new(Vec::new());
-        manager.servers.insert("failed".into(), ServerState {
+        let _ = manager.servers.insert("failed".into(), ServerState {
             client: Arc::new(McpClient::failed_placeholder("failed")),
             tool_count: 0,
             health: McpServerHealth::Failed,

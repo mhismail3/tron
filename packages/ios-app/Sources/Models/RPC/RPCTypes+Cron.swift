@@ -177,8 +177,8 @@ enum CronScheduleDTO: Codable, Hashable {
             let hours = hour.split(separator: ",").compactMap { Int($0) }
             if hours.count >= 2, hours.allSatisfy({ (0...23).contains($0) }) {
                 let times = hours.compactMap { formatTime(hour: String($0), minute: min) }
-                if times.count == hours.count {
-                    let joined = times.dropLast().joined(separator: ", ") + " & " + times.last!
+                if times.count == hours.count, let last = times.last {
+                    let joined = times.count == 1 ? last : times.dropLast().joined(separator: ", ") + " & " + last
                     return "Daily at \(joined) (\(tz))"
                 }
             }

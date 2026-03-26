@@ -1,6 +1,6 @@
 //! Kimi model registry, auth, and config types.
 //!
-//! Kimi (Moonshot AI) uses an OpenAI chat completions-compatible API.
+//! Kimi (Moonshot AI) uses an `OpenAI` chat completions-compatible API.
 //! Models: K2.5 (flagship), K2 variants, and legacy moonshot-v1.
 
 use std::collections::HashMap;

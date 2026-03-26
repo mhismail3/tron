@@ -22,7 +22,7 @@ fn scratch_dir() -> PathBuf {
 }
 
 /// Configuration for a lightweight sandbox.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SandboxConfig {
     /// Files/dirs to copy into the sandbox (source paths).
     pub copy_paths: Vec<String>,
@@ -30,21 +30,12 @@ pub struct SandboxConfig {
     pub readonly_mounts: Vec<String>,
 }
 
-impl Default for SandboxConfig {
-    fn default() -> Self {
-        Self {
-            copy_paths: Vec::new(),
-            readonly_mounts: Vec::new(),
-        }
-    }
-}
-
 /// Configuration for a Docker sandbox.
 #[derive(Clone, Debug)]
 pub struct DockerSandboxConfig {
     /// Docker image to use.
     pub image: String,
-    /// Volume mounts: (host_path, container_path, "ro" | "rw").
+    /// Volume mounts: (`host_path`, `container_path`, "ro" | "rw").
     pub mounts: Vec<(String, String, String)>,
     /// Whether to enable network access.
     pub network: bool,
@@ -98,7 +89,7 @@ impl SandboxWorkspace {
                 if src_path.is_dir() {
                     copy_dir_recursive(src_path, &dest).await?;
                 } else {
-                    tokio::fs::copy(src_path, &dest)
+                    let _ = tokio::fs::copy(src_path, &dest)
                         .await
                         .map_err(|e| ToolError::Internal {
                             message: format!("Failed to copy {src} into sandbox: {e}"),
@@ -237,7 +228,7 @@ async fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), ToolError> {
         if entry_path.is_dir() {
             Box::pin(copy_dir_recursive(&entry_path, &dest_path)).await?;
         } else {
-            tokio::fs::copy(&entry_path, &dest_path)
+            let _ = tokio::fs::copy(&entry_path, &dest_path)
                 .await
                 .map_err(|e| ToolError::Internal {
                     message: format!("Failed to copy file: {e}"),
@@ -264,13 +255,12 @@ pub async fn cleanup_stale_sandboxes() {
             if !name.starts_with("sandbox-") {
                 continue;
             }
-            if let Ok(meta) = entry.metadata().await {
-                if let Ok(modified) = meta.modified() {
-                    if modified < cutoff {
-                        let _ = tokio::fs::remove_dir_all(entry.path()).await;
-                        debug!(path = %entry.path().display(), "cleaned stale sandbox");
-                    }
-                }
+            if let Ok(meta) = entry.metadata().await
+                && let Ok(modified) = meta.modified()
+                && modified < cutoff
+            {
+                let _ = tokio::fs::remove_dir_all(entry.path()).await;
+                debug!(path = %entry.path().display(), "cleaned stale sandbox");
             }
         }
     }

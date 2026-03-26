@@ -648,8 +648,7 @@ async fn execute_job(
                 .notify(
                     &format!("Cron job '{}' auto-disabled", job.name),
                     &format!(
-                        "Disabled after {} consecutive failures. Re-enable manually.",
-                        failures
+                        "Disabled after {failures} consecutive failures. Re-enable manually.",
                     ),
                 )
                 .await;
@@ -1519,7 +1518,7 @@ mod tests {
             "notification title should contain job name"
         );
         assert!(
-            calls[0].1.contains("1"),
+            calls[0].1.contains('1'),
             "notification body should contain failure count"
         );
     }

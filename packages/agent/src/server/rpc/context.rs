@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use metrics::{counter, histogram};
 use parking_lot::RwLock;
-use crate::events::{ConnectionPool, EventStore};
+use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
 use crate::runtime::guardrails::GuardrailEngine;

@@ -643,7 +643,6 @@ fn build_run_filters(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cron::migrations;
     use crate::cron::types::*;
 
     fn setup_pool() -> ConnectionPool {

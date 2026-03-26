@@ -288,18 +288,6 @@ impl Default for ContextArtifactsService {
 }
 
 #[cfg(test)]
-pub(crate) fn load_session_context_artifacts(
-    event_store: &EventStore,
-    working_dir: &str,
-    settings: &crate::settings::TronSettings,
-    is_chat: bool,
-) -> SessionContextArtifacts {
-    ContextArtifactsService::new()
-        .load(event_store, working_dir, settings, is_chat)
-        .session
-}
-
-#[cfg(test)]
 pub(crate) fn load_session_context_artifacts_with_home(
     event_store: &EventStore,
     working_dir: &str,
@@ -312,7 +300,7 @@ pub(crate) fn load_session_context_artifacts_with_home(
         return SessionContextArtifacts::default();
     }
     let wd_path = Path::new(working_dir);
-    let workspace = event_store
+    let _workspace = event_store
         .get_workspace_by_path(working_dir)
         .ok()
         .flatten();

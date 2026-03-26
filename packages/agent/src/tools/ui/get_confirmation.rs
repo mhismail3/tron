@@ -103,8 +103,7 @@ impl TronTool for GetConfirmationTool {
 
         if !VALID_RISK_LEVELS.contains(&risk_level.as_str()) {
             return Ok(error_result(format!(
-                "Invalid riskLevel '{}'. Must be one of: low, medium, high",
-                risk_level
+                "Invalid riskLevel '{risk_level}'. Must be one of: low, medium, high",
             )));
         }
 

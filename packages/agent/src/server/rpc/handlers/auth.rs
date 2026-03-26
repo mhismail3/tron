@@ -15,7 +15,7 @@ use crate::llm::auth::storage::{
     save_provider_api_key, save_provider_oauth_tokens,
 };
 use crate::llm::auth::types::{
-    AuthStorage, GoogleOAuthEndpoint, GoogleProviderAuth, OAuthTokens, ProviderAuth, ServiceAuth,
+    GoogleOAuthEndpoint, OAuthTokens, ProviderAuth, ServiceAuth,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
@@ -38,14 +38,12 @@ fn mask_key(key: &str) -> String {
     }
     let prefix_end = key
         .find('-')
-        .map(|i| {
+        .map_or(4, |i| {
             // Find second dash for "sk-ant-..." style keys
             key[i + 1..]
                 .find('-')
-                .map(|j| i + 1 + j + 1)
-                .unwrap_or(i + 1)
+                .map_or(i + 1, |j| i + 1 + j + 1)
         })
-        .unwrap_or(4)
         .min(10);
     let suffix_start = key.len().saturating_sub(4);
     format!("{}...{}", &key[..prefix_end], &key[suffix_start..])
@@ -54,7 +52,6 @@ fn mask_key(key: &str) -> String {
 // ─── Masked state builder ────────────────────────────────────────────────────
 
 /// Build the masked auth state response from raw storage.
-#[allow(unused_must_use)]
 fn build_masked_state(auth_path: &Path) -> Value {
     let storage = load_auth_storage(auth_path);
 
@@ -64,16 +61,16 @@ fn build_masked_state(auth_path: &Path) -> Value {
         if provider == "google" {
             let google = storage
                 .as_ref()
-                .and_then(|s| s.get_google_auth());
+                .and_then(crate::llm::auth::types::AuthStorage::get_google_auth);
 
             let mut info = serde_json::Map::new();
             if let Some(ref g) = google {
                 let has_key = g.base.api_key.is_some();
                 let _ = info.insert("hasApiKey".into(), json!(has_key));
                 if let Some(ref key) = g.base.api_key {
-                    info.insert("apiKeyHint".into(), json!(mask_key(key)));
+                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
                 }
-                info.insert("hasOAuth".into(), json!(g.base.oauth.is_some()));
+                let _ = info.insert("hasOAuth".into(), json!(g.base.oauth.is_some()));
 
                 // Google-specific fields
                 if let Some(ref ep) = g.endpoint {
@@ -81,26 +78,26 @@ fn build_masked_state(auth_path: &Path) -> Value {
                         GoogleOAuthEndpoint::CloudCodeAssist => "cloud-code-assist",
                         GoogleOAuthEndpoint::Antigravity => "antigravity",
                     };
-                    info.insert("endpoint".into(), json!(ep_str));
+                    let _ = info.insert("endpoint".into(), json!(ep_str));
                 }
                 if let Some(ref pid) = g.project_id {
-                    info.insert("projectId".into(), json!(pid));
+                    let _ = info.insert("projectId".into(), json!(pid));
                 }
-                info.insert("hasClientId".into(), json!(g.client_id.is_some()));
-                info.insert("hasClientSecret".into(), json!(g.client_secret.is_some()));
+                let _ = info.insert("hasClientId".into(), json!(g.client_id.is_some()));
+                let _ = info.insert("hasClientSecret".into(), json!(g.client_secret.is_some()));
 
                 // Accounts
                 let accounts = build_accounts_list(&g.base);
-                info.insert("accounts".into(), json!(accounts));
+                let _ = info.insert("accounts".into(), json!(accounts));
             } else {
-                info.insert("hasApiKey".into(), json!(false));
-                info.insert("hasOAuth".into(), json!(false));
-                info.insert("hasClientId".into(), json!(false));
-                info.insert("hasClientSecret".into(), json!(false));
-                info.insert("accounts".into(), json!([]));
+                let _ = info.insert("hasApiKey".into(), json!(false));
+                let _ = info.insert("hasOAuth".into(), json!(false));
+                let _ = info.insert("hasClientId".into(), json!(false));
+                let _ = info.insert("hasClientSecret".into(), json!(false));
+                let _ = info.insert("accounts".into(), json!([]));
             }
 
-            providers.insert(provider.to_string(), Value::Object(info));
+            let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
             let pa = storage
                 .as_ref()
@@ -108,28 +105,28 @@ fn build_masked_state(auth_path: &Path) -> Value {
 
             let mut info = serde_json::Map::new();
             if let Some(ref pa) = pa {
-                info.insert("hasApiKey".into(), json!(pa.api_key.is_some()));
+                let _ = info.insert("hasApiKey".into(), json!(pa.api_key.is_some()));
                 if let Some(ref key) = pa.api_key {
-                    info.insert("apiKeyHint".into(), json!(mask_key(key)));
+                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
                 }
-                info.insert("hasOAuth".into(), json!(pa.oauth.is_some()));
+                let _ = info.insert("hasOAuth".into(), json!(pa.oauth.is_some()));
 
                 if let Some(ref oauth) = pa.oauth {
-                    info.insert("oauthExpiresAt".into(), json!(oauth.expires_at));
+                    let _ = info.insert("oauthExpiresAt".into(), json!(oauth.expires_at));
                     let is_expired =
                         crate::llm::auth::types::now_ms() >= oauth.expires_at;
-                    info.insert("isOAuthExpired".into(), json!(is_expired));
+                    let _ = info.insert("isOAuthExpired".into(), json!(is_expired));
                 }
 
                 let accounts = build_accounts_list(pa);
-                info.insert("accounts".into(), json!(accounts));
+                let _ = info.insert("accounts".into(), json!(accounts));
             } else {
-                info.insert("hasApiKey".into(), json!(false));
-                info.insert("hasOAuth".into(), json!(false));
-                info.insert("accounts".into(), json!([]));
+                let _ = info.insert("hasApiKey".into(), json!(false));
+                let _ = info.insert("hasOAuth".into(), json!(false));
+                let _ = info.insert("accounts".into(), json!([]));
             }
 
-            providers.insert(provider.to_string(), Value::Object(info));
+            let _ = providers.insert(provider.to_string(), Value::Object(info));
         }
     }
 
@@ -143,19 +140,19 @@ fn build_masked_state(auth_path: &Path) -> Value {
         let mut info = serde_json::Map::new();
         if let Some(svc) = svc {
             let has_key = svc.api_key.is_some()
-                || svc.api_keys.as_ref().map_or(false, |k| !k.is_empty());
-            info.insert("hasApiKey".into(), json!(has_key));
+                || svc.api_keys.as_ref().is_some_and(|k| !k.is_empty());
+            let _ = info.insert("hasApiKey".into(), json!(has_key));
             if let Some(ref key) = svc.api_key {
-                info.insert("apiKeyHint".into(), json!(mask_key(key)));
-            } else if let Some(ref keys) = svc.api_keys {
-                if let Some(first) = keys.first() {
-                    info.insert("apiKeyHint".into(), json!(mask_key(first)));
-                }
+                let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
+            } else if let Some(ref keys) = svc.api_keys
+                && let Some(first) = keys.first()
+            {
+                let _ = info.insert("apiKeyHint".into(), json!(mask_key(first)));
             }
         } else {
-            info.insert("hasApiKey".into(), json!(false));
+            let _ = info.insert("hasApiKey".into(), json!(false));
         }
-        services.insert(service.to_string(), Value::Object(info));
+        let _ = services.insert(service.to_string(), Value::Object(info));
     }
 
     json!({
@@ -316,8 +313,11 @@ impl MethodHandler for ClearAuthHandler {
 
 /// In-memory state for a pending OAuth flow.
 pub struct PendingOAuthFlow {
+    /// PKCE code verifier for this flow.
     pub verifier: String,
+    /// OAuth provider name (e.g., "anthropic").
     pub provider: String,
+    /// When this flow was initiated.
     pub created_at: std::time::Instant,
 }
 
@@ -665,7 +665,7 @@ fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, RpcError> {
 
     let expires_at = oauth
         .get("expiresAt")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .ok_or_else(|| RpcError::InvalidParams {
             message: "oauth.expiresAt is required (milliseconds)".into(),
         })?;
@@ -683,6 +683,7 @@ fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, RpcError> {
 mod tests {
     use super::*;
     use crate::llm::auth::storage::save_google_provider_auth;
+    use crate::llm::auth::types::{AuthStorage, GoogleProviderAuth};
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use tempfile::TempDir;
 
@@ -916,7 +917,7 @@ mod tests {
                     "oauth": {
                         "accessToken": "at-123",
                         "refreshToken": "rt-456",
-                        "expiresAt": 9999999999999_i64
+                        "expiresAt": 9_999_999_999_999_i64
                     }
                 })),
                 &ctx,
@@ -975,7 +976,7 @@ mod tests {
                     "oauth": {
                         "accessToken": "at",
                         "refreshToken": "rt",
-                        "expiresAt": 9999999999999_i64
+                        "expiresAt": 9_999_999_999_999_i64
                     }
                 })),
                 &ctx,
@@ -1303,12 +1304,12 @@ mod tests {
         // Insert an expired flow manually
         {
             let mut flows = ctx.oauth_flows.lock().await;
-            flows.insert(
+            let _ = flows.insert(
                 "expired-flow".to_string(),
                 PendingOAuthFlow {
                     verifier: "v".to_string(),
                     provider: "anthropic".to_string(),
-                    created_at: std::time::Instant::now() - std::time::Duration::from_secs(700),
+                    created_at: std::time::Instant::now().checked_sub(std::time::Duration::from_secs(700)).unwrap(),
                 },
             );
         }
@@ -1381,7 +1382,7 @@ mod tests {
         let flow_id = "single-use-flow";
         {
             let mut flows = ctx.oauth_flows.lock().await;
-            flows.insert(
+            let _ = flows.insert(
                 flow_id.to_string(),
                 PendingOAuthFlow {
                     verifier: "v".to_string(),
@@ -1420,12 +1421,12 @@ mod tests {
         let flow_id = "expired-flow";
         {
             let mut flows = ctx.oauth_flows.lock().await;
-            flows.insert(
+            let _ = flows.insert(
                 flow_id.to_string(),
                 PendingOAuthFlow {
                     verifier: "v".to_string(),
                     provider: "anthropic".to_string(),
-                    created_at: std::time::Instant::now() - std::time::Duration::from_secs(700),
+                    created_at: std::time::Instant::now().checked_sub(std::time::Duration::from_secs(700)).unwrap(),
                 },
             );
         }
@@ -1449,7 +1450,7 @@ mod tests {
         let flow_id = "will-be-removed";
         {
             let mut flows = ctx.oauth_flows.lock().await;
-            flows.insert(
+            let _ = flows.insert(
                 flow_id.to_string(),
                 PendingOAuthFlow {
                     verifier: "v".to_string(),

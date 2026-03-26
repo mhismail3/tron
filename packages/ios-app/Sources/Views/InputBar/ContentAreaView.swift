@@ -163,7 +163,7 @@ extension String {
             let atIndex = match.range.location
             if atIndex > 0 {
                 let prevChar = nsText.character(at: atIndex - 1)
-                let prevCharScalar = Unicode.Scalar(prevChar)!
+                guard let prevCharScalar = Unicode.Scalar(prevChar) else { continue }
                 let isWhitespace = CharacterSet.whitespacesAndNewlines.contains(prevCharScalar)
                 guard isWhitespace else { continue }
             }

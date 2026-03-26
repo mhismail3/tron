@@ -8,6 +8,9 @@ enum AppConstants {
     static let defaultHost = "localhost"
     static let appVersion = "0.0.1"
     static var fallbackServerURL: URL {
-        URL(string: "ws://\(defaultHost):\(prodPort)/ws")!
+        guard let url = URL(string: "ws://\(defaultHost):\(prodPort)/ws") else {
+            fatalError("Invalid WebSocket URL from constants: ws://\(defaultHost):\(prodPort)/ws")
+        }
+        return url
     }
 }

@@ -20,9 +20,9 @@
 //! - [`tool_bridge`] — Legacy adapter + result conversion helper
 //! - [`server_manager`] — Lifecycle management for MCP servers
 //! - [`tool_index`] — Searchable in-memory tool index
-//! - [`router`] — Central coordinator (McpServerManager + ToolIndex)
-//! - [`search_tool`] — `McpSearch` TronTool implementation
-//! - [`call_tool`] — `McpCall` TronTool implementation
+//! - [`router`] — Central coordinator (`McpServerManager` + `ToolIndex`)
+//! - [`search_tool`] — `McpSearch` `TronTool` implementation
+//! - [`call_tool`] — `McpCall` `TronTool` implementation
 
 pub mod call_tool;
 pub mod client;

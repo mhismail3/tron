@@ -41,13 +41,13 @@ impl MethodHandler for UpdateSettingsHandler {
         .await?;
 
         // Hot-reload MCP servers when the mcp section changes
-        if has_mcp_changes {
-            if let Some(ref router) = ctx.mcp_router {
-                let mut guard = router.write().await;
-                let _ = guard.reload_from_settings().await;
-                drop(guard);
-                mcp::broadcast_status_changed(ctx).await;
-            }
+        if has_mcp_changes
+            && let Some(ref router) = ctx.mcp_router
+        {
+            let mut guard = router.write().await;
+            let _ = guard.reload_from_settings().await;
+            drop(guard);
+            mcp::broadcast_status_changed(ctx).await;
         }
 
         Ok(serde_json::json!({ "success": true }))

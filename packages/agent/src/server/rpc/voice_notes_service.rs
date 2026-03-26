@@ -27,7 +27,10 @@ pub(crate) fn list_notes(dir: &str, limit: usize, offset: usize) -> Value {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with(".md") || name.starts_with('.') {
+            let is_md = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+            if !is_md || name.starts_with('.') {
                 continue;
             }
 

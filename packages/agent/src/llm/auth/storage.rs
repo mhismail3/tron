@@ -217,6 +217,7 @@ pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock>
     }
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&lock_path)?;
 
@@ -480,6 +481,7 @@ mod tests {
         let lock_path = lock_path_for(&path);
         let lock_file2 = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&lock_path)
             .unwrap();

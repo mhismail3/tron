@@ -1,4 +1,4 @@
-//! Kimi message converter — `Context` → OpenAI chat completions format.
+//! Kimi message converter — `Context` → `OpenAI` chat completions format.
 //!
 //! Converts Tron's internal message types to the chat completions `messages`
 //! array format used by Kimi's API (`POST /v1/chat/completions`).
@@ -16,7 +16,7 @@ use crate::core::tools::Tool;
 use crate::llm::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 
 
-/// A single message in OpenAI chat completions format.
+/// A single message in `OpenAI` chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
     /// Role: `"system"`, `"user"`, `"assistant"`, or `"tool"`.
@@ -74,9 +74,9 @@ pub struct ChatFunctionDef {
     pub parameters: Value,
 }
 
-/// Convert Tron messages to OpenAI chat completions format.
+/// Convert Tron messages to `OpenAI` chat completions format.
 ///
-/// Handles ID remapping from Anthropic `toolu_` format to OpenAI `call_` format.
+/// Handles ID remapping from Anthropic `toolu_` format to `OpenAI` `call_` format.
 /// Strips image content blocks when `supports_images` is `false`.
 /// Omits thinking blocks from assistant messages (thinking is output-only).
 pub fn convert_messages(
@@ -143,7 +143,7 @@ fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
             Message::ToolResult { tool_call_id, .. } => {
                 ids.push(tool_call_id.as_str());
             }
-            _ => {}
+            Message::User { .. } => {}
         }
     }
 
@@ -277,7 +277,7 @@ fn convert_tool_result(tool_call_id: &str, content: &ToolResultMessageContent) -
                 .iter()
                 .filter_map(|b| match b {
                     crate::core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
+                    crate::core::content::ToolResultContent::Image { .. } => None,
                 })
                 .collect::<Vec<_>>()
                 .join("\n")

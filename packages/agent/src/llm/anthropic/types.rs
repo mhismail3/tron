@@ -177,7 +177,7 @@ pub struct ClaudeModelInfo {
     pub is_deprecated: bool,
     /// Deprecation date (ISO-8601), if deprecated.
     pub deprecation_date: Option<&'static str>,
-    /// Supported reasoning/effort levels (e.g., ["low", "medium", "high", "max"]).
+    /// Supported reasoning/effort levels (e.g., `["low", "medium", "high", "max"]`).
     /// `None` means the model does not support reasoning levels.
     pub reasoning_levels: Option<&'static [&'static str]>,
     /// Default reasoning/effort level. `None` if reasoning not supported.

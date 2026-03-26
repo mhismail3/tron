@@ -6,14 +6,19 @@ use serde_json::Value;
 /// JSON-RPC 2.0 request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
+    /// JSON-RPC version string (always "2.0").
     pub jsonrpc: String,
+    /// Request ID for correlating responses.
     pub id: u64,
+    /// Method name to invoke.
     pub method: String,
+    /// Optional method parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
 impl JsonRpcRequest {
+    /// Create a new JSON-RPC 2.0 request.
     pub fn new(id: u64, method: impl Into<String>, params: Option<Value>) -> Self {
         Self {
             jsonrpc: "2.0".into(),
@@ -27,10 +32,14 @@ impl JsonRpcRequest {
 /// JSON-RPC 2.0 response.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
+    /// JSON-RPC version string (always "2.0").
     pub jsonrpc: String,
+    /// Request ID this response corresponds to.
     pub id: Option<u64>,
+    /// Successful result value (mutually exclusive with `error`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
+    /// Error object (mutually exclusive with `result`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcError>,
 }
@@ -38,8 +47,11 @@ pub struct JsonRpcResponse {
 /// JSON-RPC 2.0 error object.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonRpcError {
+    /// Numeric error code.
     pub code: i64,
+    /// Human-readable error message.
     pub message: String,
+    /// Optional additional error data.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }
@@ -83,18 +95,22 @@ pub enum McpContentBlock {
     /// Text content.
     #[serde(rename = "text")]
     Text {
+        /// The text string.
         text: String,
     },
     /// Image content.
     #[serde(rename = "image")]
     Image {
+        /// Base64-encoded image data.
         data: String,
+        /// MIME type of the image (e.g., "image/png").
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
     /// Resource content.
     #[serde(rename = "resource")]
     Resource {
+        /// Resource payload as a JSON value.
         resource: Value,
     },
 }
@@ -156,11 +172,17 @@ pub enum McpServerHealth {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerStatus {
+    /// Server name.
     pub name: String,
+    /// Current health state.
     pub health: McpServerHealth,
+    /// Number of tools registered by this server.
     pub tool_count: usize,
+    /// Number of consecutive failures since last success.
     pub consecutive_failures: u32,
+    /// Most recent error message, if any.
     pub last_error: Option<String>,
+    /// ISO-8601 timestamp when the server connected.
     pub connected_at: Option<String>,
 }
 
@@ -324,9 +346,9 @@ mod tests {
 
     #[test]
     fn backoff_constants_valid() {
-        assert!(BACKOFF_BASE_MS > 0);
-        assert!(BACKOFF_MAX_MS > BACKOFF_BASE_MS);
-        assert!(MAX_CONSECUTIVE_FAILURES > 0);
+        const _: () = assert!(BACKOFF_BASE_MS > 0);
+        const _: () = assert!(BACKOFF_MAX_MS > BACKOFF_BASE_MS);
+        const _: () = assert!(MAX_CONSECUTIVE_FAILURES > 0);
     }
 
     #[test]

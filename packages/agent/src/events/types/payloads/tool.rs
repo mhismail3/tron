@@ -38,8 +38,8 @@ pub struct ToolResultPayload {
     /// Blob ID for truncated content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_id: Option<String>,
-    /// Tool-specific metadata (e.g. WebFetch: url, status, fromCache, responseHeaders;
-    /// Bash: exitCode, command, durationMs).
+    /// Tool-specific metadata (e.g. `WebFetch`: url, status, `fromCache`, `responseHeaders`;
+    /// `Bash`: `exitCode`, command, `durationMs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
 }

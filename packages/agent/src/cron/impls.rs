@@ -515,14 +515,6 @@ mod tests {
         }
     }
 
-    struct LedgerMockProviderFactory;
-    #[async_trait]
-    impl ProviderFactory for LedgerMockProviderFactory {
-        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-            Ok(Arc::new(LedgerMockProvider))
-        }
-    }
-
     /// Mock factory that fails N times with a retryable error, then succeeds.
     struct RetryMockProviderFactory {
         failures_remaining: std::sync::atomic::AtomicU32,

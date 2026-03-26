@@ -1,6 +1,6 @@
-//! Browser handlers: startStream, stopStream, getStatus.
+//! Browser handlers: `startStream`, `stopStream`, `getStatus`.
 //!
-//! Browser support has been removed. All handlers return NOT_AVAILABLE.
+//! Browser support has been removed. All handlers return `NOT_AVAILABLE`.
 
 use async_trait::async_trait;
 use serde_json::Value;

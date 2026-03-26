@@ -250,7 +250,7 @@ impl Default for WebCacheSettings {
 }
 
 /// Browser automation settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BrowserSettings {
     /// Browser provider name. Auto-detects agent-browser if not set.
@@ -259,16 +259,6 @@ pub struct BrowserSettings {
     pub executable_path: Option<String>,
     /// Run browser in headed mode (visible window). Default: false (headless).
     pub headed: bool,
-}
-
-impl Default for BrowserSettings {
-    fn default() -> Self {
-        Self {
-            provider: None,
-            executable_path: None,
-            headed: false,
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

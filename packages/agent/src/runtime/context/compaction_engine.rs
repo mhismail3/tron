@@ -812,12 +812,11 @@ mod tests {
             .with_tokens(80_000, 10_000)
             .with_token_fn(|msg| {
                 // Make the "huge response" assistant message very expensive
-                if let Message::Assistant { content, .. } = msg {
-                    if let Some(text) = content.first().and_then(|c| c.as_text()) {
-                        if text == "huge response" {
-                            return 5000;
-                        }
-                    }
+                if let Message::Assistant { content, .. } = msg
+                    && let Some(text) = content.first().and_then(|c| c.as_text())
+                    && text == "huge response"
+                {
+                    return 5000;
                 }
                 100
             });

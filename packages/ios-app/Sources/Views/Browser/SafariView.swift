@@ -23,7 +23,7 @@ struct SafariView: UIViewControllerRepresentable {
     }
 }
 
-private let previewURL = URL(string: "https://apple.com")!
+private let previewURL = URL(string: "https://apple.com") ?? URL(filePath: "/")
 
 #Preview {
     SafariView(url: previewURL)

@@ -66,6 +66,7 @@ impl BashTool {
     }
 
     /// Configure sandbox settings (called from factory with settings values).
+    #[must_use]
     pub fn with_sandbox_settings(mut self, default_image: String, network_enabled: bool) -> Self {
         self.sandbox_default_image = default_image;
         self.sandbox_network_enabled = network_enabled;
@@ -242,13 +243,13 @@ impl TronTool for BashTool {
             .unwrap_or_default();
 
         // Guard: block suspicious PATH overrides
-        if let Some(path_val) = env_vars.get("PATH") {
-            if Self::is_suspicious_path(path_val) {
-                return Ok(error_result(
-                    "Blocked: env overrides PATH to a suspicious location. \
-                     Use absolute paths to binaries instead of modifying PATH.",
-                ));
-            }
+        if let Some(path_val) = env_vars.get("PATH")
+            && Self::is_suspicious_path(path_val)
+        {
+            return Ok(error_result(
+                "Blocked: env overrides PATH to a suspicious location. \
+                 Use absolute paths to binaries instead of modifying PATH.",
+            ));
         }
 
         let shell = get_optional_string(&params, "shell")

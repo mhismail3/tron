@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Maximum chars for pending_work and total completed_steps text.
+/// Maximum chars for `pending_work` and total `completed_steps` text.
 const MAX_CHECKPOINT_FIELD_CHARS: usize = 2000;
 
 /// Payload for `checkpoint.saved` events.
@@ -162,7 +162,7 @@ mod tests {
             .map(|i| format!("Step {i}: did something with a very long description that takes up space"))
             .collect();
         let payload = CheckpointSavedPayload::new(1, "work".into(), many_steps, None);
-        let total: usize = payload.completed_steps.iter().map(|s| s.len()).sum();
+        let total: usize = payload.completed_steps.iter().map(String::len).sum();
         assert!(total <= 2100, "total step chars should be bounded");
     }
 

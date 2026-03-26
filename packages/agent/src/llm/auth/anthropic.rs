@@ -270,7 +270,7 @@ fn persist_tokens(
 
 /// Check if a refresh failure indicates the refresh token was already consumed.
 ///
-/// HTTP 400 with "invalid_grant" means the single-use refresh token was used
+/// HTTP 400 with `invalid_grant` means the single-use refresh token was used
 /// by another process/server between our read and our refresh attempt.
 fn is_stale_token_error(e: &AuthError) -> bool {
     matches!(e, AuthError::OAuth { status: 400, message } if message.contains("invalid_grant"))
@@ -281,7 +281,7 @@ fn is_stale_token_error(e: &AuthError) -> bool {
 /// Serializes concurrent refresh attempts with both a process-local lock
 /// (for async tasks) and a file-level advisory lock (for multiple processes).
 /// Re-reads from disk after acquiring the file lock in case another process
-/// refreshed while we waited. On stale-token errors (HTTP 400 invalid_grant),
+/// refreshed while we waited. On stale-token errors (HTTP 400 `invalid_grant`),
 /// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
     auth_path: &std::path::Path,
@@ -316,17 +316,17 @@ async fn maybe_refresh_tokens(
     // Re-read from disk — another process may have refreshed while we waited.
     // Also prefer disk tokens for refresh (may have a newer refresh_token).
     let disk_tokens = read_tokens_from_disk(auth_path, account_label);
-    if let Some(ref dt) = disk_tokens {
-        if now_ms() + buffer_ms < dt.expires_at {
-            return Ok((dt.clone(), true));
-        }
+    if let Some(ref dt) = disk_tokens
+        && now_ms() + buffer_ms < dt.expires_at
+    {
+        return Ok((dt.clone(), true));
     }
     let effective_tokens = disk_tokens.unwrap_or_else(|| tokens.clone());
 
     let client = client.clone();
     let config = config.clone();
     let auth_path = auth_path.to_path_buf();
-    let account_label_owned = account_label.map(|s| s.to_string());
+    let account_label_owned = account_label.map(std::string::ToString::to_string);
 
     let do_refresh = |tok: &OAuthTokens| {
         let client = client.clone();
@@ -399,7 +399,7 @@ type TokenResponse = super::types::OAuthTokenRefreshResponse;
 #[allow(unsafe_code)]
 fn short_hostname() -> Option<String> {
     let mut buf = [0u8; 256];
-    let ret = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+    let ret = unsafe { libc::gethostname(buf.as_mut_ptr().cast::<libc::c_char>(), buf.len()) };
     if ret != 0 {
         return None;
     }
@@ -556,8 +556,7 @@ mod tests {
         // Should return Err (OAuth refresh failed), NOT Ok(Some(ApiKey))
         assert!(
             result.is_err(),
-            "expected Err when OAuth refresh fails, got: {:?}",
-            result
+            "expected Err when OAuth refresh fails, got: {result:?}"
         );
     }
 
@@ -767,8 +766,7 @@ mod tests {
             status: 503,
             message: "server_error".to_string(),
         }));
-        assert!(!is_stale_token_error(&AuthError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        assert!(!is_stale_token_error(&AuthError::Io(std::io::Error::other(
             "test",
         ))));
     }

@@ -184,20 +184,19 @@ impl TronTool for WebFetchTool {
         let follow_redirects = get_optional_bool(&params, "followRedirects").unwrap_or(true);
         let allow_private = get_optional_bool(&params, "allowPrivateNetwork").unwrap_or(false);
         let max_size = get_optional_u64(&params, "maxSize")
-            .map(|v| v as usize)
-            .unwrap_or(MAX_RESPONSE_SIZE);
+            .map_or(MAX_RESPONSE_SIZE, |v| v as usize);
         let req_headers = parse_headers(&params);
         let cookie_header = parse_cookies(&params);
         let (body, auto_json_content_type) = extract_body(&params);
 
         // Validate body size
-        if let Some(ref b) = body {
-            if b.len() > MAX_BODY_SIZE {
-                return Ok(error_result(format!(
-                    "Request body too large: {} bytes (max {MAX_BODY_SIZE})",
-                    b.len()
-                )));
-            }
+        if let Some(ref b) = body
+            && b.len() > MAX_BODY_SIZE
+        {
+            return Ok(error_result(format!(
+                "Request body too large: {} bytes (max {MAX_BODY_SIZE})",
+                b.len()
+            )));
         }
 
         // Validate URL
@@ -388,8 +387,7 @@ impl WebFetchTool {
 
         // Handle binary response: base64-encode if content-type is not text/*
         let is_binary = response.content_type.as_ref()
-            .map(|ct| !ct.starts_with("text/") && !ct.contains("json") && !ct.contains("xml") && !ct.contains("javascript"))
-            .unwrap_or(false);
+            .is_some_and(|ct| !ct.starts_with("text/") && !ct.contains("json") && !ct.contains("xml") && !ct.contains("javascript"));
 
         let body_text = if is_binary {
             use base64::Engine;
@@ -503,7 +501,7 @@ mod tests {
             }),
             request_handler: Box::new(|req| {
                 let mut headers = HashMap::new();
-                headers.insert("x-request-id".into(), "test-123".into());
+                let _ = headers.insert("x-request-id".into(), "test-123".into());
 
                 // Echo back the method and body for testing
                 let body = if let Some(b) = req.body {
@@ -1299,8 +1297,8 @@ mod tests {
                 let accept = req.headers.iter().find(|(k, _)| *k == "Accept");
                 let body = format!(
                     "auth={} accept={}",
-                    auth.map(|(_, v)| *v).unwrap_or("none"),
-                    accept.map(|(_, v)| *v).unwrap_or("none"),
+                    auth.map_or("none", |(_, v)| *v),
+                    accept.map_or("none", |(_, v)| *v),
                 );
                 Ok(HttpResponse {
                     status: 200, body, content_type: None, headers: HashMap::new(),
@@ -1398,7 +1396,7 @@ mod tests {
                     status: 301, body, content_type: None,
                     headers: {
                         let mut h = HashMap::new();
-                        h.insert("location".into(), "https://example.com/new".into());
+                        let _ = h.insert("location".into(), "https://example.com/new".into());
                         h
                     },
                 })

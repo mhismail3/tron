@@ -52,7 +52,7 @@ pub fn discover_hooks(config: &DiscoveryConfig) -> Vec<DiscoveredHook> {
         let home = config
             .user_home
             .clone()
-            .unwrap_or_else(|| crate::core::paths::home_dir());
+            .unwrap_or_else(crate::core::paths::home_dir);
         let path = PathBuf::from(home).join(USER_HOOK_DIR);
         scan_directory(&path, HookSource::User, &extensions, &mut discovered);
     }

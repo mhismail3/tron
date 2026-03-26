@@ -101,11 +101,11 @@ impl TokioProcessRunner {
                 + std::time::Duration::from_millis(timeout_ms);
 
             // Write initial stdin if provided
-            if let Some(ref data) = stdin_data {
-                if let Ok(mut writer) = pair.master.take_writer() {
-                    let _ = writer.write_all(data.as_bytes());
-                    let _ = writer.flush();
-                }
+            if let Some(ref data) = stdin_data
+                && let Ok(mut writer) = pair.master.take_writer()
+            {
+                let _ = writer.write_all(data.as_bytes());
+                let _ = writer.flush();
             }
 
             // Spawn a killer thread that will terminate the child if it exceeds the deadline.
@@ -114,7 +114,7 @@ impl TokioProcessRunner {
             let timed_out_flag_clone = timed_out_flag.clone();
             let child_id = child.process_id();
             let kill_deadline = deadline;
-            std::thread::spawn(move || {
+            let _ = std::thread::spawn(move || {
                 let remaining = kill_deadline.saturating_duration_since(std::time::Instant::now());
                 std::thread::sleep(remaining);
                 timed_out_flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -255,14 +255,14 @@ impl ProcessRunner for TokioProcessRunner {
         })?;
 
         // Write stdin data if provided
-        if let Some(ref stdin_data) = opts.stdin {
-            if let Some(mut stdin_pipe) = child.stdin.take() {
-                let data = stdin_data.clone();
-                tokio::spawn(async move {
-                    let _ = stdin_pipe.write_all(data.as_bytes()).await;
-                    let _ = stdin_pipe.shutdown().await;
-                });
-            }
+        if let Some(ref stdin_data) = opts.stdin
+            && let Some(mut stdin_pipe) = child.stdin.take()
+        {
+            let data = stdin_data.clone();
+            let _stdin_writer = tokio::spawn(async move {
+                let _ = stdin_pipe.write_all(data.as_bytes()).await;
+                let _ = stdin_pipe.shutdown().await;
+            });
         }
 
         let timeout = std::time::Duration::from_millis(opts.timeout_ms);
@@ -284,7 +284,7 @@ impl ProcessRunner for TokioProcessRunner {
                     let remaining = MAX_OUTPUT_BYTES as usize - total.len();
                     let to_read = chunk_buf.len().min(remaining);
                     match pipe.read(&mut chunk_buf[..to_read]).await {
-                        Ok(0) => break,
+                        Ok(0) | Err(_) => break,
                         Ok(n) => {
                             total.extend_from_slice(&chunk_buf[..n]);
                             // Stream chunk to output channel if available
@@ -293,7 +293,6 @@ impl ProcessRunner for TokioProcessRunner {
                                 let _ = tx.send(chunk_str.into_owned());
                             }
                         }
-                        Err(_) => break,
                     }
                 }
             }
@@ -596,7 +595,7 @@ mod tests {
         opts.stdin = Some("line1\nline2\nline3\n".into());
         let result = runner.run_command("wc -l", &opts).await.unwrap();
         assert_eq!(result.exit_code, 0);
-        assert!(result.stdout.trim().contains("3"));
+        assert!(result.stdout.trim().contains('3'));
     }
 
     #[tokio::test]

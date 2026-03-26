@@ -144,11 +144,8 @@ final class TronLogger: @unchecked Sendable {
         let timestamp = Self.isoFormatter.string(from: Date())
         let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(message)"
 
-        // Log to OS unified logging
+        // Log to OS unified logging (also appears in Xcode console)
         loggers[category]?.log(level: level.osLogType, "\(formattedMessage)")
-
-        // Also print to console for Xcode debugging
-        print(formattedMessage)
 
         // Add to category-specific buffer
         bufferLock.lock()

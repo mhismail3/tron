@@ -12,7 +12,7 @@ use crate::mcp::types::{McpContentBlock, McpToolDef, McpToolResult};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
 
-/// A TronTool backed by an MCP server tool.
+/// A `TronTool` backed by an MCP server tool.
 ///
 /// The tool name is prefixed with the server name to prevent collisions:
 /// e.g., `sqlite.query`, `github.create_issue`.
@@ -113,7 +113,7 @@ impl TronTool for McpToolBridge {
     }
 }
 
-/// Convert an MCP tool result to a TronToolResult.
+/// Convert an MCP tool result to a `TronToolResult`.
 pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &str) -> TronToolResult {
     let content = if result.content.is_empty() {
         "(no output)".to_string()
@@ -128,7 +128,7 @@ pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &st
                     text_parts.push(format!("[Image: {mime_type}, {} bytes]", data.len()));
                 }
                 McpContentBlock::Resource { resource } => {
-                    text_parts.push(format!("[Resource: {}]", resource));
+                    text_parts.push(format!("[Resource: {resource}]"));
                 }
             }
         }
@@ -153,7 +153,7 @@ pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &st
 pub fn create_bridge_tools(
     server_name: &str,
     tool_defs: &[McpToolDef],
-    client: Arc<McpClient>,
+    client: &Arc<McpClient>,
 ) -> Vec<Arc<dyn TronTool>> {
     tool_defs
         .iter()

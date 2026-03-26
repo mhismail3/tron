@@ -9,7 +9,7 @@ mod integration {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     use crate::mcp::client::{McpClient, McpErrorKind};
     use crate::mcp::server_manager::McpServerManager;
@@ -63,14 +63,11 @@ while IFS= read -r line; do
             ;;
     esac
 done
-"#,
-            tools_json = tools_json,
-            call_result_json = call_result_json,
-            protocol_version = protocol_version,
+"#
         )
     }
 
-    /// Create an McpServerConfig that launches a mock server via bash.
+    /// Create an `McpServerConfig` that launches a mock server via bash.
     fn mock_config(name: &str, script: &str) -> McpServerConfig {
         McpServerConfig {
             name: name.to_string(),
@@ -328,7 +325,7 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
         let tools = client.list_tools().await.unwrap();
-        let bridge_tools = create_bridge_tools("sqlite", &tools, client.clone());
+        let bridge_tools = create_bridge_tools("sqlite", &tools, &client);
 
         assert_eq!(bridge_tools.len(), 2);
         assert_eq!(bridge_tools[0].name(), "sqlite.query");
@@ -348,7 +345,7 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
         let tools = client.list_tools().await.unwrap();
-        let bridges = create_bridge_tools("github", &tools, client.clone());
+        let bridges = create_bridge_tools("github", &tools, &client);
 
         for bridge in &bridges {
             assert!(bridge.name().starts_with("github."), "Tool name should be prefixed: {}", bridge.name());
