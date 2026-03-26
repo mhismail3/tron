@@ -145,6 +145,7 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("mcp.disableServer", mcp::McpDisableServerHandler);
     registry.register("mcp.restartServer", mcp::McpRestartServerHandler);
     registry.register("mcp.reload", mcp::McpReloadHandler);
+    registry.register("mcp.listTools", mcp::McpListToolsHandler);
 
     // Skills
     registry.register("skill.list", skills::ListSkillsHandler);
@@ -493,8 +494,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            113,
-            "expected 113 methods (106 + 7 MCP), got {}",
+            114,
+            "expected 114 methods (106 + 8 MCP), got {}",
             reg.methods().len()
         );
     }

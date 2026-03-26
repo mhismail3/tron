@@ -225,6 +225,26 @@ impl MethodHandler for McpReloadHandler {
     }
 }
 
+// ─── mcp.listTools ───────────────────────────────────────────────────
+
+pub struct McpListToolsHandler;
+
+#[async_trait]
+impl MethodHandler for McpListToolsHandler {
+    #[instrument(skip(self, ctx), fields(method = "mcp.listTools"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let router = require_router(ctx)?;
+        let server_filter = opt_string(params.as_ref(), "server");
+
+        let guard = router.read().await;
+        let matches = guard.search("", server_filter.as_deref());
+
+        serde_json::to_value(matches).map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

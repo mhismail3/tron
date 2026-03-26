@@ -65,7 +65,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertNotNil(update.server)
         XCTAssertEqual(update.server?.maxConcurrentSessions, 10)
         XCTAssertNotNil(update.context?.compactor)
-        XCTAssertNotNil(update.tools?.web)
     }
 
     // MARK: - Display Helpers

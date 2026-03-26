@@ -9,6 +9,10 @@ struct MCPServersPage: View {
     @State private var loadError: String?
     @State private var showAddSheet = false
     @State private var actionInProgress: String?
+    @State private var expandedServer: String?
+    @State private var toolsByServer: [String: [MCPToolInfo]] = [:]
+    @State private var toolsLoading: String?
+    @State private var expandedTool: String?
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
@@ -50,24 +54,36 @@ struct MCPServersPage: View {
                         .listRowBackground(Color.clear)
                     }
                 } else {
-                    Section {
-                        ForEach(servers) { server in
+                    ForEach(servers) { server in
+                        Section {
                             MCPServerRow(
                                 server: server,
+                                isExpanded: expandedServer == server.name,
                                 actionInProgress: actionInProgress,
+                                onTap: { toggleExpansion(server) },
                                 onToggle: { toggleServer(server) },
                                 onRestart: { restartServer(server.name) },
                                 onRemove: { removeServer(server.name) }
                             )
-                        }
-                    } header: {
-                        HStack {
-                            Text("Servers")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                            Spacer()
-                            Text("\(servers.count)")
-                                .font(TronTypography.caption2)
-                                .foregroundStyle(.tronTextMuted)
+
+                            if expandedServer == server.name {
+                                MCPToolListSection(
+                                    tools: toolsByServer[server.name],
+                                    isLoading: toolsLoading == server.name,
+                                    expandedTool: $expandedTool
+                                )
+                            }
+                        } header: {
+                            if server.id == servers.first?.id {
+                                HStack {
+                                    Text("Servers")
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
+                                    Spacer()
+                                    Text("\(servers.count)")
+                                        .font(TronTypography.caption2)
+                                        .foregroundStyle(.tronTextMuted)
+                                }
+                            }
                         }
                     }
                 }
@@ -125,6 +141,33 @@ struct MCPServersPage: View {
         isLoading = false
     }
 
+    private func toggleExpansion(_ server: MCPServerStatus) {
+        withAnimation {
+            expandedTool = nil
+            if expandedServer == server.name {
+                expandedServer = nil
+            } else {
+                expandedServer = server.name
+                if toolsByServer[server.name] == nil && server.isConnected {
+                    loadTools(for: server.name)
+                }
+            }
+        }
+    }
+
+    private func loadTools(for serverName: String) {
+        toolsLoading = serverName
+        Task {
+            do {
+                let tools = try await rpcClient.mcp.listTools(server: serverName)
+                toolsByServer[serverName] = tools
+            } catch {
+                toolsByServer[serverName] = []
+            }
+            toolsLoading = nil
+        }
+    }
+
     private func addServer(_ params: MCPAddServerParams) async {
         actionInProgress = params.name
         do {
@@ -141,6 +184,8 @@ struct MCPServersPage: View {
         Task {
             do {
                 try await rpcClient.mcp.removeServer(name: name)
+                toolsByServer.removeValue(forKey: name)
+                if expandedServer == name { expandedServer = nil }
                 await loadStatus()
             } catch {
                 loadError = error.localizedDescription
@@ -155,6 +200,7 @@ struct MCPServersPage: View {
             do {
                 if server.isConnected {
                     try await rpcClient.mcp.disableServer(name: server.name)
+                    toolsByServer.removeValue(forKey: server.name)
                 } else {
                     try await rpcClient.mcp.enableServer(name: server.name)
                 }
@@ -171,7 +217,11 @@ struct MCPServersPage: View {
         Task {
             do {
                 let _ = try await rpcClient.mcp.restartServer(name: name)
+                toolsByServer.removeValue(forKey: name)
                 await loadStatus()
+                if expandedServer == name {
+                    loadTools(for: name)
+                }
             } catch {
                 loadError = error.localizedDescription
             }
@@ -184,7 +234,9 @@ struct MCPServersPage: View {
 
 private struct MCPServerRow: View {
     let server: MCPServerStatus
+    let isExpanded: Bool
     let actionInProgress: String?
+    let onTap: () -> Void
     let onToggle: () -> Void
     let onRestart: () -> Void
     let onRemove: () -> Void
@@ -195,12 +247,10 @@ private struct MCPServerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Health indicator
             Circle()
                 .fill(healthColor)
                 .frame(width: 8, height: 8)
 
-            // Server info
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name)
                     .font(TronTypography.subheadline)
@@ -210,9 +260,9 @@ private struct MCPServerRow: View {
                         .font(TronTypography.caption2)
                         .foregroundStyle(healthColor)
                     if server.toolCount > 0 {
-                        Text("· \(server.toolCount) tool\(server.toolCount == 1 ? "" : "s")")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.tronTextMuted)
+                        Text("\(server.toolCount)")
+                            .font(TronTypography.pillValue)
+                            .countBadge(.tronEmerald)
                     }
                     if let error = server.lastError {
                         Text("· \(error)")
@@ -230,6 +280,12 @@ private struct MCPServerRow: View {
                     .tint(.tronEmerald)
                     .scaleEffect(0.7)
             } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tronTextMuted)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
+
                 Menu {
                     if server.isConnected {
                         Button { onRestart() } label: {
@@ -248,13 +304,17 @@ private struct MCPServerRow: View {
                         Label("Remove", systemImage: "trash")
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronTextMuted)
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
     }
 
     private var healthColor: Color {
@@ -263,6 +323,139 @@ private struct MCPServerRow: View {
         case .degraded: .orange
         case .failed: .red.opacity(0.7)
         }
+    }
+}
+
+// MARK: - Tool List Section
+
+private struct MCPToolListSection: View {
+    let tools: [MCPToolInfo]?
+    let isLoading: Bool
+    @Binding var expandedTool: String?
+
+    var body: some View {
+        if isLoading {
+            HStack {
+                Spacer()
+                ProgressView()
+                    .tint(.tronEmerald)
+                    .scaleEffect(0.7)
+                Text("Loading tools...")
+                    .font(TronTypography.caption2)
+                    .foregroundStyle(.tronTextMuted)
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        } else if let tools, !tools.isEmpty {
+            ForEach(tools) { tool in
+                // Tool header row — always one list row
+                MCPToolHeaderRow(
+                    tool: tool,
+                    isExpanded: expandedTool == tool.id,
+                    onTap: {
+                        withAnimation {
+                            expandedTool = expandedTool == tool.id ? nil : tool.id
+                        }
+                    }
+                )
+
+                // Param rows — required first, then optional
+                if expandedTool == tool.id {
+                    let sorted = tool.params.sorted { $0.required && !$1.required }
+                    ForEach(sorted) { param in
+                        MCPParamRow(param: param)
+                    }
+                }
+            }
+        } else if tools != nil {
+            Text("No tools discovered")
+                .font(TronTypography.caption2)
+                .foregroundStyle(.tronTextMuted)
+                .padding(.vertical, 4)
+        }
+    }
+}
+
+// MARK: - Tool Header Row (single list row, fixed height)
+
+private struct MCPToolHeaderRow: View {
+    let tool: MCPToolInfo
+    let isExpanded: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.caption2)
+                    .foregroundStyle(.tronEmerald.opacity(0.7))
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tool.tool)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(.tronTextPrimary)
+                    if !tool.description.isEmpty {
+                        Text(tool.description)
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(.tronTextMuted)
+                            .lineLimit(isExpanded ? nil : 2)
+                    }
+                }
+
+                Spacer()
+
+                if !tool.params.isEmpty {
+                    Text("\(tool.params.count)")
+                        .font(TronTypography.pillValue)
+                        .countBadge(.tronSlate)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tronTextMuted.opacity(0.5))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Param Row (single list row, fixed height)
+
+private struct MCPParamRow: View {
+    let param: MCPToolParam
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(param.name)
+                    .font(TronTypography.caption2.monospaced())
+                    .foregroundStyle(.tronTextPrimary)
+                Text(param.paramType)
+                    .font(TronTypography.caption2)
+                    .foregroundStyle(.tronTextMuted)
+                if param.required {
+                    Text("required")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.tronEmerald.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+            if !param.description.isEmpty {
+                Text(param.description)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tronTextMuted.opacity(0.7))
+            }
+        }
+        .padding(.leading, 40)
+        .padding(.vertical, 2)
     }
 }
 

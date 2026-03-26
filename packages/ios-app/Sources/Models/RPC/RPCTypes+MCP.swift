@@ -60,3 +60,26 @@ struct MCPReloadResult: Decodable {
 struct MCPSuccessResult: Decodable {
     let success: Bool
 }
+
+// MARK: - MCP Tool Listing
+
+/// A tool discovered from an MCP server (matches Rust ToolMatch).
+struct MCPToolInfo: Decodable, Identifiable, Sendable {
+    let server: String
+    let tool: String
+    let description: String
+    let params: [MCPToolParam]
+    let score: Int
+
+    var id: String { "\(server).\(tool)" }
+}
+
+/// Parameter summary for an MCP tool (matches Rust ParamSummary).
+struct MCPToolParam: Decodable, Identifiable, Sendable {
+    let name: String
+    let paramType: String
+    let required: Bool
+    let description: String
+
+    var id: String { name }
+}

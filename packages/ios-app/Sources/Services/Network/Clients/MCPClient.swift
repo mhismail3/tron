@@ -63,6 +63,22 @@ final class MCPClient {
         )
     }
 
+    // MARK: - Tool Listing
+
+    func listTools(server: String? = nil) async throws -> [MCPToolInfo] {
+        let ws = try transport.requireConnection()
+
+        struct ListToolsParams: Encodable {
+            let server: String?
+        }
+
+        let result: [MCPToolInfo] = try await ws.send(
+            method: "mcp.listTools",
+            params: ListToolsParams(server: server)
+        )
+        return result
+    }
+
     // MARK: - Reload
 
     func reload() async throws -> MCPReloadResult {

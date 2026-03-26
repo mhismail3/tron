@@ -3,11 +3,14 @@
 //! Pure data structure with zero external dependencies. Indexes tools
 //! discovered from MCP servers and supports keyword search with scoring.
 
+use serde::Serialize;
+
 use crate::mcp::types::McpToolDef;
 use serde_json::Value;
 
 /// Summary of a single tool parameter (extracted from JSON Schema).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ParamSummary {
     pub name: String,
     pub param_type: String,
@@ -26,7 +29,8 @@ struct IndexedTool {
 }
 
 /// A search result with relevance score.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolMatch {
     pub server: String,
     pub tool: String,
