@@ -15,6 +15,8 @@ pub struct MemoryRetainedPayload {
     pub turn_number: i64,
     /// First line of the summary (used as title in UI).
     pub title: String,
+    /// Full summary text from the LLM summarizer.
+    pub summary: String,
     /// ISO 8601 timestamp.
     pub timestamp: String,
 }

@@ -167,6 +167,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
     let event_store4 = ctx.event_store.clone();
     let session_id_persist = session_id.clone();
     let title_persist = title.clone();
+    let summary_persist = summary_text.clone();
     let ts_persist = ts.clone();
     let retained_event_id = ctx
         .run_blocking("memory.retain.persist_event", move || {
@@ -178,6 +179,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
                         "sessionId": session_id_persist,
                         "turnNumber": turn_count,
                         "title": title_persist,
+                        "summary": summary_persist,
                         "timestamp": ts_persist,
                     }),
                     parent_id: None,

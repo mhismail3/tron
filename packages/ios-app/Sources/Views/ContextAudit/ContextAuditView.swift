@@ -69,11 +69,16 @@ struct ContextAuditView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                if isLoading {
-                    ProgressView()
-                        .tint(.tronEmerald)
-                } else {
-                    contentView
+                contentView
+
+                if isLoading && detailedSnapshot == nil {
+                    Color.clear
+                        .background(.ultraThinMaterial)
+                        .overlay {
+                            ProgressView()
+                                .tint(.tronEmerald)
+                        }
+                        .ignoresSafeArea()
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
