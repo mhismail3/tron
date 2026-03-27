@@ -15,8 +15,12 @@ pub struct ServerConfig {
     pub heartbeat_interval_secs: u64,
     /// Heartbeat timeout in seconds (close after this many missed pongs).
     pub heartbeat_timeout_secs: u64,
-    /// Max WebSocket message size in bytes.
+    /// Max WebSocket message size in bytes (default 2 MB).
     pub max_message_size: usize,
+    /// Rate limit: max requests per second per connection. 0 = disabled (default).
+    pub rate_limit_rps: u64,
+    /// Whether CORS is enabled (default false).
+    pub cors_enabled: bool,
 }
 
 impl Default for ServerConfig {
@@ -27,7 +31,9 @@ impl Default for ServerConfig {
             max_connections: 50,
             heartbeat_interval_secs: 30,
             heartbeat_timeout_secs: 90,
-            max_message_size: 16 * 1024 * 1024, // 16 MB
+            max_message_size: 2 * 1024 * 1024, // 2 MB (Phase 8)
+            rate_limit_rps: 0,   // disabled by default
+            cors_enabled: false,  // disabled by default
         }
     }
 }
@@ -69,7 +75,19 @@ mod tests {
     #[test]
     fn default_max_message_size() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.max_message_size, 16 * 1024 * 1024);
+        assert_eq!(cfg.max_message_size, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn default_rate_limit_disabled() {
+        let cfg = ServerConfig::default();
+        assert_eq!(cfg.rate_limit_rps, 0);
+    }
+
+    #[test]
+    fn default_cors_disabled() {
+        let cfg = ServerConfig::default();
+        assert!(!cfg.cors_enabled);
     }
 
     #[test]
@@ -83,6 +101,8 @@ mod tests {
         assert_eq!(back.heartbeat_interval_secs, cfg.heartbeat_interval_secs);
         assert_eq!(back.heartbeat_timeout_secs, cfg.heartbeat_timeout_secs);
         assert_eq!(back.max_message_size, cfg.max_message_size);
+        assert_eq!(back.rate_limit_rps, cfg.rate_limit_rps);
+        assert_eq!(back.cors_enabled, cfg.cors_enabled);
     }
 
     #[test]
@@ -94,6 +114,8 @@ mod tests {
             heartbeat_interval_secs: 15,
             heartbeat_timeout_secs: 45,
             max_message_size: 1024,
+            rate_limit_rps: 100,
+            cors_enabled: true,
         };
         assert_eq!(cfg.host, "0.0.0.0");
         assert_eq!(cfg.port, 8080);
@@ -101,11 +123,13 @@ mod tests {
         assert_eq!(cfg.heartbeat_interval_secs, 15);
         assert_eq!(cfg.heartbeat_timeout_secs, 45);
         assert_eq!(cfg.max_message_size, 1024);
+        assert_eq!(cfg.rate_limit_rps, 100);
+        assert!(cfg.cors_enabled);
     }
 
     #[test]
     fn deserialize_from_json_string() {
-        let json = r#"{"host":"10.0.0.1","port":3000,"max_connections":5,"heartbeat_interval_secs":10,"heartbeat_timeout_secs":30,"max_message_size":512}"#;
+        let json = r#"{"host":"10.0.0.1","port":3000,"max_connections":5,"heartbeat_interval_secs":10,"heartbeat_timeout_secs":30,"max_message_size":512,"rate_limit_rps":0,"cors_enabled":false}"#;
         let cfg: ServerConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.host, "10.0.0.1");
         assert_eq!(cfg.port, 3000);

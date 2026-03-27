@@ -1360,7 +1360,7 @@ mod tests {
     fn engine_all_default_rules_registered() {
         let engine = default_engine();
         let rules = engine.get_rules();
-        assert_eq!(rules.len(), 10);
+        assert_eq!(rules.len(), 11);
     }
 
     #[test]

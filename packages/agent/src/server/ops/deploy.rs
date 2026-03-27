@@ -41,6 +41,9 @@ pub struct RestartSentinel {
     /// Self-test results (populated after startup self-test runs).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub self_test: Option<SelfTestResult>,
+    /// SHA-256 hash of the deployed binary (for integrity verification).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub binary_sha256: Option<String>,
 }
 
 /// Result of the post-deploy startup self-test.
@@ -164,6 +167,33 @@ pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::R
     std::fs::create_dir_all(artifacts_dir)?;
     let json = serde_json::to_string_pretty(sentinel).map_err(io::Error::other)?;
     std::fs::write(artifacts_dir.join("restart-sentinel.json"), json)
+}
+
+/// Compute SHA-256 hash of a file (streaming, for large binaries).
+pub fn compute_binary_hash(path: &Path) -> io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Verify a deployed binary against its expected SHA-256 hash.
+///
+/// Returns `Ok(true)` if hash matches, `Ok(false)` on mismatch,
+/// `Err` if the binary can't be read.
+pub fn verify_binary_hash(binary_path: &Path, expected_hash: &str) -> io::Result<bool> {
+    let actual = compute_binary_hash(binary_path)?;
+    Ok(actual == expected_hash)
 }
 
 /// Mark a "restarting" sentinel as completed. Returns the updated sentinel
@@ -672,6 +702,7 @@ mod tests {
             completed_at: None,
             initiated_by: "test".into(),
             self_test: None,
+            binary_sha256: None,
         }
     }
 
@@ -1523,6 +1554,7 @@ mod tests {
                 }],
                 timestamp: "2026-03-09T10:00:30.000Z".into(),
             }),
+            binary_sha256: None,
         };
         let json = serde_json::to_string_pretty(&s).unwrap();
         let back: RestartSentinel = serde_json::from_str(&json).unwrap();
@@ -1575,6 +1607,7 @@ mod tests {
             completed_at: Some("2026-03-09T10:01:00.000Z".into()),
             initiated_by: "api".into(),
             self_test: None,
+            binary_sha256: None,
         };
         write_last_deployment_with_error(dir.path(), &s, "self-test failed: database").unwrap();
         let contents = std::fs::read_to_string(dir.path().join("last-deployment.json")).unwrap();
@@ -1608,5 +1641,60 @@ mod tests {
     fn disk_self_test_thresholds() {
         assert!(!disk_self_test_from_result(Ok(80)).passed);
         assert!(disk_self_test_from_result(Ok(500)).passed);
+    }
+
+    // ── Binary hash verification tests ──────────────────────────
+
+    #[test]
+    fn binary_hash_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("test-binary");
+        std::fs::write(&bin, b"hello world binary content").unwrap();
+
+        let hash = compute_binary_hash(&bin).unwrap();
+        assert!(verify_binary_hash(&bin, &hash).unwrap());
+    }
+
+    #[test]
+    fn binary_hash_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("test-binary");
+        std::fs::write(&bin, b"original content").unwrap();
+
+        let hash = compute_binary_hash(&bin).unwrap();
+        std::fs::write(&bin, b"tampered content").unwrap();
+        assert!(!verify_binary_hash(&bin, &hash).unwrap());
+    }
+
+    #[test]
+    fn binary_hash_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = compute_binary_hash(&dir.path().join("nonexistent"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sentinel_with_hash_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("binary");
+        std::fs::write(&bin, b"test").unwrap();
+        let hash = compute_binary_hash(&bin).unwrap();
+
+        let mut s = sample_sentinel();
+        s.binary_sha256 = Some(hash.clone());
+        write_sentinel(dir.path(), &s).unwrap();
+
+        let loaded = read_sentinel(dir.path()).unwrap();
+        assert_eq!(loaded.binary_sha256.unwrap(), hash);
+    }
+
+    #[test]
+    fn sentinel_without_hash_backwards_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = sample_sentinel();
+        write_sentinel(dir.path(), &s).unwrap();
+
+        let loaded = read_sentinel(dir.path()).unwrap();
+        assert!(loaded.binary_sha256.is_none());
     }
 }

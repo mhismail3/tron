@@ -213,6 +213,8 @@ pub struct SessionSettings {
     pub isolation: IsolationSettings,
     /// Default chat session settings.
     pub chat: ChatSettings,
+    /// TTL in seconds for idle session cache eviction. 0 = evict all idle immediately.
+    pub cache_ttl_secs: u64,
 }
 
 impl Default for SessionSettings {
@@ -221,6 +223,7 @@ impl Default for SessionSettings {
             worktree_timeout_ms: 30_000,
             isolation: IsolationSettings::default(),
             chat: ChatSettings::default(),
+            cache_ttl_secs: 3600,
         }
     }
 }

@@ -81,6 +81,7 @@ impl PromptRunCleanup {
     }
 
     fn release(&mut self) {
+        self.session_manager.clear_processing(&self.session_id);
         self.session_manager.invalidate_session(&self.session_id);
         let _ = self.started_run.take();
     }
@@ -194,6 +195,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         device_context,
     } = request;
 
+    let _ = session_manager.mark_processing(&session_id);
     let mut run_cleanup =
         PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
     let cancel_token = run_cleanup.cancel_token();

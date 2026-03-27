@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::mcp::types::{
     JsonRpcRequest, JsonRpcResponse, McpServerConfig, McpToolDef, McpToolResult,
@@ -147,6 +147,30 @@ impl McpClient {
             kind: McpErrorKind::Protocol("missing 'command'".into()),
             message: "MCP server config must have 'command' for stdio transport".into(),
         })?;
+
+        if command.trim().is_empty() {
+            return Err(McpError {
+                server: config.name.clone(),
+                kind: McpErrorKind::Protocol("empty command".into()),
+                message: "MCP server 'command' must not be empty".into(),
+            });
+        }
+
+        if command.contains("..") {
+            warn!(
+                server = %config.name,
+                command,
+                "MCP server command contains path traversal"
+            );
+        }
+
+        let redacted_args = redact_args(&config.args);
+        info!(
+            server = %config.name,
+            command,
+            args = %redacted_args,
+            "spawning MCP server"
+        );
 
         let mut cmd = Command::new(command);
         for arg in &config.args {
@@ -581,6 +605,22 @@ impl McpClient {
     }
 }
 
+/// Redact secret-looking values in MCP server arguments for safe logging.
+fn redact_args(args: &[String]) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+
+    static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(api[_-]?key|secret|token|password|auth)([=:]\s*)(\S+)").unwrap()
+    });
+
+    let redacted: Vec<String> = args
+        .iter()
+        .map(|arg| SECRET_PATTERN.replace_all(arg, "$1$2****").to_string())
+        .collect();
+    format!("[{}]", redacted.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +705,111 @@ mod tests {
         };
         assert!(!err.is_retryable());
         assert!(!err.requires_restart());
+    }
+
+    // ── MCP command validation tests ────────────────────────────
+
+    #[tokio::test]
+    async fn empty_command_rejected() {
+        let config = McpServerConfig {
+            name: "test".into(),
+            command: Some("".into()),
+            args: vec![],
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 5000,
+            enabled: true,
+        };
+        let err = McpClient::connect_stdio(&config).await.unwrap_err();
+        assert!(matches!(err.kind, McpErrorKind::Protocol(_)));
+        assert!(err.message.contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn whitespace_command_rejected() {
+        let config = McpServerConfig {
+            name: "test".into(),
+            command: Some("   ".into()),
+            args: vec![],
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 5000,
+            enabled: true,
+        };
+        let err = McpClient::connect_stdio(&config).await.unwrap_err();
+        assert!(matches!(err.kind, McpErrorKind::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn missing_command_rejected() {
+        let config = McpServerConfig {
+            name: "test".into(),
+            command: None,
+            args: vec![],
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 5000,
+            enabled: true,
+        };
+        let err = McpClient::connect_stdio(&config).await.unwrap_err();
+        assert!(matches!(err.kind, McpErrorKind::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn nonexistent_binary_returns_clear_error() {
+        let config = McpServerConfig {
+            name: "test".into(),
+            command: Some("__tron_nonexistent_binary_12345__".into()),
+            args: vec![],
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 5000,
+            enabled: true,
+        };
+        let err = McpClient::connect_stdio(&config).await.unwrap_err();
+        assert!(
+            err.message.contains("Ensure") || err.message.contains("Failed to spawn"),
+            "Error should guide user: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn redact_args_masks_api_key() {
+        let args = vec!["--api-key=sk-ant-api03-xxxx".into()];
+        let result = redact_args(&args);
+        assert!(result.contains("****"));
+        assert!(!result.contains("sk-ant-api03"));
+    }
+
+    #[test]
+    fn redact_args_masks_secret() {
+        let args = vec!["--secret=mysupersecretvalue".into()];
+        let result = redact_args(&args);
+        assert!(result.contains("****"));
+        assert!(!result.contains("mysupersecretvalue"));
+    }
+
+    #[test]
+    fn redact_args_masks_token() {
+        let args = vec!["--token=ghp_xxxxxxxxxxxxxxxxxxxx".into()];
+        let result = redact_args(&args);
+        assert!(result.contains("****"));
+        assert!(!result.contains("ghp_"));
+    }
+
+    #[test]
+    fn redact_args_preserves_safe_args() {
+        let args = vec!["--port".into(), "8080".into(), "--verbose".into()];
+        let result = redact_args(&args);
+        assert!(result.contains("--port"));
+        assert!(result.contains("8080"));
+        assert!(result.contains("--verbose"));
+    }
+
+    #[test]
+    fn redact_args_empty() {
+        let result = redact_args(&[]);
+        assert_eq!(result, "[]");
     }
 }

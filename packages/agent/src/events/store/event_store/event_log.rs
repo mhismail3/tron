@@ -13,6 +13,21 @@ use crate::events::types::EventType;
 use crate::events::types::base::SessionEvent;
 
 use super::{AppendOptions, EventStore};
+use crate::events::redaction::redact_sensitive_content;
+
+/// Recursively redact sensitive strings in a JSON value.
+fn redact_json_strings(value: &Value) -> Value {
+    match value {
+        Value::String(s) => Value::String(redact_sensitive_content(s)),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), redact_json_strings(v)))
+                .collect(),
+        ),
+        Value::Array(arr) => Value::Array(arr.iter().map(redact_json_strings).collect()),
+        other => other.clone(),
+    }
+}
 
 impl EventStore {
     /// Append an event to a session.
@@ -43,6 +58,8 @@ impl EventStore {
         let event_id = format!("evt_{}", Uuid::now_v7());
         let now = chrono::Utc::now().to_rfc3339();
 
+        let payload = redact_json_strings(&opts.payload);
+
         let event = SessionEvent {
             id: event_id,
             session_id: opts.session_id.to_string(),
@@ -52,7 +69,7 @@ impl EventStore {
             event_type: opts.event_type,
             sequence,
             checksum: None,
-            payload: opts.payload.clone(),
+            payload,
         };
 
         EventRepo::insert(&tx, &event)?;

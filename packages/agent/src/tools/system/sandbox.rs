@@ -65,6 +65,17 @@ pub struct SandboxWorkspace {
     cleanup: bool,
 }
 
+impl Drop for SandboxWorkspace {
+    fn drop(&mut self) {
+        if self.cleanup {
+            // Remove .active marker synchronously to prevent leak on early return/panic.
+            // The directory itself is left for cleanup_stale_sandboxes (async removal).
+            let marker = self.path.join(".active");
+            let _ = std::fs::remove_file(marker);
+        }
+    }
+}
+
 impl SandboxWorkspace {
     /// Create a new lightweight sandbox workspace.
     pub async fn create(config: &SandboxConfig) -> Result<Self, ToolError> {
@@ -113,6 +124,10 @@ impl SandboxWorkspace {
             }
         }
 
+        // Write .active marker to prevent cleanup_stale_sandboxes from removing this sandbox
+        let marker = sandbox_path.join(".active");
+        let _ = tokio::fs::write(&marker, b"").await;
+
         Ok(Self {
             path: sandbox_path,
             cleanup: true,
@@ -126,6 +141,10 @@ impl SandboxWorkspace {
 
     /// Explicitly clean up the sandbox directory.
     pub async fn cleanup(self) -> Result<(), ToolError> {
+        // Remove .active marker before cleanup
+        let marker = self.path.join(".active");
+        let _ = tokio::fs::remove_file(&marker).await;
+
         if self.path.exists() {
             tokio::fs::remove_dir_all(&self.path)
                 .await
@@ -172,10 +191,10 @@ pub fn build_docker_command(command: &str, config: &DockerSandboxConfig) -> Stri
     // Image
     parts.push(config.image.clone());
 
-    // Command
+    // Command — escape single quotes to prevent shell injection
     parts.push("sh".to_string());
     parts.push("-c".to_string());
-    parts.push(format!("'{command}'"));
+    parts.push(format!("'{}'", command.replace('\'', "'\\''")));
 
     parts.join(" ")
 }
@@ -253,6 +272,11 @@ pub async fn cleanup_stale_sandboxes() {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name().to_string_lossy().to_string();
             if !name.starts_with("sandbox-") {
+                continue;
+            }
+            // Skip sandboxes with .active marker (still in use)
+            if entry.path().join(".active").exists() {
+                debug!(path = %entry.path().display(), "skipping active sandbox");
                 continue;
             }
             if let Ok(meta) = entry.metadata().await
@@ -394,6 +418,71 @@ mod tests {
         assert!(!path.exists());
     }
 
+    // ── Docker command shell injection tests ───────────────────
+
+    #[test]
+    fn docker_command_escapes_single_quotes() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo 'hello world'", &config);
+        assert!(cmd.contains("'echo '\\''hello world'\\'''"));
+    }
+
+    #[test]
+    fn docker_command_prevents_injection() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("'; rm -rf /; echo '", &config);
+        // Each single quote in the input is escaped as '\'' (end-quote, literal-quote, start-quote)
+        // Full sh -c arg: ''\''; rm -rf /; echo '\'''
+        let expected_arg = "''\\''; rm -rf /; echo '\\'''";
+        assert!(
+            cmd.ends_with(&format!("sh -c {expected_arg}")),
+            "Expected injection-safe escaping, got: {cmd}"
+        );
+    }
+
+    #[test]
+    fn docker_command_backslashes_unchanged() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo \"foo\\\\bar\"", &config);
+        assert!(cmd.contains("foo\\\\bar"));
+    }
+
+    #[test]
+    fn docker_command_double_quotes_pass_through() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo \"hello\"", &config);
+        assert!(cmd.contains("echo \"hello\""));
+    }
+
+    #[test]
+    fn docker_command_dollar_signs_preserved() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo $HOME", &config);
+        assert!(cmd.contains("echo $HOME"));
+    }
+
+    #[test]
+    fn docker_command_empty_string() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("", &config);
+        assert!(cmd.contains("sh -c ''"));
+    }
+
+    #[test]
+    fn docker_command_newlines_preserved() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo foo\nbar", &config);
+        assert!(cmd.contains("echo foo\nbar"));
+    }
+
+    #[test]
+    fn docker_command_null_bytes_handled() {
+        let config = DockerSandboxConfig::default();
+        let cmd = build_docker_command("echo foo\0bar", &config);
+        // Should not panic — null bytes pass through
+        assert!(cmd.contains("sh -c"));
+    }
+
     #[tokio::test]
     async fn sandbox_mounts_readonly_dir() {
         // Create a temp directory to mount
@@ -420,6 +509,29 @@ mod tests {
 
         workspace.cleanup().await.unwrap();
         let _ = tokio::fs::remove_dir_all(&mount_dir).await;
+    }
+
+    #[tokio::test]
+    async fn sandbox_creates_active_marker() {
+        let workspace = SandboxWorkspace::create(&SandboxConfig::default())
+            .await
+            .unwrap();
+        let marker = workspace.path.join(".active");
+        assert!(marker.exists(), ".active marker should exist after create");
+        workspace.cleanup().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sandbox_cleanup_removes_marker() {
+        let workspace = SandboxWorkspace::create(&SandboxConfig::default())
+            .await
+            .unwrap();
+        let path = workspace.path.clone();
+        let marker = path.join(".active");
+        assert!(marker.exists());
+        workspace.cleanup().await.unwrap();
+        assert!(!marker.exists());
+        assert!(!path.exists());
     }
 
     #[tokio::test]

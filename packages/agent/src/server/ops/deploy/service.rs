@@ -17,8 +17,8 @@ use crate::server::websocket::broadcast::BroadcastManager;
 
 use super::{
     DeployRestartRequest, DeployRestartResponse, DeployStatusResponse, RestartSentinel,
-    atomic_binary_install, git_head_commit, read_deployed_commit_async, read_sentinel_async,
-    resolve_source_binary, resolve_workspace_root, write_sentinel,
+    atomic_binary_install, compute_binary_hash, git_head_commit, read_deployed_commit_async,
+    read_sentinel_async, resolve_source_binary, resolve_workspace_root, write_sentinel,
 };
 
 pub(crate) struct DeployService {
@@ -156,6 +156,7 @@ impl DeployService {
                 ))
             })?;
 
+        let binary_hash = compute_binary_hash(&self.binary_path).ok();
         let sentinel = RestartSentinel {
             action: "deploy".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -165,6 +166,7 @@ impl DeployService {
             completed_at: None,
             initiated_by: req.session_id.clone().unwrap_or_else(|| "api".to_string()),
             self_test: None,
+            binary_sha256: binary_hash,
         };
         let deploy_dir = self.deploy_dir.clone();
         let sentinel_for_write = sentinel.clone();

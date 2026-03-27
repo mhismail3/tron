@@ -8,6 +8,9 @@ pub const MAX_PROMPT_LENGTH: usize = 1_048_576;
 /// Maximum general string parameter length (8 KB).
 pub const MAX_PARAM_LENGTH: usize = 8_192;
 
+/// Maximum JSON nesting depth for incoming RPC payloads.
+pub const MAX_JSON_DEPTH: usize = 128;
+
 /// Validate that a string parameter does not exceed `max_len` bytes.
 pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<(), RpcError> {
     if value.len() > max_len {
@@ -19,6 +22,36 @@ pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<
         });
     }
     Ok(())
+}
+
+/// Validate that parsed JSON does not exceed the maximum nesting depth.
+///
+/// Uses `serde_json`'s default recursion limit of 128 as a safety net,
+/// but this function provides explicit validation with a clear error message.
+pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Result<(), RpcError> {
+    fn measure_depth(v: &serde_json::Value, current: usize, max: usize) -> Result<(), ()> {
+        if current > max {
+            return Err(());
+        }
+        match v {
+            serde_json::Value::Object(map) => {
+                for val in map.values() {
+                    measure_depth(val, current + 1, max)?;
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for val in arr {
+                    measure_depth(val, current + 1, max)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    measure_depth(value, 0, max_depth).map_err(|()| RpcError::InvalidParams {
+        message: format!("JSON nesting depth exceeds maximum of {max_depth}"),
+    })
 }
 
 /// Sanitize an error message for client consumption.
@@ -100,5 +133,81 @@ mod tests {
         };
         let sanitized = sanitize_error_message(&err);
         assert!(sanitized.contains("abc"));
+    }
+
+    // ── JSON depth validation tests ─────────────────────────────
+
+    fn nested_object(depth: usize) -> serde_json::Value {
+        let mut v = serde_json::json!({"leaf": true});
+        for _ in 0..depth {
+            v = serde_json::json!({"nested": v});
+        }
+        v
+    }
+
+    fn nested_array(depth: usize) -> serde_json::Value {
+        let mut v = serde_json::json!(42);
+        for _ in 0..depth {
+            v = serde_json::json!([v]);
+        }
+        v
+    }
+
+    #[test]
+    fn depth_1_passes() {
+        let v = serde_json::json!({"key": "value"});
+        assert!(validate_json_depth(&v, MAX_JSON_DEPTH).is_ok());
+    }
+
+    #[test]
+    fn depth_10_passes() {
+        assert!(validate_json_depth(&nested_object(10), MAX_JSON_DEPTH).is_ok());
+    }
+
+    #[test]
+    fn depth_64_passes() {
+        assert!(validate_json_depth(&nested_object(64), MAX_JSON_DEPTH).is_ok());
+    }
+
+    #[test]
+    fn depth_128_rejected() {
+        let deep = nested_object(130);
+        assert!(validate_json_depth(&deep, MAX_JSON_DEPTH).is_err());
+    }
+
+    #[test]
+    fn depth_200_rejected() {
+        let deep = nested_object(200);
+        let result = validate_json_depth(&deep, MAX_JSON_DEPTH);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("128"));
+    }
+
+    #[test]
+    fn deep_arrays_caught() {
+        let deep = nested_array(150);
+        assert!(validate_json_depth(&deep, MAX_JSON_DEPTH).is_err());
+    }
+
+    #[test]
+    fn flat_many_keys_passes() {
+        let mut map = serde_json::Map::new();
+        for i in 0..1000 {
+            map.insert(format!("key_{i}"), serde_json::json!(i));
+        }
+        let v = serde_json::Value::Object(map);
+        assert!(validate_json_depth(&v, MAX_JSON_DEPTH).is_ok());
+    }
+
+    #[test]
+    fn null_passes() {
+        assert!(validate_json_depth(&serde_json::Value::Null, MAX_JSON_DEPTH).is_ok());
+    }
+
+    #[test]
+    fn primitives_pass() {
+        assert!(validate_json_depth(&serde_json::json!(42), MAX_JSON_DEPTH).is_ok());
+        assert!(validate_json_depth(&serde_json::json!("hello"), MAX_JSON_DEPTH).is_ok());
+        assert!(validate_json_depth(&serde_json::json!(true), MAX_JSON_DEPTH).is_ok());
     }
 }

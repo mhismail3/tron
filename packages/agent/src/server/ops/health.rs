@@ -378,6 +378,7 @@ mod tests {
             completed_at: None,
             initiated_by: "api".into(),
             self_test: None,
+            binary_sha256: None,
         }
     }
 

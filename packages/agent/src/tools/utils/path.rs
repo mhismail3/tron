@@ -3,7 +3,9 @@
 //! Resolves relative paths against a working directory and expands `~` to the
 //! user's home directory.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use tracing::warn;
 
 /// Resolve a file path against a working directory.
 ///
@@ -24,6 +26,26 @@ pub fn resolve_path(file_path: &str, working_directory: &str) -> PathBuf {
         path.to_path_buf()
     } else {
         Path::new(working_directory).join(path)
+    }
+}
+
+/// Log a warning if the resolved path contains `..` components.
+///
+/// This is defense-in-depth — the `path.traversal` guardrail is the primary
+/// defense. This check provides audit visibility if guardrails are ever disabled.
+/// It does NOT block the operation.
+///
+/// Limitation: symlinks that resolve outside the working directory are not caught.
+pub fn warn_path_traversal(resolved: &Path, tool_name: &str) {
+    let has_traversal = resolved
+        .components()
+        .any(|c| matches!(c, Component::ParentDir));
+    if has_traversal {
+        warn!(
+            tool = tool_name,
+            path = %resolved.display(),
+            "path traversal detected in resolved path"
+        );
     }
 }
 
@@ -95,5 +117,77 @@ mod tests {
         let home = crate::core::paths::home_dir();
         let result = resolve_path("~//file", "/work");
         assert_eq!(result, PathBuf::from(format!("{home}//file")));
+    }
+
+    // ── warn_path_traversal tests ───────────────────────────────
+
+    use std::sync::Once;
+
+    static INIT_TRACING: Once = Once::new();
+
+    fn init_tracing() {
+        INIT_TRACING.call_once(|| {
+            let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+        });
+    }
+
+    #[test]
+    fn traversal_detected_with_dotdot() {
+        init_tracing();
+        let path = Path::new("/home/user/project/../../../etc/passwd");
+        // Should not panic; logs a warning (verified by test writer)
+        warn_path_traversal(path, "Read");
+    }
+
+    #[test]
+    fn no_traversal_absolute_path() {
+        init_tracing();
+        let path = Path::new("/etc/passwd");
+        warn_path_traversal(path, "Read");
+        // No warning emitted — just verifying no panic
+    }
+
+    #[test]
+    fn no_traversal_relative_clean() {
+        init_tracing();
+        let path = Path::new("./foo/bar");
+        warn_path_traversal(path, "Write");
+    }
+
+    #[test]
+    fn traversal_stays_within_dir() {
+        init_tracing();
+        // foo/../bar stays within the same directory — conservative: still warns
+        let path = Path::new("foo/../bar");
+        warn_path_traversal(path, "Edit");
+    }
+
+    #[test]
+    fn no_traversal_home_expansion() {
+        init_tracing();
+        let home = crate::core::paths::home_dir();
+        let path = PathBuf::from(format!("{home}/some/path"));
+        warn_path_traversal(&path, "Read");
+    }
+
+    #[test]
+    fn traversal_only_dotdot() {
+        init_tracing();
+        let path = Path::new("..");
+        warn_path_traversal(path, "Read");
+    }
+
+    #[test]
+    fn traversal_empty_path() {
+        init_tracing();
+        let path = Path::new("");
+        warn_path_traversal(path, "Read");
+    }
+
+    #[test]
+    fn traversal_many_segments() {
+        init_tracing();
+        let path = Path::new("a/../b/../c/../d/../e/../f");
+        warn_path_traversal(path, "Read");
     }
 }

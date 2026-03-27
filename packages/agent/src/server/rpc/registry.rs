@@ -55,6 +55,23 @@ impl MethodRegistry {
             );
         };
 
+        // Validate JSON depth before dispatching to handler
+        if let Some(ref params) = request.params {
+            if let Err(err) = crate::server::rpc::validation::validate_json_depth(
+                params,
+                crate::server::rpc::validation::MAX_JSON_DEPTH,
+            ) {
+                counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "json_depth").increment(1);
+                let body = err.to_error_body();
+                return RpcResponse {
+                    id: request.id,
+                    success: false,
+                    result: None,
+                    error: Some(body),
+                };
+            }
+        }
+
         let start = std::time::Instant::now();
         let result =
             tokio::time::timeout(Self::HANDLER_TIMEOUT, handler.handle(request.params, ctx)).await;

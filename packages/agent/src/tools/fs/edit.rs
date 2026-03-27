@@ -13,7 +13,7 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
 use crate::tools::utils::diff::generate_unified_diff;
 use crate::tools::utils::fs_errors::format_fs_error;
-use crate::tools::utils::path::resolve_path;
+use crate::tools::utils::path::{resolve_path, warn_path_traversal};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::validate_required_string;
 
@@ -111,6 +111,7 @@ impl TronTool for EditTool {
             .unwrap_or(false);
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
+        warn_path_traversal(&resolved, "Edit");
 
         // Pre-read metadata size check (fail-open: if metadata() errors, proceed)
         if let Ok(meta) = self.fs.metadata(&resolved).await {

@@ -65,6 +65,7 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         path_hidden_mkdir(),
         bash_timeout(),
         bash_long_timeout_warning(),
+        command_substitution_warning(),
     ]
 }
 
@@ -86,11 +87,16 @@ fn core_destructive_commands() -> GuardrailRule {
         },
         target_argument: "command".into(),
         // INVARIANT: All patterns below are compile-time literals, validated by tests.
+        // INVARIANT: Regex-based detection is defense-in-depth, not a security boundary.
+        // Command substitution ($(...)), eval, and variable expansion bypass these checks.
         patterns: vec![
-            // rm -rf / or rm -rf /* (with or without sudo)
-            Regex::new(r"(?i)^(sudo\s+)?rm\s+(-rf?|--force)\s+/\s*$").unwrap(),
+            // rm -rf / or rm -rf /* (with or without sudo, short flags)
             Regex::new(r"(?i)^(sudo\s+)?rm\s+-rf?\s+/\s*$").unwrap(),
             Regex::new(r"(?i)(sudo\s+)?rm\s+-rf?\s+/\*").unwrap(),
+            // rm with long-form flags targeting root /
+            Regex::new(r"(?i)^(sudo\s+)?rm\s+(--recursive\s+--force|--force\s+--recursive)\s+/\s*$").unwrap(),
+            // rm with mixed short/long flags targeting root /
+            Regex::new(r"(?i)^(sudo\s+)?rm\s+(-r\s+--force|--force\s+-r|-f\s+--recursive|--recursive\s+-f)\s+/\s*$").unwrap(),
             // Fork bomb
             Regex::new(r"^:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;\s*:").unwrap(),
             // dd to raw devices
@@ -101,8 +107,13 @@ fn core_destructive_commands() -> GuardrailRule {
             Regex::new(r"(?i)^(sudo\s+)?mkfs\.").unwrap(),
             // chmod 777 on root
             Regex::new(r"(?i)^(sudo\s+)?chmod\s+777\s+/\s*$").unwrap(),
-            // Dangerous system modifications with sudo
-            Regex::new(r"(?i)^sudo\s+rm\s+-rf?\s+/(usr|var|etc|boot|bin|sbin|lib)\b").unwrap(),
+            // rm -rf on critical system directories (with or without sudo)
+            Regex::new(r"(?i)(sudo\s+)?rm\s+-[a-z]*rf[a-z]*\s+/(usr|var|etc|boot|bin|sbin|lib|home|opt|root|srv)\b").unwrap(),
+            Regex::new(r"(?i)(sudo\s+)?rm\s+-[a-z]*fr[a-z]*\s+/(usr|var|etc|boot|bin|sbin|lib|home|opt|root|srv)\b").unwrap(),
+            // rm with long-form flags targeting critical dirs
+            Regex::new(r"(?i)(sudo\s+)?rm\s+(--recursive\s+--force|--force\s+--recursive)\s+/(usr|var|etc|boot|bin|sbin|lib|home|opt|root|srv)\b").unwrap(),
+            // rm with mixed short/long flags targeting critical dirs
+            Regex::new(r"(?i)(sudo\s+)?rm\s+(-r\s+--force|--force\s+-r|-f\s+--recursive|--recursive\s+-f)\s+/(usr|var|etc|boot|bin|sbin|lib|home|opt|root|srv)\b").unwrap(),
         ],
     })
 }
@@ -367,6 +378,37 @@ fn bash_long_timeout_warning() -> GuardrailRule {
     })
 }
 
+/// Standard rule: Warn on command substitution containing destructive commands.
+///
+/// INVARIANT: This is a WARNING, not a BLOCK. Command substitution is common
+/// in legitimate shell usage. We only warn when the substitution output
+/// appears to construct a destructive command.
+fn command_substitution_warning() -> GuardrailRule {
+    GuardrailRule::Pattern(PatternRule {
+        base: RuleBase {
+            id: "bash.command-substitution".into(),
+            name: "Command Substitution Warning".into(),
+            description: "Warns when command substitution may construct destructive commands"
+                .into(),
+            severity: Severity::Warn,
+            scope: Scope::Tool,
+            tier: RuleTier::Standard,
+            tools: vec!["Bash".into()],
+            priority: 300,
+            enabled: true,
+            tags: vec!["security".into()],
+        },
+        target_argument: "command".into(),
+        patterns: vec![
+            // $(cmd) or `cmd` containing rm/dd/mkfs followed by dangerous target
+            Regex::new(r"(?i)(\$\(|`).*\b(rm|dd|mkfs)\b.*(\)|`).*\s+-[a-z]*rf?.*\s+/").unwrap(),
+            Regex::new(r"(?i)(\$\(|`)\s*(which\s+)?(rm|dd|mkfs)\b.*(\)|`).*\s+/").unwrap(),
+            // eval with destructive command
+            Regex::new(r#"(?i)\beval\s+["'].*\brm\s+-[a-z]*rf?.*\s+/"#).unwrap(),
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,7 +428,7 @@ mod tests {
     #[test]
     fn test_default_rules_count() {
         let rules = default_rules();
-        assert_eq!(rules.len(), 10); // 6 core + 4 standard
+        assert_eq!(rules.len(), 11); // 6 core + 5 standard
     }
 
     #[test]
@@ -582,6 +624,142 @@ mod tests {
         let ctx = make_ctx("Bash", serde_json::json!({"command": "ls"}));
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "No timeout param should not warn");
+    }
+
+    // ── destructive command hardening tests ────────────────────
+
+    #[test]
+    fn destructive_blocks_rm_long_flags_root() {
+        let rule = find_rule("core.destructive-commands");
+        let cases = [
+            "rm --recursive --force /",
+            "rm --force --recursive /",
+            "sudo rm --recursive --force /",
+        ];
+        for cmd in cases {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(result.triggered, "Should block: {cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_blocks_rm_mixed_flags_root() {
+        let rule = find_rule("core.destructive-commands");
+        let cases = [
+            "rm -r --force /",
+            "rm --recursive -f /",
+            "rm --force -r /",
+            "rm -f --recursive /",
+        ];
+        for cmd in cases {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(result.triggered, "Should block: {cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_blocks_rm_rf_critical_dirs() {
+        let rule = find_rule("core.destructive-commands");
+        let cases = [
+            "rm -rf /home",
+            "rm -rf /opt",
+            "rm -rf /boot",
+            "rm -rf /root",
+            "rm -rf /srv",
+            "rm -rf /usr/local",
+            "sudo rm -rf /home",
+        ];
+        for cmd in cases {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(result.triggered, "Should block: {cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_blocks_rm_long_flags_critical_dirs() {
+        let rule = find_rule("core.destructive-commands");
+        let cases = [
+            "rm --recursive --force /home",
+            "rm --force --recursive /usr",
+            "rm -r --force /etc",
+            "rm --recursive -f /var",
+        ];
+        for cmd in cases {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(result.triggered, "Should block: {cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_blocks_extra_whitespace() {
+        let rule = find_rule("core.destructive-commands");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "rm   -rf   /"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Should block rm with extra whitespace");
+    }
+
+    #[test]
+    fn destructive_allows_safe_commands() {
+        let rule = find_rule("core.destructive-commands");
+        let safe = [
+            "rm -rf /tmp/build",
+            "rm -rf ./node_modules",
+            "rm file.txt",
+            "rm -rf ~/project/build",
+            "grep -r \"force\" /etc/config",
+            "docker rm -f container_name",
+        ];
+        for cmd in safe {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(!result.triggered, "Should NOT block: {cmd}");
+        }
+    }
+
+    // ── command substitution warning tests ─────────────────────
+
+    #[test]
+    fn command_sub_warns_dollar_paren_rm() {
+        let rule = find_rule("bash.command-substitution");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "$(which rm) -rf /"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Should warn on $(which rm) -rf /");
+        assert_eq!(result.severity, Some(Severity::Warn));
+    }
+
+    #[test]
+    fn command_sub_warns_eval_rm() {
+        let rule = find_rule("bash.command-substitution");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "eval \"rm -rf /\""}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Should warn on eval rm -rf /");
+    }
+
+    #[test]
+    fn command_sub_warns_backtick_rm() {
+        let rule = find_rule("bash.command-substitution");
+        let ctx = make_ctx("Bash", serde_json::json!({"command": "`which rm` -rf /"}));
+        let result = rule.evaluate(&ctx, None);
+        assert!(result.triggered, "Should warn on `which rm` -rf /");
+    }
+
+    #[test]
+    fn command_sub_allows_benign_subst() {
+        let rule = find_rule("bash.command-substitution");
+        let safe = [
+            "echo $(date)",
+            "$(which python) script.py",
+            "export PATH=$(brew --prefix)/bin:$PATH",
+        ];
+        for cmd in safe {
+            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let result = rule.evaluate(&ctx, None);
+            assert!(!result.triggered, "Should NOT warn: {cmd}");
+        }
     }
 
     #[test]

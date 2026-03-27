@@ -14,7 +14,7 @@ use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, err
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
 use crate::tools::utils::fs_errors::format_fs_error;
-use crate::tools::utils::path::resolve_path;
+use crate::tools::utils::path::{resolve_path, warn_path_traversal};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::{TruncateOptions, estimate_tokens, truncate_output};
 use crate::tools::utils::validation::validate_required_string;
@@ -81,6 +81,7 @@ impl TronTool for ReadTool {
         };
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
+        warn_path_traversal(&resolved, "Read");
         #[allow(clippy::cast_possible_truncation)]
         let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         let limit = params.get("limit").and_then(Value::as_u64);

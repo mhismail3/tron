@@ -115,10 +115,7 @@ impl BashTool {
         pty_input
             .iter()
             .map(|(wait, send)| {
-                let is_sensitive = wait.to_lowercase().contains("password")
-                    || wait.to_lowercase().contains("passphrase")
-                    || wait.to_lowercase().contains("secret")
-                    || wait.to_lowercase().contains("token");
+                let is_sensitive = is_sensitive_prompt(wait);
                 json!({
                     "wait": wait,
                     "send": if is_sensitive { "[REDACTED]" } else { send.as_str() },
@@ -126,6 +123,29 @@ impl BashTool {
             })
             .collect()
     }
+}
+
+/// Check if a PTY prompt string indicates sensitive input.
+///
+/// Uses phrase matching for ambiguous words like "key" to avoid false
+/// positives (e.g., "api key" redacts but "keyboard" does not).
+fn is_sensitive_prompt(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    // Single-word triggers (unambiguous)
+    let single_words = ["password", "passphrase", "secret", "token", "credential", "pin"];
+    for word in single_words {
+        if lower.contains(word) {
+            return true;
+        }
+    }
+    // Phrase triggers (disambiguate "key" from "keyboard")
+    let phrases = ["api key", "secret key", "ssh key", "private key", "oauth"];
+    for phrase in phrases {
+        if lower.contains(phrase) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Find a UTF-8-safe char boundary at or before `target` byte index.
@@ -1472,5 +1492,74 @@ mod tests {
         let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
         assert_eq!(tool.sandbox_default_image, "ubuntu:latest");
         assert!(tool.sandbox_network_enabled);
+    }
+
+    // ── PTY redaction tests ─────────────────────────────────────
+
+    #[test]
+    fn pty_redacts_password() {
+        assert!(is_sensitive_prompt("Enter password:"));
+        assert!(is_sensitive_prompt("PASSWORD:"));
+    }
+
+    #[test]
+    fn pty_redacts_passphrase() {
+        assert!(is_sensitive_prompt("Enter passphrase for key:"));
+    }
+
+    #[test]
+    fn pty_redacts_token() {
+        assert!(is_sensitive_prompt("Token:"));
+    }
+
+    #[test]
+    fn pty_redacts_secret() {
+        assert!(is_sensitive_prompt("Secret key:"));
+    }
+
+    #[test]
+    fn pty_redacts_pin() {
+        assert!(is_sensitive_prompt("Enter PIN:"));
+    }
+
+    #[test]
+    fn pty_redacts_api_key() {
+        assert!(is_sensitive_prompt("API key:"));
+    }
+
+    #[test]
+    fn pty_redacts_oauth() {
+        assert!(is_sensitive_prompt("OAuth credential:"));
+    }
+
+    #[test]
+    fn pty_redacts_credential() {
+        assert!(is_sensitive_prompt("Enter your credential:"));
+    }
+
+    #[test]
+    fn pty_does_not_redact_username() {
+        assert!(!is_sensitive_prompt("Enter username:"));
+    }
+
+    #[test]
+    fn pty_does_not_redact_name() {
+        assert!(!is_sensitive_prompt("What is your name?"));
+    }
+
+    #[test]
+    fn pty_does_not_redact_file_path() {
+        assert!(!is_sensitive_prompt("Enter file path:"));
+    }
+
+    #[test]
+    fn pty_does_not_redact_keyboard() {
+        // "key" in "keyboard" should NOT trigger
+        assert!(!is_sensitive_prompt("Keyboard input:"));
+    }
+
+    #[test]
+    fn pty_does_not_redact_continue_prompt() {
+        assert!(!is_sensitive_prompt("Continue? [y/n]"));
     }
 }

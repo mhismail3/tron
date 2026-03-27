@@ -52,6 +52,8 @@ pub const MESSAGE_ERROR: &str = "MESSAGE_ERROR";
 pub const GIT_ERROR: &str = "GIT_ERROR";
 /// Device registration error.
 pub const REGISTRATION_ERROR: &str = "REGISTRATION_ERROR";
+/// Session is currently processing a prompt from another connection.
+pub const SESSION_BUSY: &str = "SESSION_BUSY";
 
 /// RPC error type returned by handlers.
 #[derive(Debug, thiserror::Error)]
@@ -170,6 +172,19 @@ mod tests {
         let body = err.to_error_body();
         assert_eq!(body.code, "MY_CODE");
         assert_eq!(body.details.unwrap()["x"], 1);
+    }
+
+    #[test]
+    fn session_busy_code() {
+        let err = RpcError::Custom {
+            code: SESSION_BUSY.into(),
+            message: "Session is processing a prompt from another connection".into(),
+            details: None,
+        };
+        assert_eq!(err.code(), SESSION_BUSY);
+        let body = err.to_error_body();
+        assert_eq!(body.code, "SESSION_BUSY");
+        assert!(body.message.contains("processing"));
     }
 
     #[test]

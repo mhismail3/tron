@@ -1,12 +1,15 @@
 //! Session manager — create, resume, end, fork, archive, list sessions.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
+use parking_lot::Mutex;
 use serde_json::json;
 use crate::events::{AppendOptions, EventStore, EventType};
 
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::runtime::errors::RuntimeError;
 use crate::runtime::orchestrator::session_context::SessionContext;
@@ -30,6 +33,31 @@ pub struct ActiveSession {
     pub state: ReconstructedState,
 }
 
+/// Cached session with access tracking for idle eviction.
+pub struct CachedSession {
+    /// The active session.
+    pub session: Arc<ActiveSession>,
+    /// Last time this session was accessed (for TTL eviction).
+    pub last_accessed: Mutex<Instant>,
+    /// Whether an agent loop is currently processing a prompt.
+    /// Prevents eviction and concurrent access (Phase 6).
+    pub is_processing: AtomicBool,
+}
+
+impl CachedSession {
+    fn new(session: Arc<ActiveSession>) -> Self {
+        Self {
+            session,
+            last_accessed: Mutex::new(Instant::now()),
+            is_processing: AtomicBool::new(false),
+        }
+    }
+
+    fn touch(&self) {
+        *self.last_accessed.lock() = Instant::now();
+    }
+}
+
 /// Filter for listing sessions.
 #[derive(Clone, Debug, Default)]
 pub struct SessionFilter {
@@ -48,7 +76,7 @@ pub struct SessionFilter {
 /// Session manager.
 pub struct SessionManager {
     event_store: Arc<EventStore>,
-    active_sessions: DashMap<String, Arc<ActiveSession>>,
+    active_sessions: DashMap<String, CachedSession>,
     plan_mode: DashMap<String, bool>,
     origin: Option<String>,
     worktree_coordinator: std::sync::OnceLock<Arc<crate::worktree::WorktreeCoordinator>>,
@@ -107,7 +135,7 @@ impl SessionManager {
             state,
         });
 
-        let _ = self.active_sessions.insert(session_id.clone(), active);
+        let _ = self.active_sessions.insert(session_id.clone(), CachedSession::new(active));
         debug!(session_id, "session created");
         Ok(session_id)
     }
@@ -120,7 +148,8 @@ impl SessionManager {
     pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
         // Check if already active
         if let Some(existing) = self.active_sessions.get(session_id) {
-            return Ok(existing.clone());
+            existing.touch();
+            return Ok(existing.session.clone());
         }
 
         // Reconstruct from events
@@ -134,7 +163,7 @@ impl SessionManager {
 
         let _ = self
             .active_sessions
-            .insert(session_id.to_owned(), active.clone());
+            .insert(session_id.to_owned(), CachedSession::new(active.clone()));
         debug!(session_id, "session resumed");
         Ok(active)
     }
@@ -154,8 +183,8 @@ impl SessionManager {
             );
         }
 
-        if let Some((_, active)) = self.active_sessions.remove(session_id) {
-            active.context.persister.flush().await?;
+        if let Some((_, cached)) = self.active_sessions.remove(session_id) {
+            cached.session.context.persister.flush().await?;
         }
 
         // Persist session.end event before marking the session as ended
@@ -395,6 +424,59 @@ impl SessionManager {
     pub fn is_plan_mode(&self, session_id: &str) -> bool {
         self.plan_mode.get(session_id).is_some_and(|v| *v)
     }
+
+    // ── Cache eviction ────────────────────────────────────────────────
+
+    /// Evict idle sessions from the in-memory cache.
+    ///
+    /// Sessions that are currently processing a prompt are never evicted.
+    /// Evicted sessions are seamlessly reconstructed via `resume_session()`.
+    /// Returns the number of sessions evicted.
+    pub fn evict_idle_sessions(&self, ttl: Duration) -> usize {
+        let now = Instant::now();
+        let mut evicted = 0usize;
+        self.active_sessions.retain(|session_id, cached| {
+            if cached.is_processing.load(Ordering::Relaxed) {
+                return true;
+            }
+            let last = *cached.last_accessed.lock();
+            let age = now.duration_since(last);
+            if age > ttl {
+                evicted += 1;
+                info!(session_id, age_secs = age.as_secs(), "evicting idle session from cache");
+                false
+            } else {
+                true
+            }
+        });
+        evicted
+    }
+
+    /// Mark a session as currently processing (prevents eviction).
+    pub fn mark_processing(&self, session_id: &str) -> bool {
+        if let Some(cached) = self.active_sessions.get(session_id) {
+            cached.touch();
+            cached.is_processing.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear the processing flag for a session.
+    pub fn clear_processing(&self, session_id: &str) {
+        if let Some(cached) = self.active_sessions.get(session_id) {
+            cached.is_processing.store(false, Ordering::Release);
+            cached.touch();
+        }
+    }
+
+    /// Check if a session is currently processing.
+    pub fn is_processing(&self, session_id: &str) -> bool {
+        self.active_sessions
+            .get(session_id)
+            .is_some_and(|cached| cached.is_processing.load(Ordering::Acquire))
+    }
 }
 
 #[cfg(test)]
@@ -428,8 +510,8 @@ mod tests {
             .create_session("test-model", "/tmp", Some("test"))
             .unwrap();
 
-        // Drop from active
-        let _ = mgr.active_sessions.remove(&sid);
+        // Drop from active cache
+        mgr.invalidate_session(&sid);
         assert!(!mgr.is_active(&sid));
 
         // Resume should reconstruct
@@ -800,5 +882,113 @@ mod tests {
 
         let err = mgr.reset_chat_session("m", "/tmp").unwrap_err();
         assert!(matches!(err, RuntimeError::SessionNotFound(_)));
+    }
+
+    // ── Cache eviction tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn evict_idle_session() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+
+        // Force last_accessed to the past
+        if let Some(cached) = mgr.active_sessions.get(&sid) {
+            *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
+        }
+
+        let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert_eq!(evicted, 1);
+        assert!(!mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn evict_preserves_recent_session() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+
+        let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert_eq!(evicted, 0);
+        assert!(mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn evict_preserves_processing_session() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+
+        // Mark as processing and make it old
+        let _ = mgr.mark_processing(&sid);
+        if let Some(cached) = mgr.active_sessions.get(&sid) {
+            *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
+        }
+
+        let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert_eq!(evicted, 0, "processing session must not be evicted");
+        assert!(mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn evicted_session_reconstructs_on_resume() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+
+        // Evict it
+        if let Some(cached) = mgr.active_sessions.get(&sid) {
+            *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
+        }
+        let _ = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert!(!mgr.is_active(&sid));
+
+        // Resume should reconstruct
+        let active = mgr.resume_session(&sid).unwrap();
+        assert_eq!(active.state.model, "m");
+        assert!(mgr.is_active(&sid));
+    }
+
+    #[tokio::test]
+    async fn evict_mixed_idle_and_active() {
+        let mgr = make_manager();
+        let idle = mgr.create_session("m", "/tmp", Some("idle")).unwrap();
+        let recent = mgr.create_session("m", "/tmp", Some("recent")).unwrap();
+
+        if let Some(cached) = mgr.active_sessions.get(&idle) {
+            *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
+        }
+
+        let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert_eq!(evicted, 1);
+        assert!(!mgr.is_active(&idle));
+        assert!(mgr.is_active(&recent));
+    }
+
+    #[tokio::test]
+    async fn evict_zero_ttl_evicts_all_idle() {
+        let mgr = make_manager();
+        let s1 = mgr.create_session("m", "/tmp", Some("s1")).unwrap();
+        let s2 = mgr.create_session("m", "/tmp", Some("s2")).unwrap();
+
+        let evicted = mgr.evict_idle_sessions(Duration::ZERO);
+        assert_eq!(evicted, 2);
+        assert!(!mgr.is_active(&s1));
+        assert!(!mgr.is_active(&s2));
+    }
+
+    #[tokio::test]
+    async fn evict_empty_map_is_noop() {
+        let mgr = make_manager();
+        let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
+        assert_eq!(evicted, 0);
+    }
+
+    #[tokio::test]
+    async fn processing_flag_lifecycle() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+
+        assert!(!mgr.is_processing(&sid));
+        mgr.mark_processing(&sid);
+        assert!(mgr.is_processing(&sid));
+        mgr.clear_processing(&sid);
+        assert!(!mgr.is_processing(&sid));
     }
 }
