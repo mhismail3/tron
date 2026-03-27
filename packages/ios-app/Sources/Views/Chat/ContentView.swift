@@ -156,13 +156,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        // On iPhone with no sessions, show WelcomePage or VoiceNotesListView or MemoryDashboard
+        // On iPhone with no sessions, show WelcomePage or alternate dashboard
         if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
             compactWelcomePage
         } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
             compactVoiceNotesList
-        } else if horizontalSizeClass == .compact && navigationMode == .memory {
-            compactMemoryDashboard
         } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
             compactSandboxesDashboard
         } else if horizontalSizeClass == .compact && navigationMode == .automations {
@@ -197,16 +195,6 @@ struct ContentView: View {
             VoiceNotesListView(
                 rpcClient: rpcClient,
                 onVoiceNote: { showVoiceNotesRecording = true },
-                actions: dashboardActions
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var compactMemoryDashboard: some View {
-        NavigationStack {
-            MemoryDashboardView(
-                rpcClient: rpcClient,
                 actions: dashboardActions
             )
         }
@@ -272,11 +260,6 @@ struct ContentView: View {
                         deleteSession(sessionId)
                     },
                     onVoiceNote: { showVoiceNotesRecording = true },
-                    actions: dashboardActions
-                )
-            } else if navigationMode == .memory {
-                MemoryDashboardView(
-                    rpcClient: rpcClient,
                     actions: dashboardActions
                 )
             } else if navigationMode == .sandboxes {
