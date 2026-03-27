@@ -23,9 +23,6 @@
 # Auth:
 #   login           Authenticate with Claude (--label for multi-account)
 #
-# Data:
-#   backfill-ledger Import LEDGER.jsonl entries as memory events
-#
 # Logs:
 #   logs            Query database logs (use -h for options)
 #   errors          Show recent errors
@@ -1439,7 +1436,6 @@ cmd_help() {
     echo "  status          Show service status"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  login           Authenticate with Claude (--label <name> for multi-account)"
-    echo "  backfill-ledger Import LEDGER.jsonl entries as memory events"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""
@@ -1476,7 +1472,6 @@ case "$1" in
     logs)      shift; query_logs "$@" ;;
     errors)    cmd_errors ;;
     login)     shift; cmd_login "$@" ;;
-    backfill-ledger) shift; "$INSTALLED_BINARY" backfill-ledger "$@" ;;
     uninstall) cmd_uninstall ;;
     auto-deploy) shift; cmd_auto_deploy "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;

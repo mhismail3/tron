@@ -55,7 +55,6 @@ A CLI tool is available for common queries:
 | `tasks` | Task management (project/area scoped) |
 | `areas` | Task area groupings |
 | `projects` | Task project groupings |
-| `memory_vectors` | Semantic memory embeddings |
 
 ### Key Columns
 

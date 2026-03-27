@@ -1,12 +1,11 @@
 #!/bin/bash
 #
-# reset-db — Clear session/event/log data while preserving memory vectors.
+# reset-db — Clear session/event/log data from the database.
 #
 # Usage: scripts/reset-db
 #
 # Stops the tron server, clears all session/event/log/task data from
-# log.db, vacuums, and restarts the server. Memory vectors and
-# schema_version are preserved.
+# log.db, vacuums, and restarts the server.
 
 set -euo pipefail
 
@@ -15,7 +14,7 @@ source "$(dirname "$0")/tron-lib.sh"
 
 DB_DIR="$TRON_HOME/system/db"
 
-# Tables to clear — everything except memory_vectors* and schema_version
+# Tables to clear — everything except schema_version
 DATA_TABLES=(
   sessions events logs blobs
   workspaces branches projects areas
@@ -29,7 +28,7 @@ FTS_TABLES=(events_fts tasks_fts areas_fts)
 usage() {
   echo "Usage: $(basename "$0")"
   echo ""
-  echo "Clears session/event/log data from log.db while preserving memory vectors."
+  echo "Clears session/event/log data from log.db."
   echo "Stops the server, clears data, vacuums, and restarts."
   exit 0
 }
@@ -80,10 +79,7 @@ reset_database() {
 
   sqlite3 "$db_path" "$sql"
 
-  # Get counts to confirm
-  local remaining
-  remaining=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM memory_vectors_rowids;")
-  echo "  $db_name: cleared. Memory vectors preserved: $remaining"
+  echo "  $db_name: cleared."
 
   # Vacuum to reclaim space
   echo "  $db_name: vacuuming..."
@@ -102,7 +98,6 @@ db_path="$DB_DIR/log.db"
 
 # Confirm
 echo "This will DELETE all sessions, events, logs, tasks from log.db"
-echo "Memory vectors will be preserved."
 read -rp "Continue? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
   echo "Aborted."
