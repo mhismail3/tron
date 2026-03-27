@@ -298,7 +298,7 @@ pub async fn load_server_auth_with_client(
                     let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
                 }
                 return Ok(Some(GoogleAuth {
-                    auth: ServerAuth::from_oauth(&tokens, None),
+                    auth: ServerAuth::from_oauth(&tokens),
                     endpoint: Some(endpoint),
                     api_endpoint: Some(cfg_with_creds.api_endpoint),
                     api_version: Some(cfg_with_creds.api_version),
@@ -427,7 +427,6 @@ mod tests {
                 access_token: "tok".to_string(),
                 refresh_token: "ref".to_string(),
                 expires_at: 0,
-                account_label: None,
             },
             endpoint: Some(GoogleOAuthEndpoint::CloudCodeAssist),
             api_endpoint: Some("https://cloudcode-pa.googleapis.com".to_string()),
@@ -464,7 +463,6 @@ mod tests {
                 access_token: "ya29.abc".to_string(),
                 refresh_token: "ref".to_string(),
                 expires_at: 0,
-                account_label: None,
             },
             endpoint: None,
             api_endpoint: None,

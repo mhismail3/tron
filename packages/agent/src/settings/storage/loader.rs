@@ -100,15 +100,6 @@ pub fn deep_merge(target: Value, source: Value) -> Value {
 /// - Invalid values are silently ignored (fall back to file/default)
 pub fn apply_env_overrides(settings: &mut TronSettings) {
     // ── Server settings ─────────────────────────────────────────────
-    if let Some(v) = read_env_u16("TRON_WS_PORT", 1, 65535) {
-        settings.server.ws_port = v;
-    }
-    if let Some(v) = read_env_u16("TRON_HEALTH_PORT", 1, 65535) {
-        settings.server.health_port = v;
-    }
-    if let Some(v) = read_env_string("TRON_HOST") {
-        settings.server.host = v;
-    }
     if let Some(v) = read_env_string("TRON_DEFAULT_MODEL") {
         settings.server.default_model = v;
     }
@@ -191,15 +182,6 @@ fn read_env_bool(name: &str) -> Option<bool> {
     let result = parse_bool(&val);
     if result.is_none() {
         tracing::warn!(key = name, value = %val, "invalid boolean env var, ignoring");
-    }
-    result
-}
-
-fn read_env_u16(name: &str, min: u16, max: u16) -> Option<u16> {
-    let val = std::env::var(name).ok()?;
-    let result = parse_u16_range(&val, min, max);
-    if result.is_none() {
-        tracing::warn!(key = name, value = %val, "invalid u16 env var, ignoring");
     }
     result
 }
@@ -355,8 +337,6 @@ mod tests {
         let settings = load_settings_from_path(path).unwrap();
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
-        assert_eq!(settings.server.ws_port, defaults.server.ws_port);
-        // Full field comparison — fast path returns identical values
         assert_eq!(settings.name, defaults.name);
         assert_eq!(settings.server.default_model, defaults.server.default_model);
         assert_eq!(settings.retry.max_retries, defaults.retry.max_retries);
@@ -383,7 +363,7 @@ mod tests {
         let settings = load_settings_from_path(&path).unwrap();
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
-        assert_eq!(settings.server.ws_port, defaults.server.ws_port);
+        assert_eq!(settings.server.default_model, defaults.server.default_model);
     }
 
     #[test]
@@ -392,14 +372,13 @@ mod tests {
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
-            r#"{"server": {"wsPort": 9090}, "retry": {"maxRetries": 5}}"#,
+            r#"{"server": {"defaultModel": "custom-model"}, "retry": {"maxRetries": 5}}"#,
         )
         .unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
-        assert_eq!(settings.server.ws_port, 9090);
+        assert_eq!(settings.server.default_model, "custom-model");
         assert_eq!(settings.retry.max_retries, 5);
-        assert_eq!(settings.server.health_port, 8081);
         assert_eq!(settings.retry.base_delay_ms, 1000);
     }
 

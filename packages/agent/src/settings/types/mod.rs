@@ -185,7 +185,10 @@ mod tests {
         let back: TronSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.version, defaults.version);
         assert_eq!(back.name, defaults.name);
-        assert_eq!(back.server.ws_port, defaults.server.ws_port);
+        assert_eq!(
+            back.server.max_concurrent_sessions,
+            defaults.server.max_concurrent_sessions
+        );
         assert_eq!(
             back.context.compactor.max_tokens,
             defaults.context.compactor.max_tokens
@@ -206,8 +209,17 @@ mod tests {
 
         // Nested fields are camelCase
         let server = json.get("server").unwrap();
-        assert!(server.get("wsPort").is_some());
-        assert!(server.get("healthPort").is_some());
+        assert!(server.get("heartbeatIntervalMs").is_some());
+        assert!(server.get("defaultModel").is_some());
+        assert!(server.get("connectionPresets").is_some());
+
+        // Removed fields no longer present
+        assert!(server.get("wsPort").is_none());
+        assert!(server.get("healthPort").is_none());
+        assert!(server.get("host").is_none());
+        assert!(server.get("sessionTimeoutMs").is_none());
+        assert!(server.get("tailscaleIp").is_none());
+        assert!(server.get("anthropicAccount").is_none());
 
         // Optional sections omitted when None
         assert!(json.get("guardrails").is_none());
@@ -218,7 +230,10 @@ mod tests {
         let settings: TronSettings = serde_json::from_str("{}").unwrap();
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
-        assert_eq!(settings.server.ws_port, defaults.server.ws_port);
+        assert_eq!(
+            settings.server.max_concurrent_sessions,
+            defaults.server.max_concurrent_sessions
+        );
         assert_eq!(settings.retry.max_retries, defaults.retry.max_retries);
     }
 
@@ -226,17 +241,15 @@ mod tests {
     fn partial_json_overrides() {
         let json = serde_json::json!({
             "server": {
-                "wsPort": 9090
+                "maxConcurrentSessions": 20
             },
             "retry": {
                 "maxRetries": 3
             }
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.server.ws_port, 9090);
+        assert_eq!(settings.server.max_concurrent_sessions, 20);
         assert_eq!(settings.retry.max_retries, 3);
-        // Unset fields should be defaults
-        assert_eq!(settings.server.health_port, 8081);
         assert_eq!(settings.retry.base_delay_ms, 1000);
         assert_eq!(settings.version, "0.1.0");
     }

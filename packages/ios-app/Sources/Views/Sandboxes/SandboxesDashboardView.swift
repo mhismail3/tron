@@ -6,7 +6,7 @@ struct SandboxesDashboardView: View {
     let actions: DashboardToolbarActions
 
     @State private var containers: [ContainerDTO] = []
-    @State private var tailscaleIp: String?
+    @State private var hostIp: String?
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedContainer: ContainerDTO?
@@ -61,7 +61,7 @@ struct SandboxesDashboardView: View {
         .sheet(item: $selectedContainer) { container in
             ContainerDetailSheet(
                 container: container,
-                tailscaleIp: tailscaleIp,
+                hostIp: hostIp,
                 onOpenURL: { url in
                     safariURL = url
                 }
@@ -294,7 +294,7 @@ struct SandboxesDashboardView: View {
             let result = try await rpcClient.misc.listContainers()
             await MainActor.run {
                 containers = result.containers
-                tailscaleIp = result.tailscaleIp
+                hostIp = result.hostIp
                 isLoading = false
             }
         } catch {

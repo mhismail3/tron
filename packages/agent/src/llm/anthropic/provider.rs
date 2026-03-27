@@ -430,7 +430,6 @@ mod tests {
                 refresh_token: "rt-test".into(),
                 expires_at: 9_999_999_999_999,
             },
-            account_label: None,
         })
     }
 

@@ -43,11 +43,15 @@ impl MethodHandler for ListContainersHandler {
         let statuses = sandbox_service::query_container_statuses().await;
         enrich_with_status(&mut containers, &statuses);
 
-        let tailscale_ip = crate::settings::get_settings().server.tailscale_ip.clone();
+        let host_ip = crate::settings::get_settings()
+            .server
+            .connection_presets
+            .first()
+            .map(|p| p.host.clone());
 
         Ok(serde_json::json!({
             "containers": containers,
-            "tailscaleIp": tailscale_ip,
+            "hostIp": host_ip,
         }))
     }
 }
@@ -254,20 +258,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_has_tailscale_ip_key() {
+    async fn response_has_host_ip_key() {
         let ctx = make_test_context();
         let result = ListContainersHandler.handle(None, &ctx).await.unwrap();
-        assert!(result.get("tailscaleIp").is_some());
+        assert!(result.get("hostIp").is_some());
     }
 
     #[tokio::test]
-    async fn response_tailscale_ip_is_null_or_string() {
+    async fn response_host_ip_is_null_or_string() {
         let ctx = make_test_context();
         let result = ListContainersHandler.handle(None, &ctx).await.unwrap();
-        let ip = &result["tailscaleIp"];
+        let ip = &result["hostIp"];
         assert!(
             ip.is_null() || ip.is_string(),
-            "tailscaleIp must be null or string"
+            "hostIp must be null or string"
         );
     }
 

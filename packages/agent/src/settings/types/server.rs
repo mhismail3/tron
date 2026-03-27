@@ -11,19 +11,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ServerSettings {
-    /// WebSocket server port.
-    pub ws_port: u16,
-    /// Health check HTTP port.
-    pub health_port: u16,
-    /// Bind address.
-    pub host: String,
-    /// Optional Tailscale IP for network access.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tailscale_ip: Option<String>,
     /// WebSocket heartbeat interval in milliseconds.
     pub heartbeat_interval_ms: u64,
-    /// Session inactivity timeout in milliseconds.
-    pub session_timeout_ms: u64,
     /// Maximum number of concurrent sessions.
     pub max_concurrent_sessions: usize,
     /// Directory for session data (relative to `~/.tron`).
@@ -37,32 +26,41 @@ pub struct ServerSettings {
     /// Default workspace path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_workspace: Option<String>,
-    /// Anthropic account label for multi-account selection.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub anthropic_account: Option<String>,
     /// Audio transcription settings.
     pub transcription: TranscriptionSettings,
+    /// Quick-connect connection presets for iOS clients.
+    #[serde(default)]
+    pub connection_presets: Vec<ConnectionPreset>,
 }
 
 impl Default for ServerSettings {
     fn default() -> Self {
         Self {
-            ws_port: 8080,
-            health_port: 8081,
-            host: "0.0.0.0".to_string(),
-            tailscale_ip: None,
             heartbeat_interval_ms: 30_000,
-            session_timeout_ms: 1_800_000,
             max_concurrent_sessions: 10,
             sessions_dir: "sessions".to_string(),
             memory_db_path: "memory.db".to_string(),
             default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),
             default_workspace: None,
-            anthropic_account: None,
             transcription: TranscriptionSettings::default(),
+            connection_presets: Vec::new(),
         }
     }
+}
+
+/// A connection preset for quick-connect from iOS clients.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionPreset {
+    /// Unique identifier.
+    pub id: String,
+    /// Display label.
+    pub label: String,
+    /// Hostname or IP address.
+    pub host: String,
+    /// Port number.
+    pub port: u16,
 }
 
 /// Audio transcription settings.
@@ -324,31 +322,67 @@ mod tests {
     #[test]
     fn server_defaults() {
         let s = ServerSettings::default();
-        assert_eq!(s.ws_port, 8080);
-        assert_eq!(s.health_port, 8081);
-        assert_eq!(s.host, "0.0.0.0");
-        assert!(s.tailscale_ip.is_none());
+        assert_eq!(s.heartbeat_interval_ms, 30_000);
         assert_eq!(s.max_concurrent_sessions, 10);
         assert_eq!(s.default_provider, "anthropic");
+        assert_eq!(s.default_model, "claude-sonnet-4-6");
+        assert!(s.default_workspace.is_none());
+        assert!(s.connection_presets.is_empty());
     }
 
     #[test]
     fn server_serde_camel_case() {
         let s = ServerSettings::default();
         let json = serde_json::to_value(&s).unwrap();
-        assert!(json.get("wsPort").is_some());
-        assert!(json.get("healthPort").is_some());
         assert!(json.get("heartbeatIntervalMs").is_some());
         assert!(json.get("defaultModel").is_some());
+        assert!(json.get("connectionPresets").is_some());
     }
 
     #[test]
     fn server_omits_none_fields() {
         let s = ServerSettings::default();
         let json = serde_json::to_value(&s).unwrap();
-        assert!(json.get("tailscaleIp").is_none());
         assert!(json.get("defaultWorkspace").is_none());
-        assert!(json.get("anthropicAccount").is_none());
+    }
+
+    #[test]
+    fn connection_presets_serde_roundtrip() {
+        let json = serde_json::json!({
+            "connectionPresets": [
+                {"id": "main", "label": "Main", "host": "100.64.213.113", "port": 9847},
+                {"id": "secondary", "label": "Secondary", "host": "100.95.255.62", "port": 9847}
+            ]
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(s.connection_presets.len(), 2);
+        assert_eq!(s.connection_presets[0].id, "main");
+        assert_eq!(s.connection_presets[0].label, "Main");
+        assert_eq!(s.connection_presets[0].host, "100.64.213.113");
+        assert_eq!(s.connection_presets[0].port, 9847);
+        assert_eq!(s.connection_presets[1].id, "secondary");
+    }
+
+    #[test]
+    fn connection_presets_empty_by_default() {
+        let s: ServerSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.connection_presets.is_empty());
+    }
+
+    #[test]
+    fn stale_fields_ignored_during_deserialization() {
+        let json = serde_json::json!({
+            "wsPort": 8082,
+            "healthPort": 8083,
+            "host": "0.0.0.0",
+            "tailscaleIp": "100.64.213.113",
+            "sessionTimeoutMs": 3600000,
+            "anthropicAccount": "mhismail3",
+            "defaultModel": "claude-sonnet-4-6"
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(s.default_model, "claude-sonnet-4-6");
+        assert_eq!(s.max_concurrent_sessions, 10);
     }
 
     #[test]
@@ -390,10 +424,6 @@ mod tests {
         assert_eq!(a.max_turns, 250);
         assert_eq!(a.subagent_max_depth, 3);
         assert_eq!(a.subagent_model, "claude-haiku-4-5-20251001");
-
-        // inactive_session_timeout_ms removed — canonical field is server.session_timeout_ms
-        let json = serde_json::to_value(&a).unwrap();
-        assert!(json.get("inactiveSessionTimeoutMs").is_none());
     }
 
     #[test]
@@ -491,14 +521,10 @@ mod tests {
     #[test]
     fn server_partial_json() {
         let json = serde_json::json!({
-            "wsPort": 9090,
             "defaultModel": "claude-sonnet-4-5-20250929"
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.ws_port, 9090);
         assert_eq!(s.default_model, "claude-sonnet-4-5-20250929");
-        // Other fields should be defaults
-        assert_eq!(s.health_port, 8081);
-        assert_eq!(s.host, "0.0.0.0");
+        assert_eq!(s.max_concurrent_sessions, 10);
     }
 }

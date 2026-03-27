@@ -151,24 +151,16 @@ pub fn is_oauth_token(token: &str) -> bool {
 /// Load server auth from auth storage.
 ///
 /// Priority:
-/// 1. Multi-account OAuth tokens (from `accounts[]`)
-/// 2. Legacy single OAuth tokens
-/// 3. API key
+/// 1. OAuth tokens (from `accounts[0]` or legacy `oauth`)
+/// 2. API key
 ///
 /// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "anthropic"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
-    preferred_account: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(
-        auth_path,
-        config,
-        preferred_account,
-        super::shared_auth_client(),
-    )
-    .await
+    load_server_auth_with_client(auth_path, config, super::shared_auth_client()).await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -176,57 +168,34 @@ pub async fn load_server_auth(
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
-    preferred_account: Option<&str>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
     let Some(pa) = super::storage::get_provider_auth(auth_path, "anthropic") else {
         return Ok(None);
     };
 
-    // 1. Multi-account tokens
+    // 1. OAuth tokens (accounts[0] takes precedence over legacy `oauth`)
     if let Some(accounts) = &pa.accounts
-        && !accounts.is_empty()
+        && let Some(acct) = accounts.first()
     {
-        let account = if let Some(label) = preferred_account {
-            accounts.iter().find(|a| a.label == label)
-        } else {
-            None
-        }
-        .or_else(|| {
-            // Prefer account whose label ends with @{current_hostname}
-            if let Some(host) = resolve_hostname() {
-                let suffix = format!("@{host}");
-                if let Some(acct) = accounts.iter().find(|a| a.label.ends_with(&suffix)) {
-                    return Some(acct);
-                }
-            }
-            accounts.first()
-        });
-
-        if let Some(acct) = account {
-            let (tokens, _refreshed) = maybe_refresh_tokens(
-                auth_path,
-                Some(&acct.label),
-                &acct.oauth,
-                config,
-                client,
-            )
-            .await?;
-            return Ok(Some(ServerAuth::from_oauth(
-                &tokens,
-                Some(acct.label.clone()),
-            )));
-        }
+        let (tokens, _refreshed) = maybe_refresh_tokens(
+            auth_path,
+            Some(&acct.label),
+            &acct.oauth,
+            config,
+            client,
+        )
+        .await?;
+        return Ok(Some(ServerAuth::from_oauth(&tokens)));
     }
 
-    // 2. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
         let (tokens, _refreshed) =
             maybe_refresh_tokens(auth_path, None, oauth, config, client).await?;
-        return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+        return Ok(Some(ServerAuth::from_oauth(&tokens)));
     }
 
-    // 3. API key
+    // 2. API key
     if let Some(key) = &pa.api_key {
         return Ok(Some(ServerAuth::from_api_key(key)));
     }
@@ -395,36 +364,6 @@ async fn maybe_refresh_tokens(
 /// Uses the shared [`super::types::OAuthTokenRefreshResponse`] type.
 type TokenResponse = super::types::OAuthTokenRefreshResponse;
 
-/// Get the short hostname (before the first '.'), e.g. "macbook" from "macbook.local".
-#[allow(unsafe_code)]
-fn short_hostname() -> Option<String> {
-    let mut buf = [0u8; 256];
-    let ret = unsafe { libc::gethostname(buf.as_mut_ptr().cast::<libc::c_char>(), buf.len()) };
-    if ret != 0 {
-        return None;
-    }
-    let name = std::ffi::CStr::from_bytes_until_nul(&buf)
-        .ok()?
-        .to_str()
-        .ok()?;
-    Some(name.split('.').next().unwrap_or(name).to_string())
-}
-
-#[cfg(not(test))]
-fn resolve_hostname() -> Option<String> {
-    short_hostname()
-}
-
-#[cfg(test)]
-fn resolve_hostname() -> Option<String> {
-    MOCK_HOSTNAME.with(|h| h.borrow().clone())
-}
-
-#[cfg(test)]
-thread_local! {
-    static MOCK_HOSTNAME: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,7 +410,7 @@ mod tests {
         crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-file-key").unwrap();
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "sk-file-key");
 
@@ -483,7 +422,7 @@ mod tests {
         };
         crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "oauth-tok");
@@ -497,7 +436,7 @@ mod tests {
         crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert!(!auth.is_oauth());
         assert_eq!(auth.token(), "sk-123");
@@ -509,7 +448,7 @@ mod tests {
         let path = dir.path().join("auth.json");
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -527,7 +466,7 @@ mod tests {
         crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-tok");
@@ -551,7 +490,7 @@ mod tests {
             .unwrap();
 
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await;
+        let result = load_server_auth(&path, &cfg).await;
 
         // Should return Err (OAuth refresh failed), NOT Ok(Some(ApiKey))
         assert!(
@@ -561,11 +500,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_multi_account_preferred() {
+    async fn load_server_auth_uses_first_account() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Save two accounts with non-expired tokens
         let tokens1 = OAuthTokens {
             access_token: "work-tok".to_string(),
             refresh_token: "ref1".to_string(),
@@ -582,148 +520,13 @@ mod tests {
             .unwrap();
 
         let cfg = default_config();
-
-        // Prefer "personal" account
-        let result = load_server_auth(&path, &cfg, Some("personal"))
-            .await
-            .unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "personal-tok");
-
-        // No preference, no hostname match → first account
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "work-tok");
     }
 
-    #[test]
-    fn short_hostname_strips_domain() {
-        let result = short_hostname();
-        assert!(result.is_some());
-        assert!(!result.unwrap().contains('.'));
-    }
-
     #[tokio::test]
-    async fn account_selection_prefers_hostname_match() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens_a = OAuthTokens {
-            access_token: "tok-a".to_string(),
-            refresh_token: "ref-a".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        let tokens_b = OAuthTokens {
-            access_token: "tok-b".to_string(),
-            refresh_token: "ref-b".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-a", &tokens_a,
-        ).unwrap();
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-b", &tokens_b,
-        ).unwrap();
-
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-b".to_string()));
-        let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "tok-b");
-    }
-
-    #[tokio::test]
-    async fn account_selection_explicit_preference_overrides_hostname() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens_a = OAuthTokens {
-            access_token: "tok-a".to_string(),
-            refresh_token: "ref-a".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        let tokens_b = OAuthTokens {
-            access_token: "tok-b".to_string(),
-            refresh_token: "ref-b".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-a", &tokens_a,
-        ).unwrap();
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-b", &tokens_b,
-        ).unwrap();
-
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("host-a".to_string()));
-        let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, Some("user@host-b"))
-            .await
-            .unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "tok-b");
-    }
-
-    #[tokio::test]
-    async fn account_selection_falls_back_to_first_when_no_hostname_match() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens_work = OAuthTokens {
-            access_token: "tok-work".to_string(),
-            refresh_token: "ref-work".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        let tokens_personal = OAuthTokens {
-            access_token: "tok-personal".to_string(),
-            refresh_token: "ref-personal".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "work", &tokens_work,
-        ).unwrap();
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "personal", &tokens_personal,
-        ).unwrap();
-
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("unknown-host".to_string()));
-        let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "tok-work");
-    }
-
-    #[tokio::test]
-    async fn account_selection_no_hostname_available() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens_a = OAuthTokens {
-            access_token: "tok-a".to_string(),
-            refresh_token: "ref-a".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        let tokens_b = OAuthTokens {
-            access_token: "tok-b".to_string(),
-            refresh_token: "ref-b".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-a", &tokens_a,
-        ).unwrap();
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host-b", &tokens_b,
-        ).unwrap();
-
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = None);
-        let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "tok-a");
-    }
-
-    #[tokio::test]
-    async fn account_selection_single_account_no_hostname() {
+    async fn load_server_auth_single_account() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
@@ -736,9 +539,8 @@ mod tests {
             &path, "anthropic", "alice", &tokens,
         ).unwrap();
 
-        MOCK_HOSTNAME.with(|h| *h.borrow_mut() = Some("myhost".to_string()));
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None).await.unwrap();
+        let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "tok-alice");
     }

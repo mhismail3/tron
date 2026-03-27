@@ -97,7 +97,7 @@ pub async fn load_server_auth_with_client(
                         &tokens,
                     );
                 }
-                return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+                return Ok(Some(ServerAuth::from_oauth(&tokens)));
             }
             Err(e) => {
                 tracing::warn!("`OpenAI` OAuth refresh failed: {e}");

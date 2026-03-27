@@ -3,14 +3,14 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct ContainerDetailSheet: View {
     let container: ContainerDTO
-    let tailscaleIp: String?
+    let hostIp: String?
     var onOpenURL: ((URL) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    /// URL for the "Open" button: http://{tailscaleIp}:{firstHostPort}
+    /// URL for the "Open" button: http://{hostIp}:{firstHostPort}
     private var openURL: URL? {
         guard container.status == "running",
-              let ip = tailscaleIp,
+              let ip = hostIp,
               let firstPort = container.ports.first else { return nil }
         let hostPort = firstPort.split(separator: ":").first.map(String.init) ?? firstPort
         return URL(string: "http://\(ip):\(hostPort)")
@@ -124,7 +124,7 @@ struct ContainerDetailSheet: View {
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
 
-                    if let ip = tailscaleIp {
+                    if let ip = hostIp {
                         let hostPort = port.split(separator: ":").first.map(String.init) ?? port
                         Text("http://\(ip):\(hostPort)")
                             .font(TronTypography.mono(size: TronTypography.sizeBody3))

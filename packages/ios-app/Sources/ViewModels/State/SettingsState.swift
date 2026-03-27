@@ -23,10 +23,9 @@ final class SettingsState {
     var taskAutoInjectEnabled: Bool = false
     var isolationMode: String = "always"
 
-    // MARK: - Account Settings
+    // MARK: - Connection Presets
 
-    var anthropicAccounts: [String] = []
-    var selectedAnthropicAccount: String?
+    var connectionPresets: [ConnectionPreset] = []
 
     // MARK: - Load State
 
@@ -73,8 +72,7 @@ final class SettingsState {
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
             isolationMode = settings.isolationMode
-            anthropicAccounts = settings.anthropicAccounts ?? []
-            selectedAnthropicAccount = settings.anthropicAccount
+            connectionPresets = settings.connectionPresets
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }

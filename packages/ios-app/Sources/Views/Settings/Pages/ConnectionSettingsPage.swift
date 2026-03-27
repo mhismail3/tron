@@ -1,17 +1,5 @@
 import SwiftUI
 
-private struct ServerPreset: Identifiable {
-    let id: String
-    let label: String
-    let host: String
-    let port: String
-
-    static let presets: [ServerPreset] = [
-        ServerPreset(id: "main", label: "Main", host: "100.64.213.113", port: "9847"),
-        ServerPreset(id: "secondary", label: "Secondary", host: "100.95.255.62", port: "9847"),
-    ]
-}
-
 struct ConnectionSettingsPage: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var serverHost: String
@@ -21,19 +9,21 @@ struct ConnectionSettingsPage: View {
     let onPortChange: (String) -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
-    private func applyPreset(_ preset: ServerPreset) {
+    private func applyPreset(_ preset: ConnectionPreset) {
         serverHost = preset.host
-        serverPort = preset.port
-        onPortChange(preset.port)
+        let portString = String(preset.port)
+        serverPort = portString
+        onPortChange(portString)
         onHostSubmit()
     }
 
-    private func isSelected(_ preset: ServerPreset) -> Bool {
-        serverHost == preset.host && serverPort == preset.port
+    private func isSelected(_ preset: ConnectionPreset) -> Bool {
+        serverHost == preset.host && serverPort == String(preset.port)
     }
 
-    private func presetChip(_ preset: ServerPreset) -> some View {
+    private func presetChip(_ preset: ConnectionPreset) -> some View {
         let selected = isSelected(preset)
+        let portString = String(preset.port)
         return Button {
             withAnimation(.easeInOut(duration: 0.2)) {
                 applyPreset(preset)
@@ -42,7 +32,7 @@ struct ConnectionSettingsPage: View {
             HStack(spacing: 6) {
                 Text(preset.label)
                     .font(TronTypography.caption)
-                Text("\(preset.host):\(preset.port)")
+                Text("\(preset.host):\(portString)")
                     .font(TronTypography.caption)
                     .opacity(selected ? 0.8 : 0.5)
             }
@@ -66,17 +56,19 @@ struct ConnectionSettingsPage: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(ServerPreset.presets) { preset in
-                                presetChip(preset)
+                if !settingsState.connectionPresets.isEmpty {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(settingsState.connectionPresets) { preset in
+                                    presetChip(preset)
+                                }
                             }
                         }
+                    } header: {
+                        Text("Presets")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                     }
-                } header: {
-                    Text("Presets")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 }
 
                 ServerSettingsSection(
@@ -85,14 +77,6 @@ struct ConnectionSettingsPage: View {
                     onHostSubmit: onHostSubmit,
                     onPortChange: onPortChange
                 )
-
-                if !settingsState.anthropicAccounts.isEmpty {
-                    AccountSection(
-                        accounts: settingsState.anthropicAccounts,
-                        selectedAccount: Bindable(settingsState).selectedAnthropicAccount,
-                        updateServerSetting: updateServerSetting
-                    )
-                }
             }
             .listStyle(.insetGrouped)
             .navigationBarTitleDisplayMode(.inline)

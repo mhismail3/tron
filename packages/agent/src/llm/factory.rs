@@ -20,7 +20,6 @@ struct AnthropicSettings {
     system_prompt_prefix: String,
     token_expiry_buffer_seconds: u64,
     oauth_beta_headers: String,
-    preferred_account: Option<String>,
 }
 
 /// Retry settings captured at startup.
@@ -65,7 +64,6 @@ impl DefaultProviderFactory {
                 system_prompt_prefix: settings.api.anthropic.system_prompt_prefix.clone(),
                 token_expiry_buffer_seconds: settings.api.anthropic.token_expiry_buffer_seconds,
                 oauth_beta_headers: settings.api.anthropic.oauth_beta_headers.clone(),
-                preferred_account: settings.server.anthropic_account.clone(),
             },
             retry: CapturedRetrySettings {
                 max_retries: settings.retry.max_retries,
@@ -98,12 +96,10 @@ impl DefaultProviderFactory {
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
-        let preferred = self.anthropic.preferred_account.as_deref();
 
         let server_auth = match crate::llm::auth::anthropic::load_server_auth_with_client(
             &self.auth_path,
             &oauth_config,
-            preferred,
             &self.http_client,
         )
         .await
@@ -140,14 +136,12 @@ impl DefaultProviderFactory {
                 access_token,
                 refresh_token,
                 expires_at,
-                account_label,
             } => crate::llm::anthropic::types::AnthropicAuth::OAuth {
                 tokens: crate::llm::auth::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
-                account_label,
             },
             crate::llm::auth::ServerAuth::ApiKey { api_key } => {
                 crate::llm::anthropic::types::AnthropicAuth::ApiKey { api_key }
@@ -444,21 +438,9 @@ mod tests {
     fn factory_captures_anthropic_settings() {
         let mut settings = crate::settings::TronSettings::default();
         settings.api.anthropic.client_id = "test-client-id".into();
-        settings.server.anthropic_account = Some("work".into());
 
         let factory = DefaultProviderFactory::new(&settings);
         assert_eq!(factory.anthropic.client_id, "test-client-id");
-        assert_eq!(
-            factory.anthropic.preferred_account,
-            Some("work".to_string())
-        );
-    }
-
-    #[test]
-    fn factory_default_settings() {
-        let settings = crate::settings::TronSettings::default();
-        let factory = DefaultProviderFactory::new(&settings);
-        assert!(factory.anthropic.preferred_account.is_none());
     }
 
     #[test]

@@ -12,8 +12,7 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let maxConcurrentSessions: Int
-    let anthropicAccounts: [String]?
-    let anthropicAccount: String?
+    let connectionPresets: [ConnectionPreset]
     let compaction: CompactionSettings
     let rules: RulesSettings
     let tasks: TaskSettings
@@ -41,7 +40,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case maxConcurrentSessions, defaultWorkspace, anthropicAccount, anthropicAccounts
+        case maxConcurrentSessions, defaultWorkspace, connectionPresets
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -62,13 +61,11 @@ struct ServerSettings: Decodable {
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
             maxConcurrentSessions = (try? serverContainer.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions)) ?? 10
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
-            anthropicAccounts = try? serverContainer.decodeIfPresent([String].self, forKey: .anthropicAccounts)
-            anthropicAccount = try? serverContainer.decodeIfPresent(String.self, forKey: .anthropicAccount)
+            connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
         } else {
             maxConcurrentSessions = 10
             defaultWorkspace = nil
-            anthropicAccounts = nil
-            anthropicAccount = nil
+            connectionPresets = []
         }
 
         // context.*
@@ -199,7 +196,6 @@ struct ServerSettingsUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
         var maxConcurrentSessions: Int?
-        var anthropicAccount: String?
     }
 
     struct ContextUpdate: Encodable {
@@ -243,4 +239,12 @@ struct ServerSettingsUpdate: Encodable {
         }
     }
 
+}
+
+/// A connection preset for quick-connect from the Connections settings page.
+struct ConnectionPreset: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let host: String
+    let port: Int
 }

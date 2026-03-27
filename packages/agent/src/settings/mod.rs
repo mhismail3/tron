@@ -20,7 +20,7 @@
 //! use crate::settings::{get_settings, TronSettings};
 //!
 //! let settings = get_settings();
-//! println!("WebSocket port: {}", settings.server.ws_port);
+//! println!("Default model: {}", settings.server.default_model);
 //! ```
 //!
 //! ## Module Position
@@ -162,11 +162,9 @@ mod tests {
     #[test]
     fn default_settings_are_valid() {
         let settings = TronSettings::default();
-        // Verify key defaults match TypeScript
         assert_eq!(settings.version, "0.1.0");
         assert_eq!(settings.name, "tron");
-        assert_eq!(settings.server.ws_port, 8080);
-        assert_eq!(settings.server.health_port, 8081);
+        assert_eq!(settings.server.max_concurrent_sessions, 10);
         assert_eq!(settings.server.default_provider, "anthropic");
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 1);
@@ -181,10 +179,10 @@ mod tests {
         let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
         let mut custom = TronSettings::default();
-        custom.server.ws_port = 9999;
+        custom.server.max_concurrent_sessions = 99;
         init_settings(custom);
         let s = get_settings();
-        assert_eq!(s.server.ws_port, 9999);
+        assert_eq!(s.server.max_concurrent_sessions, 99);
         reset_settings();
     }
 
@@ -193,14 +191,14 @@ mod tests {
         let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
         let mut first = TronSettings::default();
-        first.server.ws_port = 1111;
+        first.server.max_concurrent_sessions = 11;
         init_settings(first);
-        assert_eq!(get_settings().server.ws_port, 1111);
+        assert_eq!(get_settings().server.max_concurrent_sessions, 11);
 
         let mut second = TronSettings::default();
-        second.server.ws_port = 2222;
+        second.server.max_concurrent_sessions = 22;
         init_settings(second);
-        assert_eq!(get_settings().server.ws_port, 2222);
+        assert_eq!(get_settings().server.max_concurrent_sessions, 22);
         reset_settings();
     }
 
@@ -231,7 +229,7 @@ mod tests {
             "discover_standalone_files should be disabled after reload"
         );
         // Other defaults should be preserved (deep merge)
-        assert_eq!(updated.server.ws_port, 8080);
+        assert_eq!(updated.server.max_concurrent_sessions, 10);
 
         reset_settings();
     }
@@ -242,16 +240,16 @@ mod tests {
         reset_settings();
 
         let mut custom = TronSettings::default();
-        custom.server.ws_port = 7777;
+        custom.server.max_concurrent_sessions = 77;
         init_settings(custom);
-        assert_eq!(get_settings().server.ws_port, 7777);
+        assert_eq!(get_settings().server.max_concurrent_sessions, 77);
 
-        // Reload from a path that doesn't exist — should get defaults (not keep 7777)
+        // Reload from a path that doesn't exist — should get defaults (not keep 77)
         reload_settings_from_path(Path::new("/nonexistent/settings.json"));
 
         let s = get_settings();
         assert_eq!(
-            s.server.ws_port, 8080,
+            s.server.max_concurrent_sessions, 10,
             "should fall back to defaults when file missing"
         );
 
@@ -302,17 +300,17 @@ mod tests {
 
         // Take a snapshot
         let snapshot = get_settings();
-        assert_eq!(snapshot.server.ws_port, 8080);
+        assert_eq!(snapshot.server.max_concurrent_sessions, 10);
 
         // Reload with different value
         let mut new = TronSettings::default();
-        new.server.ws_port = 5555;
+        new.server.max_concurrent_sessions = 55;
         init_settings(new);
 
         // Snapshot should still see old value (Arc isolation)
-        assert_eq!(snapshot.server.ws_port, 8080);
+        assert_eq!(snapshot.server.max_concurrent_sessions, 10);
         // New get should see new value
-        assert_eq!(get_settings().server.ws_port, 5555);
+        assert_eq!(get_settings().server.max_concurrent_sessions, 55);
 
         reset_settings();
     }

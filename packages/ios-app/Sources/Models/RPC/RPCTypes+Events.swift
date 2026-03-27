@@ -139,7 +139,7 @@ struct ContainerDTO: Decodable, Identifiable {
 
 struct SandboxListResult: Decodable {
     let containers: [ContainerDTO]
-    let tailscaleIp: String?
+    let hostIp: String?
 }
 
 struct ContainerActionParams: Encodable {

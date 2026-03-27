@@ -1093,7 +1093,7 @@ mod tests {
 
         // load_server_auth should find the OAuth tokens
         let config = tron::llm::auth::anthropic::default_config();
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1117,7 +1117,7 @@ mod tests {
 
         // OAuth takes priority
         let config = tron::llm::auth::anthropic::default_config();
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -1126,19 +1126,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_anthropic_multi_account_select() {
+    async fn create_anthropic_uses_first_account() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Save two accounts
         let work_tokens = tron::llm::auth::OAuthTokens {
             access_token: "work-tok".to_string(),
             refresh_token: "ref1".to_string(),
-            expires_at: tron::llm::auth::now_ms() + 3_600_000,
-        };
-        let personal_tokens = tron::llm::auth::OAuthTokens {
-            access_token: "personal-tok".to_string(),
-            refresh_token: "ref2".to_string(),
             expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
         tron::llm::auth::storage::save_account_oauth_tokens(
@@ -1148,25 +1142,9 @@ mod tests {
             &work_tokens,
         )
         .unwrap();
-        tron::llm::auth::storage::save_account_oauth_tokens(
-            &path,
-            "anthropic",
-            "personal",
-            &personal_tokens,
-        )
-        .unwrap();
 
         let config = tron::llm::auth::anthropic::default_config();
-
-        // Select "personal" account
-        let result =
-            tron::llm::auth::anthropic::load_server_auth(&path, &config, Some("personal"))
-                .await
-                .unwrap();
-        assert_eq!(result.unwrap().token(), "personal-tok");
-
-        // No preference → first account
-        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config, None)
+        let result = tron::llm::auth::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
         assert_eq!(result.unwrap().token(), "work-tok");
@@ -1233,7 +1211,6 @@ mod tests {
             access_token: "tok".to_string(),
             refresh_token: "ref".to_string(),
             expires_at: 999,
-            account_label: Some("work".to_string()),
         };
         assert!(server_auth.is_oauth());
         assert_eq!(server_auth.token(), "tok");

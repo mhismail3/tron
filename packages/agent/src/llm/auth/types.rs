@@ -180,8 +180,6 @@ pub enum ServerAuth {
         refresh_token: String,
         /// Expiration timestamp in milliseconds.
         expires_at: i64,
-        /// Account label (for multi-account).
-        account_label: Option<String>,
     },
     /// API-key-based authentication.
     ApiKey {
@@ -192,12 +190,11 @@ pub enum ServerAuth {
 
 impl ServerAuth {
     /// Create from OAuth tokens.
-    pub fn from_oauth(tokens: &OAuthTokens, account_label: Option<String>) -> Self {
+    pub fn from_oauth(tokens: &OAuthTokens) -> Self {
         Self::OAuth {
             access_token: tokens.access_token.clone(),
             refresh_token: tokens.refresh_token.clone(),
             expires_at: tokens.expires_at,
-            account_label,
         }
     }
 
@@ -444,7 +441,7 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: 999,
         };
-        let sa = ServerAuth::from_oauth(&tokens, Some("work".to_string()));
+        let sa = ServerAuth::from_oauth(&tokens);
         assert!(sa.is_oauth());
         assert_eq!(sa.token(), "tok");
     }

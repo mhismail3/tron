@@ -26,8 +26,6 @@ pub enum AnthropicAuth {
     OAuth {
         /// OAuth tokens.
         tokens: crate::llm::auth::OAuthTokens,
-        /// Account label (for multi-account).
-        account_label: Option<String>,
     },
 }
 
