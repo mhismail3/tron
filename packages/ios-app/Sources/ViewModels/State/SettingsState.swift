@@ -20,7 +20,6 @@ final class SettingsState {
     var alertTurnFallback: Int = 15
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
-    var taskAutoInjectEnabled: Bool = false
     var isolationMode: String = "always"
 
     // MARK: - Connection Presets
@@ -70,7 +69,6 @@ final class SettingsState {
             alertTurnFallback = settings.compaction.alertTurnFallback
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
-            taskAutoInjectEnabled = settings.tasks.autoInject.enabled
             isolationMode = settings.isolationMode
             connectionPresets = settings.connectionPresets
             if let workspace = settings.defaultWorkspace {
@@ -111,7 +109,6 @@ final class SettingsState {
         alertTurnFallback = 15
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
-        taskAutoInjectEnabled = false
         isolationMode = "always"
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
@@ -131,8 +128,7 @@ final class SettingsState {
                 alertTurnFallback: 15,
                 maxPreservedRatio: 0.20
                 ),
-                rules: .init(discoverStandaloneFiles: true),
-                tasks: .init(autoInject: .init(enabled: false))
+                rules: .init(discoverStandaloneFiles: true)
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))
         )

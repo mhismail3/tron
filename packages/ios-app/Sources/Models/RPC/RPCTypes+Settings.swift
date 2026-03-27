@@ -15,7 +15,6 @@ struct ServerSettings: Decodable {
     let connectionPresets: [ConnectionPreset]
     let compaction: CompactionSettings
     let rules: RulesSettings
-    let tasks: TaskSettings
     let isolationMode: String
     let chatWorkingDirectory: String?
 
@@ -44,7 +43,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ContextKeys: String, CodingKey {
-        case compactor, rules, tasks
+        case compactor, rules
     }
 
     init(from decoder: Decoder) throws {
@@ -72,11 +71,9 @@ struct ServerSettings: Decodable {
         if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {
             compaction = (try? contextContainer.decodeIfPresent(CompactionSettings.self, forKey: .compactor)) ?? .defaults
             rules = (try? contextContainer.decodeIfPresent(RulesSettings.self, forKey: .rules)) ?? .defaults
-            tasks = (try? contextContainer.decodeIfPresent(TaskSettings.self, forKey: .tasks)) ?? .defaults
         } else {
             compaction = .defaults
             rules = .defaults
-            tasks = .defaults
         }
 
         // session.isolation.mode + session.chat.workingDirectory
@@ -162,29 +159,6 @@ struct ServerSettings: Decodable {
         }
     }
 
-    struct TaskSettings: Decodable {
-        let autoInject: AutoInjectSettings
-        static let defaults = TaskSettings(autoInject: .defaults)
-
-        private enum CodingKeys: String, CodingKey {
-            case autoInject
-        }
-
-        init(autoInject: AutoInjectSettings) {
-            self.autoInject = autoInject
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            autoInject = (try? container.decodeIfPresent(AutoInjectSettings.self, forKey: .autoInject)) ?? .defaults
-        }
-
-        struct AutoInjectSettings: Decodable {
-            let enabled: Bool
-            static let defaults = AutoInjectSettings(enabled: false)
-        }
-    }
-
 }
 
 struct ServerSettingsUpdate: Encodable {
@@ -201,7 +175,6 @@ struct ServerSettingsUpdate: Encodable {
     struct ContextUpdate: Encodable {
         var compactor: CompactorUpdate?
         var rules: RulesUpdate?
-        var tasks: TasksUpdate?
 
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
@@ -215,14 +188,6 @@ struct ServerSettingsUpdate: Encodable {
 
         struct RulesUpdate: Encodable {
             var discoverStandaloneFiles: Bool?
-        }
-
-        struct TasksUpdate: Encodable {
-            var autoInject: AutoInjectUpdate?
-
-            struct AutoInjectUpdate: Encodable {
-                var enabled: Bool?
-            }
         }
     }
 

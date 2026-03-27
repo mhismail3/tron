@@ -19,7 +19,6 @@ struct ContextSettingsPage: View {
                 )
 
                 ContextSettingsSection(
-                    taskAutoInjectEnabled: Bindable(settingsState).taskAutoInjectEnabled,
                     discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
                     updateServerSetting: updateServerSetting
                 )

@@ -12,8 +12,6 @@ pub struct ContextSettings {
     pub compactor: CompactorSettings,
     /// Rules discovery settings.
     pub rules: RulesSettings,
-    /// Task context injection settings.
-    pub tasks: TaskSettings,
 }
 
 /// Context compaction settings.
@@ -86,36 +84,6 @@ impl Default for RulesSettings {
     }
 }
 
-/// Task context injection settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct TaskSettings {
-    /// Auto-inject task summary into agent context.
-    pub auto_inject: AutoInjectSettings,
-}
-
-impl Default for TaskSettings {
-    fn default() -> Self {
-        Self {
-            auto_inject: AutoInjectSettings::default(),
-        }
-    }
-}
-
-/// Auto-inject configuration for task summaries.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct AutoInjectSettings {
-    /// Whether to auto-inject task summaries.
-    pub enabled: bool,
-}
-
-impl Default for AutoInjectSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,24 +147,6 @@ mod tests {
     }
 
     #[test]
-    fn task_defaults() {
-        let t = TaskSettings::default();
-        assert!(!t.auto_inject.enabled);
-    }
-
-    #[test]
-    fn task_serde_roundtrip() {
-        let json = serde_json::json!({
-            "autoInject": { "enabled": true }
-        });
-        let t: TaskSettings = serde_json::from_value(json).unwrap();
-        assert!(t.auto_inject.enabled);
-
-        let serialized = serde_json::to_value(&t).unwrap();
-        assert_eq!(serialized["autoInject"]["enabled"], true);
-    }
-
-    #[test]
     fn context_partial_json() {
         let json = serde_json::json!({
             "compactor": {
@@ -205,24 +155,7 @@ mod tests {
         });
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.compactor.max_tokens, 50_000);
-        // Other compactor fields should be defaults
         assert!((ctx.compactor.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
-        // Other sections should be defaults
         assert!(ctx.rules.discover_standalone_files);
-        assert!(!ctx.tasks.auto_inject.enabled);
-    }
-
-    #[test]
-    fn context_with_tasks() {
-        let json = serde_json::json!({
-            "tasks": {
-                "autoInject": { "enabled": true }
-            }
-        });
-        let ctx: ContextSettings = serde_json::from_value(json).unwrap();
-        assert!(ctx.tasks.auto_inject.enabled);
-        // Other sections should be defaults
-        assert!(ctx.rules.discover_standalone_files);
-        assert_eq!(ctx.compactor.max_tokens, 25_000);
     }
 }
