@@ -460,7 +460,9 @@ struct ContextAuditView: View {
 
         do {
             _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
-            dismiss()
+            // Don't dismiss — the MemoryUpdated event adds a pill to chat.
+            // Just re-enable the button.
+            isRetaining = false
         } catch {
             errorMessage = "Failed to retain memory: \(error.localizedDescription)"
             isRetaining = false

@@ -145,6 +145,8 @@ final class ChatViewModel {
     var catchUpMessageIds: Set<UUID> = []
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
+    /// ID of the memory-retain-in-progress notification (replaced when retain completes)
+    var memoryRetainInProgressMessageId: UUID?
     /// Defensive timeout: if agent.ready never arrives after agent.complete, recover after 10s
     @ObservationIgnored
     var postProcessingTimeoutTask: Task<Void, Never>?
@@ -266,6 +268,7 @@ final class ChatViewModel {
                 self.isCompacting = false
                 self.compactionInProgressMessageId = nil
                 self.isRetaining = false
+                self.memoryRetainInProgressMessageId = nil
                 self.runningToolCount = 0
             }
         })

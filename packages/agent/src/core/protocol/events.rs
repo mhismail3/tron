@@ -681,6 +681,8 @@ tron_events! {
     MemoryUpdated {
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
         #[serde(rename = "entryType", skip_serializing_if = "Option::is_none")]
         entry_type: Option<String>,
         #[serde(rename = "eventId", skip_serializing_if = "Option::is_none")]
@@ -1529,6 +1531,7 @@ mod tests {
             TronEvent::MemoryUpdated {
                 base: base.clone(),
                 title: None,
+                summary: None,
                 entry_type: None,
                 event_id: None,
             },
@@ -1687,6 +1690,7 @@ mod tests {
         let e = TronEvent::MemoryUpdated {
             base: BaseEvent::now("s1"),
             title: Some("entry".into()),
+            summary: Some("summary text".into()),
             entry_type: Some("feature".into()),
             event_id: Some("evt_123".into()),
         };

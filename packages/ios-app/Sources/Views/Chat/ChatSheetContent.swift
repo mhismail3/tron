@@ -62,6 +62,10 @@ struct ChatSheetContent: View {
             )
             .adaptivePresentationDetents([.medium, .large])
 
+        case .memoryRetainDetail(let data):
+            MemoryRetainDetailSheet(title: data.title, summary: data.summary)
+                .adaptivePresentationDetents([.medium, .large])
+
         case .askUserQuestion:
             askUserQuestionSheet
 

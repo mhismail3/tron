@@ -16,6 +16,7 @@ enum MemoryUpdatedPlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let title: String?
+            let summary: String?
             let entryType: String?
             let eventId: String?
         }
@@ -26,12 +27,14 @@ enum MemoryUpdatedPlugin: DispatchableEventPlugin {
     struct Result: EventResult {
         /// Non-nil when memory was actually saved; nil means "nothing new to retain".
         let title: String?
+        /// The full summary text from the LLM summarizer.
+        let summary: String?
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(title: event.data.title)
+        Result(title: event.data.title, summary: event.data.summary)
     }
 
     @MainActor

@@ -419,6 +419,8 @@ struct ChatView: View {
             viewModel.subagentState.showDetails(for: sid)
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
+        case .memoryRetainDetail(let title, let summary):
+            sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
         }
     }
 

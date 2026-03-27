@@ -37,8 +37,10 @@ enum SystemEvent: Equatable, Hashable {
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
+    /// Memory retain in progress (shows spinner pill)
+    case memoryRetainInProgress
     /// Memory was retained to long-term log
-    case memoryRetained(title: String)
+    case memoryRetained(title: String, summary: String?)
     /// Memory retain was requested but there was nothing new since the last boundary
     case memoryRetainedNothingNew
 
@@ -83,11 +85,39 @@ enum SystemEvent: Equatable, Hashable {
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category)
             return "\(label): \(data.message)"
-        case .memoryRetained(let title):
+        case .memoryRetainInProgress:
+            return "Retaining memory..."
+        case .memoryRetained(let title, _):
             return "Memory saved: \(title)"
         case .memoryRetainedNothingNew:
             return "Nothing new to retain"
         }
+    }
+
+    /// Whether this is a memory retain notification (for unified animation)
+    var isMemoryRetainNotification: Bool {
+        switch self {
+        case .memoryRetainInProgress, .memoryRetained, .memoryRetainedNothingNew: return true
+        default: return false
+        }
+    }
+
+    /// Whether the memory retain is still in progress
+    var memoryRetainIsInProgress: Bool {
+        if case .memoryRetainInProgress = self { return true }
+        return false
+    }
+
+    /// Memory retain title (nil for in-progress / nothing-new)
+    var memoryRetainTitle: String? {
+        if case .memoryRetained(let title, _) = self { return title }
+        return nil
+    }
+
+    /// Memory retain summary (nil for in-progress / nothing-new)
+    var memoryRetainSummary: String? {
+        if case .memoryRetained(_, let summary) = self { return summary }
+        return nil
     }
 
     /// Whether this is a compaction in-progress or completed event (for unified animation)

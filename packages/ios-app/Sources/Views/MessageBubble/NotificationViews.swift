@@ -530,37 +530,63 @@ enum ErrorCategoryDisplay {
     }
 }
 
-// MARK: - Memory Retained Notification View
+// MARK: - Memory Retained Notification View (unified in-progress + completed)
 
 struct MemoryRetainedNotificationView: View {
-    let title: String?
+    let isInProgress: Bool
+    var title: String?
+    var nothingNew: Bool = false
+    var onTap: (() -> Void)? = nil
+
+    private let iconSize: CGFloat = TronTypography.sizeBody2
 
     var body: some View {
-        NotificationPill(tint: .tronPink) {
+        NotificationPill(tint: .tronPink, interactive: !isInProgress && title != nil, onTap: isInProgress ? nil : onTap) {
             HStack(spacing: 8) {
-                Image(systemName: "brain")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronPink)
+                ZStack {
+                    if isInProgress {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.tronPink)
+                            .transition(.blurReplace)
+                    } else {
+                        Image(systemName: "brain")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.tronPink)
+                            .transition(.blurReplace)
+                    }
+                }
+                .frame(width: iconSize, height: iconSize)
 
-                if let title {
+                if isInProgress {
+                    Text("Retaining memory...")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.tronPink.opacity(0.9))
+                        .contentTransition(.interpolate)
+                } else if let title {
                     Text("Memory saved")
                         .font(TronTypography.filePath)
                         .foregroundStyle(.tronPink.opacity(0.9))
+                        .contentTransition(.interpolate)
 
                     Text("\u{2022}")
                         .font(TronTypography.badge)
                         .foregroundStyle(.tronPink.opacity(0.5))
+                        .transition(.blurReplace)
 
                     Text(title)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronPink.opacity(0.7))
                         .lineLimit(1)
+                        .transition(.blurReplace)
                 } else {
                     Text("Nothing new to retain")
                         .font(TronTypography.filePath)
                         .foregroundStyle(.tronPink.opacity(0.6))
+                        .contentTransition(.interpolate)
                 }
             }
+            .animation(.smooth(duration: 0.35), value: isInProgress)
         }
     }
 }

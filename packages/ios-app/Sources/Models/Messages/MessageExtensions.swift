@@ -91,9 +91,14 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .skillRemoved(skillName: skillName))
     }
 
+    /// In-chat notification for memory retain in progress (spinning indicator)
+    static func memoryRetainInProgress() -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryRetainInProgress)
+    }
+
     /// In-chat notification for memory retained to long-term log
-    static func memoryRetained(title: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryRetained(title: title))
+    static func memoryRetained(title: String, summary: String?) -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryRetained(title: title, summary: summary))
     }
 
     /// In-chat notification for memory retain with nothing new

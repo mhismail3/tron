@@ -164,6 +164,7 @@ extension ChatViewModel {
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
+        memoryRetainInProgressMessageId = nil
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         // Clear queue — server context is lost, queued messages are stale
@@ -242,6 +243,14 @@ extension ChatViewModel {
     func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
         logger.info("Memory retain started", category: .events)
         isRetaining = true
+
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        // Add spinning "Retaining memory..." pill to chat
+        let inProgressMessage = ChatMessage.memoryRetainInProgress()
+        appendToMessages(inProgressMessage)
+        memoryRetainInProgressMessageId = inProgressMessage.id
     }
 
     func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
@@ -252,10 +261,29 @@ extension ChatViewModel {
 
         if let title = pluginResult.title {
             logger.info("Memory retained: \(title)", category: .events)
-            appendToMessages(ChatMessage.memoryRetained(title: title))
+
+            // Mutate content in-place to keep the same message identity → smooth animation
+            if let inProgressId = memoryRetainInProgressMessageId,
+               let index = messageIndex.index(for: inProgressId) {
+                withAnimation(.smooth(duration: 0.35)) {
+                    messages[index].content = .memoryRetained(title: title, summary: pluginResult.summary)
+                }
+                memoryRetainInProgressMessageId = nil
+            } else {
+                appendToMessages(ChatMessage.memoryRetained(title: title, summary: pluginResult.summary))
+            }
         } else {
             logger.info("Memory retain: nothing new", category: .events)
-            appendToMessages(ChatMessage.memoryRetainedNothingNew())
+
+            if let inProgressId = memoryRetainInProgressMessageId,
+               let index = messageIndex.index(for: inProgressId) {
+                withAnimation(.smooth(duration: 0.35)) {
+                    messages[index].content = .memoryRetainedNothingNew
+                }
+                memoryRetainInProgressMessageId = nil
+            } else {
+                appendToMessages(ChatMessage.memoryRetainedNothingNew())
+            }
         }
     }
 
@@ -333,6 +361,7 @@ extension ChatViewModel {
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
+        memoryRetainInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

@@ -66,9 +66,13 @@ enum MessageContent: Equatable {
     static func skillRemoved(skillName: String) -> MessageContent {
         .systemEvent(.skillRemoved(skillName: skillName))
     }
+    /// In-chat notification for memory retain in progress
+    static var memoryRetainInProgress: MessageContent {
+        .systemEvent(.memoryRetainInProgress)
+    }
     /// In-chat notification for memory retained to long-term log
-    static func memoryRetained(title: String) -> MessageContent {
-        .systemEvent(.memoryRetained(title: title))
+    static func memoryRetained(title: String, summary: String?) -> MessageContent {
+        .systemEvent(.memoryRetained(title: title, summary: summary))
     }
     /// In-chat notification for memory retain with nothing new
     static var memoryRetainedNothingNew: MessageContent {

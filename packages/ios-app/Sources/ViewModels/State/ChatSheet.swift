@@ -1,5 +1,11 @@
 import Foundation
 
+/// Data for memory retain detail sheet
+struct MemoryRetainDetailData: Equatable {
+    let title: String
+    let summary: String?
+}
+
 /// Data for compaction detail sheet
 struct CompactionDetailData: Equatable {
     let tokensBefore: Int
@@ -43,6 +49,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Skill/Spell details
     case skillDetail(Skill, ChipMode)
     case compactionDetail(CompactionDetailData)
+    case memoryRetainDetail(MemoryRetainDetailData)
 
     // Tool sheets
     case askUserQuestion
@@ -75,6 +82,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "skillDetail-\(skill.id)"
         case .compactionDetail:
             return "compaction"
+        case .memoryRetainDetail:
+            return "memoryRetain"
         case .askUserQuestion:
             return "askUserQuestion"
         case .getConfirmation:
@@ -109,6 +118,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.skillDetail(let skill1, let mode1), .skillDetail(let skill2, let mode2)):
             return skill1.id == skill2.id && mode1 == mode2
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
+            return data1 == data2
+        case (.memoryRetainDetail(let data1), .memoryRetainDetail(let data2)):
             return data1 == data2
         case (.askUserQuestion, .askUserQuestion):
             return true

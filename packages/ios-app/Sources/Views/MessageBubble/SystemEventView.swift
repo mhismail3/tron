@@ -10,6 +10,8 @@ struct SystemEventView: View {
     var body: some View {
         if event.isCompactionNotification {
             compactionNotificationView
+        } else if event.isMemoryRetainNotification {
+            memoryRetainNotificationView
         } else {
             eventView
         }
@@ -30,6 +32,20 @@ struct SystemEventView: View {
             onTap: isInProgress ? nil : {
                 onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: event.compactionPreservedTurns, summarizedTurns: event.compactionSummarizedTurns))
             }
+        )
+    }
+
+    @ViewBuilder
+    private var memoryRetainNotificationView: some View {
+        let isInProgress = event.memoryRetainIsInProgress
+        let title = event.memoryRetainTitle
+        let summary = event.memoryRetainSummary
+        MemoryRetainedNotificationView(
+            isInProgress: isInProgress,
+            title: title,
+            onTap: isInProgress ? nil : (title != nil ? {
+                onTap?(.memoryRetainDetail(title: title!, summary: summary))
+            } : nil)
         )
     }
 
@@ -89,12 +105,6 @@ struct SystemEventView: View {
                     onTap?(.providerError(data))
                 }
             )
-
-        case .memoryRetained(let title):
-            MemoryRetainedNotificationView(title: title)
-
-        case .memoryRetainedNothingNew:
-            MemoryRetainedNotificationView(title: nil)
 
         default:
             EmptyView()

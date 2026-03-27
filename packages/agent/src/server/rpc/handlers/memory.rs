@@ -74,6 +74,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
             .emit(crate::core::events::TronEvent::MemoryUpdated {
                 base: crate::core::events::BaseEvent::now(&session_id),
                 title: None,
+                summary: None,
                 entry_type: Some("session".to_owned()),
                 event_id: None,
             });
@@ -119,6 +120,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
             .emit(crate::core::events::TronEvent::MemoryUpdated {
                 base: crate::core::events::BaseEvent::now(&session_id),
                 title: None,
+                summary: None,
                 entry_type: Some("session".to_owned()),
                 event_id: None,
             });
@@ -195,6 +197,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
         .emit(crate::core::events::TronEvent::MemoryUpdated {
             base: crate::core::events::BaseEvent::now(&session_id),
             title: Some(title.clone()),
+            summary: Some(summary_text.clone()),
             entry_type: Some("session".to_owned()),
             event_id: if retained_event_id.is_empty() {
                 None

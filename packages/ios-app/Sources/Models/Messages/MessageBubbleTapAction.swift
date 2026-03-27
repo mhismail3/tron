@@ -16,4 +16,5 @@ enum MessageBubbleTapAction {
     case waitForAgents(WaitForAgentsChipData)
     case subagentResult(sessionId: String)
     case providerError(ProviderErrorDetailData)
+    case memoryRetainDetail(title: String, summary: String?)
 }

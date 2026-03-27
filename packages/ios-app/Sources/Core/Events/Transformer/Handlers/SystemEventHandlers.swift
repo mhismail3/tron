@@ -188,9 +188,10 @@ enum SystemEventHandlers {
         timestamp: Date
     ) -> ChatMessage? {
         let title = payload["title"]?.value as? String
+        let summary = payload["summary"]?.value as? String
         return ChatMessage(
             role: .system,
-            content: .memoryRetained(title: title ?? "Session summary"),
+            content: .memoryRetained(title: title ?? "Session summary", summary: summary),
             timestamp: timestamp
         )
     }

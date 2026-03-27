@@ -942,6 +942,7 @@ fn all_event_types_have_wire_mapping() {
         TronEvent::MemoryUpdated {
             base: base.clone(),
             title: None,
+            summary: None,
             entry_type: None,
             event_id: None,
         },
@@ -1089,6 +1090,7 @@ fn memory_updated_wire_type_and_data() {
     let event = TronEvent::MemoryUpdated {
         base: BaseEvent::now("s1"),
         title: Some("My Entry".into()),
+        summary: Some("summary text".into()),
         entry_type: Some("feature".into()),
         event_id: Some("evt_abc123".into()),
     };
@@ -1096,6 +1098,7 @@ fn memory_updated_wire_type_and_data() {
     assert_eq!(rpc.event_type, "agent.memory_updated");
     let data = rpc.data.unwrap();
     assert_eq!(data["title"], "My Entry");
+    assert_eq!(data["summary"], "summary text");
     assert_eq!(data["entryType"], "feature");
     assert_eq!(data["eventId"], "evt_abc123");
 }

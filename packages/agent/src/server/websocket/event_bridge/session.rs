@@ -162,6 +162,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
         )),
         TronEvent::MemoryUpdated {
             title,
+            summary,
             entry_type,
             event_id,
             ..
@@ -170,6 +171,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             "agent.memory_updated",
             Some(json!({
                 "title": title,
+                "summary": summary,
                 "entryType": entry_type,
                 "eventId": event_id,
             })),
