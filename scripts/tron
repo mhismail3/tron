@@ -711,9 +711,18 @@ cmd_deploy() {
     # Record workspace path
     echo "$PROJECT_DIR" > "$DEPLOY_DIR/workspace-path"
 
-    # Regenerate plist so paths (e.g. log file) stay current
+    # Regenerate plists so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
     create_launchd_plist
+
+    # Regenerate auto-deploy plist if installed (keeps paths in sync)
+    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
+        print_status "Updating auto-deploy plist..."
+        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+        create_auto_deploy_plist
+        launchctl load "$AUTO_DEPLOY_PLIST_PATH"
+        print_success "Auto-deploy plist updated"
+    fi
 
     # Record new commit
     local new_commit
@@ -1264,11 +1273,7 @@ cmd_auto_deploy() {
     esac
 }
 
-auto_deploy_install() {
-    require_project_dir
-
-    print_header "Installing Auto-Deploy Watcher"
-
+create_auto_deploy_plist() {
     mkdir -p "$DEPLOY_DIR"
 
     cat > "$AUTO_DEPLOY_PLIST_PATH" << PLIST
@@ -1308,7 +1313,14 @@ auto_deploy_install() {
 </dict>
 </plist>
 PLIST
+}
 
+auto_deploy_install() {
+    require_project_dir
+
+    print_header "Installing Auto-Deploy Watcher"
+
+    create_auto_deploy_plist
     print_success "Created: $AUTO_DEPLOY_PLIST_PATH"
 
     launchctl load "$AUTO_DEPLOY_PLIST_PATH"
