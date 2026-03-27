@@ -494,9 +494,13 @@ mod session_event_tests {
                 EventType::HookBackgroundCompleted,
                 json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
             ),
+            (
+                EventType::MemoryRetained,
+                json!({"sessionId": "s1", "turnNumber": 5, "title": "Implement auth", "timestamp": "2026-01-01T00:00:00Z"}),
+            ),
         ];
 
-        assert_eq!(cases.len(), 49, "must cover all 49 event types");
+        assert_eq!(cases.len(), 50, "must cover all 50 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());

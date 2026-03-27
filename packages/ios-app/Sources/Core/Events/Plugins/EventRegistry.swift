@@ -84,6 +84,8 @@ final class EventRegistry: @unchecked Sendable {
         register(CompactionStartedPlugin.self)
         register(CompactionPlugin.self)
         register(ContextClearedPlugin.self)
+        register(MemoryUpdatingPlugin.self)
+        register(MemoryUpdatedPlugin.self)
         register(MessageDeletedPlugin.self)
         register(SkillRemovedPlugin.self)
         register(TurnFailedPlugin.self)

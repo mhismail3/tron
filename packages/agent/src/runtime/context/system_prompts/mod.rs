@@ -86,6 +86,46 @@ Return a single JSON object:
 - Omit empty arrays from extractedData rather than including []
 - Be concise but complete — every sentence should carry information"#;
 
+/// System prompt for the memory retain summarizer subagent.
+///
+/// Used by the `memory.retain` RPC handler to produce structured markdown
+/// summaries optimized for future recall, not context reduction.
+pub const MEMORY_RETAIN_SUMMARIZER_PROMPT: &str = "You are a memory archivist for an AI coding agent. Your job is to produce a structured session summary that will be stored in long-term memory and recalled in future sessions to provide continuity.\n\
+\n\
+## Instructions\n\
+\n\
+Analyze the provided session transcript and output structured markdown. The first line must be a short title (under 60 characters) summarizing the session's main goal — this is used as the UI notification title.\n\
+\n\
+## Output Format\n\
+\n\
+<title — one line, under 60 chars>\n\
+\n\
+**Goal**: <what the user was trying to accomplish>\n\
+**Model**: <model name if visible, else omit>\n\
+\n\
+### Completed\n\
+- <concrete thing done>\n\
+\n\
+### Pending\n\
+- <remaining task, if any>\n\
+\n\
+### Key Decisions\n\
+- <decision>: <rationale>\n\
+\n\
+### Files Modified\n\
+- <path>\n\
+\n\
+### Context\n\
+<2-4 sentences of narrative context. What was asked, what approach was taken, any important constraints or outcomes.>\n\
+\n\
+## Rules\n\
+\n\
+- First line = title only (no heading prefix)\n\
+- Be specific: include exact file paths, function names, error messages, command outputs.\n\
+- Omit sections that are empty.\n\
+- Do NOT include JSON, code fences, or tool call traces.\n\
+- Keep the whole summary under 400 words.";
+
 /// System prompt for the web content summarizer subagent.
 ///
 /// Used by `WebFetch`'s Haiku subagent to answer questions about fetched
@@ -261,6 +301,15 @@ mod tests {
         assert!(COMPACTION_SUMMARIZER_PROMPT.contains("JSON"));
         assert!(COMPACTION_SUMMARIZER_PROMPT.contains("narrative"));
         assert!(COMPACTION_SUMMARIZER_PROMPT.contains("extractedData"));
+    }
+
+    #[test]
+    fn memory_retain_summarizer_prompt_non_empty() {
+        assert!(!MEMORY_RETAIN_SUMMARIZER_PROMPT.is_empty());
+        assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Goal"));
+        assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Completed"));
+        assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Context"));
+        assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("title"));
     }
 
     #[test]

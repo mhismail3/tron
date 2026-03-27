@@ -123,6 +123,17 @@ struct MemoryGetLedgerResult: Decodable {
     let totalCount: Int
 }
 
+struct MemoryRetainParams: Encodable {
+    let sessionId: String
+}
+
+struct MemoryRetainResult: Decodable {
+    let retained: Bool
+    let reason: String?
+    let title: String?
+    let eventId: String?
+}
+
 // MARK: - Sandbox Types
 
 struct ContainerDTO: Decodable, Identifiable {

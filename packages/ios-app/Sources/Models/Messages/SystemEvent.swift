@@ -37,8 +37,12 @@ enum SystemEvent: Equatable, Hashable {
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
+    /// Memory was retained to long-term log
+    case memoryRetained(title: String)
+    /// Memory retain was requested but there was nothing new since the last boundary
+    case memoryRetainedNothingNew
 
-    /// Human-readable description for the event
+/// Human-readable description for the event
     var textContent: String {
         switch self {
         case .modelChange(let from, let to):
@@ -79,6 +83,10 @@ enum SystemEvent: Equatable, Hashable {
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category)
             return "\(label): \(data.message)"
+        case .memoryRetained(let title):
+            return "Memory saved: \(title)"
+        case .memoryRetainedNothingNew:
+            return "Nothing new to retain"
         }
     }
 

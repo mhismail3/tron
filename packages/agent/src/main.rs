@@ -287,14 +287,14 @@ async fn main() -> Result<()> {
     {
         let tron_home = tron::settings::tron_home_dir();
         let system = tron_home.join("system");
-        for subdir in &["bin", "db", "deployment", "scratch"] {
+        for subdir in &["bin", "db", "deployment"] {
             let _ = std::fs::create_dir_all(system.join(subdir));
         }
-        for subdir in &["sessions", "knowledge", "cron"] {
+        for subdir in &["sessions", "knowledge", "cron", "scratch"] {
             let _ = std::fs::create_dir_all(tron_home.join("memory").join(subdir));
         }
         let _ = std::fs::create_dir_all(tron_home.join("user").join("voice"));
-        let _ = std::fs::create_dir_all(tron_home.join("memory").join("skills"));
+        let _ = std::fs::create_dir_all(tron_home.join("skills"));
         let _ = std::fs::create_dir_all(tron_home.join("memory").join("rules"));
     }
 

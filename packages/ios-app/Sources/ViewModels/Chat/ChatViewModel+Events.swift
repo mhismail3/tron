@@ -163,6 +163,7 @@ extension ChatViewModel {
         }
         isCompacting = false
         compactionInProgressMessageId = nil
+        isRetaining = false
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         // Clear queue — server context is lost, queued messages are stale
@@ -238,6 +239,26 @@ extension ChatViewModel {
         drainMessageQueue()
     }
 
+    func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
+        logger.info("Memory retain started", category: .events)
+        isRetaining = true
+    }
+
+    func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
+        isRetaining = false
+
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        if let title = pluginResult.title {
+            logger.info("Memory retained: \(title)", category: .events)
+            appendToMessages(ChatMessage.memoryRetained(title: title))
+        } else {
+            logger.info("Memory retain: nothing new", category: .events)
+            appendToMessages(ChatMessage.memoryRetainedNothingNew())
+        }
+    }
+
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         let tokensFreed = pluginResult.tokensBefore - pluginResult.tokensAfter
         logger.info("Context cleared: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
@@ -311,6 +332,7 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
+        isRetaining = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
@@ -354,6 +376,7 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
+        isRetaining = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

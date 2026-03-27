@@ -316,6 +316,7 @@ impl TronAgent {
     pub fn emitter(&self) -> &Arc<EventEmitter> {
         &self.emitter
     }
+
 }
 
 #[cfg(test)]
@@ -1670,4 +1671,5 @@ mod tests {
             .collect();
         assert_eq!(tool_results.len(), 1);
     }
+
 }

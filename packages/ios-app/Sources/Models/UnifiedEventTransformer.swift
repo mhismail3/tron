@@ -168,6 +168,8 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformRulesLoaded(payload, timestamp: ts)
         case .rulesActivated:
             return SystemEventHandlers.transformRulesActivated(payload, timestamp: ts)
+        case .memoryRetained:
+            return SystemEventHandlers.transformMemoryRetained(payload, timestamp: ts)
         case .streamThinkingComplete:
             return SystemEventHandlers.transformThinkingComplete(payload, timestamp: ts)
         default:
@@ -178,7 +180,6 @@ struct UnifiedEventTransformer {
     // =========================================================================
     // MARK: - Helpers
     // =========================================================================
-
 
     /// Extract preview (first 3 lines) from thinking content for display
     private static func extractThinkingPreview(from content: String, maxLines: Int = 3) -> String {
@@ -313,7 +314,8 @@ extension UnifiedEventTransformer {
                  .notificationInterrupted, .notificationSubagentResult,
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillRemoved, .rulesLoaded, .rulesActivated,
-                 .errorAgent, .errorTool, .errorProvider:
+                 .errorAgent, .errorTool, .errorProvider,
+                 .memoryRetained:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {
                         message.eventId = event.id

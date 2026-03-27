@@ -33,6 +33,7 @@ pub mod filesystem;
 pub mod git;
 pub mod logs;
 pub mod mcp;
+pub mod memory;
 pub mod message;
 pub mod model;
 pub mod notifications;
@@ -134,6 +135,9 @@ fn register_core(registry: &mut MethodRegistry) {
 
     // Logs
     registry.register("logs.ingest", logs::IngestLogsHandler);
+
+    // Memory
+    registry.register("memory.retain", memory::RetainMemoryHandler);
 }
 
 fn register_capabilities(registry: &mut MethodRegistry) {
@@ -494,8 +498,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            114,
-            "expected 114 methods (106 + 8 MCP), got {}",
+            115,
+            "expected 115 methods, got {}",
             reg.methods().len()
         );
     }

@@ -1,7 +1,7 @@
 //! Filesystem skill scanner.
 //!
 //! Discovers skills by scanning directories for folders containing `SKILL.md`.
-//! Supports both global (`~/.tron/memory/skills/`) and project-local skill directories.
+//! Supports both global (`~/.tron/skills/`) and project-local skill directories.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +13,7 @@ use crate::skills::constants::{
 use crate::skills::parser::parse_skill_md;
 use crate::skills::types::{SkillMetadata, SkillScanError, SkillScanResult, SkillSource};
 
-/// Get the global skills directory path (`~/.tron/memory/skills`).
+/// Get the global skills directory path (`~/.tron/skills`).
 pub fn global_skills_dir() -> PathBuf {
     let home = crate::core::paths::home_dir();
     PathBuf::from(home).join(GLOBAL_SKILLS_DIR)
@@ -350,7 +350,7 @@ mod tests {
         let dirs = project_skills_dirs("/home/user/project");
         assert_eq!(dirs.len(), 2);
         assert!(dirs[0].to_string_lossy().ends_with(".claude/skills"));
-        assert!(dirs[1].to_string_lossy().ends_with(".tron/memory/skills"));
+        assert!(dirs[1].to_string_lossy().ends_with(".tron/skills"));
     }
 
     #[test]

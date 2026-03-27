@@ -42,6 +42,11 @@ import Foundation
     func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result)
 }
 
+@MainActor protocol MemoryEventHandler: AnyObject {
+    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result)
+    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
+}
+
 @MainActor protocol ServerEventHandler: AnyObject {
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
 }
@@ -64,6 +69,6 @@ import Foundation
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
-    ContextEventHandler, SubagentEventHandler,
+    ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, EventDispatchLogger {}
 

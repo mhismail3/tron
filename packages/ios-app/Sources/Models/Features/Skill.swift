@@ -4,8 +4,8 @@ import Foundation
 
 /// Where a skill was loaded from
 enum SkillSource: String, Codable {
-    case global  // ~/.tron/memory/skills/
-    case project // .tron/memory/skills/ (relative to project)
+    case global  // ~/.tron/skills/
+    case project // .tron/skills/ (relative to project)
 }
 
 // MARK: - Skill Model

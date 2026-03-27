@@ -23,8 +23,8 @@ use super::system_prompts;
 use super::token_estimator;
 use super::types::{
     CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
-    DetailedContextSnapshot, ExportedState, PreTurnValidation, ProcessedToolResult,
-    SessionMemoryEntry, ToolSummary,
+    DetailedContextSnapshot, ExtractedData, ExportedState, PreTurnValidation,
+    ProcessedToolResult, SessionMemoryEntry, ToolSummary,
 };
 
 // =============================================================================
@@ -51,6 +51,8 @@ pub struct ContextManager {
     on_compaction_needed: Option<Box<dyn Fn() + Send + Sync>>,
     /// Rules tracker for dynamic scoped-rule activation.
     rules_tracker: RulesTracker,
+    /// Latest extracted data from compaction (for checkpoint payloads).
+    last_extracted_data: Option<super::types::ExtractedData>,
 }
 
 impl ContextManager {
@@ -79,6 +81,7 @@ impl ContextManager {
             session_memories: Vec::new(),
             on_compaction_needed: None,
             rules_tracker: RulesTracker::new(),
+            last_extracted_data: None,
         }
     }
 
@@ -451,6 +454,11 @@ impl ContextManager {
         let new_messages = engine.deps.get_messages();
         self.messages.set(new_messages);
 
+        // Store extracted data for checkpoint payloads
+        if let Some(ref data) = result.extracted_data {
+            self.last_extracted_data = Some(data.clone());
+        }
+
         // Clear API tokens since they're now stale
         self.api_context_tokens = None;
 
@@ -563,6 +571,19 @@ impl ContextManager {
             server_origin: None,
             device_context: None,
         }
+    }
+
+    // ── Extracted data (for memory snapshots) ──────────────────────────
+
+    /// Get the latest extracted data from compaction, or a default.
+    #[must_use]
+    pub fn get_latest_extracted_data(&self) -> ExtractedData {
+        self.last_extracted_data.clone().unwrap_or_default()
+    }
+
+    /// Store extracted data from compaction for checkpoint payloads.
+    pub fn set_extracted_data(&mut self, data: ExtractedData) {
+        self.last_extracted_data = Some(data);
     }
 
     // ── Export ───────────────────────────────────────────────────────────
@@ -1441,5 +1462,28 @@ mod tests {
             "should return only newly activated rules, got {r2:?}"
         );
         assert_eq!(r2[0].scope_dir, "src/b");
+    }
+
+    #[test]
+    fn extracted_data_default_when_no_compaction() {
+        let cm = ContextManager::new(test_config());
+        let data = cm.get_latest_extracted_data();
+        assert!(data.completed_steps.is_empty());
+        assert!(data.pending_tasks.is_empty());
+    }
+
+    #[test]
+    fn extracted_data_persisted_after_set() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_extracted_data(ExtractedData {
+            current_goal: "build feature X".into(),
+            completed_steps: vec!["step 1".into()],
+            pending_tasks: vec!["step 2".into()],
+            ..Default::default()
+        });
+        let data = cm.get_latest_extracted_data();
+        assert_eq!(data.current_goal, "build feature X");
+        assert_eq!(data.completed_steps, vec!["step 1"]);
+        assert_eq!(data.pending_tasks, vec!["step 2"]);
     }
 }

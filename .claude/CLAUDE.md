@@ -18,6 +18,16 @@ cd packages/ios-app && xcodegen generate
 xcodebuild test -scheme TronMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+## Settings Parity
+
+Every server setting (`~/.tron/system/settings.json`) must have a 1-to-1 corresponding control in the iOS settings UI. When adding a new setting to the Rust agent (`settings/types/`), also add:
+1. Decode in `RPCTypes+Settings.swift` (`ServerSettings`)
+2. Update struct in `RPCTypes+Settings.swift` (`ServerSettingsUpdate`)
+3. Property in `SettingsState.swift` (load, reset, build reset update)
+4. UI control in the appropriate settings page (`Views/Settings/Pages/`)
+
+No setting should exist only on the server or only in the iOS UI.
+
 ## Deployment
 
 - **NEVER run `tron deploy`** — production deployments are manual-only by the user.

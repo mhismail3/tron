@@ -66,6 +66,14 @@ enum MessageContent: Equatable {
     static func skillRemoved(skillName: String) -> MessageContent {
         .systemEvent(.skillRemoved(skillName: skillName))
     }
+    /// In-chat notification for memory retained to long-term log
+    static func memoryRetained(title: String) -> MessageContent {
+        .systemEvent(.memoryRetained(title: title))
+    }
+    /// In-chat notification for memory retain with nothing new
+    static var memoryRetainedNothingNew: MessageContent {
+        .systemEvent(.memoryRetainedNothingNew)
+    }
     /// In-chat notification for rules loaded on session start
     static func rulesLoaded(count: Int) -> MessageContent {
         .systemEvent(.rulesLoaded(count: count))

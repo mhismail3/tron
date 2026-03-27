@@ -556,8 +556,8 @@ System prompt  (stable)
 Reusable context packages stored as `SKILL.md` files with optional YAML frontmatter.
 
 **Locations:**
-- `~/.tron/memory/skills/` — Global (all projects)
-- `.claude/skills/` or `.tron/memory/skills/` — Project-local (higher precedence)
+- `~/.tron/skills/` — Global (all projects)
+- `.claude/skills/` or `.tron/skills/` — Project-local (higher precedence)
 
 **Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context.
 
@@ -731,19 +731,19 @@ The deploy process:
 +-- app/                  Server binary + production dependencies
 +-- settings.json         User settings (deep-merged over defaults)
 +-- auth.json             OAuth tokens + API keys (mode 600)
++-- skills/               Global skills (SKILL.md files)
 +-- memory/
 |   +-- sessions/         Session compaction summaries
 |   +-- knowledge/        Knowledge base (notes, research)
-|   +-- skills/           Global skills (SKILL.md files)
 |   +-- rules/            Global rules
 |   +-- cron/             Cron job working directories
 |   +-- canvases/         Generated artifacts
+|   +-- scratch/          Downloads, temp files, experiments
 +-- system/
 |   +-- bin/              CLI binaries
 |   +-- db/
 |   |   +-- log.db        Single SQLite file (events, tasks, logs, vectors)
 |   +-- deployment/       Deploy state files
-|   +-- scratch/          Downloads, temp files, experiments
 |   +-- mods/
 |       +-- apns/         APNS credentials (p8 key + config)
 |       +-- models/       Cached ONNX models (embeddings, transcription)

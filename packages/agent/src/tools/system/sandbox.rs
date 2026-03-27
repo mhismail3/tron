@@ -18,7 +18,7 @@ use crate::tools::errors::ToolError;
 
 /// Tron scratch directory for sandbox workspaces.
 fn scratch_dir() -> PathBuf {
-    tron_home().join("system").join("scratch")
+    tron_home().join("memory").join("scratch")
 }
 
 /// Configuration for a lightweight sandbox.
@@ -428,7 +428,7 @@ mod tests {
             .await
             .unwrap();
         let path_str = workspace.path.to_string_lossy().to_string();
-        assert!(path_str.contains(".tron/system/scratch/sandbox-"));
+        assert!(path_str.contains(".tron/memory/scratch/sandbox-"));
         workspace.cleanup().await.unwrap();
     }
 

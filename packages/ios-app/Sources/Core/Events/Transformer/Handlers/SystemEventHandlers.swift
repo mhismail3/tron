@@ -179,4 +179,19 @@ enum SystemEventHandlers {
             timestamp: timestamp
         )
     }
+
+    /// Transform memory.retained event into a ChatMessage.
+    ///
+    /// Memory retained events indicate when a session was summarized to long-term memory.
+    static func transformMemoryRetained(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        let title = payload["title"]?.value as? String
+        return ChatMessage(
+            role: .system,
+            content: .memoryRetained(title: title ?? "Session summary"),
+            timestamp: timestamp
+        )
+    }
 }

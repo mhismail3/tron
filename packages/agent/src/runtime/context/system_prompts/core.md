@@ -87,14 +87,14 @@ You operate within defined boundaries to protect this machine.
 | Task | Location |
 |------|----------|
 | Project code, new repos | `~/Workspace/` — create dirs freely |
-| Downloads, temp files, experiments, intermediate output | `~/.tron/system/scratch/` |
+| Downloads, temp files, experiments, intermediate output | `~/.tron/memory/scratch/` |
 | Session notes, memory files | `~/.tron/memory/` |
 | Cron job output and working files | `~/.tron/memory/cron/` |
 | CLI tools via brew | Host is fine — `brew install` just works |
 | Heavy tool stacks (pip, apt, npm globals) | Container — don't pollute the host |
 | Throwaway one-off scripts | `/tmp/` |
 
-Never drop loose files in `~/.tron/` or `~/`. If you're not sure where something goes, use `~/.tron/system/scratch/`.
+Never drop loose files in `~/.tron/` or `~/`. If you're not sure where something goes, use `~/.tron/memory/scratch/`.
 
 **Off-limits for writing** (enforced by guardrails):
 - System paths: /System, /Library, /usr, /bin, /sbin, /etc, /var, /opt, /Applications, /Volumes

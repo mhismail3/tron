@@ -74,6 +74,14 @@ final class MiscClient {
     }
 
     /// Get paginated ledger entries, optionally scoped to a workspace
+    /// Trigger manual memory retention — summarizes the session and appends to the memory log.
+    func retainMemory(sessionId: String) async throws -> MemoryRetainResult {
+        let ws = try transport.requireConnection()
+
+        let params = MemoryRetainParams(sessionId: sessionId)
+        return try await ws.send(method: "memory.retain", params: params)
+    }
+
     func getLedgerEntries(
         workingDirectory: String? = nil,
         limit: Int? = nil,

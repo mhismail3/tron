@@ -91,6 +91,16 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .skillRemoved(skillName: skillName))
     }
 
+    /// In-chat notification for memory retained to long-term log
+    static func memoryRetained(title: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryRetained(title: title))
+    }
+
+    /// In-chat notification for memory retain with nothing new
+    static func memoryRetainedNothingNew() -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryRetainedNothingNew)
+    }
+
     /// In-chat notification for rules loaded on session start
     static func rulesLoaded(count: Int) -> ChatMessage {
         ChatMessage(role: .system, content: .rulesLoaded(count: count))

@@ -22,8 +22,10 @@ struct ContextAuditView: View {
     @State private var sessionEvents: [SessionEvent] = []
     @State private var isClearing = false
     @State private var isCompacting = false
+    @State private var isRetaining = false
     @State private var showClearPopover = false
     @State private var showCompactPopover = false
+    @State private var showRetainPopover = false
 
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
@@ -78,11 +80,12 @@ struct ContextAuditView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    clearButton(iconOnly: false)
+                    clearButton(iconOnly: true)
+                    compactButton(iconOnly: true)
                 }
                 ToolbarItem(placement: .principal) { principalToolbarContent }
                 ToolbarItem(placement: .topBarTrailing) {
-                    compactButton(iconOnly: false)
+                    retainButton(iconOnly: false)
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -206,6 +209,53 @@ struct ContextAuditView: View {
                         role: .cancel
                     ) {
                         showCompactPopover = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private func retainButton(iconOnly: Bool) -> some View {
+        Button {
+            showRetainPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                if isRetaining {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronPink)
+                } else {
+                    Image(systemName: "brain")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                }
+                if !iconOnly {
+                    Text("Retain")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+            }
+            .foregroundStyle(!readOnly && !isRetaining ? .tronPink : .tronTextMuted)
+        }
+        .disabled(isRetaining || readOnly)
+        .popover(isPresented: $showRetainPopover, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Retain Memory",
+                        icon: "brain",
+                        color: .tronPink,
+                        role: .default
+                    ) {
+                        showRetainPopover = false
+                        Task { await retainMemory() }
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showRetainPopover = false
                     }
                 ]
             )
@@ -402,6 +452,18 @@ struct ContextAuditView: View {
             logger.error("🔧 Compaction failed: \(error)", category: .general)
             errorMessage = "Failed to compact context: \(error.localizedDescription)"
             isCompacting = false
+        }
+    }
+
+    private func retainMemory() async {
+        isRetaining = true
+
+        do {
+            _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
+            dismiss()
+        } catch {
+            errorMessage = "Failed to retain memory: \(error.localizedDescription)"
+            isRetaining = false
         }
     }
 

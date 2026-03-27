@@ -87,6 +87,9 @@ enum PersistedEventType: String, CaseIterable {
     // Turn events
     case turnFailed = "turn.failed"
 
+    // Memory
+    case memoryRetained = "memory.retained"
+
     // MARK: - Display Classification
 
     /// Whether this event type should render as a ChatMessage in the chat UI
@@ -98,7 +101,7 @@ enum PersistedEventType: String, CaseIterable {
              .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded, .rulesActivated,
              .errorAgent, .errorTool, .errorProvider,
-             .turnFailed:
+             .turnFailed, .memoryRetained:
             return true
         default:
             return false
@@ -196,6 +199,7 @@ enum PersistedEventType: String, CaseIterable {
         case .subagentCompleted: return "Subagent completed"
         case .subagentFailed: return "Subagent failed"
         case .turnFailed: return "Turn failed"
+        case .memoryRetained: return "Memory retained"
         }
     }
 }

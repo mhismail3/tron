@@ -530,3 +530,38 @@ enum ErrorCategoryDisplay {
     }
 }
 
+// MARK: - Memory Retained Notification View
+
+struct MemoryRetainedNotificationView: View {
+    let title: String?
+
+    var body: some View {
+        NotificationPill(tint: .tronPink) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronPink)
+
+                if let title {
+                    Text("Memory saved")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.tronPink.opacity(0.9))
+
+                    Text("\u{2022}")
+                        .font(TronTypography.badge)
+                        .foregroundStyle(.tronPink.opacity(0.5))
+
+                    Text(title)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronPink.opacity(0.7))
+                        .lineLimit(1)
+                } else {
+                    Text("Nothing new to retain")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.tronPink.opacity(0.6))
+                }
+            }
+        }
+    }
+}
+

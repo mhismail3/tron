@@ -22,6 +22,9 @@ final class ChatViewModel {
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
     /// because the memory-manager triggers it asynchronously. A turn_start resets it.
     var isCompacting = false
+    /// Memory retain is in progress (LLM summarizer call running).
+    /// While true: Retain button shows a spinner and is disabled.
+    var isRetaining = false
     var connectionState: ConnectionState = .disconnected
     var showSettings = false
     var errorMessage: String?
@@ -262,6 +265,7 @@ final class ChatViewModel {
                 self.streamingManager.reset()
                 self.isCompacting = false
                 self.compactionInProgressMessageId = nil
+                self.isRetaining = false
                 self.runningToolCount = 0
             }
         })

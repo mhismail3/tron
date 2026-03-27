@@ -90,6 +90,12 @@ struct SystemEventView: View {
                 }
             )
 
+        case .memoryRetained(let title):
+            MemoryRetainedNotificationView(title: title)
+
+        case .memoryRetainedNothingNew:
+            MemoryRetainedNotificationView(title: nil)
+
         default:
             EmptyView()
         }
