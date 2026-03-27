@@ -17,13 +17,14 @@ struct ServerSettings: Decodable {
     let rules: RulesSettings
     let isolationMode: String
     let chatWorkingDirectory: String?
+    let cacheTtlSecs: Int
 
     private enum CodingKeys: String, CodingKey {
         case models, server, context, session
     }
 
     private enum SessionKeys: String, CodingKey {
-        case isolation, chat
+        case isolation, chat, cacheTtlSecs
     }
 
     private enum ChatKeys: String, CodingKey {
@@ -76,7 +77,7 @@ struct ServerSettings: Decodable {
             rules = .defaults
         }
 
-        // session.isolation.mode + session.chat.workingDirectory
+        // session.isolation.mode + session.chat.workingDirectory + session.cacheTtlSecs
         if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session) {
             if let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
                 isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
@@ -88,9 +89,11 @@ struct ServerSettings: Decodable {
             } else {
                 chatWorkingDirectory = nil
             }
+            cacheTtlSecs = (try? sessionContainer.decodeIfPresent(Int.self, forKey: .cacheTtlSecs)) ?? 3600
         } else {
             isolationMode = "always"
             chatWorkingDirectory = nil
+            cacheTtlSecs = 3600
         }
     }
 
@@ -194,6 +197,7 @@ struct ServerSettingsUpdate: Encodable {
     struct SessionUpdate: Encodable {
         var isolation: IsolationUpdate?
         var chat: ChatUpdate?
+        var cacheTtlSecs: Int?
 
         struct IsolationUpdate: Encodable {
             var mode: String?

@@ -22,6 +22,17 @@ struct SessionSettingsPage: View {
         )
     }
 
+    private var cacheTtlDisplayText: String {
+        let minutes = settingsState.cacheTtlSecs / 60
+        if settingsState.cacheTtlSecs == 0 {
+            return "Off"
+        } else if minutes >= 60 {
+            return "\(minutes / 60)h"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+
     private var isolationDescription: String {
         switch settingsState.isolationMode {
         case "always":
@@ -117,6 +128,27 @@ struct SessionSettingsPage: View {
                     .onChange(of: settingsState.maxConcurrentSessions) { _, newValue in
                         updateServerSetting {
                             ServerSettingsUpdate(server: .init(maxConcurrentSessions: newValue))
+                        }
+                    }
+
+                    HStack {
+                        Label("Cache TTL", systemImage: "clock.arrow.circlepath")
+                            .font(TronTypography.subheadline)
+                        Spacer()
+                        Text(cacheTtlDisplayText)
+                            .font(TronTypography.subheadline)
+                            .foregroundStyle(.tronEmerald)
+                            .monospacedDigit()
+                            .frame(minWidth: 40)
+                        TronStepper(
+                            value: Bindable(settingsState).cacheTtlSecs,
+                            range: 0...7200,
+                            step: 300
+                        )
+                    }
+                    .onChange(of: settingsState.cacheTtlSecs) { _, newValue in
+                        updateServerSetting {
+                            ServerSettingsUpdate(session: .init(cacheTtlSecs: newValue))
                         }
                     }
 

@@ -162,11 +162,19 @@ pub fn read_sentinel(artifacts_dir: &Path) -> Option<RestartSentinel> {
     serde_json::from_str(&data).ok()
 }
 
-/// Write the restart sentinel.
+/// Write a file atomically using temp-file + rename (crash-safe).
+fn atomic_write(dir: &Path, filename: &str, content: &str) -> io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(filename);
+    let tmp = dir.join(format!("{filename}.tmp"));
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, &target)
+}
+
+/// Write the restart sentinel (atomic: temp file + rename).
 pub fn write_sentinel(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
-    std::fs::create_dir_all(artifacts_dir)?;
     let json = serde_json::to_string_pretty(sentinel).map_err(io::Error::other)?;
-    std::fs::write(artifacts_dir.join("restart-sentinel.json"), json)
+    atomic_write(artifacts_dir, "restart-sentinel.json", &json)
 }
 
 /// Compute SHA-256 hash of a file (streaming, for large binaries).
@@ -217,7 +225,7 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
     sentinel.completed_at =
         Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
     let json = serde_json::to_string_pretty(&sentinel).map_err(io::Error::other)?;
-    std::fs::write(&path, json)?;
+    atomic_write(artifacts_dir, "restart-sentinel.json", &json)?;
     Ok(Some(sentinel))
 }
 
@@ -252,8 +260,7 @@ fn write_last_deployment_inner(
         "error": error,
     });
     let pretty = serde_json::to_string_pretty(&json).map_err(io::Error::other)?;
-    std::fs::create_dir_all(artifacts_dir)?;
-    std::fs::write(artifacts_dir.join("last-deployment.json"), pretty)
+    atomic_write(artifacts_dir, "last-deployment.json", &pretty)
 }
 
 async fn read_deployed_commit_async(artifacts_dir: &Path) -> String {
@@ -280,6 +287,7 @@ pub fn run_self_test(
     settings_path: &Path,
     auth_path: &Path,
     binary_path: &Path,
+    deploy_dir: &Path,
 ) -> SelfTestResult {
     let checks = vec![
         // 1. Database: open + SELECT 1 + verify events table exists
@@ -290,7 +298,9 @@ pub fn run_self_test(
         check_auth(auth_path),
         // 4. Binary: exists + executable
         check_binary(binary_path),
-        // 5. Disk space
+        // 5. Binary hash integrity
+        check_binary_hash(binary_path, deploy_dir),
+        // 6. Disk space
         check_disk_space(binary_path),
     ];
 
@@ -441,6 +451,52 @@ fn check_binary(binary_path: &Path) -> SelfTestCheck {
             name: "binary".into(),
             passed: false,
             detail: Some(format!("stat error: {e}")),
+        },
+    }
+}
+
+fn check_binary_hash(binary_path: &Path, deploy_dir: &Path) -> SelfTestCheck {
+    let sentinel = match read_sentinel(deploy_dir) {
+        Some(s) => s,
+        None => {
+            return SelfTestCheck {
+                name: "binary_hash".into(),
+                passed: true,
+                detail: Some("no sentinel — skipping hash check".into()),
+            };
+        }
+    };
+    let expected = match sentinel.binary_sha256 {
+        Some(h) => h,
+        None => {
+            return SelfTestCheck {
+                name: "binary_hash".into(),
+                passed: true,
+                detail: Some("no hash in sentinel — pre-hash deployment".into()),
+            };
+        }
+    };
+    match verify_binary_hash(binary_path, &expected) {
+        Ok(true) => SelfTestCheck {
+            name: "binary_hash".into(),
+            passed: true,
+            detail: None,
+        },
+        Ok(false) => {
+            warn!(
+                binary = %binary_path.display(),
+                "binary hash mismatch — possible tampering"
+            );
+            SelfTestCheck {
+                name: "binary_hash".into(),
+                passed: false,
+                detail: Some("hash mismatch — binary may have been tampered with".into()),
+            }
+        }
+        Err(e) => SelfTestCheck {
+            name: "binary_hash".into(),
+            passed: false,
+            detail: Some(format!("hash verification failed: {e}")),
         },
     }
 }
@@ -1453,7 +1509,7 @@ mod tests {
         std::fs::write(&binary, b"#!/bin/sh").unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let result = run_self_test(&db, &settings, &auth, &binary);
+        let result = run_self_test(&db, &settings, &auth, &binary, dir.path());
         assert!(result.passed);
         assert!(result.checks.iter().all(|c| c.passed));
     }
@@ -1466,6 +1522,7 @@ mod tests {
             &dir.path().join("s.json"),
             &dir.path().join("a.json"),
             &dir.path().join("bin"),
+            dir.path(),
         );
         assert!(!result.passed);
         assert!(!result.checks[0].passed); // database
@@ -1489,6 +1546,7 @@ mod tests {
             &dir.path().join("missing.json"),
             &dir.path().join("missing-auth.json"),
             &binary,
+            dir.path(),
         );
         assert!(!result.passed);
         let auth_check = result.checks.iter().find(|c| c.name == "auth").unwrap();
@@ -1512,7 +1570,7 @@ mod tests {
         std::fs::write(&binary, b"bin").unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        let result = run_self_test(&db, &settings, &auth, &binary);
+        let result = run_self_test(&db, &settings, &auth, &binary, dir.path());
         assert!(!result.passed);
         let bin_check = result.checks.iter().find(|c| c.name == "binary").unwrap();
         assert!(!bin_check.passed);
@@ -1696,5 +1754,65 @@ mod tests {
 
         let loaded = read_sentinel(dir.path()).unwrap();
         assert!(loaded.binary_sha256.is_none());
+    }
+
+    // ── Self-test binary hash verification ──────────────────────
+
+    #[test]
+    fn self_test_hash_match_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("tron");
+        std::fs::write(&binary, b"test binary content").unwrap();
+
+        let hash = compute_binary_hash(&binary).unwrap();
+        let mut s = sample_sentinel();
+        s.binary_sha256 = Some(hash);
+        write_sentinel(dir.path(), &s).unwrap();
+
+        let check = check_binary_hash(&binary, dir.path());
+        assert!(check.passed, "Hash match should pass");
+    }
+
+    #[test]
+    fn self_test_hash_mismatch_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("tron");
+        std::fs::write(&binary, b"original content").unwrap();
+
+        let hash = compute_binary_hash(&binary).unwrap();
+        let mut s = sample_sentinel();
+        s.binary_sha256 = Some(hash);
+        write_sentinel(dir.path(), &s).unwrap();
+
+        // Tamper with binary
+        std::fs::write(&binary, b"tampered content").unwrap();
+
+        let check = check_binary_hash(&binary, dir.path());
+        assert!(!check.passed, "Hash mismatch should fail");
+        assert!(check.detail.unwrap().contains("tampered"));
+    }
+
+    #[test]
+    fn self_test_no_sentinel_skips_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("tron");
+        std::fs::write(&binary, b"content").unwrap();
+
+        let check = check_binary_hash(&binary, dir.path());
+        assert!(check.passed, "No sentinel should pass gracefully");
+    }
+
+    #[test]
+    fn self_test_no_hash_in_sentinel_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("tron");
+        std::fs::write(&binary, b"content").unwrap();
+
+        let s = sample_sentinel(); // binary_sha256: None
+        write_sentinel(dir.path(), &s).unwrap();
+
+        let check = check_binary_hash(&binary, dir.path());
+        assert!(check.passed, "No hash in sentinel should pass gracefully");
+        assert!(check.detail.unwrap().contains("pre-hash"));
     }
 }

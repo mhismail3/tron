@@ -699,6 +699,28 @@ async fn main() -> Result<()> {
     // Clean up stale sandbox directories from previous sessions (>24h old)
     let _sandbox_cleanup = tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
 
+    // Periodic session cache eviction (prevents unbounded memory growth)
+    {
+        let eviction_mgr = session_manager_for_startup.clone();
+        let eviction_shutdown = server.shutdown().token();
+        let cache_ttl = std::time::Duration::from_secs(settings.session.cache_ttl_secs);
+        let _eviction_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            let _ = interval.tick().await; // first tick is immediate, skip it
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let evicted = eviction_mgr.evict_idle_sessions(cache_ttl);
+                        if evicted > 0 {
+                            tracing::debug!(evicted, "session cache eviction sweep");
+                        }
+                    }
+                    () = eviction_shutdown.cancelled() => break,
+                }
+            }
+        });
+    }
+
     // Check macOS permissions for ComputerUse (Accessibility + Screen Recording).
     // Triggers OS permission prompts on first run so users don't hit errors mid-session.
     let _permissions_check = tokio::spawn(async { tron::tools::ui::computer_use::check_permissions_on_startup().await });
@@ -720,6 +742,7 @@ async fn main() -> Result<()> {
                 &settings_path_for_selftest,
                 &auth,
                 &binary_path,
+                &deploy_dir,
             );
 
             if !test_result.passed {

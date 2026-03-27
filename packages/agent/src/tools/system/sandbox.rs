@@ -50,7 +50,7 @@ impl Default for DockerSandboxConfig {
         Self {
             image: "ubuntu:latest".to_string(),
             mounts: Vec::new(),
-            network: true,
+            network: false,
             workdir: None,
             env: Vec::new(),
         }

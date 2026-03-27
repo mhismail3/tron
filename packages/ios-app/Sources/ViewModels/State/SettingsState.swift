@@ -21,6 +21,7 @@ final class SettingsState {
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
+    var cacheTtlSecs: Int = 3600
 
     // MARK: - Connection Presets
 
@@ -70,6 +71,7 @@ final class SettingsState {
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             isolationMode = settings.isolationMode
+            cacheTtlSecs = settings.cacheTtlSecs
             connectionPresets = settings.connectionPresets
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
@@ -110,6 +112,7 @@ final class SettingsState {
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
         isolationMode = "always"
+        cacheTtlSecs = 3600
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
     }
@@ -130,7 +133,7 @@ final class SettingsState {
                 ),
                 rules: .init(discoverStandaloneFiles: true)
             ),
-            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""))
+            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600)
         )
     }
 }

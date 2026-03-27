@@ -25,6 +25,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) event_store: Arc<EventStore>,
     pub(super) broadcast: Arc<EventEmitter>,
     pub(super) provider_factory: Arc<dyn ProviderFactory>,
+    pub(super) guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     pub(super) hooks: Option<Arc<HookEngine>>,
     pub(super) worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     pub(super) child_subagent_manager: Option<Arc<SubagentManager>>,
@@ -137,7 +138,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         CreateAgentOpts {
             provider,
             tools: params.tools,
-            guardrails: None,
+            guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
             denied_tools: vec![],

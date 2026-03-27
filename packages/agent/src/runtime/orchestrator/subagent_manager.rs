@@ -251,6 +251,7 @@ impl SubagentManager {
             event_store: self.event_store.clone(),
             broadcast: self.broadcast.clone(),
             provider_factory: self.provider_factory.clone(),
+            guardrails: self.guardrails.clone(),
             hooks: self.hooks.clone(),
             worktree_coordinator: self.worktree_coordinator.get().cloned(),
             child_subagent_manager: self.arc_self(),
