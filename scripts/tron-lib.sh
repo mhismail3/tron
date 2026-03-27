@@ -74,8 +74,9 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns,scratch}
-    mkdir -p "$TRON_HOME"/memory/{sessions,knowledge,cron,skills,rules}
+    mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns}
+    mkdir -p "$TRON_HOME"/memory/{sessions,knowledge,cron,scratch,rules}
+    mkdir -p "$TRON_HOME"/skills
     mkdir -p "$TRON_HOME"/user/voice
 }
 
