@@ -1320,6 +1320,11 @@ auto_deploy_install() {
 
     print_header "Installing Auto-Deploy Watcher"
 
+    # Unload existing job before overwriting plist
+    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
+        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+    fi
+
     create_auto_deploy_plist
     print_success "Created: $AUTO_DEPLOY_PLIST_PATH"
 
