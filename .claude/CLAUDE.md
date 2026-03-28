@@ -11,7 +11,7 @@
 
 ```bash
 # REQUIRED before completing any task
-cd packages/agent && cargo build --release && cargo test
+cd packages/agent && cargo build --release && cargo test -- --quiet
 
 # iOS
 cd packages/ios-app && xcodegen generate

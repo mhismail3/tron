@@ -123,7 +123,7 @@ build_rust() {
 
 run_tests() {
     print_status "Running tests..."
-    if (cd "$RUST_WORKSPACE" && cargo test --workspace 2>&1); then
+    if (cd "$RUST_WORKSPACE" && cargo test --workspace -- --quiet 2>&1); then
         print_success "Tests passed"
         return 0
     else
