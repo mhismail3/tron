@@ -61,10 +61,12 @@ struct MentionPopup: View {
     let skills: [Skill]
     let query: String
     let style: MentionStyle
+    let skillStore: SkillStore?
     let onSelect: (Skill) -> Void
     let onDismiss: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var detailSkill: Skill?
 
     private var tint: TintedColors {
         TintedColors(accent: style.tintColor, colorScheme: colorScheme)
@@ -128,9 +130,11 @@ struct MentionPopup: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(filteredSkills) { skill in
-                            MentionRow(skill: skill, style: style, tint: tint) {
+                            MentionRow(skill: skill, style: style, tint: tint, onTap: {
                                 onSelect(skill)
-                            }
+                            }, onInfo: {
+                                detailSkill = skill
+                            })
                         }
                     }
                 }
@@ -146,6 +150,15 @@ struct MentionPopup: View {
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
+        .sheet(item: $detailSkill) { skill in
+            if let store = skillStore {
+                SkillDetailSheet(
+                    skill: skill,
+                    skillStore: store,
+                    mode: style.tintColor == .tronPink ? .spell : .skill
+                )
+            }
+        }
     }
 }
 
@@ -157,6 +170,7 @@ private struct MentionRow: View {
     let style: MentionStyle
     let tint: TintedColors
     let onTap: () -> Void
+    let onInfo: () -> Void
 
     var body: some View {
         let icon = style.rowIcon(skill)
@@ -203,10 +217,16 @@ private struct MentionRow: View {
 
                 Spacer(minLength: 8)
 
-                // Add indicator
-                Image(systemName: "plus.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
-                    .foregroundStyle(style.tintColor)
+                // Info button
+                Button {
+                    onInfo()
+                } label: {
+                    Image(systemName: "info.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
+                        .foregroundStyle(style.tintColor)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

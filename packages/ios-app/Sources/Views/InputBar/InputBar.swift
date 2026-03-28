@@ -94,6 +94,7 @@ struct InputBar: View {
                     skills: store.skills,
                     query: skillMentionQuery,
                     style: .skill,
+                    skillStore: store,
                     onSelect: { skill in
                         selectFromMention(skill, style: .skill)
                     },
@@ -111,6 +112,7 @@ struct InputBar: View {
                     skills: store.skills,
                     query: spellMentionQuery,
                     style: .spell,
+                    skillStore: store,
                     onSelect: { skill in
                         selectFromMention(skill, style: .spell)
                     },
