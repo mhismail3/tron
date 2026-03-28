@@ -85,19 +85,26 @@ impl TronTool for ComputerUseTool {
         ToolSchemaBuilder::new(
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
+             **PREFER KEYBOARD NAVIGATION.** Use keypress (Tab, arrow keys, Cmd+shortcuts, Enter, Escape) \
+             to navigate UIs whenever possible. This is faster and more reliable than clicking. \
+             Only use click when you have exact coordinates from getWindows or for broad targets \
+             (e.g., center of a known window). Do NOT try to estimate pixel positions from screenshots \
+             — use keyboard shortcuts instead.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the full screen, or a specific window by name/title. Returns base64 image with screen resolution in details. Attempts capture regardless of window visibility state.\n\
-             - **click**: Click at screen coordinates. Needs Accessibility permission.\n\
-             - **type**: Type a text string. Needs Accessibility permission.\n\
-             - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
-             - **scroll**: Scroll at a position. Uses Quartz scroll wheel events.\n\
-             - **getWindows**: List all windows (including off-screen) with process name, title, position, size, and visibility status. Works from background processes.\n\
-             - **focusWindow**: Bring a window to front by title using native activation. Verifies the window is on-screen after activation. If the app is on another Space, it will be brought to the current one.\n\
+             - **screenshot**: Capture the full screen or a specific window. Use for visual verification, not for computing click targets.\n\
+             - **getWindows**: List all windows with position, size, and visibility. Use this for coordinate data.\n\
+             - **focusWindow**: Bring a window to front by name. Uses native activation — works across Spaces.\n\
+             - **keypress**: Press key combinations (Tab, Enter, Escape, arrow keys, Cmd+C, etc.). **Primary navigation method.**\n\
+             - **type**: Type a text string into the focused field.\n\
+             - **click**: Click at screen coordinates. Use only when coordinates are known from getWindows \
+             (e.g., center of a window) or for large obvious targets. Avoid trying to click small UI elements \
+             by guessing coordinates from screenshots.\n\
+             - **scroll**: Scroll at a position or the current cursor location.\n\
              - **moveMouse**: Move the mouse cursor without clicking.\n\n\
              NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
              calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
-             System Settings > Privacy & Security. Do NOT attempt workarounds — the tool handles window management internally.",
+             System Settings > Privacy & Security.",
         )
         .required_property("action", json!({
             "type": "string",
@@ -495,38 +502,14 @@ impl ComputerUseTool {
             details["screenHeight"] = json!(h);
         }
 
-        // Build informative text with coordinate mapping guide
         let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
         let mut text = format!(
-            "Screenshot captured ({img_w}x{img_h} image, {} bytes {format_label})",
+            "Screenshot captured ({} bytes {format_label})",
             image_data.len()
         );
-
-        // Coordinate mapping guide — this is critical for click accuracy
         if let Some((sw, sh)) = screen {
-            if img_w > 0 && img_h > 0 {
-                #[allow(clippy::cast_precision_loss)]
-                let scale_x = sw / img_w as f64;
-                #[allow(clippy::cast_precision_loss)]
-                let scale_y = sh / img_h as f64;
-
-                if window.is_some() {
-                    text.push_str(&format!(
-                        "\nCoordinate mapping: this is a WINDOW screenshot. \
-                         Use getWindows to find the window's screen position, then: \
-                         screen_x = window_x + (image_x * {scale_x:.2}), \
-                         screen_y = window_y + (image_y * {scale_y:.2})"
-                    ));
-                } else {
-                    text.push_str(&format!(
-                        "\nCoordinate mapping: screen is {sw}x{sh} points, image is {img_w}x{img_h}px. \
-                         To click where you see pixel (x,y) in the image: \
-                         screen_x = image_x * {scale_x:.2}, screen_y = image_y * {scale_y:.2}"
-                    ));
-                }
-            }
+            text.push_str(&format!(", screen {sw}x{sh}"));
         }
-
         if !size_warning.is_empty() {
             text.push_str(size_warning);
         }
@@ -1708,35 +1691,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn screenshot_text_includes_image_dimensions() {
+    async fn screenshot_text_includes_format_and_screen() {
         let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        // Must include image pixel dimensions
-        assert!(text.contains("1280x960 image"), "should have image dimensions: {text}");
-        // On macOS, should include coordinate mapping guide
+        assert!(text.contains("bytes JPEG"), "should state format: {text}");
+        // On macOS, should include screen dimensions
         #[cfg(target_os = "macos")]
-        {
-            assert!(text.contains("Coordinate mapping"), "should have coord guide: {text}");
-            assert!(text.contains("screen_x"), "should show formula: {text}");
-        }
-        // Details should also have imageWidth/imageHeight
+        assert!(text.contains("screen"), "should include screen size: {text}");
+        // Details should have imageWidth/imageHeight
         let d = r.details.unwrap();
         assert_eq!(d["imageWidth"], 1280);
         assert_eq!(d["imageHeight"], 960);
     }
 
     #[tokio::test]
-    async fn screenshot_window_text_includes_window_mapping() {
+    async fn screenshot_details_have_image_dimensions() {
         let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
         let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
-        let text = extract_text(&r);
-        // Window screenshots should explain they need getWindows for position
-        #[cfg(target_os = "macos")]
-        assert!(text.contains("WINDOW screenshot"), "should say it's a window screenshot: {text}");
+        let d = r.details.unwrap();
+        assert!(d.get("imageWidth").is_some(), "should have imageWidth");
+        assert!(d.get("imageHeight").is_some(), "should have imageHeight");
     }
 
     #[tokio::test]
