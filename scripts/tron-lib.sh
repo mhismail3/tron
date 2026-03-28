@@ -23,7 +23,6 @@ PROD_PORT=9847
 
 # File paths
 DEPLOY_DIR="$TRON_HOME/system/deployment"
-PROD_LOG_FILE="$DEPLOY_DIR/server.log"
 DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
 
 # Database
@@ -202,7 +201,6 @@ query_logs() {
     local level=""
     local output=""
     local limit=50
-    local tail_mode=false
     local session=""
     local search=""
 
@@ -211,7 +209,6 @@ query_logs() {
             -l|--level)   level="$2"; shift 2 ;;
             -o|--output)  output="$2"; shift 2 ;;
             -n|--limit)   limit="$2"; shift 2 ;;
-            -t|--tail)    tail_mode=true; shift ;;
             -s|--session) session="$2"; shift 2 ;;
             -q|--search)  search="$2"; shift 2 ;;
             -h|--help)
@@ -226,26 +223,12 @@ query_logs() {
                 echo "  -o, --output FILE    Write output to file"
                 echo "  -s, --session ID     Filter by session ID"
                 echo "  -q, --search TEXT    Search log messages"
-                echo "  -t, --tail           Tail file logs instead of querying database"
                 echo ""
                 return 0
                 ;;
             *) shift ;;
         esac
     done
-
-    # Tail mode
-    if [ "$tail_mode" = true ]; then
-        if [ ! -f "$PROD_LOG_FILE" ]; then
-            print_error "Log file not found: $PROD_LOG_FILE"
-            return 1
-        fi
-        echo -e "${BLUE}Tailing log${NC}"
-        echo -e "${DIM}$PROD_LOG_FILE${NC}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        tail -f "$PROD_LOG_FILE"
-        return 0
-    fi
 
     # Database mode
     if [ ! -f "$DB_PATH" ]; then
@@ -450,7 +433,6 @@ cmd_status() {
     echo ""
     echo -e "${DIM}Logs:${NC}"
     echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
-    [ -f "$PROD_LOG_FILE" ] && echo -e "  ${DIM}Log:   $PROD_LOG_FILE${NC}"
     echo ""
 }
 
@@ -484,11 +466,6 @@ cmd_errors() {
              LIMIT 20;" 2>/dev/null || echo "  No logs table found"
     fi
 
-    if [ -f "$PROD_LOG_FILE" ]; then
-        echo ""
-        echo -e "${RED}Recent errors from file log:${NC}"
-        grep -i "error\|fatal\|exception" "$PROD_LOG_FILE" 2>/dev/null | tail -10 || echo "  No errors found"
-    fi
 }
 
 cmd_rollback() {

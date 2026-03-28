@@ -90,6 +90,10 @@ struct Cli {
     /// Override database log level (trace, debug, info, warn, error).
     #[arg(long, global = true)]
     log_level: Option<String>,
+
+    /// Suppress stderr logging (logs still persist to database).
+    #[arg(long, global = true)]
+    quiet: bool,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -339,6 +343,7 @@ async fn main() -> Result<()> {
         &module_overrides,
         log_conn,
         Some(origin.clone()),
+        !args.quiet,
     );
     let flush_task = tron::core::logging::spawn_flush_task(log_handle.clone());
     let event_store = Arc::new(EventStore::new(pool));

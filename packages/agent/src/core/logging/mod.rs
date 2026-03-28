@@ -50,9 +50,9 @@ pub fn init_subscriber(level: &str) {
     let _ = subscriber.try_init();
 }
 
-/// Initialize the global tracing subscriber with stderr output AND `SQLite` persistence.
+/// Initialize the global tracing subscriber with optional stderr output AND `SQLite` persistence.
 ///
-/// Composes a `fmt` layer (stderr) with [`SqliteTransport`] (database) on a
+/// Composes an optional `fmt` layer (stderr) with [`SqliteTransport`] (database) on a
 /// shared [`tracing_subscriber::Registry`]. Call once at application startup.
 ///
 /// Returns a [`TransportHandle`] for manual flushing and shutdown cleanup.
@@ -63,11 +63,14 @@ pub fn init_subscriber(level: &str) {
 /// * `module_overrides` - Per-module level overrides (e.g. `{"ort": "warn"}`).
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
 /// * `origin` - Server origin (e.g. `"localhost:9847"`) stamped on every log entry.
+/// * `enable_fmt` - When `true`, also writes human-readable logs to stderr.
+///   Pass `false` for background/daemon mode where only DB persistence is needed.
 pub fn init_subscriber_with_sqlite(
     level: &str,
     module_overrides: &[(String, &str)],
     conn: rusqlite::Connection,
     origin: Option<String>,
+    enable_fmt: bool,
 ) -> TransportHandle {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt;
@@ -81,10 +84,16 @@ pub fn init_subscriber_with_sqlite(
     }
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter_str));
 
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_target(true)
-        .with_writer(std::io::stderr)
-        .compact();
+    let fmt_layer = if enable_fmt {
+        Some(
+            tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_writer(std::io::stderr)
+                .compact(),
+        )
+    } else {
+        None
+    };
 
     let config = TransportConfig {
         origin,

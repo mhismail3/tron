@@ -229,6 +229,7 @@ create_launchd_plist() {
         <string>$INSTALLED_BINARY</string>
         <string>--port</string>
         <string>$PROD_PORT</string>
+        <string>--quiet</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -258,12 +259,6 @@ create_launchd_plist() {
         <key>GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE</key>
         <string>$TRON_HOME/system/mods/google/credentials.json</string>
     </dict>
-
-    <key>StandardOutPath</key>
-    <string>$PROD_LOG_FILE</string>
-
-    <key>StandardErrorPath</key>
-    <string>$PROD_LOG_FILE</string>
 
     <key>SoftResourceLimits</key>
     <dict>
@@ -298,7 +293,7 @@ cmd_dev() {
             -btd|-bdt|-tbd|-tdb|-dbt|-dtb) do_build=true; do_test=true; do_background=true; shift ;;
             -td|-dt)      do_test=true; do_background=true; shift ;;
             --stop)       dev_stop; return ;;
-            --log|--logs) dev_tail_log; return ;;
+            --log|--logs) cmd_logs; return ;;
             -h|--help)
                 echo ""
                 echo -e "${CYAN}tron dev${NC} - Start dev server (takes over port $PROD_PORT from production)"
@@ -311,7 +306,7 @@ cmd_dev() {
                 echo "Options:"
                 echo "  -b, --build       Build before starting"
                 echo "  -t, --test        Run tests before starting"
-                echo "  -d, --background  Run in background (log to server.log)"
+                echo "  -d, --background  Run in background (logs to database only)"
                 echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --stop            Stop dev server and restart production"
                 echo "  --log             Tail the server log"
@@ -421,12 +416,10 @@ dev_start_background() {
         fi
     fi
 
-    local log_file="$DEPLOY_DIR/dev-server.log"
-
     RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --release \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
-        --bin tron -- --port "$PROD_PORT" ${log_level:+--log-level "$log_level"} \
-        > "$log_file" 2>&1 &
+        --bin tron -- --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
+        >/dev/null 2>&1 &
 
     local pid=$!
     sleep 2
@@ -437,12 +430,12 @@ dev_start_background() {
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  Server:  http://localhost:$PROD_PORT"
         echo "  PID:     $pid"
-        echo "  Log:     $log_file"
+        echo "  Logs:    tron logs"
         echo ""
         echo -e "${YELLOW}Use 'tron dev --stop' to stop and restart prod.${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     else
-        print_error "Dev server failed to start. Check log: $log_file"
+        print_error "Dev server failed to start. Check: tron logs -l error"
         print_status "Restarting production service..."
         if ensure_prod_binary; then
             launchctl load "$PLIST_PATH" 2>/dev/null || true
@@ -486,16 +479,6 @@ dev_stop() {
     else
         print_warning "No dev server running"
     fi
-}
-
-dev_tail_log() {
-    if [ ! -f "$PROD_LOG_FILE" ]; then
-        print_error "No log file found: $PROD_LOG_FILE"
-        return 1
-    fi
-    echo -e "${BLUE}Tailing server log${NC} ${DIM}($PROD_LOG_FILE)${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    tail -f "$PROD_LOG_FILE"
 }
 
 #=============================================================================
