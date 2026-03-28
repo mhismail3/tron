@@ -1,17 +1,14 @@
 //! Smart compaction trigger.
 //!
-//! Determines when context compaction should happen based on multiple signals:
-//! 1. Token ratio exceeding threshold (safety net)
+//! Determines when context compaction should happen based on two signals:
+//! 1. Token ratio exceeding threshold (primary trigger)
 //! 2. Progress signals (commits, pushes, PRs, tags)
-//! 3. Turn count fallback (lower in alert zone)
-//!
-//! The trigger maintains a turn counter that resets after each compaction.
 
 use regex::Regex;
 use std::sync::LazyLock;
-use tracing::debug;
 
-use super::types::{CompactionTriggerConfig, CompactionTriggerInput};
+use super::types::CompactionTriggerConfig;
+use super::types::CompactionTriggerInput;
 
 /// Result of the compaction trigger decision.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -44,41 +41,21 @@ fn progress_patterns() -> &'static [Regex; 4] {
 ///
 /// 1. **Token threshold** — if the ratio exceeds `trigger_token_threshold`, compact.
 /// 2. **Progress signals** — if a commit, push, PR, or tag is detected, compact.
-/// 3. **Turn fallback** — if enough turns have elapsed, compact (threshold is
-///    lower in the alert zone above `alert_zone_threshold`).
 #[derive(Debug)]
 pub struct CompactionTrigger {
     config: CompactionTriggerConfig,
-    turns_since_compaction: u32,
-    force_always: bool,
 }
 
 impl CompactionTrigger {
     /// Create a new trigger with the given configuration.
     #[must_use]
     pub fn new(config: CompactionTriggerConfig) -> Self {
-        Self {
-            config,
-            turns_since_compaction: 0,
-            force_always: false,
-        }
+        Self { config }
     }
 
     /// Evaluate whether compaction should run.
-    ///
-    /// Increments the turn counter each call. Returns a result indicating
-    /// whether to compact and why.
     pub fn should_compact(&mut self, input: &CompactionTriggerInput) -> CompactionTriggerResult {
-        self.turns_since_compaction += 1;
-
-        if self.force_always {
-            return CompactionTriggerResult {
-                compact: true,
-                reason: "force-always mode (testing)".to_string(),
-            };
-        }
-
-        // 1. Token threshold — safety net
+        // 1. Token threshold — primary trigger
         if input.current_token_ratio >= self.config.trigger_token_threshold {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let pct = (input.current_token_ratio * 100.0) as u32;
@@ -113,47 +90,15 @@ impl CompactionTrigger {
             }
         }
 
-        // 3. Turn-count fallback (lower threshold in alert zone)
-        let fallback = if input.current_token_ratio >= self.config.alert_zone_threshold {
-            self.config.alert_turn_fallback
-        } else {
-            self.config.default_turn_fallback
-        };
-
-        if self.turns_since_compaction >= fallback {
-            return CompactionTriggerResult {
-                compact: true,
-                reason: format!(
-                    "turn count fallback ({} turns)",
-                    self.turns_since_compaction
-                ),
-            };
-        }
-
         CompactionTriggerResult {
             compact: false,
             reason: "no trigger".to_string(),
         }
     }
 
-    /// Reset the turn counter (called after compaction completes).
+    /// Reset the trigger state (called after compaction completes).
     pub fn reset(&mut self) {
-        debug!(
-            turns = self.turns_since_compaction,
-            "Resetting compaction trigger"
-        );
-        self.turns_since_compaction = 0;
-    }
-
-    /// Enable force-always mode (every call triggers compaction). For testing.
-    pub fn set_force_always(&mut self, enabled: bool) {
-        self.force_always = enabled;
-    }
-
-    /// Get the current turn count since last compaction.
-    #[must_use]
-    pub fn turns_since_compaction(&self) -> u32 {
-        self.turns_since_compaction
+        // No mutable state to reset — trigger is purely functional.
     }
 }
 
@@ -218,34 +163,20 @@ mod tests {
     }
 
     #[test]
-    fn test_turn_fallback_normal_triggers() {
+    fn test_no_turn_fallback_even_after_many_turns() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..24 {
+        // Even after 100 turns at low ratio, should NOT trigger
+        for _ in 0..100 {
             let result = trigger.should_compact(&default_input(0.3));
-            assert!(!result.compact);
+            assert!(!result.compact, "should not trigger on turn count alone");
         }
-        let result = trigger.should_compact(&default_input(0.3));
-        assert!(result.compact);
-        assert!(result.reason.contains("turn count fallback"));
     }
 
     #[test]
-    fn test_reset_clears_turn_count() {
+    fn test_reset_is_noop() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        for _ in 0..5 {
-            let _ = trigger.should_compact(&default_input(0.3));
-        }
-        assert_eq!(trigger.turns_since_compaction(), 5);
         trigger.reset();
-        assert_eq!(trigger.turns_since_compaction(), 0);
-    }
-
-    #[test]
-    fn test_force_always_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        trigger.set_force_always(true);
-        let result = trigger.should_compact(&default_input(0.0));
-        assert!(result.compact);
-        assert!(result.reason.contains("force-always"));
+        let result = trigger.should_compact(&default_input(0.3));
+        assert!(!result.compact);
     }
 }

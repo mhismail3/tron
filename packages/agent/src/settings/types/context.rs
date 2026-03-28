@@ -30,21 +30,9 @@ pub struct CompactorSettings {
     pub chars_per_token: usize,
     /// Token buffer reserved for responses.
     pub buffer_tokens: usize,
-    /// Force compaction on every turn (testing only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub force_always: Option<bool>,
     /// Context usage ratio that triggers compaction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger_token_threshold: Option<f64>,
-    /// Context usage ratio for the alert zone.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alert_zone_threshold: Option<f64>,
-    /// Default number of recent turns to keep when compacting.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_turn_fallback: Option<usize>,
-    /// Number of recent turns to keep in the alert zone.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alert_turn_fallback: Option<usize>,
     /// Number of recent messages to preserve during compaction.
     pub preserve_recent_count: usize,
 }
@@ -58,11 +46,7 @@ impl Default for CompactorSettings {
             max_preserved_ratio: 0.20,
             chars_per_token: 4,
             buffer_tokens: 4000,
-            force_always: None,
             trigger_token_threshold: Some(0.70),
-            alert_zone_threshold: Some(0.50),
-            default_turn_fallback: Some(25),
-            alert_turn_fallback: Some(15),
             preserve_recent_count: 5,
         }
     }
@@ -128,16 +112,6 @@ mod tests {
         let json = serde_json::json!({});
         let c: CompactorSettings = serde_json::from_value(json).unwrap();
         assert_eq!(c.preserve_recent_count, 5);
-    }
-
-    #[test]
-    fn compactor_omits_none_fields() {
-        let c = CompactorSettings {
-            force_always: None,
-            ..CompactorSettings::default()
-        };
-        let json = serde_json::to_value(&c).unwrap();
-        assert!(json.get("forceAlways").is_none());
     }
 
     #[test]

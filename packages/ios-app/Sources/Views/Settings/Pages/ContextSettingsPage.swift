@@ -10,11 +10,8 @@ struct ContextSettingsPage: View {
             List {
                 CompactionSection(
                     triggerTokenThreshold: Bindable(settingsState).triggerTokenThreshold,
-                    defaultTurnFallback: Bindable(settingsState).defaultTurnFallback,
-                    alertTurnFallback: Bindable(settingsState).alertTurnFallback,
                     preserveRecentCount: Bindable(settingsState).preserveRecentCount,
                     maxPreservedRatio: Bindable(settingsState).maxPreservedRatio,
-                    forceAlwaysCompact: Bindable(settingsState).forceAlwaysCompact,
                     updateServerSetting: updateServerSetting
                 )
 

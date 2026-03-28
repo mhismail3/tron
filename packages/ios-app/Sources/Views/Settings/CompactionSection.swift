@@ -2,11 +2,8 @@ import SwiftUI
 
 struct CompactionSection: View {
     @Binding var triggerTokenThreshold: Double
-    @Binding var defaultTurnFallback: Int
-    @Binding var alertTurnFallback: Int
     @Binding var preserveRecentCount: Int
     @Binding var maxPreservedRatio: Double
-    @Binding var forceAlwaysCompact: Bool
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     var body: some View {
@@ -41,56 +38,6 @@ struct CompactionSection: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody3))
         } footer: {
             Text("Context usage % that triggers compaction. Lower values compact sooner, preserving more headroom.")
-                .font(TronTypography.caption2)
-        }
-
-        // Turn Fallback stepper (3–50)
-        Section {
-            HStack {
-                Label("Turn Fallback", systemImage: "repeat")
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Text("\(defaultTurnFallback)")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronEmerald)
-                    .monospacedDigit()
-                    .frame(minWidth: 20)
-                TronStepper(value: $defaultTurnFallback, range: 3...50)
-            }
-            .onChange(of: defaultTurnFallback) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(compactor: .init(
-                        defaultTurnFallback: newValue
-                    )))
-                }
-            }
-        } footer: {
-            Text("Compact after this many turns even if the threshold hasn't been reached.")
-                .font(TronTypography.caption2)
-        }
-
-        // Alert Zone Turn Fallback stepper (3–30)
-        Section {
-            HStack {
-                Label("Alert Zone Fallback", systemImage: "exclamationmark.triangle")
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Text("\(alertTurnFallback)")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronEmerald)
-                    .monospacedDigit()
-                    .frame(minWidth: 20)
-                TronStepper(value: $alertTurnFallback, range: 3...30)
-            }
-            .onChange(of: alertTurnFallback) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(compactor: .init(
-                        alertTurnFallback: newValue
-                    )))
-                }
-            }
-        } footer: {
-            Text("Fewer turns between compactions when context usage exceeds the alert zone threshold.")
                 .font(TronTypography.caption2)
         }
 
@@ -145,22 +92,6 @@ struct CompactionSection: View {
             }
         } footer: {
             Text("Maximum % of context window that preserved turns can consume.")
-                .font(TronTypography.caption2)
-        }
-
-        // Compact Every Cycle toggle
-        Section {
-            Toggle(isOn: $forceAlwaysCompact) {
-                Label("Compact Every Cycle", systemImage: "arrow.triangle.2.circlepath")
-                    .font(TronTypography.subheadline)
-            }
-            .onChange(of: forceAlwaysCompact) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(compactor: .init(forceAlways: newValue)))
-                }
-            }
-        } footer: {
-            Text("Force compaction after every response. Useful for testing compaction behavior.")
                 .font(TronTypography.caption2)
         }
         .listSectionSpacing(16)

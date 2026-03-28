@@ -99,47 +99,31 @@ struct ServerSettings: Decodable {
 
     struct CompactionSettings: Decodable {
         let preserveRecentCount: Int
-        let forceAlways: Bool
         let triggerTokenThreshold: Double
-        let alertZoneThreshold: Double
-        let defaultTurnFallback: Int
-        let alertTurnFallback: Int
         let maxPreservedRatio: Double
 
         static let defaults = CompactionSettings(
-            preserveRecentCount: 5, forceAlways: false,
-            triggerTokenThreshold: 0.70, alertZoneThreshold: 0.50,
-            defaultTurnFallback: 25, alertTurnFallback: 15,
+            preserveRecentCount: 5,
+            triggerTokenThreshold: 0.70,
             maxPreservedRatio: 0.20
         )
 
         private enum CodingKeys: String, CodingKey {
-            case preserveRecentCount, forceAlways, triggerTokenThreshold
-            case alertZoneThreshold, defaultTurnFallback, alertTurnFallback
-            case maxPreservedRatio
+            case preserveRecentCount, triggerTokenThreshold, maxPreservedRatio
         }
 
-        init(preserveRecentCount: Int, forceAlways: Bool,
-             triggerTokenThreshold: Double, alertZoneThreshold: Double,
-             defaultTurnFallback: Int, alertTurnFallback: Int,
+        init(preserveRecentCount: Int,
+             triggerTokenThreshold: Double,
              maxPreservedRatio: Double = 0.20) {
             self.preserveRecentCount = preserveRecentCount
-            self.forceAlways = forceAlways
             self.triggerTokenThreshold = triggerTokenThreshold
-            self.alertZoneThreshold = alertZoneThreshold
-            self.defaultTurnFallback = defaultTurnFallback
-            self.alertTurnFallback = alertTurnFallback
             self.maxPreservedRatio = maxPreservedRatio
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             preserveRecentCount = (try? container.decodeIfPresent(Int.self, forKey: .preserveRecentCount)) ?? 5
-            forceAlways = (try? container.decodeIfPresent(Bool.self, forKey: .forceAlways)) ?? false
             triggerTokenThreshold = (try? container.decodeIfPresent(Double.self, forKey: .triggerTokenThreshold)) ?? 0.70
-            alertZoneThreshold = (try? container.decodeIfPresent(Double.self, forKey: .alertZoneThreshold)) ?? 0.50
-            defaultTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .defaultTurnFallback)) ?? 25
-            alertTurnFallback = (try? container.decodeIfPresent(Int.self, forKey: .alertTurnFallback)) ?? 15
             maxPreservedRatio = (try? container.decodeIfPresent(Double.self, forKey: .maxPreservedRatio)) ?? 0.20
         }
     }
@@ -181,11 +165,7 @@ struct ServerSettingsUpdate: Encodable {
 
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
-            var forceAlways: Bool?
             var triggerTokenThreshold: Double?
-            var alertZoneThreshold: Double?
-            var defaultTurnFallback: Int?
-            var alertTurnFallback: Int?
             var maxPreservedRatio: Double?
         }
 

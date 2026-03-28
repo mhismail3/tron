@@ -615,6 +615,18 @@ final class MockEventDispatchContext: EventDispatchTarget {
         // No-op for test mock
     }
 
+    // MARK: - Memory
+    var handleMemoryUpdatingCalledWith: MemoryUpdatingPlugin.Result?
+    var handleMemoryUpdatedCalledWith: MemoryUpdatedPlugin.Result?
+
+    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result) {
+        handleMemoryUpdatingCalledWith = result
+    }
+
+    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result) {
+        handleMemoryUpdatedCalledWith = result
+    }
+
     // MARK: - Server
     var handleServerRestartingCalledWith: ServerRestartingPlugin.Result?
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {

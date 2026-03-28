@@ -14,10 +14,7 @@ final class SettingsState {
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
     var maxPreservedRatio: Double = 0.20
-    var forceAlwaysCompact: Bool = false
     var triggerTokenThreshold: Double = 0.70
-    var defaultTurnFallback: Int = 25
-    var alertTurnFallback: Int = 15
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
@@ -64,10 +61,7 @@ final class SettingsState {
             let settings = try await rpcClient.settings.get()
             preserveRecentCount = settings.compaction.preserveRecentCount
             maxPreservedRatio = settings.compaction.maxPreservedRatio
-            forceAlwaysCompact = settings.compaction.forceAlways
             triggerTokenThreshold = settings.compaction.triggerTokenThreshold
-            defaultTurnFallback = settings.compaction.defaultTurnFallback
-            alertTurnFallback = settings.compaction.alertTurnFallback
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             isolationMode = settings.isolationMode
@@ -105,10 +99,7 @@ final class SettingsState {
     func resetToDefaults() {
         preserveRecentCount = 5
         maxPreservedRatio = 0.20
-        forceAlwaysCompact = false
         triggerTokenThreshold = 0.70
-        defaultTurnFallback = 25
-        alertTurnFallback = 15
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
         isolationMode = "always"
@@ -125,10 +116,7 @@ final class SettingsState {
             context: .init(
                 compactor: .init(
                 preserveRecentCount: 5,
-                forceAlways: false,
                 triggerTokenThreshold: 0.70,
-                defaultTurnFallback: 25,
-                alertTurnFallback: 15,
                 maxPreservedRatio: 0.20
                 ),
                 rules: .init(discoverStandaloneFiles: true)

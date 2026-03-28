@@ -10,9 +10,7 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertEqual(state.preserveRecentCount, 5)
-        XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
-        XCTAssertEqual(state.defaultTurnFallback, 25)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
@@ -27,9 +25,7 @@ final class SettingsStateTests: XCTestCase {
 
         // Change everything
         state.preserveRecentCount = 10
-        state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.90
-        state.defaultTurnFallback = 15
         state.maxConcurrentSessions = 25
         state.quickSessionWorkspace = "/some/other/path"
 
@@ -38,9 +34,7 @@ final class SettingsStateTests: XCTestCase {
 
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertEqual(state.preserveRecentCount, 5)
-        XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
-        XCTAssertEqual(state.defaultTurnFallback, 25)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
     }
 
@@ -49,9 +43,7 @@ final class SettingsStateTests: XCTestCase {
     func testBuildCompactionUpdate() {
         let state = SettingsState()
         state.preserveRecentCount = 7
-        state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.85
-        state.defaultTurnFallback = 12
 
         let update = state.buildResetUpdate()
         XCTAssertNotNil(update.context?.compactor)

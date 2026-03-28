@@ -5,11 +5,6 @@ final class NotificationPillTests: XCTestCase {
 
     // MARK: - CompactionNotificationView Tests
 
-    func testCompactionReasonDisplayPreTurnGuardrail() {
-        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "pre_turn_guardrail")
-        XCTAssertNotNil(view)
-    }
-
     func testCompactionReasonDisplayThresholdExceeded() {
         let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "threshold_exceeded")
         XCTAssertNotNil(view)

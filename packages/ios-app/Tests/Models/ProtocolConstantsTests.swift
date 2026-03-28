@@ -5,20 +5,12 @@ final class ProtocolConstantsTests: XCTestCase {
 
     // MARK: - CompactionReason Tests
 
-    func testCompactionReasonPreTurnGuardrailRawValue() {
-        XCTAssertEqual(CompactionReason.preTurnGuardrail.rawValue, "pre_turn_guardrail")
-    }
-
     func testCompactionReasonThresholdExceededRawValue() {
         XCTAssertEqual(CompactionReason.thresholdExceeded.rawValue, "threshold_exceeded")
     }
 
     func testCompactionReasonManualRawValue() {
         XCTAssertEqual(CompactionReason.manual.rawValue, "manual")
-    }
-
-    func testCompactionReasonPreTurnGuardrailDisplayText() {
-        XCTAssertEqual(CompactionReason.preTurnGuardrail.displayText, "auto")
     }
 
     func testCompactionReasonThresholdExceededDisplayText() {
@@ -35,7 +27,6 @@ final class ProtocolConstantsTests: XCTestCase {
     }
 
     func testCompactionReasonDetailDisplayText() {
-        XCTAssertEqual(CompactionReason.preTurnGuardrail.detailDisplayText, "Auto")
         XCTAssertEqual(CompactionReason.thresholdExceeded.detailDisplayText, "Threshold")
         XCTAssertEqual(CompactionReason.manual.detailDisplayText, "Manual")
     }

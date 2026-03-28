@@ -1,7 +1,7 @@
 //! Compaction handler — sole owner of compaction logic.
 //!
-//! Uses multi-signal triggering: token threshold, turn count fallback,
-//! and progress signals (git push, gh pr, etc.). Runs at pre-turn.
+//! Uses multi-signal triggering: token threshold and progress signals
+//! (git push, gh pr, etc.). Runs at pre-turn.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -135,9 +135,8 @@ impl crate::tools::traits::ContentSummarizer for SubagentContentSummarizer {
 /// Compaction handler state — sole owner of all compaction logic.
 ///
 /// Uses multi-signal triggering via `CompactionTrigger`:
-/// 1. Token threshold (safety net)
+/// 1. Token threshold (primary trigger)
 /// 2. Progress signals (git push, gh pr, etc.)
-/// 3. Turn count fallback (shorter in alert zone)
 pub struct CompactionHandler {
     is_compacting: AtomicBool,
     compaction_done: Arc<Notify>,
@@ -212,11 +211,6 @@ impl CompactionHandler {
             .lock()
             .unwrap()
             .push(command.to_owned());
-    }
-
-    /// Get the current turn count since last compaction.
-    pub fn turns_since_compaction(&self) -> u32 {
-        self.trigger.lock().unwrap().turns_since_compaction()
     }
 
     /// Wait for an in-progress compaction to complete, with timeout.
@@ -627,9 +621,4 @@ mod tests {
         assert_eq!(cmds.len(), 3);
     }
 
-    #[test]
-    fn turns_since_compaction_starts_at_zero() {
-        let handler = CompactionHandler::default();
-        assert_eq!(handler.turns_since_compaction(), 0);
-    }
 }

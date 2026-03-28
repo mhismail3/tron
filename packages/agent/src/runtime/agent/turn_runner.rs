@@ -112,7 +112,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             hooks,
             session_id,
             emitter,
-            CompactionReason::PreTurnGuardrail,
+            CompactionReason::ThresholdExceeded,
         )
         .await
     {

@@ -238,9 +238,7 @@ pub struct ActivatedRuleInfo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionReason {
-    /// Pre-turn guardrail triggered compaction.
-    PreTurnGuardrail,
-    /// Token threshold exceeded.
+    /// Token threshold exceeded or progress signal detected.
     ThresholdExceeded,
     /// User requested compaction.
     Manual,

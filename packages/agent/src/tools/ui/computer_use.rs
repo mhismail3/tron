@@ -198,6 +198,27 @@ impl ComputerUseTool {
         }
     }
 
+    /// Build a Swift script that finds the best matching window using scored ranking.
+    ///
+    /// Instead of returning the first match, this scores all matching windows by:
+    /// - +1,000,000 if on-screen (`kCGWindowIsOnscreen`)
+    /// - +500,000 if normal layer (`kCGWindowLayer == 0`)
+    /// - +area (width * height) — prefers larger content windows
+    ///
+    /// `output_format` controls stdout:
+    /// - `"screenshot"`: prints `windowId\tonScreen\twidth\theight`
+    /// - `"focus"`: prints `owner\tname\tpid`
+    fn build_window_lookup_swift(search: &str, output_format: &str) -> String {
+        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
+        let print_stmt = match output_format {
+            "screenshot" => r#"print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)")"#,
+            _ => r#"print("\(bestOwner)\t\(bestName)\t\(bestPid)")"#,
+        };
+        format!(
+            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOwner = ""; var bestName = ""; var bestPid = 0; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; let pid = w[kCGWindowOwnerPID as String] as? Int ?? 0; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOwner = owner; bestName = name; bestPid = pid; bestOnScreen = onScreen; bestW = bw; bestH = bh }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; {print_stmt}; Foundation.exit(0)"#
+        )
+    }
+
     /// Run an osascript command via the process runner.
     async fn run_osascript(
         &self,
@@ -305,14 +326,11 @@ impl ComputerUseTool {
         let window = get_optional_string(params, "window");
 
         if let Some(ref w) = window {
-            // Window-specific capture: use CGWindowListCopyWindowInfo via Swift to find
-            // the window ID, then screencapture -l <id>. This approach only requires
-            // Screen Recording permission (NOT Accessibility permission).
-            // Uses optionAll to find windows on all desktops/spaces, not just current.
-            let escaped = w.replace('\\', "\\\\").replace('"', "\\\"");
-            let swift_script = format!(
-                r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print(w[kCGWindowNumber as String] as! Int); Foundation.exit(0) }} }}; fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1)"#
-            );
+            // Window-specific capture: use scored CGWindowList lookup via Swift to find
+            // the best matching window ID, then screencapture -l <id>.
+            // Scoring prefers on-screen, layer-0, largest-area windows to avoid
+            // matching non-capturable system/accessory windows.
+            let swift_script = Self::build_window_lookup_swift(w, "screenshot");
             let wid_command = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
             let wid_output = self.run_shell(&wid_command, ctx).await?;
 
@@ -328,13 +346,37 @@ impl ComputerUseTool {
                 )));
             }
 
-            let window_id = wid_output.stdout.trim().to_string();
+            // Parse: "windowId\tonScreen\twidth\theight"
+            let parts: Vec<&str> = wid_output.stdout.trim().splitn(4, '\t').collect();
+            let window_id = parts.first().unwrap_or(&"").to_string();
+            let on_screen = parts.get(1).map(|s| *s == "true").unwrap_or(true);
+            let _win_w: f64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+            let _win_h: f64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+
+            tracing::debug!(
+                window = %w, id = %window_id, on_screen, width = _win_w, height = _win_h,
+                "Window lookup result for screenshot"
+            );
+
+            // Pre-capture: if the window is off-screen (minimized or other Space),
+            // screencapture will fail. Give a specific diagnostic instead.
+            if !on_screen {
+                return Ok(error_result(format!(
+                    "Window '{w}' appears minimized or off-screen. \
+                     Use focusWindow to bring it to the front first, then retry the screenshot."
+                )));
+            }
+
             let capture_command = format!("screencapture -x -t png -l {window_id} {tmp_path}");
             let output = self.run_shell(&capture_command, ctx).await?;
             if output.exit_code != 0 {
+                tracing::debug!(
+                    window = %w, id = %window_id, stderr = %output.stderr.trim(),
+                    "screencapture failed for window"
+                );
                 return Ok(error_result(format!(
                     "Window screenshot failed: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
-                    output.stderr
+                    output.stderr.trim()
                 )));
             }
         } else {
@@ -371,17 +413,31 @@ impl ComputerUseTool {
         let (image_data, mime_type) = match sips_result {
             Ok(output) if output.exit_code == 0 => {
                 match tokio::fs::read(&jpg_path).await {
-                    Ok(data) if !data.is_empty() => {
+                    Ok(data) if !data.is_empty() && data.len() < raw_data.len() => {
+                        tracing::debug!(
+                            jpeg_bytes = data.len(), png_bytes = original_size,
+                            "Using JPEG (smaller than PNG)"
+                        );
                         let _ = tokio::fs::remove_file(&jpg_path).await;
                         (data, "image/jpeg")
                     }
+                    Ok(data) => {
+                        tracing::debug!(
+                            jpeg_bytes = data.len(), png_bytes = original_size,
+                            "Skipping JPEG (not smaller than PNG), using PNG"
+                        );
+                        let _ = tokio::fs::remove_file(&jpg_path).await;
+                        (raw_data, "image/png")
+                    }
                     _ => {
+                        tracing::debug!("JPEG read failed, falling back to PNG");
                         let _ = tokio::fs::remove_file(&jpg_path).await;
                         (raw_data, "image/png")
                     }
                 }
             }
             _ => {
+                tracing::debug!("sips compression failed, using original PNG");
                 let _ = tokio::fs::remove_file(&jpg_path).await;
                 (raw_data, "image/png")
             }
@@ -392,6 +448,12 @@ impl ComputerUseTool {
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
 
+        // Include screen resolution for coordinate context
+        let screen = self.screen_bounds().await;
+        let screen_text = screen
+            .map(|(w, h)| format!(" ({w}x{h} screen)"))
+            .unwrap_or_default();
+
         // Size guard: if a window capture is suspiciously small, it's likely
         // blank/minimized/off-screen. Warn the agent so it can focus the window first.
         let size_warning = if window.is_some() && image_data.len() < 10_000 {
@@ -400,6 +462,18 @@ impl ComputerUseTool {
             ""
         };
 
+        let mut details = json!({
+            "action": "screenshot",
+            "window": window,
+            "sizeBytes": image_data.len(),
+            "originalSizeBytes": original_size,
+            "mimeType": mime_type,
+        });
+        if let Some((w, h)) = screen {
+            details["screenWidth"] = json!(w);
+            details["screenHeight"] = json!(h);
+        }
+
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::Image {
@@ -407,17 +481,11 @@ impl ComputerUseTool {
                     mime_type: mime_type.into(),
                 },
                 crate::core::content::ToolResultContent::text(format!(
-                    "Screenshot captured ({} bytes, compressed from {} bytes){size_warning}",
+                    "Screenshot captured{screen_text} ({} bytes, compressed from {} bytes){size_warning}",
                     image_data.len(), original_size
                 )),
             ]),
-            details: Some(json!({
-                "action": "screenshot",
-                "window": window,
-                "sizeBytes": image_data.len(),
-                "originalSizeBytes": original_size,
-                "mimeType": mime_type,
-            })),
+            details: Some(details),
             is_error: None,
             stop_turn: None,
         })
@@ -645,7 +713,8 @@ repeat with win in (every window of proc)
 set winName to name of win
 set winPos to position of win
 set winSize to size of win
-set windowList to windowList & procName & " | " & winName & " | " & (item 1 of winPos) & "," & (item 2 of winPos) & " | " & (item 1 of winSize) & "," & (item 2 of winSize) & "\n"
+set isMini to miniaturized of win
+set windowList to windowList & procName & " | " & winName & " | " & (item 1 of winPos) & "," & (item 2 of winPos) & " | " & (item 1 of winSize) & "," & (item 2 of winSize) & " | " & isMini & "\n"
 end repeat
 end try
 end repeat
@@ -661,7 +730,7 @@ return windowList"#;
                             if trimmed.is_empty() {
                                 "No visible windows found.".to_string()
                             } else {
-                                format!("App | Window | Position | Size\n{trimmed}")
+                                format!("App | Window | Position | Size | Minimized\n{trimmed}")
                             }
                         ),
                     ]),
@@ -676,17 +745,14 @@ return windowList"#;
         }
     }
 
-    /// Find a window's owner using `CGWindowList` (case-insensitive contains).
+    /// Find a window's owner using scored `CGWindowList` lookup (case-insensitive contains).
     /// Returns `(ownerName, windowName, ownerPID)` or error with list of available windows.
     async fn find_window_owner(
         &self,
         search: &str,
         ctx: &ToolContext,
     ) -> Result<(String, String, u64), TronToolResult> {
-        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
-        let swift_script = format!(
-            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; let pid = w[kCGWindowOwnerPID as String] as? Int ?? 0; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; if owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") {{ print("\(owner)\t\(name)\t\(pid)"); Foundation.exit(0) }} }}; fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1)"#
-        );
+        let swift_script = Self::build_window_lookup_swift(search, "focus");
         let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
         let output = self.run_shell(&cmd, ctx).await.map_err(|e| {
             error_result(format!("Window lookup failed: {e}"))
@@ -697,6 +763,10 @@ return windowList"#;
             let owner = parts.first().unwrap_or(&"").to_string();
             let name = parts.get(1).unwrap_or(&"").to_string();
             let pid: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            tracing::debug!(
+                search, owner = %owner, name = %name, pid,
+                "Window lookup result for focusWindow"
+            );
             Ok((owner, name, pid))
         } else {
             let available = output.stderr.trim();
@@ -1229,12 +1299,26 @@ mod tests {
     #[tokio::test]
     async fn get_windows_returns_list() {
         let t = tool_with_runner(
-            MockRunner::success("Safari | Google | 0,0 | 1920,1080\n"),
+            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | false\n"),
             false,
         );
         let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         assert!(extract_text(&r).contains("Safari"));
+    }
+
+    #[tokio::test]
+    async fn get_windows_includes_minimized_column() {
+        let t = tool_with_runner(
+            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | false\nTextEdit | Untitled | 100,100 | 800,600 | true\n"),
+            false,
+        );
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        assert!(text.contains("Minimized"), "header should include Minimized column: {text}");
+        assert!(text.contains("false"), "should show non-minimized state");
+        assert!(text.contains("true"), "should show minimized state");
     }
 
     #[tokio::test]
@@ -1441,6 +1525,126 @@ mod tests {
         assert!(extract_text(&r).contains("throttled"));
     }
 
+    // ─── Screenshot compression tests ───
+
+    /// Helper: create a MockRunner that simulates the full screenshot pipeline.
+    /// `png_size` controls how many bytes the "PNG" file will be.
+    /// `jpg_size` controls how many bytes the "JPEG" file will be (None = sips fails).
+    fn screenshot_runner(png_size: usize, jpg_size: Option<usize>) -> MockRunner {
+        MockRunner::with_handler(move |cmd| {
+            if cmd.contains("screencapture") {
+                // Extract the output path from the command
+                // Format: "screencapture -x -t png /tmp/tron-screenshot-XXXX.png"
+                let path = cmd.rsplit(' ').next().unwrap_or("/tmp/test.png");
+                // Write a fake PNG file of the specified size
+                let data = vec![0x89u8; png_size]; // 0x89 is PNG magic byte
+                std::fs::write(path, &data).ok();
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else if cmd.contains("sips") {
+                match jpg_size {
+                    Some(size) => {
+                        // Extract --out path: sips ... --out '/tmp/xxx.jpg'
+                        let out_path = cmd
+                            .rfind("--out '")
+                            .map(|i| {
+                                let start = i + 7;
+                                let end = cmd[start..].find('\'').map(|j| start + j).unwrap_or(cmd.len());
+                                &cmd[start..end]
+                            })
+                            .unwrap_or("/tmp/test.jpg");
+                        let data = vec![0xFFu8; size]; // 0xFF is JPEG magic byte
+                        std::fs::write(out_path, &data).ok();
+                        ProcessOutput {
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            exit_code: 0,
+                            duration_ms: 10,
+                            timed_out: false,
+                            interrupted: false,
+                        }
+                    }
+                    None => ProcessOutput {
+                        stdout: String::new(),
+                        stderr: "sips failed".into(),
+                        exit_code: 1,
+                        duration_ms: 10,
+                        timed_out: false,
+                        interrupted: false,
+                    },
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn screenshot_compression_prefers_smaller_format() {
+        // JPEG (500 bytes) smaller than PNG (1000 bytes) → use JPEG
+        let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["mimeType"], "image/jpeg");
+        assert_eq!(d["sizeBytes"], 500);
+        assert_eq!(d["originalSizeBytes"], 1000);
+    }
+
+    #[tokio::test]
+    async fn screenshot_compression_skips_larger_jpeg() {
+        // JPEG (2000 bytes) LARGER than PNG (1000 bytes) → use PNG
+        let t = tool_with_runner(screenshot_runner(1000, Some(2000)), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["mimeType"], "image/png");
+        assert_eq!(d["sizeBytes"], 1000);
+    }
+
+    #[tokio::test]
+    async fn screenshot_compression_skips_same_size_jpeg() {
+        // JPEG same size as PNG → prefer PNG (no benefit from lossy)
+        let t = tool_with_runner(screenshot_runner(1000, Some(1000)), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["mimeType"], "image/png");
+    }
+
+    #[tokio::test]
+    async fn screenshot_compression_fallback_on_sips_failure() {
+        // sips fails → use PNG
+        let t = tool_with_runner(screenshot_runner(1000, None), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["mimeType"], "image/png");
+    }
+
+    #[tokio::test]
+    async fn screenshot_compression_empty_jpeg_falls_back() {
+        // sips succeeds but produces empty JPEG → use PNG
+        let t = tool_with_runner(screenshot_runner(1000, Some(0)), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["mimeType"], "image/png");
+    }
+
     // ─── Coordinate bounds tests ───
 
     #[tokio::test]
@@ -1531,6 +1735,392 @@ mod tests {
         let r = t.execute(json!({"action": "moveMouse", "x": 100, "y": 2000}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("outside screen bounds"));
+    }
+
+    // ─── Window selection scoring tests ───
+
+    #[tokio::test]
+    async fn screenshot_window_swift_uses_scoring() {
+        // The Swift script should use scoring logic, not first-match-wins.
+        // Capture the command string and verify it contains scoring keywords.
+        use std::sync::{Arc as StdArc, Mutex};
+        let commands: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let cmds = commands.clone();
+        let runner = MockRunner::with_handler(move |cmd| {
+            cmds.lock().unwrap().push(cmd.to_string());
+            // Swift script should fail (no real CGWindowList in test)
+            ProcessOutput {
+                stdout: String::new(),
+                stderr: "Safari: Start Page".into(),
+                exit_code: 1,
+                duration_ms: 10,
+                timed_out: false,
+                interrupted: false,
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let _ = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await;
+        let cmds = commands.lock().unwrap();
+        let swift_cmd = cmds.iter().find(|c| c.contains("swift")).expect("should run swift");
+        assert!(swift_cmd.contains("kCGWindowLayer"), "script should check window layer");
+        assert!(swift_cmd.contains("kCGWindowIsOnscreen"), "script should check on-screen state");
+        assert!(swift_cmd.contains("kCGWindowBounds"), "script should check window bounds");
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_not_found_lists_available() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "Safari: Start Page\nArc: Tab1".into(),
+                    exit_code: 1,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "NonexistentApp"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("not found"), "should say not found: {text}");
+        assert!(text.contains("Available windows"), "should list available: {text}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_not_found_empty_list() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Nothing"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("not found"), "should say not found: {text}");
+    }
+
+    #[tokio::test]
+    async fn focus_window_swift_uses_scoring() {
+        use std::sync::{Arc as StdArc, Mutex};
+        let commands: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let cmds = commands.clone();
+        let runner = MockRunner::with_handler(move |cmd| {
+            cmds.lock().unwrap().push(cmd.to_string());
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tStart Page\t12345".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let _ = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await;
+        let cmds = commands.lock().unwrap();
+        let swift_cmd = cmds.iter().find(|c| c.contains("swift")).expect("should run swift");
+        assert!(swift_cmd.contains("kCGWindowLayer"), "script should check window layer");
+        assert!(swift_cmd.contains("kCGWindowIsOnscreen"), "script should check on-screen state");
+    }
+
+    #[tokio::test]
+    async fn focus_window_not_found_lists_available() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "Xcode: Project\nFinder: Downloads".into(),
+                    exit_code: 1,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "NonexistentApp"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("not found"), "should say not found: {text}");
+        assert!(text.contains("Available windows"), "should list available: {text}");
+    }
+
+    #[tokio::test]
+    async fn focus_window_succeeds_with_scored_lookup() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tStart Page\t12345".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                // osascript activation
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("Focused window"), "should confirm focus: {text}");
+    }
+
+    // ─── Window visibility diagnosis tests ───
+
+    /// Helper: create a MockRunner for window screenshot tests.
+    /// `swift_stdout`: what the Swift script returns on stdout (e.g., "42\ttrue\t1920\t1080")
+    /// `swift_exit`: exit code of Swift script (0=found, 1=not found)
+    /// `capture_exit`: exit code of screencapture (0=success, 1=failure)
+    /// `capture_stderr`: stderr from screencapture
+    fn window_screenshot_runner(
+        swift_stdout: &str,
+        swift_exit: i32,
+        capture_exit: i32,
+        capture_stderr: &str,
+    ) -> MockRunner {
+        let swift_out = swift_stdout.to_string();
+        let cap_stderr = capture_stderr.to_string();
+        MockRunner::with_handler(move |cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: swift_out.clone(),
+                    stderr: String::new(),
+                    exit_code: swift_exit,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else if cmd.contains("screencapture") {
+                if capture_exit == 0 {
+                    // Create a fake PNG file
+                    let path = cmd.rsplit(' ').next().unwrap_or("/tmp/test.png");
+                    let data = vec![0x89u8; 5000];
+                    std::fs::write(path, &data).ok();
+                }
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: cap_stderr.clone(),
+                    exit_code: capture_exit,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else if cmd.contains("sips") {
+                // sips fails in test (no real image) — fallback to PNG
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "not a valid image".into(),
+                    exit_code: 1,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn screenshot_minimized_window_specific_error() {
+        // Window found but off-screen with zero size (minimized)
+        let runner = window_screenshot_runner("42\tfalse\t0\t0", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("minimized or off-screen"), "should mention minimized: {text}");
+        assert!(text.contains("focusWindow"), "should suggest focusWindow: {text}");
+        assert!(!text.contains("Screen Recording"), "should NOT mention permissions: {text}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_offscreen_window_with_size() {
+        // Window found but off-screen with nonzero size (on another Space)
+        let runner = window_screenshot_runner("42\tfalse\t1187\t1100", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("minimized or off-screen"), "should mention off-screen: {text}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_onscreen_capture_failure_mentions_permission() {
+        // Window on-screen but screencapture fails → should suggest permissions
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 1, "could not create image from window");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("Screen Recording permission"), "should mention permission: {text}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_onscreen_window_succeeds() {
+        // Window on-screen, capture succeeds → should return image
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "screenshot");
+        assert_eq!(d["window"], "Safari");
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_metadata_only_id() {
+        // Swift returns only window ID (no metadata) → should proceed to capture
+        // (graceful fallback: assume on-screen when can't parse metadata)
+        let runner = window_screenshot_runner("42", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        // Should NOT error about minimized — should proceed to capture
+        assert!(r.is_error.is_none(), "should succeed with partial metadata: {}", extract_text(&r));
+    }
+
+    #[tokio::test]
+    async fn screenshot_details_include_screen_resolution() {
+        // Full-screen screenshot should include screen dimensions in details
+        let runner = screenshot_runner(5000, None);
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        // On macOS test environment, screen_bounds() should return real values
+        // On non-macOS or test, these may be absent — that's OK
+        #[cfg(target_os = "macos")]
+        {
+            assert!(d.get("screenWidth").is_some(), "should have screenWidth");
+            assert!(d.get("screenHeight").is_some(), "should have screenHeight");
+        }
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_details_include_screen_resolution() {
+        // Window screenshot should also include screen dimensions
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        #[cfg(target_os = "macos")]
+        {
+            assert!(d.get("screenWidth").is_some(), "should have screenWidth");
+            assert!(d.get("screenHeight").is_some(), "should have screenHeight");
+        }
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_metadata_partial() {
+        // Swift returns "42\ttrue" (missing width/height) → should proceed to capture
+        let runner = window_screenshot_runner("42\ttrue", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed with partial metadata: {}", extract_text(&r));
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_special_chars_escaped() {
+        // Verify window names with quotes/backslashes are properly escaped
+        use std::sync::{Arc as StdArc, Mutex};
+        let commands: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let cmds = commands.clone();
+        let runner = MockRunner::with_handler(move |cmd| {
+            cmds.lock().unwrap().push(cmd.to_string());
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let _ = t.execute(json!({"action": "screenshot", "window": "App \"with\" quotes"}), &make_ctx()).await;
+        let cmds = commands.lock().unwrap();
+        let swift_cmd = cmds.iter().find(|c| c.contains("swift")).expect("should run swift");
+        // The escaped double quotes should appear as \" in the Swift string
+        assert!(swift_cmd.contains(r#"\""#), "quotes should be escaped in swift: {swift_cmd}");
     }
 
     // ─── Confirmation describe_action tests ───
