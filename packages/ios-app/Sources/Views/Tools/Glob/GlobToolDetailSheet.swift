@@ -171,7 +171,7 @@ struct GlobToolDetailSheet: View {
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: entry.isDirectory ? "folder.fill" : FileDisplayHelpers.fileIcon(for: entry.fileName))
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(entry.isDirectory ? .tronAmber : langColor)
+                .foregroundStyle(entry.isDirectory ? .tronAmber : .cyan)
                 .frame(width: 16, alignment: .center)
 
             VStack(alignment: .leading, spacing: 2) {

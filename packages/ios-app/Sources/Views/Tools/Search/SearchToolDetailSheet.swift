@@ -200,8 +200,6 @@ struct SearchToolDetailSheet: View {
     }
 
     private func fileGroupView(_ group: SearchFileGroup) -> some View {
-        let ext = (group.filePath as NSString).pathExtension.lowercased()
-        let langColor = ext.isEmpty ? Color.tronSlate : FileDisplayHelpers.languageColor(for: ext)
         let fileName = (group.filePath as NSString).lastPathComponent
         let lineNumWidth = SearchResultParser.lineNumberWidth(for: group.matches)
 
@@ -210,7 +208,7 @@ struct SearchToolDetailSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
                     .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                    .foregroundStyle(langColor)
+                    .foregroundStyle(.purple)
 
                 Text(group.filePath)
                     .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
@@ -294,14 +292,12 @@ struct SearchToolDetailSheet: View {
     }
 
     private func fileListRow(_ path: String) -> some View {
-        let ext = (path as NSString).pathExtension.lowercased()
-        let langColor = ext.isEmpty ? Color.tronSlate : FileDisplayHelpers.languageColor(for: ext)
         let fileName = (path as NSString).lastPathComponent
 
         return HStack(spacing: 8) {
             Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(langColor)
+                .foregroundStyle(.purple)
                 .frame(width: 16, alignment: .center)
 
             Text(path)

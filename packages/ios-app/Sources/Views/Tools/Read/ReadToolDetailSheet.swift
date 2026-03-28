@@ -100,7 +100,6 @@ struct ReadToolDetailSheet: View {
             lines: parsedLines.map { ($0.lineNum, $0.content) },
             accent: .tronSlate,
             tint: tint,
-            borderColor: fileInfo.langColor,
             copyContent: parsedLines.map(\.content).joined(separator: "\n"),
             headerNote: rangeNote
         )

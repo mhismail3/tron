@@ -153,7 +153,7 @@ struct EditToolDetailSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(alignment: .leading) {
                 Rectangle()
-                    .fill(fileInfo.langColor)
+                    .fill(accentColor)
                     .frame(width: 3)
             }
             .padding(14)

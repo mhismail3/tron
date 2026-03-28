@@ -15,7 +15,7 @@ struct ToolFileInfoSection: View {
             HStack(spacing: 8) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileInfo.fileName))
                     .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                    .foregroundStyle(fileInfo.langColor)
+                    .foregroundStyle(accent)
 
                 Text(fileInfo.fileName)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))

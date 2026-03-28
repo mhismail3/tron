@@ -114,7 +114,6 @@ struct WriteToolDetailSheet: View {
             lines: contentLines.enumerated().map { (index, line) in (index + 1, line) },
             accent: .tronPink,
             tint: tint,
-            borderColor: fileInfo.langColor,
             copyContent: writtenContent,
             wrapsContent: true
         )
