@@ -88,6 +88,20 @@ struct InputBar: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // Content area: attachments, skills (wrapping), and status pills
+            contentArea
+                .padding(.horizontal, 16)
+                .transition(.opacity)
+
+            // Queued message chips
+            if !config.queuedMessages.isEmpty {
+                QueuedMessageChipsView(
+                    queue: config.queuedMessages,
+                    onRemove: { id in actions.onQueueRemove?(id) }
+                )
+                .padding(.horizontal, 16)
+            }
+
             // Skill mention popup
             if showSkillMentionPopup, let store = config.skillStore {
                 MentionPopup(
@@ -122,20 +136,6 @@ struct InputBar: View {
                 )
                 .padding(.horizontal, 16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // Content area: attachments, skills (wrapping), and status pills
-            contentArea
-                .padding(.horizontal, 16)
-                .transition(.opacity)
-
-            // Queued message chips
-            if !config.queuedMessages.isEmpty {
-                QueuedMessageChipsView(
-                    queue: config.queuedMessages,
-                    onRemove: { id in actions.onQueueRemove?(id) }
-                )
-                .padding(.horizontal, 16)
             }
 
             // Input row - floating liquid glass elements
