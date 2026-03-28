@@ -12,6 +12,7 @@ struct ModelPickerSheet: View {
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var expandedProviders: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var expandedDetails: Set<String> = []
 
@@ -28,8 +29,18 @@ struct ModelPickerSheet: View {
                             provider: provider,
                             currentModelId: currentModelId,
                             readOnly: readOnly,
+                            isExpanded: expandedProviders.contains(provider.id),
                             expandedFamilies: $expandedFamilies,
                             expandedDetails: $expandedDetails,
+                            onToggle: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    if expandedProviders.contains(provider.id) {
+                                        expandedProviders.remove(provider.id)
+                                    } else {
+                                        expandedProviders.insert(provider.id)
+                                    }
+                                }
+                            },
                             onSelect: { model in
                                 onSelect(model)
                                 dismiss()
@@ -53,8 +64,14 @@ struct ModelPickerSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .onAppear {
-            // Initialize expanded families to latest ones
+            // Expand only the provider containing the current default model
             for provider in providerGroups {
+                let containsCurrentModel = provider.families.contains { family in
+                    family.models.contains { $0.id == currentModelId }
+                }
+                if containsCurrentModel {
+                    expandedProviders.insert(provider.id)
+                }
                 for family in provider.families where family.isLatest {
                     expandedFamilies.insert(family.id)
                 }
@@ -70,8 +87,10 @@ private struct ProviderSection: View {
     let provider: ProviderGroup
     let currentModelId: String
     let readOnly: Bool
+    let isExpanded: Bool
     @Binding var expandedFamilies: Set<String>
     @Binding var expandedDetails: Set<String>
+    let onToggle: () -> Void
     let onSelect: (ModelInfo) -> Void
 
     var body: some View {
@@ -87,35 +106,45 @@ private struct ProviderSection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(provider.color)
                 Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(provider.color.opacity(0.6))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
             }
             .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { onToggle() }
 
             // Family sections
-            VStack(spacing: 8) {
-                ForEach(provider.families) { family in
-                    FamilySection(
-                        family: family,
-                        providerColor: provider.color,
-                        currentModelId: currentModelId,
-                        readOnly: readOnly,
-                        isExpanded: expandedFamilies.contains(family.id),
-                        expandedDetails: $expandedDetails,
-                        onToggle: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                if expandedFamilies.contains(family.id) {
-                                    expandedFamilies.remove(family.id)
-                                } else {
-                                    expandedFamilies.insert(family.id)
+            if isExpanded {
+                VStack(spacing: 8) {
+                    ForEach(provider.families) { family in
+                        FamilySection(
+                            family: family,
+                            providerColor: provider.color,
+                            currentModelId: currentModelId,
+                            readOnly: readOnly,
+                            isExpanded: expandedFamilies.contains(family.id),
+                            expandedDetails: $expandedDetails,
+                            onToggle: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    if expandedFamilies.contains(family.id) {
+                                        expandedFamilies.remove(family.id)
+                                    } else {
+                                        expandedFamilies.insert(family.id)
+                                    }
                                 }
-                            }
-                        },
-                        onSelect: onSelect
-                    )
+                            },
+                            onSelect: onSelect
+                        )
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
         }
+        .clipped()
         .sectionFill(provider.color)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
