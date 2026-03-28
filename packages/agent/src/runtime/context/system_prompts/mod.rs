@@ -5,11 +5,17 @@
 //! provider crate — this module provides the Tron-specific prompts.
 //!
 //! The default core prompt is loaded from `core.md` via [`include_str!`].
-//! Users can override by creating `.tron/SYSTEM.md` in their project directory.
+//! Users can override at two levels:
+//!
+//! 1. **Project**: `.tron/SYSTEM.md` in the working directory
+//! 2. **Global**: `~/.tron/memory/rules/SYSTEM.md`
+//!
+//! Precedence: project override > global override > embedded `TRON_CORE_PROMPT`.
 
 use std::fs;
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
 use crate::core::messages::Provider;
@@ -156,6 +162,8 @@ pub struct LoadedSystemPrompt {
 pub enum SystemPromptSource {
     /// Project-level `.tron/SYSTEM.md`.
     Project,
+    /// Global `~/.tron/memory/rules/SYSTEM.md`.
+    Global,
 }
 
 /// Load system prompt from project directory (synchronous).
@@ -190,6 +198,157 @@ pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSys
         }
         Err(_) => None,
     }
+}
+
+// =============================================================================
+// Global System Prompt — Hash-Based Seeding
+// =============================================================================
+
+/// Hash header prefix used to detect unmodified seeded files.
+const HASH_HEADER_PREFIX: &str = "<!-- tron-prompt-hash:";
+const HASH_HEADER_SUFFIX: &str = " -->";
+
+/// Compute a truncated SHA-256 hex digest of prompt content (16 hex chars).
+pub fn compute_prompt_hash(content: &str) -> String {
+    let full = Sha256::digest(content.as_bytes());
+    // Take first 8 bytes → 16 hex chars
+    full[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Build the seeded file content: hash header line + prompt body.
+///
+/// Format: `<!-- tron-prompt-hash:XXXXXXXXXXXXXXXX -->\n{content}`
+pub fn build_seeded_content(prompt: &str) -> String {
+    let hash = compute_prompt_hash(prompt);
+    format!("{HASH_HEADER_PREFIX}{hash}{HASH_HEADER_SUFFIX}\n{prompt}")
+}
+
+/// Check if a file's content has been customized by the user.
+///
+/// Returns `true` if the hash header is missing, malformed, or doesn't match
+/// the body content. Returns `false` only when the hash header matches —
+/// meaning the file is a pristine seeded copy.
+pub fn is_user_customized(file_content: &str) -> bool {
+    let Some(first_line) = file_content.lines().next() else {
+        return true;
+    };
+
+    let Some(hash_value) = first_line
+        .strip_prefix(HASH_HEADER_PREFIX)
+        .and_then(|rest| rest.strip_suffix(HASH_HEADER_SUFFIX))
+    else {
+        return true;
+    };
+
+    let body = strip_hash_header(file_content);
+    let actual_hash = compute_prompt_hash(body);
+
+    hash_value != actual_hash
+}
+
+/// Strip the hash header line from file content, returning the prompt body.
+///
+/// If no hash header is present, returns the full content unchanged.
+pub fn strip_hash_header(file_content: &str) -> &str {
+    let Some(first_line) = file_content.lines().next() else {
+        return file_content;
+    };
+
+    if first_line.starts_with(HASH_HEADER_PREFIX) && first_line.ends_with(HASH_HEADER_SUFFIX) {
+        // Skip the first line + the newline separator
+        &file_content[first_line.len().min(file_content.len())..]
+            .strip_prefix('\n')
+            .unwrap_or("")
+    } else {
+        file_content
+    }
+}
+
+/// Seed or update the global `SYSTEM.md` file.
+///
+/// - File doesn't exist → create with hash header + `TRON_CORE_PROMPT`
+/// - File exists, not customized (hash matches) → overwrite with latest
+/// - File exists, customized → leave alone
+///
+/// Returns `true` if the file was written, `false` otherwise.
+pub fn seed_global_system_prompt(tron_home: &Path) -> bool {
+    let path = tron_home
+        .join("memory")
+        .join("rules")
+        .join("SYSTEM.md");
+
+    if let Ok(existing) = fs::read_to_string(&path) {
+        if is_user_customized(&existing) {
+            debug!(path = %path.display(), "Global SYSTEM.md is user-customized, leaving unchanged");
+            return false;
+        }
+        // Pristine — check if content matches current embedded prompt
+        let body = strip_hash_header(&existing);
+        if body == TRON_CORE_PROMPT {
+            return false; // Already up to date
+        }
+        debug!(path = %path.display(), "Updating pristine global SYSTEM.md to latest version");
+    }
+
+    let content = build_seeded_content(TRON_CORE_PROMPT);
+    match fs::write(&path, &content) {
+        Ok(()) => {
+            debug!(path = %path.display(), "Seeded global SYSTEM.md");
+            true
+        }
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "Failed to seed global SYSTEM.md");
+            false
+        }
+    }
+}
+
+/// Load the global system prompt from a given home directory.
+///
+/// Looks for `{home}/.tron/memory/rules/SYSTEM.md`. Strips the hash header
+/// if present. Returns `None` if the file is missing, empty, or oversized.
+#[must_use]
+pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt> {
+    let path = home.join(".tron").join("memory").join("rules").join("SYSTEM.md");
+
+    let Ok(metadata) = fs::metadata(&path) else {
+        return None;
+    };
+
+    if metadata.len() > MAX_SYSTEM_PROMPT_FILE_SIZE {
+        warn!(
+            path = %path.display(),
+            size = metadata.len(),
+            limit = MAX_SYSTEM_PROMPT_FILE_SIZE,
+            "Global SYSTEM.md exceeds size limit"
+        );
+        return None;
+    }
+
+    match fs::read_to_string(&path) {
+        Ok(content) => {
+            let body = strip_hash_header(&content).to_owned();
+            if body.trim().is_empty() {
+                return None;
+            }
+            debug!(path = %path.display(), "Loaded global system prompt");
+            Some(LoadedSystemPrompt {
+                content: body,
+                source: SystemPromptSource::Global,
+            })
+        }
+        Err(_) => None,
+    }
+}
+
+/// Load the global system prompt from `~/.tron/memory/rules/SYSTEM.md`.
+///
+/// Convenience wrapper around [`load_global_system_prompt_from`] using the
+/// user's home directory.
+#[must_use]
+pub fn load_global_system_prompt() -> Option<LoadedSystemPrompt> {
+    let home = crate::core::paths::home_dir();
+    load_global_system_prompt_from(Path::new(&home))
 }
 
 // =============================================================================
@@ -451,5 +610,309 @@ mod tests {
 
         let result = load_system_prompt_from_file(dir.path().to_str().unwrap());
         assert!(result.is_none());
+    }
+
+    // ── Hash helpers ────────────────────────────────────────────────────
+
+    #[test]
+    fn hash_is_deterministic() {
+        let h1 = compute_prompt_hash("hello world");
+        let h2 = compute_prompt_hash("hello world");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_differs_for_different_input() {
+        let h1 = compute_prompt_hash("hello");
+        let h2 = compute_prompt_hash("world");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn hash_is_16_hex_chars() {
+        let h = compute_prompt_hash("test content");
+        assert_eq!(h.len(), 16);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn build_seeded_content_starts_with_hash_line() {
+        let content = build_seeded_content("My prompt");
+        let first_line = content.lines().next().unwrap();
+        assert!(first_line.starts_with(HASH_HEADER_PREFIX));
+        assert!(first_line.ends_with(HASH_HEADER_SUFFIX));
+    }
+
+    #[test]
+    fn build_seeded_content_body_matches_input() {
+        let prompt = "My custom prompt\nwith multiple lines";
+        let content = build_seeded_content(prompt);
+        let body = strip_hash_header(&content);
+        assert_eq!(body, prompt);
+    }
+
+    #[test]
+    fn build_seeded_content_roundtrip_not_customized() {
+        let content = build_seeded_content("Some prompt text");
+        assert!(!is_user_customized(&content));
+    }
+
+    #[test]
+    fn is_user_customized_returns_true_for_edited_body() {
+        let mut content = build_seeded_content("Original prompt");
+        content.push_str("\nUser added this line");
+        assert!(is_user_customized(&content));
+    }
+
+    #[test]
+    fn is_user_customized_returns_true_for_no_header() {
+        assert!(is_user_customized("Just a plain prompt with no header"));
+    }
+
+    #[test]
+    fn is_user_customized_returns_true_for_empty_string() {
+        assert!(is_user_customized(""));
+    }
+
+    #[test]
+    fn is_user_customized_returns_true_for_tampered_hash() {
+        let content = format!(
+            "{HASH_HEADER_PREFIX}0000000000000000{HASH_HEADER_SUFFIX}\nSome body"
+        );
+        assert!(is_user_customized(&content));
+    }
+
+    #[test]
+    fn is_user_customized_returns_false_for_pristine() {
+        let content = build_seeded_content("Pristine prompt");
+        assert!(!is_user_customized(&content));
+    }
+
+    #[test]
+    fn strip_hash_header_removes_header() {
+        let content = build_seeded_content("body text");
+        assert_eq!(strip_hash_header(&content), "body text");
+    }
+
+    #[test]
+    fn strip_hash_header_no_header_returns_full() {
+        let text = "No header here\nJust text";
+        assert_eq!(strip_hash_header(text), text);
+    }
+
+    #[test]
+    fn strip_hash_header_empty_string() {
+        assert_eq!(strip_hash_header(""), "");
+    }
+
+    #[test]
+    fn build_seeded_content_with_core_prompt() {
+        let content = build_seeded_content(TRON_CORE_PROMPT);
+        assert!(!is_user_customized(&content));
+        assert_eq!(strip_hash_header(&content), TRON_CORE_PROMPT);
+    }
+
+    // ── Seed function ───────────────────────────────────────────────────
+
+    #[test]
+    fn seed_creates_file_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        assert!(seed_global_system_prompt(dir.path()));
+        assert!(rules_dir.join("SYSTEM.md").exists());
+    }
+
+    #[test]
+    fn seed_created_file_is_not_user_customized() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        seed_global_system_prompt(dir.path());
+        let content = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+        assert!(!is_user_customized(&content));
+    }
+
+    #[test]
+    fn seed_created_file_body_is_core_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        seed_global_system_prompt(dir.path());
+        let content = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+        assert_eq!(strip_hash_header(&content), TRON_CORE_PROMPT);
+    }
+
+    #[test]
+    fn seed_updates_pristine_file_with_different_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        // Write a pristine file with different content (simulating old version)
+        let old_content = build_seeded_content("Old embedded prompt");
+        fs::write(rules_dir.join("SYSTEM.md"), &old_content).unwrap();
+
+        // Seed should overwrite since it's not customized and body differs
+        assert!(seed_global_system_prompt(dir.path()));
+        let new_content = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+        assert_eq!(strip_hash_header(&new_content), TRON_CORE_PROMPT);
+    }
+
+    #[test]
+    fn seed_preserves_customized_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        let custom = "My fully custom prompt";
+        fs::write(rules_dir.join("SYSTEM.md"), custom).unwrap();
+
+        assert!(!seed_global_system_prompt(dir.path()));
+        let content = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+        assert_eq!(content, custom);
+    }
+
+    #[test]
+    fn seed_preserves_file_without_hash_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        let manual = "Manually created SYSTEM.md\nwith custom content";
+        fs::write(rules_dir.join("SYSTEM.md"), manual).unwrap();
+
+        assert!(!seed_global_system_prompt(dir.path()));
+        assert_eq!(
+            fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap(),
+            manual
+        );
+    }
+
+    #[test]
+    fn seed_returns_true_on_write_false_on_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        // First call creates → true
+        assert!(seed_global_system_prompt(dir.path()));
+        // Second call, already up to date → false
+        assert!(!seed_global_system_prompt(dir.path()));
+    }
+
+    #[test]
+    fn seed_handles_empty_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
+
+        // Empty file is treated as customized → not overwritten
+        assert!(!seed_global_system_prompt(dir.path()));
+    }
+
+    #[test]
+    fn seed_handles_missing_parent_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // Don't create memory/rules/ — seed should handle gracefully
+        assert!(!seed_global_system_prompt(dir.path()));
+    }
+
+    #[test]
+    fn seed_idempotent_when_pristine() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        let _ = seed_global_system_prompt(dir.path());
+        let first = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+
+        let _ = seed_global_system_prompt(dir.path());
+        let second = fs::read_to_string(rules_dir.join("SYSTEM.md")).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    // ── Global prompt loading ───────────────────────────────────────────
+
+    #[test]
+    fn load_global_returns_none_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_global_system_prompt_from(dir.path()).is_none());
+    }
+
+    #[test]
+    fn load_global_returns_content_when_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+        fs::write(rules_dir.join("SYSTEM.md"), "Custom global prompt").unwrap();
+
+        let loaded = load_global_system_prompt_from(dir.path()).unwrap();
+        assert_eq!(loaded.content, "Custom global prompt");
+    }
+
+    #[test]
+    fn load_global_strips_hash_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        let seeded = build_seeded_content("Prompt body");
+        fs::write(rules_dir.join("SYSTEM.md"), &seeded).unwrap();
+
+        let loaded = load_global_system_prompt_from(dir.path()).unwrap();
+        assert_eq!(loaded.content, "Prompt body");
+        assert!(!loaded.content.contains(HASH_HEADER_PREFIX));
+    }
+
+    #[test]
+    fn load_global_source_is_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+        fs::write(rules_dir.join("SYSTEM.md"), "prompt").unwrap();
+
+        let loaded = load_global_system_prompt_from(dir.path()).unwrap();
+        assert_eq!(loaded.source, SystemPromptSource::Global);
+    }
+
+    #[test]
+    fn load_global_rejects_oversized_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+        let big = "x".repeat(150_000);
+        fs::write(rules_dir.join("SYSTEM.md"), big).unwrap();
+
+        assert!(load_global_system_prompt_from(dir.path()).is_none());
+    }
+
+    #[test]
+    fn load_global_returns_customized_content_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+
+        let custom = "User's custom prompt\nwith multiple lines";
+        fs::write(rules_dir.join("SYSTEM.md"), custom).unwrap();
+
+        let loaded = load_global_system_prompt_from(dir.path()).unwrap();
+        assert_eq!(loaded.content, custom);
+    }
+
+    #[test]
+    fn load_global_returns_none_for_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        fs::create_dir_all(&rules_dir).unwrap();
+        fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
+
+        assert!(load_global_system_prompt_from(dir.path()).is_none());
     }
 }
