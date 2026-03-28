@@ -474,8 +474,10 @@ impl ComputerUseTool {
                     mime_type: mime_type.into(),
                 },
                 crate::core::content::ToolResultContent::text(format!(
-                    "Screenshot captured{screen_text} ({} bytes, compressed from {} bytes){size_warning}",
-                    image_data.len(), original_size
+                    "Screenshot captured{screen_text} ({} bytes {}, from {} bytes PNG){size_warning}",
+                    image_data.len(),
+                    if mime_type == "image/jpeg" { "JPEG" } else { "PNG" },
+                    original_size
                 )),
             ]),
             details: Some(details),
@@ -1607,6 +1609,8 @@ mod tests {
         let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("JPEG"), "text should say JPEG: {text}");
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/jpeg");
         assert_eq!(d["sizeBytes"], 500);
@@ -1619,6 +1623,8 @@ mod tests {
         let t = tool_with_runner(screenshot_runner(1000, Some(2000)), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("PNG, from"), "text should say PNG when JPEG is larger: {text}");
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
         assert_eq!(d["sizeBytes"], 1000);
@@ -1640,6 +1646,8 @@ mod tests {
         let t = tool_with_runner(screenshot_runner(1000, None), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("PNG, from"), "text should say PNG on sips failure: {text}");
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
     }
