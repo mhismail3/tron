@@ -85,26 +85,19 @@ impl TronTool for ComputerUseTool {
         ToolSchemaBuilder::new(
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
-             **PREFER KEYBOARD NAVIGATION.** Use keypress (Tab, arrow keys, Cmd+shortcuts, Enter, Escape) \
-             to navigate UIs whenever possible. This is faster and more reliable than clicking. \
-             Only use click when you have exact coordinates from getWindows or for broad targets \
-             (e.g., center of a known window). Do NOT try to estimate pixel positions from screenshots \
-             — use keyboard shortcuts instead.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the full screen or a specific window. Use for visual verification, not for computing click targets.\n\
-             - **getWindows**: List all windows with position, size, and visibility. Use this for coordinate data.\n\
-             - **focusWindow**: Bring a window to front by name. Uses native activation — works across Spaces.\n\
-             - **keypress**: Press key combinations (Tab, Enter, Escape, arrow keys, Cmd+C, etc.). **Primary navigation method.**\n\
-             - **type**: Type a text string into the focused field.\n\
-             - **click**: Click at screen coordinates. Use only when coordinates are known from getWindows \
-             (e.g., center of a window) or for large obvious targets. Avoid trying to click small UI elements \
-             by guessing coordinates from screenshots.\n\
-             - **scroll**: Scroll at a position or the current cursor location.\n\
+             - **screenshot**: Capture the full screen, or a specific window by name/title. Returns base64 image with screen resolution in details. Attempts capture regardless of window visibility state.\n\
+             - **click**: Click at screen coordinates. Needs Accessibility permission.\n\
+             - **type**: Type a text string. Needs Accessibility permission.\n\
+             - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
+             - **scroll**: Scroll at a position. Uses Quartz scroll wheel events.\n\
+             - **getWindows**: List all windows (including off-screen) with process name, title, position, size, and visibility status. Works from background processes.\n\
+             - **focusWindow**: Bring a window to front by title using native activation. Verifies the window is on-screen after activation. If the app is on another Space, it will be brought to the current one.\n\
              - **moveMouse**: Move the mouse cursor without clicking.\n\n\
              NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
              calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
-             System Settings > Privacy & Security.",
+             System Settings > Privacy & Security. Do NOT attempt workarounds — the tool handles window management internally.",
         )
         .required_property("action", json!({
             "type": "string",
@@ -218,6 +211,16 @@ impl ComputerUseTool {
         format!(
             r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOnScreen = onScreen; bestW = bw; bestH = bh }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)"); Foundation.exit(0)"#
         )
+    }
+
+    /// Parse width and height from a PNG file's IHDR chunk (bytes 16-23).
+    fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+        if data.len() < 24 {
+            return None;
+        }
+        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+        if w > 0 && h > 0 { Some((w, h)) } else { None }
     }
 
     /// Run an osascript command via the process runner.
@@ -418,6 +421,9 @@ impl ComputerUseTool {
         };
         let original_size = resized_png.len();
 
+        // Parse image dimensions from PNG header (bytes 16-23 of IHDR chunk)
+        let (img_w, img_h) = Self::png_dimensions(&resized_png).unwrap_or((0, 0));
+
         // Step 2: Try JPEG compression on the resized PNG.
         let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
         let sips_cmd = format!(
@@ -479,21 +485,48 @@ impl ComputerUseTool {
             "action": "screenshot",
             "window": window,
             "sizeBytes": image_data.len(),
+            "originalSizeBytes": original_size,
             "mimeType": mime_type,
+            "imageWidth": img_w,
+            "imageHeight": img_h,
         });
         if let Some((w, h)) = screen {
             details["screenWidth"] = json!(w);
             details["screenHeight"] = json!(h);
         }
 
+        // Build informative text with coordinate mapping guide
         let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
         let mut text = format!(
-            "Screenshot captured ({} bytes {format_label})",
+            "Screenshot captured ({img_w}x{img_h} image, {} bytes {format_label})",
             image_data.len()
         );
+
+        // Coordinate mapping guide — this is critical for click accuracy
         if let Some((sw, sh)) = screen {
-            text.push_str(&format!(", screen {sw}x{sh}"));
+            if img_w > 0 && img_h > 0 {
+                #[allow(clippy::cast_precision_loss)]
+                let scale_x = sw / img_w as f64;
+                #[allow(clippy::cast_precision_loss)]
+                let scale_y = sh / img_h as f64;
+
+                if window.is_some() {
+                    text.push_str(&format!(
+                        "\nCoordinate mapping: this is a WINDOW screenshot. \
+                         Use getWindows to find the window's screen position, then: \
+                         screen_x = window_x + (image_x * {scale_x:.2}), \
+                         screen_y = window_y + (image_y * {scale_y:.2})"
+                    ));
+                } else {
+                    text.push_str(&format!(
+                        "\nCoordinate mapping: screen is {sw}x{sh} points, image is {img_w}x{img_h}px. \
+                         To click where you see pixel (x,y) in the image: \
+                         screen_x = image_x * {scale_x:.2}, screen_y = image_y * {scale_y:.2}"
+                    ));
+                }
+            }
         }
+
         if !size_warning.is_empty() {
             text.push_str(size_warning);
         }
@@ -1658,6 +1691,7 @@ mod tests {
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/jpeg");
         assert_eq!(d["sizeBytes"], 500);
+        assert_eq!(d["originalSizeBytes"], 1000);
     }
 
     #[tokio::test]
@@ -1674,22 +1708,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn screenshot_text_includes_format_and_screen() {
+    async fn screenshot_text_includes_image_dimensions() {
         let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        assert!(text.contains("bytes JPEG"), "should state format: {text}");
-        // On macOS, should include screen dimensions
+        // Must include image pixel dimensions
+        assert!(text.contains("1280x960 image"), "should have image dimensions: {text}");
+        // On macOS, should include coordinate mapping guide
         #[cfg(target_os = "macos")]
-        assert!(text.contains("screen"), "should include screen size: {text}");
-        // Details should NOT expose image pixel dimensions (prevents coordinate obsession)
+        {
+            assert!(text.contains("Coordinate mapping"), "should have coord guide: {text}");
+            assert!(text.contains("screen_x"), "should show formula: {text}");
+        }
+        // Details should also have imageWidth/imageHeight
         let d = r.details.unwrap();
-        assert!(d.get("imageWidth").is_none(), "should not expose image pixel dims");
-        assert!(d.get("imageHeight").is_none(), "should not expose image pixel dims");
-        // But should have screen dims
+        assert_eq!(d["imageWidth"], 1280);
+        assert_eq!(d["imageHeight"], 960);
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_text_includes_window_mapping() {
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        // Window screenshots should explain they need getWindows for position
         #[cfg(target_os = "macos")]
-        assert!(d.get("screenWidth").is_some(), "should have screen dims");
+        assert!(text.contains("WINDOW screenshot"), "should say it's a window screenshot: {text}");
     }
 
     #[tokio::test]
