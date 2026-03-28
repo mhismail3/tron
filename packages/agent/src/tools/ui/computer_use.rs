@@ -86,19 +86,18 @@ impl TronTool for ComputerUseTool {
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the full screen, or a specific window by name/title (uses window ID lookup internally). Returns base64 PNG. Only needs Screen Recording permission.\n\
-             - **click**: Click at screen coordinates. Needs Accessibility permission for osascript.\n\
+             - **screenshot**: Capture the full screen, or a specific window by name/title. Returns base64 image with screen resolution in details. Attempts capture regardless of window visibility state.\n\
+             - **click**: Click at screen coordinates. Needs Accessibility permission.\n\
              - **type**: Type a text string. Needs Accessibility permission.\n\
              - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
              - **scroll**: Scroll at a position. Uses Quartz scroll wheel events.\n\
-             - **getWindows**: List all visible windows with their process name, title, position, and size. Needs Accessibility permission.\n\
-             - **focusWindow**: Bring a window to front by title.\n\
+             - **getWindows**: List all windows (including off-screen) with process name, title, position, size, and visibility status. Works from background processes.\n\
+             - **focusWindow**: Bring a window to front by title using native activation. Verifies the window is on-screen after activation. If the app is on another Space, it will be brought to the current one.\n\
              - **moveMouse**: Move the mouse cursor without clicking.\n\n\
              NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
              calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
-             System Settings > Privacy & Security. Do NOT attempt workarounds like GetWindowID, \
-             python3 AppKit, or other approaches — the tool handles window ID lookup internally.",
+             System Settings > Privacy & Security. Do NOT attempt workarounds — the tool handles window management internally.",
         )
         .required_property("action", json!({
             "type": "string",
@@ -198,24 +197,19 @@ impl ComputerUseTool {
         }
     }
 
-    /// Build a Swift script that finds the best matching window using scored ranking.
+    /// Build a Swift script that finds the best matching window for screenshot capture.
     ///
-    /// Instead of returning the first match, this scores all matching windows by:
+    /// Scores all matching windows by:
     /// - +1,000,000 if on-screen (`kCGWindowIsOnscreen`)
     /// - +500,000 if normal layer (`kCGWindowLayer == 0`)
     /// - +area (width * height) — prefers larger content windows
     ///
-    /// `output_format` controls stdout:
-    /// - `"screenshot"`: prints `windowId\tonScreen\twidth\theight`
-    /// - `"focus"`: prints `owner\tname\tpid`
-    fn build_window_lookup_swift(search: &str, output_format: &str) -> String {
+    /// Output: `windowId\tonScreen\twidth\theight`
+    /// On failure (no match): exit 1, available window names on stderr.
+    fn build_screenshot_window_swift(search: &str) -> String {
         let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
-        let print_stmt = match output_format {
-            "screenshot" => r#"print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)")"#,
-            _ => r#"print("\(bestOwner)\t\(bestName)\t\(bestPid)")"#,
-        };
         format!(
-            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOwner = ""; var bestName = ""; var bestPid = 0; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; let pid = w[kCGWindowOwnerPID as String] as? Int ?? 0; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOwner = owner; bestName = name; bestPid = pid; bestOnScreen = onScreen; bestW = bw; bestH = bh }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; {print_stmt}; Foundation.exit(0)"#
+            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOnScreen = onScreen; bestW = bw; bestH = bh }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)"); Foundation.exit(0)"#
         )
     }
 
@@ -330,7 +324,7 @@ impl ComputerUseTool {
             // the best matching window ID, then screencapture -l <id>.
             // Scoring prefers on-screen, layer-0, largest-area windows to avoid
             // matching non-capturable system/accessory windows.
-            let swift_script = Self::build_window_lookup_swift(w, "screenshot");
+            let swift_script = Self::build_screenshot_window_swift(w);
             let wid_command = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
             let wid_output = self.run_shell(&wid_command, ctx).await?;
 
@@ -358,24 +352,23 @@ impl ComputerUseTool {
                 "Window lookup result for screenshot"
             );
 
-            // Pre-capture: if the window is off-screen (minimized or other Space),
-            // screencapture will fail. Give a specific diagnostic instead.
-            if !on_screen {
-                return Ok(error_result(format!(
-                    "Window '{w}' appears minimized or off-screen. \
-                     Use focusWindow to bring it to the front first, then retry the screenshot."
-                )));
-            }
-
+            // Always attempt capture — kCGWindowIsOnscreen is unreliable (reports false
+            // for windows on other Spaces or when running from a background launchd process,
+            // but screencapture -l can still capture them successfully).
             let capture_command = format!("screencapture -x -t png -l {window_id} {tmp_path}");
             let output = self.run_shell(&capture_command, ctx).await?;
             if output.exit_code != 0 {
                 tracing::debug!(
-                    window = %w, id = %window_id, stderr = %output.stderr.trim(),
+                    window = %w, id = %window_id, on_screen, stderr = %output.stderr.trim(),
                     "screencapture failed for window"
                 );
+                let hint = if on_screen {
+                    "Grant Screen Recording permission in System Settings > Privacy & Security."
+                } else {
+                    "The window may be minimized or off-screen. Try focusWindow first, or grant Screen Recording permission."
+                };
                 return Ok(error_result(format!(
-                    "Window screenshot failed: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
+                    "Window screenshot failed: {}. {hint}",
                     output.stderr.trim()
                 )));
             }
@@ -700,85 +693,52 @@ impl ComputerUseTool {
         }
     }
 
+    /// Swift script for listing windows via CGWindowList (works from background processes).
+    const GET_WINDOWS_SWIFT: &'static str = r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var lines = [String](); for w in ws { let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if name.isEmpty { continue }; let layer = w[kCGWindowLayer as String] as? Int ?? 999; if layer != 0 { continue }; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let x = Int(bounds["X"] as? Double ?? 0); let y = Int(bounds["Y"] as? Double ?? 0); let bw = Int(bounds["Width"] as? Double ?? 0); let bh = Int(bounds["Height"] as? Double ?? 0); let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; lines.append("\(owner) | \(name) | \(x),\(y) | \(bw),\(bh) | \(onScreen ? "visible" : "off-screen")") }; print(lines.joined(separator: "\n"))"#;
+
     async fn get_windows(
         &self,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let script = r#"tell application "System Events"
-set windowList to ""
-repeat with proc in (every process whose visible is true)
-set procName to name of proc
-try
-repeat with win in (every window of proc)
-set winName to name of win
-set winPos to position of win
-set winSize to size of win
-set isMini to miniaturized of win
-set windowList to windowList & procName & " | " & winName & " | " & (item 1 of winPos) & "," & (item 2 of winPos) & " | " & (item 1 of winSize) & "," & (item 2 of winSize) & " | " & isMini & "\n"
-end repeat
-end try
-end repeat
-end tell
-return windowList"#;
+        // Use CGWindowList via Swift — works reliably from background launchd processes,
+        // unlike the AppleScript "System Events" approach which returns empty when
+        // the agent isn't running in a foreground terminal session.
+        let cmd = format!("swift -e '{}'", Self::GET_WINDOWS_SWIFT.replace('\'', "'\\''"));
+        let output = self.run_shell(&cmd, ctx).await?;
 
-        match self.run_osascript(script, ctx).await {
-            Ok(output) => {
-                let trimmed = output.trim();
-                Ok(TronToolResult {
-                    content: ToolResultBody::Blocks(vec![
-                        crate::core::content::ToolResultContent::text(
-                            if trimmed.is_empty() {
-                                "No visible windows found.".to_string()
-                            } else {
-                                format!("App | Window | Position | Size | Minimized\n{trimmed}")
-                            }
-                        ),
-                    ]),
-                    details: Some(json!({"action": "getWindows"})),
-                    is_error: None,
-                    stop_turn: None,
-                })
-            }
-            Err(e) => Ok(error_result(format!(
-                "Failed to list windows: {e}. Grant Accessibility permission to osascript/Terminal in System Settings > Privacy & Security > Accessibility."
-            ))),
+        if output.exit_code != 0 {
+            return Ok(error_result(format!(
+                "Failed to list windows: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
+                output.stderr.trim()
+            )));
         }
+
+        let trimmed = output.stdout.trim();
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![
+                crate::core::content::ToolResultContent::text(
+                    if trimmed.is_empty() {
+                        "No windows found.".to_string()
+                    } else {
+                        format!("App | Window | Position | Size | Status\n{trimmed}")
+                    }
+                ),
+            ]),
+            details: Some(json!({"action": "getWindows"})),
+            is_error: None,
+            stop_turn: None,
+        })
     }
 
-    /// Find a window's owner using scored `CGWindowList` lookup (case-insensitive contains).
-    /// Returns `(ownerName, windowName, ownerPID)` or error with list of available windows.
-    async fn find_window_owner(
-        &self,
-        search: &str,
-        ctx: &ToolContext,
-    ) -> Result<(String, String, u64), TronToolResult> {
-        let swift_script = Self::build_window_lookup_swift(search, "focus");
-        let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
-        let output = self.run_shell(&cmd, ctx).await.map_err(|e| {
-            error_result(format!("Window lookup failed: {e}"))
-        })?;
-
-        if output.exit_code == 0 {
-            let parts: Vec<&str> = output.stdout.trim().splitn(3, '\t').collect();
-            let owner = parts.first().unwrap_or(&"").to_string();
-            let name = parts.get(1).unwrap_or(&"").to_string();
-            let pid: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-            tracing::debug!(
-                search, owner = %owner, name = %name, pid,
-                "Window lookup result for focusWindow"
-            );
-            Ok((owner, name, pid))
-        } else {
-            let available = output.stderr.trim();
-            let list = if available.is_empty() {
-                "No windows found.".to_string()
-            } else {
-                format!("Available windows:\n{available}")
-            };
-            Err(error_result(format!(
-                "Window '{search}' not found. {list}"
-            )))
-        }
+    /// Build a Swift script that finds a window by name, activates the app via
+    /// `NSRunningApplication.activate`, and verifies the window became on-screen.
+    ///
+    /// Output: `owner\tname\tpid\tactivated\tverified`
+    fn build_focus_window_swift(search: &str) -> String {
+        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestScore = -1; var bestOwner = ""; var bestName = ""; var bestPid: pid_t = 0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; let pid = w[kCGWindowOwnerPID as String] as? Int ?? 0; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestOwner = owner; bestName = name; bestPid = pid_t(pid) }} }}; guard bestPid > 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; guard let app = NSRunningApplication(processIdentifier: bestPid) else {{ print("\(bestOwner)\t\(bestName)\t\(bestPid)\tno_process\tfalse"); Foundation.exit(0) }}; let ok = app.activate(options: .activateIgnoringOtherApps); Thread.sleep(forTimeInterval: 0.3); let ws2 = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var verified = false; for w in ws2 {{ let p = w[kCGWindowOwnerPID as String] as? Int ?? 0; if p == Int(bestPid), let on = w[kCGWindowIsOnscreen as String] as? Bool, on {{ verified = true; break }} }}; print("\(bestOwner)\t\(bestName)\t\(bestPid)\t\(ok ? "activated" : "failed")\t\(verified)"); Foundation.exit(0)"#
+        )
     }
 
     async fn focus_window(
@@ -791,33 +751,67 @@ return windowList"#;
             Err(e) => return Ok(e),
         };
 
-        // Use CGWindowList to find the owner PID, then activate by PID.
-        // This avoids app name mismatches (e.g., "Things" vs "Things3").
-        let (owner, _name, pid) = match self.find_window_owner(&window, ctx).await {
-            Ok(result) => result,
-            Err(err_result) => return Ok(err_result),
-        };
+        // Single Swift call: find window → activate via NSRunningApplication → verify
+        let swift_script = Self::build_focus_window_swift(&window);
+        let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
+        let output = self.run_shell(&cmd, ctx).await.map_err(|e| {
+            ToolError::Internal { message: format!("focusWindow lookup failed: {e}") }
+        })?;
 
-        // Activate by PID — reliable regardless of app display name vs bundle name
-        let script = format!(
-            "tell application \"System Events\" to set frontmost of (first process whose unix id is {pid}) to true"
+        if output.exit_code != 0 {
+            let available = output.stderr.trim();
+            let list = if available.is_empty() {
+                "No windows found.".to_string()
+            } else {
+                format!("Available windows:\n{available}")
+            };
+            return Ok(error_result(format!(
+                "Window '{window}' not found. {list}"
+            )));
+        }
+
+        // Parse: "owner\tname\tpid\tactivated|failed|no_process\tverified"
+        let parts: Vec<&str> = output.stdout.trim().splitn(5, '\t').collect();
+        let owner = parts.first().unwrap_or(&"").to_string();
+        let _name = parts.get(1).unwrap_or(&"").to_string();
+        let pid: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let activation = parts.get(3).unwrap_or(&"unknown");
+        let verified = parts.get(4).map(|s| *s == "true").unwrap_or(false);
+
+        tracing::debug!(
+            search = %window, owner = %owner, pid, activation = %activation, verified,
+            "focusWindow result"
         );
 
-        match self.run_osascript(&script, ctx).await {
-            Ok(_) => Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    crate::core::content::ToolResultContent::text(format!(
-                        "Focused window: {window} (app: {owner})"
-                    )),
-                ]),
-                details: Some(json!({"action": "focusWindow", "window": window, "app": owner, "pid": pid})),
-                is_error: None,
-                stop_turn: None,
-            }),
-            Err(_) => Ok(error_result(format!(
-                "Found window '{window}' (app: {owner}, pid: {pid}) but failed to activate it."
-            ))),
+        if *activation == "failed" || *activation == "no_process" {
+            return Ok(error_result(format!(
+                "Found window '{window}' (app: {owner}, pid: {pid}) but activation failed. \
+                 Try opening the app with Bash: open -a \"{owner}\""
+            )));
         }
+
+        let status = if verified {
+            format!("Focused window: {window} (app: {owner}, verified on-screen)")
+        } else {
+            format!("Focused window: {window} (app: {owner}, activated but not yet verified on-screen — \
+                     the window may need a moment or may be on another Space)")
+        };
+
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![
+                crate::core::content::ToolResultContent::text(status),
+            ]),
+            details: Some(json!({
+                "action": "focusWindow",
+                "window": window,
+                "app": owner,
+                "pid": pid,
+                "activated": *activation == "activated",
+                "verified": verified,
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
     }
 
     async fn move_mouse(
@@ -1299,26 +1293,27 @@ mod tests {
     #[tokio::test]
     async fn get_windows_returns_list() {
         let t = tool_with_runner(
-            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | false\n"),
-            false,
-        );
-        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("Safari"));
-    }
-
-    #[tokio::test]
-    async fn get_windows_includes_minimized_column() {
-        let t = tool_with_runner(
-            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | false\nTextEdit | Untitled | 100,100 | 800,600 | true\n"),
+            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | visible\n"),
             false,
         );
         let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
-        assert!(text.contains("Minimized"), "header should include Minimized column: {text}");
-        assert!(text.contains("false"), "should show non-minimized state");
-        assert!(text.contains("true"), "should show minimized state");
+        assert!(text.contains("Safari"), "should list Safari: {text}");
+        assert!(text.contains("Status"), "header should include Status column: {text}");
+    }
+
+    #[tokio::test]
+    async fn get_windows_includes_visibility_status() {
+        let t = tool_with_runner(
+            MockRunner::success("Safari | Google | 0,0 | 1920,1080 | visible\nTextEdit | Untitled | 100,100 | 800,600 | off-screen\n"),
+            false,
+        );
+        let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        assert!(text.contains("visible"), "should show visible state: {text}");
+        assert!(text.contains("off-screen"), "should show off-screen state: {text}");
     }
 
     #[tokio::test]
@@ -1326,12 +1321,26 @@ mod tests {
         let t = tool(false);
         let r = t.execute(json!({"action": "getWindows"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("No visible windows"));
+        assert!(extract_text(&r).contains("No windows found"));
     }
 
     #[tokio::test]
     async fn focus_window_by_title() {
-        let t = tool(false);
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tApple\t12345\tactivated\ttrue".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         assert!(extract_text(&r).contains("Focused window: Safari"));
@@ -1829,7 +1838,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn focus_window_swift_uses_scoring() {
+    async fn focus_window_uses_nsrunningapplication() {
+        // Verify the Swift script uses NSRunningApplication.activate, not osascript
         use std::sync::{Arc as StdArc, Mutex};
         let commands: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
         let cmds = commands.clone();
@@ -1837,7 +1847,7 @@ mod tests {
             cmds.lock().unwrap().push(cmd.to_string());
             if cmd.contains("swift") {
                 ProcessOutput {
-                    stdout: "Safari\tStart Page\t12345".into(),
+                    stdout: "Safari\tApple\t12345\tactivated\ttrue".into(),
                     stderr: String::new(),
                     exit_code: 0,
                     duration_ms: 10,
@@ -1846,12 +1856,8 @@ mod tests {
                 }
             } else {
                 ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
                 }
             }
         });
@@ -1859,8 +1865,12 @@ mod tests {
         let _ = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await;
         let cmds = commands.lock().unwrap();
         let swift_cmd = cmds.iter().find(|c| c.contains("swift")).expect("should run swift");
-        assert!(swift_cmd.contains("kCGWindowLayer"), "script should check window layer");
-        assert!(swift_cmd.contains("kCGWindowIsOnscreen"), "script should check on-screen state");
+        assert!(swift_cmd.contains("NSRunningApplication"), "should use NSRunningApplication");
+        assert!(swift_cmd.contains("activate"), "should call activate");
+        assert!(swift_cmd.contains("activateIgnoringOtherApps"), "should use activateIgnoringOtherApps");
+        // Should NOT use osascript "set frontmost"
+        assert!(!cmds.iter().any(|c| c.contains("osascript") && c.contains("frontmost")),
+            "should not use osascript set frontmost");
     }
 
     #[tokio::test]
@@ -1871,18 +1881,12 @@ mod tests {
                     stdout: String::new(),
                     stderr: "Xcode: Project\nFinder: Downloads".into(),
                     exit_code: 1,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
+                    duration_ms: 10, timed_out: false, interrupted: false,
                 }
             } else {
                 ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
                 }
             }
         });
@@ -1895,26 +1899,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn focus_window_succeeds_with_scored_lookup() {
+    async fn focus_window_activated_and_verified() {
         let runner = MockRunner::with_handler(|cmd| {
             if cmd.contains("swift") {
                 ProcessOutput {
-                    stdout: "Safari\tStart Page\t12345".into(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
+                    stdout: "Safari\tApple\t12345\tactivated\ttrue".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
                 }
             } else {
-                // osascript activation
                 ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
                 }
             }
         });
@@ -1922,7 +1918,82 @@ mod tests {
         let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        assert!(text.contains("Focused window"), "should confirm focus: {text}");
+        assert!(text.contains("verified on-screen"), "should say verified: {text}");
+        let d = r.details.unwrap();
+        assert_eq!(d["verified"], true);
+        assert_eq!(d["activated"], true);
+    }
+
+    #[tokio::test]
+    async fn focus_window_activated_but_unverified() {
+        // App activated but no window became onScreen (e.g., other Space issue)
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tApple\t12345\tactivated\tfalse".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should still succeed (activation worked): {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("not yet verified"), "should warn about unverified: {text}");
+        let d = r.details.unwrap();
+        assert_eq!(d["verified"], false);
+    }
+
+    #[tokio::test]
+    async fn focus_window_activation_failed() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tApple\t12345\tfailed\tfalse".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("activation failed"), "should say failed: {text}");
+    }
+
+    #[tokio::test]
+    async fn focus_window_no_process() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Safari\tApple\t99999\tno_process\tfalse".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "focusWindow", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("activation failed"), "should say failed: {text}");
     }
 
     // ─── Window visibility diagnosis tests ───
@@ -1989,38 +2060,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn screenshot_minimized_window_specific_error() {
-        // Window found but off-screen with zero size (minimized)
-        let runner = window_screenshot_runner("42\tfalse\t0\t0", 0, 0, "");
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        let text = extract_text(&r);
-        assert!(text.contains("minimized or off-screen"), "should mention minimized: {text}");
-        assert!(text.contains("focusWindow"), "should suggest focusWindow: {text}");
-        assert!(!text.contains("Screen Recording"), "should NOT mention permissions: {text}");
-    }
-
-    #[tokio::test]
-    async fn screenshot_offscreen_window_with_size() {
-        // Window found but off-screen with nonzero size (on another Space)
+    async fn screenshot_offscreen_window_capture_succeeds() {
+        // kCGWindowIsOnscreen=false but screencapture succeeds (the common case:
+        // window on another Space, or background launchd reports false).
+        // Must NOT block — should attempt capture and succeed.
         let runner = window_screenshot_runner("42\tfalse\t1187\t1100", 0, 0, "");
         let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        let text = extract_text(&r);
-        assert!(text.contains("minimized or off-screen"), "should mention off-screen: {text}");
+        assert!(r.is_error.is_none(), "should succeed despite onScreen=false: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "screenshot");
+        assert_eq!(d["window"], "Safari");
     }
 
     #[tokio::test]
-    async fn screenshot_onscreen_capture_failure_mentions_permission() {
-        // Window on-screen but screencapture fails → should suggest permissions
+    async fn screenshot_offscreen_zero_size_capture_succeeds() {
+        // Even with zero-size metadata, attempt capture (metadata can be wrong)
+        let runner = window_screenshot_runner("42\tfalse\t0\t0", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should attempt capture regardless: {}", extract_text(&r));
+    }
+
+    #[tokio::test]
+    async fn screenshot_capture_failure_includes_diagnostics() {
+        // screencapture fails → error should include stderr and suggest permission
         let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 1, "could not create image from window");
         let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
         let text = extract_text(&r);
-        assert!(text.contains("Screen Recording permission"), "should mention permission: {text}");
+        assert!(text.contains("could not create image"), "should include stderr: {text}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_capture_failure_offscreen_suggests_focus() {
+        // screencapture fails AND window was off-screen → suggest focusWindow
+        let runner = window_screenshot_runner("42\tfalse\t1187\t1100", 0, 1, "could not create image from window");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("focusWindow") || text.contains("off-screen"), "should mention off-screen context: {text}");
     }
 
     #[tokio::test]
@@ -2038,11 +2119,9 @@ mod tests {
     #[tokio::test]
     async fn screenshot_window_metadata_only_id() {
         // Swift returns only window ID (no metadata) → should proceed to capture
-        // (graceful fallback: assume on-screen when can't parse metadata)
         let runner = window_screenshot_runner("42", 0, 0, "");
         let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
-        // Should NOT error about minimized — should proceed to capture
         assert!(r.is_error.is_none(), "should succeed with partial metadata: {}", extract_text(&r));
     }
 
@@ -2227,10 +2306,28 @@ mod tests {
 
     #[tokio::test]
     async fn focus_window_details() {
-        let t = tool(false);
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "Xcode\tProject\t5678\tactivated\ttrue".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "focusWindow", "window": "Xcode"}), &make_ctx()).await.unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["action"], "focusWindow");
         assert_eq!(d["window"], "Xcode");
+        assert_eq!(d["app"], "Xcode");
+        assert_eq!(d["pid"], 5678);
+        assert_eq!(d["activated"], true);
+        assert_eq!(d["verified"], true);
     }
 }
