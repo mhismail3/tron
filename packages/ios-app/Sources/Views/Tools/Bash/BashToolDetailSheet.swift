@@ -279,7 +279,7 @@ struct BashToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+        ToolStatusRow(status: data.status, durationMs: nil) {
             if let code = exitCode, code != 0 {
                 ToolInfoPill(icon: "xmark.circle", label: "Exit \(code)", color: .tronError)
             }
@@ -291,6 +291,9 @@ struct BashToolDetailSheet: View {
             }
             if let sandbox = sandboxMode {
                 ToolInfoPill(icon: "lock.shield", label: sandbox == "docker" ? "Docker" : "Sandbox", color: .tronAmber)
+            }
+            if let ms = data.durationMs {
+                ToolDurationBadge(durationMs: ms)
             }
             if stdinContent != nil {
                 ToolInfoPill(icon: "arrow.right.doc", label: "stdin")
