@@ -220,16 +220,6 @@ impl ComputerUseTool {
         )
     }
 
-    /// Parse width and height from a PNG file's IHDR chunk (bytes 16-23).
-    fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
-        if data.len() < 24 {
-            return None;
-        }
-        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
-        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
-        if w > 0 && h > 0 { Some((w, h)) } else { None }
-    }
-
     /// Run an osascript command via the process runner.
     async fn run_osascript(
         &self,
@@ -428,9 +418,6 @@ impl ComputerUseTool {
         };
         let original_size = resized_png.len();
 
-        // Parse image dimensions from PNG header (bytes 16-23 of IHDR chunk)
-        let (img_w, img_h) = Self::png_dimensions(&resized_png).unwrap_or((0, 0));
-
         // Step 2: Try JPEG compression on the resized PNG.
         let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
         let sips_cmd = format!(
@@ -492,10 +479,7 @@ impl ComputerUseTool {
             "action": "screenshot",
             "window": window,
             "sizeBytes": image_data.len(),
-            "originalSizeBytes": original_size,
             "mimeType": mime_type,
-            "imageWidth": img_w,
-            "imageHeight": img_h,
         });
         if let Some((w, h)) = screen {
             details["screenWidth"] = json!(w);
@@ -1674,7 +1658,6 @@ mod tests {
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/jpeg");
         assert_eq!(d["sizeBytes"], 500);
-        assert_eq!(d["originalSizeBytes"], 1000);
     }
 
     #[tokio::test]
@@ -1700,21 +1683,13 @@ mod tests {
         // On macOS, should include screen dimensions
         #[cfg(target_os = "macos")]
         assert!(text.contains("screen"), "should include screen size: {text}");
-        // Details should have imageWidth/imageHeight
+        // Details should NOT expose image pixel dimensions (prevents coordinate obsession)
         let d = r.details.unwrap();
-        assert_eq!(d["imageWidth"], 1280);
-        assert_eq!(d["imageHeight"], 960);
-    }
-
-    #[tokio::test]
-    async fn screenshot_details_have_image_dimensions() {
-        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
-        let d = r.details.unwrap();
-        assert!(d.get("imageWidth").is_some(), "should have imageWidth");
-        assert!(d.get("imageHeight").is_some(), "should have imageHeight");
+        assert!(d.get("imageWidth").is_none(), "should not expose image pixel dims");
+        assert!(d.get("imageHeight").is_none(), "should not expose image pixel dims");
+        // But should have screen dims
+        #[cfg(target_os = "macos")]
+        assert!(d.get("screenWidth").is_some(), "should have screen dims");
     }
 
     #[tokio::test]
