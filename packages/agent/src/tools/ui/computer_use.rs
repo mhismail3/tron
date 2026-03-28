@@ -213,6 +213,16 @@ impl ComputerUseTool {
         )
     }
 
+    /// Parse width and height from a PNG file's IHDR chunk (bytes 16-23).
+    fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+        if data.len() < 24 {
+            return None;
+        }
+        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+        if w > 0 && h > 0 { Some((w, h)) } else { None }
+    }
+
     /// Run an osascript command via the process runner.
     async fn run_osascript(
         &self,
@@ -392,13 +402,32 @@ impl ComputerUseTool {
                 return Ok(error_result(format!("Failed to read screenshot: {e}")));
             }
         };
-        let original_size = raw_data.len();
 
-        // Compress: resize to max 1280px, convert to JPEG 70% quality using macOS `sips`.
-        // Falls back to original PNG if sips is unavailable or fails.
+        // Step 1: Resize PNG to max 1280px (consistent dimensions regardless of
+        // Retina scaling). This ensures the image the LLM sees always has a known
+        // relationship to the screen coordinate system.
+        let resize_cmd = format!(
+            "sips --resampleHeightWidthMax 1280 '{tmp_path}'",
+        );
+        let _ = self.run_shell(&resize_cmd, ctx).await;
+
+        // Read the resized PNG
+        let resized_png = match tokio::fs::read(&tmp_path).await {
+            Ok(data) => data,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Ok(error_result(format!("Failed to read resized screenshot: {e}")));
+            }
+        };
+        let original_size = resized_png.len();
+
+        // Parse image dimensions from PNG header (bytes 16-23 of IHDR chunk)
+        let (img_w, img_h) = Self::png_dimensions(&resized_png).unwrap_or((0, 0));
+
+        // Step 2: Try JPEG compression on the resized PNG.
         let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
         let sips_cmd = format!(
-            "sips --resampleHeightWidthMax 1280 --setProperty format jpeg --setProperty formatOptions 70 '{tmp_path}' --out '{jpg_path}'",
+            "sips --setProperty format jpeg --setProperty formatOptions 70 '{tmp_path}' --out '{jpg_path}'",
         );
         let sips_result = self.run_shell(&sips_cmd, ctx).await;
         let _ = tokio::fs::remove_file(&tmp_path).await;
@@ -406,7 +435,7 @@ impl ComputerUseTool {
         let (image_data, mime_type) = match sips_result {
             Ok(output) if output.exit_code == 0 => {
                 match tokio::fs::read(&jpg_path).await {
-                    Ok(data) if !data.is_empty() && data.len() < raw_data.len() => {
+                    Ok(data) if !data.is_empty() && data.len() < resized_png.len() => {
                         tracing::debug!(
                             jpeg_bytes = data.len(), png_bytes = original_size,
                             "Using JPEG (smaller than PNG)"
@@ -420,19 +449,19 @@ impl ComputerUseTool {
                             "Skipping JPEG (not smaller than PNG), using PNG"
                         );
                         let _ = tokio::fs::remove_file(&jpg_path).await;
-                        (raw_data, "image/png")
+                        (resized_png, "image/png")
                     }
                     _ => {
                         tracing::debug!("JPEG read failed, falling back to PNG");
                         let _ = tokio::fs::remove_file(&jpg_path).await;
-                        (raw_data, "image/png")
+                        (resized_png, "image/png")
                     }
                 }
             }
             _ => {
                 tracing::debug!("sips compression failed, using original PNG");
                 let _ = tokio::fs::remove_file(&jpg_path).await;
-                (raw_data, "image/png")
+                (resized_png, "image/png")
             }
         };
 
@@ -441,16 +470,13 @@ impl ComputerUseTool {
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
 
-        // Include screen resolution for coordinate context
+        // Include screen resolution and image dimensions for coordinate mapping
         let screen = self.screen_bounds().await;
-        let screen_text = screen
-            .map(|(w, h)| format!(" ({w}x{h} screen)"))
-            .unwrap_or_default();
 
         // Size guard: if a window capture is suspiciously small, it's likely
         // blank/minimized/off-screen. Warn the agent so it can focus the window first.
         let size_warning = if window.is_some() && image_data.len() < 10_000 {
-            " WARNING: Screenshot appears blank or very small — the window may be minimized or on another desktop. Try using focusWindow first to bring it to the current screen, then retry the screenshot."
+            "\nWARNING: Screenshot appears blank or very small — the window may be minimized or on another desktop. Try using focusWindow first to bring it to the current screen, then retry the screenshot."
         } else {
             ""
         };
@@ -461,10 +487,48 @@ impl ComputerUseTool {
             "sizeBytes": image_data.len(),
             "originalSizeBytes": original_size,
             "mimeType": mime_type,
+            "imageWidth": img_w,
+            "imageHeight": img_h,
         });
         if let Some((w, h)) = screen {
             details["screenWidth"] = json!(w);
             details["screenHeight"] = json!(h);
+        }
+
+        // Build informative text with coordinate mapping guide
+        let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
+        let mut text = format!(
+            "Screenshot captured ({img_w}x{img_h} image, {} bytes {format_label})",
+            image_data.len()
+        );
+
+        // Coordinate mapping guide — this is critical for click accuracy
+        if let Some((sw, sh)) = screen {
+            if img_w > 0 && img_h > 0 {
+                #[allow(clippy::cast_precision_loss)]
+                let scale_x = sw / img_w as f64;
+                #[allow(clippy::cast_precision_loss)]
+                let scale_y = sh / img_h as f64;
+
+                if window.is_some() {
+                    text.push_str(&format!(
+                        "\nCoordinate mapping: this is a WINDOW screenshot. \
+                         Use getWindows to find the window's screen position, then: \
+                         screen_x = window_x + (image_x * {scale_x:.2}), \
+                         screen_y = window_y + (image_y * {scale_y:.2})"
+                    ));
+                } else {
+                    text.push_str(&format!(
+                        "\nCoordinate mapping: screen is {sw}x{sh} points, image is {img_w}x{img_h}px. \
+                         To click where you see pixel (x,y) in the image: \
+                         screen_x = image_x * {scale_x:.2}, screen_y = image_y * {scale_y:.2}"
+                    ));
+                }
+            }
+        }
+
+        if !size_warning.is_empty() {
+            text.push_str(size_warning);
         }
 
         Ok(TronToolResult {
@@ -473,12 +537,7 @@ impl ComputerUseTool {
                     data: b64,
                     mime_type: mime_type.into(),
                 },
-                crate::core::content::ToolResultContent::text(format!(
-                    "Screenshot captured{screen_text} ({} bytes {}, from {} bytes PNG){size_warning}",
-                    image_data.len(),
-                    if mime_type == "image/jpeg" { "JPEG" } else { "PNG" },
-                    original_size
-                )),
+                crate::core::content::ToolResultContent::text(text),
             ]),
             details: Some(details),
             is_error: None,
@@ -1544,11 +1603,19 @@ mod tests {
     fn screenshot_runner(png_size: usize, jpg_size: Option<usize>) -> MockRunner {
         MockRunner::with_handler(move |cmd| {
             if cmd.contains("screencapture") {
-                // Extract the output path from the command
-                // Format: "screencapture -x -t png /tmp/tron-screenshot-XXXX.png"
                 let path = cmd.rsplit(' ').next().unwrap_or("/tmp/test.png");
-                // Write a fake PNG file of the specified size
-                let data = vec![0x89u8; png_size]; // 0x89 is PNG magic byte
+                // Write a fake PNG with valid IHDR header so png_dimensions() works.
+                // PNG: 8-byte sig + 4-byte IHDR len + 4-byte "IHDR" + 4-byte W + 4-byte H
+                let mut data = Vec::with_capacity(png_size.max(24));
+                data.extend_from_slice(b"\x89PNG\r\n\x1a\n"); // PNG signature (8 bytes)
+                data.extend_from_slice(&13u32.to_be_bytes()); // IHDR data length (9-12)
+                data.extend_from_slice(b"IHDR");              // chunk type (13-16)
+                data.extend_from_slice(&1280u32.to_be_bytes()); // width (17-20)
+                data.extend_from_slice(&960u32.to_be_bytes());  // height (21-24)
+                // Pad to the requested size
+                if png_size > data.len() {
+                    data.resize(png_size, 0);
+                }
                 std::fs::write(path, &data).ok();
                 ProcessOutput {
                     stdout: String::new(),
@@ -1558,10 +1625,10 @@ mod tests {
                     timed_out: false,
                     interrupted: false,
                 }
-            } else if cmd.contains("sips") {
+            } else if cmd.contains("sips") && cmd.contains("--out") {
+                // JPEG conversion step (has --out flag)
                 match jpg_size {
                     Some(size) => {
-                        // Extract --out path: sips ... --out '/tmp/xxx.jpg'
                         let out_path = cmd
                             .rfind("--out '")
                             .map(|i| {
@@ -1570,7 +1637,7 @@ mod tests {
                                 &cmd[start..end]
                             })
                             .unwrap_or("/tmp/test.jpg");
-                        let data = vec![0xFFu8; size]; // 0xFF is JPEG magic byte
+                        let data = vec![0xFFu8; size];
                         std::fs::write(out_path, &data).ok();
                         ProcessOutput {
                             stdout: String::new(),
@@ -1589,6 +1656,16 @@ mod tests {
                         timed_out: false,
                         interrupted: false,
                     },
+                }
+            } else if cmd.contains("sips") && cmd.contains("resampleHeightWidthMax") {
+                // Resize step — succeeds (file already written by screencapture handler)
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 10,
+                    timed_out: false,
+                    interrupted: false,
                 }
             } else {
                 ProcessOutput {
@@ -1624,10 +1701,42 @@ mod tests {
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        assert!(text.contains("PNG, from"), "text should say PNG when JPEG is larger: {text}");
+        assert!(text.contains("bytes PNG"), "text should say PNG when JPEG is larger: {text}");
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
         assert_eq!(d["sizeBytes"], 1000);
+    }
+
+    #[tokio::test]
+    async fn screenshot_text_includes_image_dimensions() {
+        let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
+        let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        // Must include image pixel dimensions
+        assert!(text.contains("1280x960 image"), "should have image dimensions: {text}");
+        // On macOS, should include coordinate mapping guide
+        #[cfg(target_os = "macos")]
+        {
+            assert!(text.contains("Coordinate mapping"), "should have coord guide: {text}");
+            assert!(text.contains("screen_x"), "should show formula: {text}");
+        }
+        // Details should also have imageWidth/imageHeight
+        let d = r.details.unwrap();
+        assert_eq!(d["imageWidth"], 1280);
+        assert_eq!(d["imageHeight"], 960);
+    }
+
+    #[tokio::test]
+    async fn screenshot_window_text_includes_window_mapping() {
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        // Window screenshots should explain they need getWindows for position
+        #[cfg(target_os = "macos")]
+        assert!(text.contains("WINDOW screenshot"), "should say it's a window screenshot: {text}");
     }
 
     #[tokio::test]
@@ -1647,7 +1756,7 @@ mod tests {
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        assert!(text.contains("PNG, from"), "text should say PNG on sips failure: {text}");
+        assert!(text.contains("bytes PNG"), "text should say PNG on sips failure: {text}");
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
     }
@@ -2031,9 +2140,15 @@ mod tests {
                 }
             } else if cmd.contains("screencapture") {
                 if capture_exit == 0 {
-                    // Create a fake PNG file
+                    // Create a fake PNG with valid IHDR header
                     let path = cmd.rsplit(' ').next().unwrap_or("/tmp/test.png");
-                    let data = vec![0x89u8; 5000];
+                    let mut data = Vec::with_capacity(5000);
+                    data.extend_from_slice(b"\x89PNG\r\n\x1a\n"); // signature
+                    data.extend_from_slice(&13u32.to_be_bytes()); // IHDR length
+                    data.extend_from_slice(b"IHDR");
+                    data.extend_from_slice(&1280u32.to_be_bytes()); // width
+                    data.extend_from_slice(&960u32.to_be_bytes());  // height
+                    data.resize(5000, 0);
                     std::fs::write(path, &data).ok();
                 }
                 ProcessOutput {
