@@ -29,6 +29,7 @@ pub mod communication;
 pub mod context;
 pub mod cron;
 pub mod device;
+pub mod display;
 pub mod events;
 pub mod filesystem;
 pub mod git;
@@ -180,6 +181,9 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("browser.startStream", browser::StartStreamHandler);
     registry.register("browser.stopStream", browser::StopStreamHandler);
     registry.register("browser.getStatus", browser::GetStatusHandler);
+
+    // Display
+    registry.register("display.stopStream", display::StopStreamHandler);
 
     // Canvas
     registry.register("canvas.get", canvas::GetCanvasHandler);
@@ -473,6 +477,7 @@ pub(crate) mod test_helpers {
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
+            display_stream_registry: None,
         }
     }
 }
@@ -502,8 +507,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            116,
-            "expected 116 methods (115 + blob.get), got {}",
+            117,
+            "expected 117 methods, got {}",
             reg.methods().len()
         );
     }

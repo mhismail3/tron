@@ -121,6 +121,7 @@ mod tests {
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
+            display_stream_registry: None,
         }
     }
 

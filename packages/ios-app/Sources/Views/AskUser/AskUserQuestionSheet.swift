@@ -71,6 +71,7 @@ struct AskUserQuestionSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronAmber)

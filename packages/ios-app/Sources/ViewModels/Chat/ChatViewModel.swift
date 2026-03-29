@@ -41,15 +41,17 @@ final class ChatViewModel {
 
     // MARK: - Display Stream State
 
-    /// Active stream identifier (nil when no stream is active).
+    /// Active stream identifier (nil when no stream is actively sending frames).
     var activeStreamId: String?
-    /// Latest frame image from the active stream.
+    /// Current or last frame image from the stream (persists after stream ends).
     var streamFrameImage: UIImage?
-    /// Tool call ID that initiated the active stream.
+    /// Tool call ID that initiated the stream (persists after stream ends).
     var streamToolCallId: String?
     /// Whether the stream sheet is presented.
     var showStreamSheet = false
-    /// Whether a display stream is currently active.
+    /// Whether the stream sheet has been auto-opened (prevents re-opening on dismiss).
+    var hasAutoOpenedStream = false
+    /// Whether a display stream is currently active (frames arriving).
     var isStreamActive: Bool { activeStreamId != nil }
 
     // MARK: - Input State (delegated to InputBarState for backward compatibility)
@@ -283,6 +285,7 @@ final class ChatViewModel {
                 self.isRetaining = false
                 self.memoryRetainInProgressMessageId = nil
                 self.runningToolCount = 0
+                self.clearDisplayStreamState()
             }
         })
 

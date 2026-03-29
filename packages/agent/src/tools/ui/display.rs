@@ -50,6 +50,8 @@ pub struct DisplayTool {
     blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>,
     /// Broadcast sender for emitting DisplayFrame events during streaming.
     event_tx: Option<tokio::sync::broadcast::Sender<crate::core::events::TronEvent>>,
+    /// Registry of active streams (shared with RPC handler for on-demand cancellation).
+    stream_registry: crate::tools::ui::display_stream::ActiveStreamRegistry,
 }
 
 impl DisplayTool {
@@ -58,6 +60,7 @@ impl DisplayTool {
         Self {
             blob_store,
             event_tx: None,
+            stream_registry: crate::tools::ui::display_stream::ActiveStreamRegistry::new(),
         }
     }
 
@@ -68,6 +71,16 @@ impl DisplayTool {
         tx: tokio::sync::broadcast::Sender<crate::core::events::TronEvent>,
     ) -> Self {
         self.event_tx = Some(tx);
+        self
+    }
+
+    /// Set the active stream registry (shared with the RPC layer).
+    #[must_use]
+    pub fn with_stream_registry(
+        mut self,
+        registry: crate::tools::ui::display_stream::ActiveStreamRegistry,
+    ) -> Self {
+        self.stream_registry = registry;
         self
     }
 }
@@ -93,7 +106,8 @@ impl TronTool for DisplayTool {
              - **image**: Show an image from a file path (e.g., ComputerUse screenshot path) \
              or inline base64 data\n\
              - **images**: Show multiple images in a gallery\n\
-             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)",
+             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\n\
+             To stop an active stream, call with type=\"stream\", action=\"stop\", and the streamId.",
         )
         .required_property(
             "type",
@@ -101,6 +115,14 @@ impl TronTool for DisplayTool {
                 "type": "string",
                 "enum": ["image", "images", "stream"],
                 "description": "The content type to display"
+            }),
+        )
+        .property(
+            "action",
+            json!({
+                "type": "string",
+                "enum": ["start", "stop"],
+                "description": "For stream type: 'start' (default) begins streaming, 'stop' ends an active stream"
             }),
         )
         .property(
@@ -146,9 +168,13 @@ impl TronTool for DisplayTool {
 
         let title = get_optional_string(&params, "title");
 
+        let action = get_optional_string(&params, "action")
+            .unwrap_or_else(|| "start".to_string());
+
         let result = match content_type.as_str() {
             "image" => self.handle_image(&params).await,
             "images" => self.handle_images(&params).await,
+            "stream" if action == "stop" => self.handle_stop_stream(&params).await,
             "stream" => self.handle_stream(&params, _ctx).await,
             other => Ok(error_result(format!(
                 "Unsupported content type: '{other}'. Supported: image, images, stream."
@@ -280,24 +306,30 @@ impl DisplayTool {
             tool_call_id: ctx.tool_call_id.clone(),
         };
 
+        // Per-stream cancellation token: cancelled by stop calls or session abort.
+        let stream_cancel = ctx.cancellation.child_token();
+        self.stream_registry.insert(&stream_id, stream_cancel.clone());
+        let registry = self.stream_registry.clone();
+        let sid = stream_id.clone();
+
         // Spawn the frame producer as a detached background task.
-        // It runs independently of the tool call lifetime — the agent
-        // continues working while frames stream to iOS.
-        let cancel = ctx.cancellation.clone();
         let blob_store = self.blob_store.clone();
         tokio::spawn(async move {
             let last_frame_data =
-                crate::tools::ui::display_stream::screen_capture_loop(event_tx, config, cancel)
-                    .await;
+                crate::tools::ui::display_stream::screen_capture_loop(
+                    event_tx, config, stream_cancel,
+                )
+                .await;
 
-            // Save last frame to blob storage for the static fallback
-            // when the user taps the Display chip after streaming ends.
+            // Save last frame to blob storage for the static fallback.
             if let (Some(data), Some(store)) = (last_frame_data, blob_store) {
                 match store.store(&data, "image/jpeg").await {
                     Ok(id) => tracing::debug!(blob_id = %id, "Saved last stream frame to blob"),
                     Err(e) => tracing::warn!(error = %e, "Failed to save last stream frame"),
                 }
             }
+
+            registry.remove(&sid);
         });
 
         // Return immediately — the agent can continue with its next tool call.
@@ -305,7 +337,8 @@ impl DisplayTool {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::text(format!(
                     "Screen stream '{stream_id}' started. Frames are being sent to the user's device at ~3 FPS. \
-                     The stream will continue in the background while you work. It stops automatically when the session ends."
+                     The stream will continue in the background while you work. \
+                     To stop it, call Display(type=\"stream\", action=\"stop\", streamId=\"{stream_id}\")."
                 )),
             ]),
             details: Some(json!({
@@ -315,6 +348,37 @@ impl DisplayTool {
             is_error: None,
             stop_turn: None,
         })
+    }
+
+    /// Handle `stream` + `action: "stop"` — cancel an active stream.
+    async fn handle_stop_stream(
+        &self,
+        params: &Value,
+    ) -> Result<TronToolResult, ToolError> {
+        let stream_id = match get_optional_string(params, "streamId") {
+            Some(s) => s,
+            None => return Ok(error_result("Missing 'streamId' parameter for stream stop.")),
+        };
+
+        if self.stream_registry.cancel(&stream_id) {
+            Ok(TronToolResult {
+                content: ToolResultBody::Blocks(vec![
+                    crate::core::content::ToolResultContent::text(format!(
+                        "Stream '{stream_id}' stopped."
+                    )),
+                ]),
+                details: Some(json!({
+                    "streamId": stream_id,
+                    "streaming": false,
+                })),
+                is_error: None,
+                stop_turn: None,
+            })
+        } else {
+            Ok(error_result(format!(
+                "No active stream with ID '{stream_id}'."
+            )))
+        }
     }
 
     /// Read a file, validate it, and return `(raw_bytes, mime_type)`.
@@ -418,7 +482,7 @@ mod tests {
         let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        for key in &["type", "title", "path", "data", "mimeType", "paths", "streamId"] {
+        for key in &["type", "action", "title", "path", "data", "mimeType", "paths", "streamId"] {
             assert!(props.contains_key(*key), "missing schema property: {key}");
         }
         // Removed params should NOT be present
@@ -628,6 +692,52 @@ mod tests {
         let tool = DisplayTool::new(None); // no event_tx
         let r = tool
             .execute(json!({"type": "stream", "streamId": "s1"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn stream_stop_cancels_active_stream() {
+        let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
+        let registry = crate::tools::ui::display_stream::ActiveStreamRegistry::new();
+        let tool = DisplayTool::new(None)
+            .with_event_tx(tx)
+            .with_stream_registry(registry.clone());
+
+        // Start a stream
+        let r = tool
+            .execute(json!({"type": "stream", "streamId": "stop-test"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+
+        // Stop it
+        let r = tool
+            .execute(json!({"type": "stream", "action": "stop", "streamId": "stop-test"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let details = r.details.unwrap();
+        assert_eq!(details["streamId"], "stop-test");
+        assert_eq!(details["streaming"], false);
+    }
+
+    #[tokio::test]
+    async fn stream_stop_nonexistent_returns_error() {
+        let tool = DisplayTool::new(None);
+        let r = tool
+            .execute(json!({"type": "stream", "action": "stop", "streamId": "nope"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn stream_stop_missing_id() {
+        let tool = DisplayTool::new(None);
+        let r = tool
+            .execute(json!({"type": "stream", "action": "stop"}), &make_ctx())
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));

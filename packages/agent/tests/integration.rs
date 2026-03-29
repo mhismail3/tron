@@ -73,6 +73,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
+        display_stream_registry: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -355,6 +356,7 @@ async fn boot_server_with_provider_and_handles(
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
+        display_stream_registry: None,
     };
 
     let mut registry = MethodRegistry::new();

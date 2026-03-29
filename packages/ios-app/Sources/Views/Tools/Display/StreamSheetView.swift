@@ -2,10 +2,13 @@ import SwiftUI
 
 /// Live stream sheet that displays frames from the Display tool's stream type.
 /// Auto-presented on first frame, can be dismissed and re-opened via toolbar icon.
+/// When the stream has ended, shows the last captured frame with stop button disabled.
 @available(iOS 26.0, *)
 struct StreamSheetView: View {
     let frameImage: UIImage?
+    let isStreamActive: Bool
     let onClose: () -> Void
+    let onStop: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -33,11 +36,21 @@ struct StreamSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        onStop()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(isStreamActive ? .red : .tronTextMuted)
+                    }
+                    .disabled(!isStreamActive)
+                }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         Image(systemName: "play.rectangle.fill")
                             .foregroundStyle(.tronIndigo)
-                        Text("Live Stream")
+                        Text(isStreamActive ? "Live Stream" : "Stream Ended")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronIndigo)
                     }
@@ -52,8 +65,9 @@ struct StreamSheetView: View {
                     }
                 }
             }
+            .background(Color.tronBackground)
             .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
         }
     }
 }

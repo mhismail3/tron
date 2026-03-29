@@ -78,6 +78,8 @@ pub struct RpcContext {
     pub oauth_flows: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>>>,
     /// MCP router for managing MCP servers (None = no MCP servers configured).
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
+    /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
+    pub display_stream_registry: Option<crate::tools::ui::display_stream::ActiveStreamRegistry>,
 }
 
 impl RpcContext {

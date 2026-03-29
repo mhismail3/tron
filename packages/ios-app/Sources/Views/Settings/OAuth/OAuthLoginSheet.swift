@@ -40,6 +40,7 @@ struct OAuthLoginSheet: View {
                     errorView(message)
                 }
             }
+            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

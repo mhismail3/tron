@@ -80,6 +80,7 @@ struct WorkspaceSelector: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

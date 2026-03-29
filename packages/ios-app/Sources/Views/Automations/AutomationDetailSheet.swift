@@ -35,6 +35,7 @@ struct AutomationDetailSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .sheet(item: $selectedRun) { run in
             AutomationRunDetailSheet(run: run)
         }

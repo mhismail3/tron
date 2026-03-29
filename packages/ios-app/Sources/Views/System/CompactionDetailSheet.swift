@@ -43,6 +43,7 @@ struct CompactionDetailSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .presentationDragIndicator(.hidden)
         .tint(.cyan)
     }

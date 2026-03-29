@@ -77,6 +77,7 @@ struct CameraCaptureSheet: View {
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 24)
+        .background(Color.tronBackground)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         .task {

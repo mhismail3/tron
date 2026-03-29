@@ -72,6 +72,7 @@ struct GetConfirmationSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accentColor)

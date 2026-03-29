@@ -59,13 +59,13 @@ extension Color {
     // MARK: - Backgrounds (adaptive — warm cream in light mode)
 
     /// Deepest background
-    static let tronBackground = Color(lightHex: "#F5F0E8", darkHex: "#09090B")
+    static let tronBackground = Color(lightHex: "#F3EDE3", darkHex: "#09090B")
 
     /// Surface background (cards, sheets)
-    static let tronSurface = Color(lightHex: "#FAF6EF", darkHex: "#18181B")
+    static let tronSurface = Color(lightHex: "#F8F3EA", darkHex: "#18181B")
 
     /// Elevated surface background
-    static let tronSurfaceElevated = Color(lightHex: "#EDE8DF", darkHex: "#27272A")
+    static let tronSurfaceElevated = Color(lightHex: "#EBE5DA", darkHex: "#27272A")
 
     /// Subtle separator/border color
     static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
@@ -93,8 +93,8 @@ extension Color {
     // MARK: - Role Colors (adaptive)
 
     static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
-    static let assistantBubble = Color(lightHex: "#EDE8DF", darkHex: "#27272A")
-    static let systemBubble = Color(lightHex: "#E5E0D6", darkHex: "#3F3F46")
+    static let assistantBubble = Color(lightHex: "#EBE5DA", darkHex: "#27272A")
+    static let systemBubble = Color(lightHex: "#E3DDCF", darkHex: "#3F3F46")
     static let toolBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
     static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
 

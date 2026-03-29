@@ -33,6 +33,7 @@ struct VoiceNotesListView: View {
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
         }
+        .background(Color.tronBackground)
         .background {
             Color.clear
                 .alert("Delete Voice Note", isPresented: $showDeleteConfirmation) {

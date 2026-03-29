@@ -57,6 +57,7 @@ struct ProvidersSettingsPage: View {
                     providersList
                 }
             }
+            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

@@ -10,6 +10,8 @@ struct AppearanceSettingsPage: View {
                 AppearanceSection()
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

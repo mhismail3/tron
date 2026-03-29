@@ -27,6 +27,7 @@ struct MemoryRetainDetailSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .presentationDragIndicator(.hidden)
         .tint(.tronPink)
     }

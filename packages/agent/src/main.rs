@@ -133,6 +133,8 @@ struct ToolRegistryConfig {
     computer_use_settings: tron::settings::ComputerUseSettings,
     /// Broadcast sender for Display tool streaming (DisplayFrame events).
     display_event_tx: Option<tokio::sync::broadcast::Sender<tron::core::events::TronEvent>>,
+    /// Active stream registry shared between Display tool and RPC handler.
+    display_stream_registry: tron::tools::ui::display_stream::ActiveStreamRegistry,
     /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
     mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
     /// `McpCall` meta-tool (calls a tool on an MCP server).
@@ -228,7 +230,8 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     //     Uses blob storage for images to avoid exceeding WebSocket message limits.
     //     event_tx is for streaming DisplayFrame events to connected iOS clients.
     let display_blob_store: Arc<dyn tron::tools::traits::BlobStore> = config.event_store.clone();
-    let mut display_tool = tron::tools::ui::display::DisplayTool::new(Some(display_blob_store));
+    let mut display_tool = tron::tools::ui::display::DisplayTool::new(Some(display_blob_store))
+        .with_stream_registry(config.display_stream_registry.clone());
     if let Some(ref tx) = config.display_event_tx {
         display_tool = display_tool.with_event_tx(tx.clone());
     }
@@ -485,6 +488,7 @@ async fn main() -> Result<()> {
     };
 
     // Tool registry config (shared resources for per-session tool factories)
+    let display_stream_registry = tron::tools::ui::display_stream::ActiveStreamRegistry::new();
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         brave_api_key,
@@ -495,6 +499,7 @@ async fn main() -> Result<()> {
         // Use the orchestrator's broadcast sender so DisplayFrame events
         // flow through the same channel the EventBridge listens to.
         display_event_tx: Some(orchestrator.broadcast().sender()),
+        display_stream_registry: display_stream_registry.clone(),
         mcp_search,
         mcp_call,
     });
@@ -695,6 +700,7 @@ async fn main() -> Result<()> {
         broadcast_manager: None, // set by TronServer after creation
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router,
+        display_stream_registry: Some(display_stream_registry),
     };
 
     // Method registry
@@ -1332,6 +1338,7 @@ mod tests {
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
+            display_stream_registry: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1415,6 +1422,7 @@ mod tests {
             sandbox_settings: tron::settings::BashSandboxSettings::default(),
             computer_use_settings: tron::settings::ComputerUseSettings::default(),
             display_event_tx: None,
+            display_stream_registry: tron::tools::ui::display_stream::ActiveStreamRegistry::new(),
             mcp_search: None,
             mcp_call: None,
         }
@@ -1519,6 +1527,7 @@ mod tests {
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
+            display_stream_registry: None,
         };
 
         let mut registry = MethodRegistry::new();

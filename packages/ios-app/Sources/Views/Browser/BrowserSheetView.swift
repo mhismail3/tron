@@ -62,6 +62,7 @@ struct BrowserSheetView: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

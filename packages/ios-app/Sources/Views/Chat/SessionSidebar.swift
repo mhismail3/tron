@@ -123,6 +123,7 @@ struct SessionSidebar: View {
                 }
                 .tint(.gray)
         }
+        .background(Color.tronBackground)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)
@@ -166,8 +167,7 @@ struct FloatingChatPill: View {
                 : .regular.tint(Color.tronMint.opacity(0.2)).interactive(),
             in: .capsule
         )
-        .contentShape([.interaction, .hoverEffect], Capsule())
-        .hoverEffect(.highlight)
+        .contentShape([.interaction], Capsule())
         .onTapGesture { onTap() }
     }
 }
@@ -309,11 +309,10 @@ struct CachedSessionSidebarRow: View {
         .glassEffect(
             isSelected
                 ? .regular.tint(Color.tronEmerald.opacity(0.25)).interactive()
-                : .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+                : .regular.tint(Color.tronPhthaloGreen.opacity(0.25)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
-        .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .hoverEffect(.highlight)
+        .contentShape([.interaction], RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
         .accessibilityAddTraits(.isButton)

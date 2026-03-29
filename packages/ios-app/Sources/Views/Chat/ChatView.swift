@@ -78,7 +78,9 @@ struct ChatView: View {
         .sheet(isPresented: $viewModel.showStreamSheet) {
             StreamSheetView(
                 frameImage: viewModel.streamFrameImage,
-                onClose: { viewModel.showStreamSheet = false }
+                isStreamActive: viewModel.isStreamActive,
+                onClose: { viewModel.showStreamSheet = false },
+                onStop: { viewModel.stopDisplayStream() }
             )
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -316,7 +318,9 @@ struct ChatView: View {
                 inputAreaContent
             }
             .scrollContentBackground(.hidden)
-            .background(.clear)
+            .background {
+                Color.tronBackground.ignoresSafeArea()
+            }
             .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -416,7 +420,15 @@ struct ChatView: View {
         case .notifyApp(let data):
             sheetCoordinator.showNotifyApp(data)
         case .commandTool(let data):
-            sheetCoordinator.showCommandToolDetail(data)
+            // Display stream tool chips open the stream sheet directly
+            // (shows live stream if active, or last frame if ended).
+            if data.normalizedName == "display",
+               let displayType = data.details?["displayType"]?.value as? String,
+               displayType == "stream" {
+                viewModel.showStreamSheet = true
+            } else {
+                sheetCoordinator.showCommandToolDetail(data)
+            }
         case .queryAgent(let data):
             sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
         case .waitForAgents(let data):

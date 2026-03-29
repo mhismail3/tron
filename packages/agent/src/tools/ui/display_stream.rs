@@ -4,14 +4,53 @@
 //! `DisplayFrame` events via a broadcast channel. The producer runs as a
 //! background tokio task and stops when its cancellation token is triggered.
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
+use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::core::events::{BaseEvent, TronEvent};
+
+/// Registry of active display streams, keyed by stream ID.
+///
+/// Shared between the `DisplayTool` (which inserts/removes entries) and
+/// the `display.stopStream` RPC handler (which cancels streams on demand).
+#[derive(Clone, Default)]
+pub struct ActiveStreamRegistry {
+    inner: Arc<Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl ActiveStreamRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a stream with its cancellation token.
+    pub fn insert(&self, stream_id: &str, token: CancellationToken) {
+        let _ = self.inner.lock().insert(stream_id.to_owned(), token);
+    }
+
+    /// Remove a stream from the registry.
+    pub fn remove(&self, stream_id: &str) {
+        let _ = self.inner.lock().remove(stream_id);
+    }
+
+    /// Cancel and remove a stream. Returns `true` if the stream existed.
+    pub fn cancel(&self, stream_id: &str) -> bool {
+        if let Some(token) = self.inner.lock().remove(stream_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+}
 
 /// Default capture interval (~3 FPS).
 pub const DEFAULT_INTERVAL_MS: u64 = 333;
@@ -182,7 +221,35 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+
+    // ── ActiveStreamRegistry ──────────────────────────────────
+
+    #[test]
+    fn registry_cancel_returns_true_for_existing() {
+        let reg = ActiveStreamRegistry::new();
+        let token = CancellationToken::new();
+        reg.insert("s1", token.clone());
+        assert!(reg.cancel("s1"));
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn registry_cancel_returns_false_for_missing() {
+        let reg = ActiveStreamRegistry::new();
+        assert!(!reg.cancel("nonexistent"));
+    }
+
+    #[test]
+    fn registry_remove_cleans_up() {
+        let reg = ActiveStreamRegistry::new();
+        let token = CancellationToken::new();
+        reg.insert("s1", token.clone());
+        reg.remove("s1");
+        assert!(!reg.cancel("s1"));
+        assert!(!token.is_cancelled());
+    }
+
+    // ── JPEG dimensions ───────────────────────────────────────
 
     #[test]
     fn jpeg_dimensions_parses_sof0() {

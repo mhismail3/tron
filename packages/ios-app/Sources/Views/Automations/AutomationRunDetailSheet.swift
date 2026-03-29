@@ -101,6 +101,7 @@ struct AutomationRunDetailSheet: View {
                 }
                 .padding()
             }
+            .background(Color.tronBackground)
             .navigationTitle("Run Detail")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

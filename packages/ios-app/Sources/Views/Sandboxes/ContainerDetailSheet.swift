@@ -71,6 +71,7 @@ struct ContainerDetailSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .presentationDragIndicator(.hidden)
         .tint(.tronIndigo)
     }

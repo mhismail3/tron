@@ -77,6 +77,7 @@ struct LogViewer: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .presentationDetents([.medium, .large], selection: $sheetDetent)
         .presentationSizing(.page)
         .presentationDragIndicator(.hidden)

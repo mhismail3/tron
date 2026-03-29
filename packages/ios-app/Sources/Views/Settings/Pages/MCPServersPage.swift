@@ -89,6 +89,8 @@ struct MCPServersPage: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
             .environment(\.defaultMinListRowHeight, 40)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)

@@ -65,7 +65,7 @@ extension ChatView {
                 } label: {
                     Image(systemName: "play.rectangle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronIndigo)
+                        .foregroundStyle(.tronEmerald)
                 }
             }
             Menu {

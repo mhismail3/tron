@@ -29,6 +29,7 @@ struct ProviderErrorDetailSheet: View {
                 }
             }
         }
+        .background(Color.tronBackground)
         .presentationDragIndicator(.hidden)
         .tint(.red)
     }

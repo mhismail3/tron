@@ -41,6 +41,7 @@ struct ContentView: View {
 
     var body: some View {
         mainContent
+            .background(Color.tronBackground)
             .tint(.tronEmerald)
             .sheet(isPresented: $showNewSessionSheet) {
                 newSessionFlowSheet
@@ -527,6 +528,7 @@ struct WelcomePage: View {
                 }
             }
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
+            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

@@ -85,6 +85,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
+    /// Display stream control client (stop streams on demand).
+    @ObservationIgnored
+    lazy var display: DisplayClient = DisplayClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
