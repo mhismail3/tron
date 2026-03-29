@@ -53,6 +53,7 @@ struct SandboxesDashboardView: View {
                 containerList
             }
         }
+        .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {

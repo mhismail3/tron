@@ -123,6 +123,7 @@ struct SessionSidebar: View {
                 }
                 .tint(.gray)
         }
+        .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)

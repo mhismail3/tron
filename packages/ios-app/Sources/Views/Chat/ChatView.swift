@@ -317,6 +317,7 @@ struct ChatView: View {
                 inputAreaContent
             }
             .scrollContentBackground(.hidden)
+            .tronScreenBackground()
             .navigationBarTitleDisplayMode(.inline)
     }
 

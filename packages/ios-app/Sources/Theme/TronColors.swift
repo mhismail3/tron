@@ -185,7 +185,9 @@ extension UIColor {
 
 extension View {
     /// Cream background that extends behind the keyboard and into all safe areas.
-    /// Apply once on root full-screen containers (ContentView, TronMobileApp loading states).
+    /// Apply to full-screen views that contain glass components (ChatView, SessionSidebar,
+    /// dashboards) — glass effects need a nearby opaque surface to create visible depth/shadow.
+    /// Also applied at root (ContentView, TronMobileApp loading states) for overall coverage.
     /// Do NOT apply to sheets — they use the iOS 26 translucent glass material.
     @ViewBuilder
     func tronScreenBackground() -> some View {
