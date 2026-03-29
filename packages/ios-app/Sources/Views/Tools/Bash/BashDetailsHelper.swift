@@ -55,6 +55,34 @@ enum BashDetailsHelper {
         return nil
     }
 
+    // MARK: - Skill Context
+
+    /// Extract the skill context display metadata from details (set by skill-guided Bash calls).
+    static func skillContext(from details: [String: AnyCodable]?) -> (label: String, icon: String, color: String)? {
+        guard let sc = details?["skillContext"]?.value as? [String: Any],
+              let label = sc["label"] as? String else { return nil }
+        let icon = sc["icon"] as? String ?? "terminal"
+        let color = sc["color"] as? String ?? ""
+        return (label, icon, color)
+    }
+
+    /// Extract the skill label from details, if present.
+    static func skillLabel(from details: [String: AnyCodable]?) -> String? {
+        (details?["skillContext"]?.value as? [String: Any])?["label"] as? String
+    }
+
+    /// Extract the skill icon from details, if present.
+    static func skillIcon(from details: [String: AnyCodable]?) -> String? {
+        (details?["skillContext"]?.value as? [String: Any])?["icon"] as? String
+    }
+
+    /// Extract the skill accent color hex from details, if present.
+    static func skillColorHex(from details: [String: AnyCodable]?) -> String? {
+        (details?["skillContext"]?.value as? [String: Any])?["color"] as? String
+    }
+
+    // MARK: - PTY Redaction
+
     /// Redact ptyInput send values for sensitive prompts (password, secret, token, passphrase).
     static func redactPtyInput(_ pairs: [[String: String]]) -> [[String: String]] {
         pairs.map { pair in

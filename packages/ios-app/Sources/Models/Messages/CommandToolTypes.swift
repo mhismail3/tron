@@ -182,14 +182,17 @@ extension CommandToolChipData {
         // Truncate result if too large to prevent performance issues
         let (truncatedResult, wasTruncated) = tool.result.map { ResultTruncation.truncate($0) } ?? (nil, false)
 
-        let name = descriptor.displayName
+        // Check for server-driven display metadata from skill context.
+        // When a Bash call includes a skill parameter, the server enriches the
+        // result details with skillContext containing label, icon, and color.
+        let skillCtx = BashDetailsHelper.skillContext(from: tool.details)
 
         self.id = tool.toolCallId
         self.toolName = tool.toolName
         self.normalizedName = tool.toolName.lowercased()
-        self.icon = descriptor.icon
-        self.iconColor = descriptor.iconColor
-        self.displayName = name
+        self.icon = skillCtx?.icon ?? descriptor.icon
+        self.iconColor = skillCtx.flatMap { Color(hex: $0.color) } ?? descriptor.iconColor
+        self.displayName = skillCtx?.label ?? descriptor.displayName
         self.summary = descriptor.summaryExtractor(tool.arguments)
         self.status = mappedStatus
         self.durationMs = tool.durationMs

@@ -11,8 +11,22 @@ struct BashToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllLines = false
 
+    private var skillAccent: Color? {
+        BashDetailsHelper.skillColorHex(from: data.details).flatMap { Color(hex: $0) }
+    }
+
     private var tint: TintedColors {
-        TintedColors(accent: .tronEmerald, colorScheme: colorScheme)
+        TintedColors(accent: skillAccent ?? .tronEmerald, colorScheme: colorScheme)
+    }
+
+    /// Sheet title: skill label if present, otherwise "Bash".
+    private var sheetTitle: String {
+        BashDetailsHelper.skillLabel(from: data.details) ?? "Bash"
+    }
+
+    /// Sheet icon: skill icon if present, otherwise "terminal".
+    private var sheetIcon: String {
+        BashDetailsHelper.skillIcon(from: data.details) ?? "terminal"
     }
 
     // MARK: - Argument Extraction
@@ -114,14 +128,14 @@ struct BashToolDetailSheet: View {
     }
 
     private var borderColor: Color {
-        data.status == .error ? .tronError : .tronEmerald
+        data.status == .error ? .tronError : (skillAccent ?? .tronEmerald)
     }
 
     var body: some View {
         ToolDetailSheetContainer(
-            toolName: "Bash",
-            iconName: "terminal",
-            accent: .tronEmerald,
+            toolName: sheetTitle,
+            iconName: sheetIcon,
+            accent: skillAccent ?? .tronEmerald,
             copyContent: command
         ) {
             contentBody
