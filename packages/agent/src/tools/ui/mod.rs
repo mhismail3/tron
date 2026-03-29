@@ -3,6 +3,7 @@
 pub mod ask_user;
 pub mod computer_use;
 pub mod display;
+pub mod display_stream;
 pub mod get_confirmation;
 #[cfg(target_os = "macos")]
 pub mod input;
