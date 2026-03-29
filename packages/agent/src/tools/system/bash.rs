@@ -396,7 +396,7 @@ impl TronTool for BashTool {
                         // from the process environment as a fallback mechanism.
                         // The actual settings integration happens in Phase 8.
                         if let Ok(val) = std::env::var(&secret.env) {
-                            env_vars.insert(secret.env.clone(), val);
+                            let _ = env_vars.insert(secret.env.clone(), val);
                         }
                     }
                 }

@@ -34,6 +34,7 @@ const SUPPORTED_AUDIO_EXTS: &[&str] = &["mp3", "wav", "m4a", "aac", "ogg", "flac
 pub struct DisplayTool;
 
 impl DisplayTool {
+    /// Create a new Display tool instance.
     pub fn new() -> Self {
         Self
     }

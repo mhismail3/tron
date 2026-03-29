@@ -41,6 +41,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Create a new empty rate limiter.
     pub fn new() -> Self {
         Self {
             last_calls: DashMap::new(),
@@ -59,7 +60,7 @@ impl RateLimiter {
             }
         }
         // Record this call.
-        self.last_calls.insert(skill_name.to_string(), Instant::now());
+        let _ = self.last_calls.insert(skill_name.to_string(), Instant::now());
         Ok(())
     }
 }
