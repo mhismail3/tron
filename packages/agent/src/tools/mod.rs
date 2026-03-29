@@ -31,6 +31,7 @@ pub mod backends;
 pub mod cache;
 pub mod errors;
 pub mod registry;
+pub mod skill_context;
 pub mod traits;
 pub(crate) mod utils;
 

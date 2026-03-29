@@ -29,7 +29,9 @@ static DANGER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
+use crate::tools::cache::{CacheKey, KeyExtractor, ServerCache};
 use crate::tools::errors::ToolError;
+use crate::tools::skill_context::{RateLimiter, ResolvedSkillContext, SkillContextResolver};
 use crate::tools::traits::{BlobStore, ProcessOptions, ProcessRunner, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::estimate_tokens;
@@ -52,6 +54,12 @@ pub struct BashTool {
     sandbox_default_image: String,
     /// Whether Docker sandbox has network by default (from settings).
     sandbox_network_enabled: bool,
+    /// Resolves skill names to display + guards metadata.
+    skill_resolver: Option<Arc<dyn SkillContextResolver>>,
+    /// General-purpose server cache for skill guards.
+    server_cache: Option<Arc<ServerCache>>,
+    /// Per-skill rate limiter.
+    rate_limiter: RateLimiter,
 }
 
 impl BashTool {
@@ -62,6 +70,9 @@ impl BashTool {
             blob_store,
             sandbox_default_image: "ubuntu:latest".to_string(),
             sandbox_network_enabled: true,
+            skill_resolver: None,
+            server_cache: None,
+            rate_limiter: RateLimiter::new(),
         }
     }
 
@@ -73,6 +84,20 @@ impl BashTool {
         self
     }
 
+    /// Set the skill context resolver for guard support.
+    #[must_use]
+    pub fn with_skill_resolver(mut self, resolver: Arc<dyn SkillContextResolver>) -> Self {
+        self.skill_resolver = Some(resolver);
+        self
+    }
+
+    /// Set the server cache for skill cache guards.
+    #[must_use]
+    pub fn with_server_cache(mut self, cache: Arc<ServerCache>) -> Self {
+        self.server_cache = Some(cache);
+        self
+    }
+
     fn check_dangerous(command: &str) -> Option<String> {
         for pattern in &*DANGER_PATTERNS {
             if pattern.is_match(command) {
@@ -80,6 +105,23 @@ impl BashTool {
             }
         }
         None
+    }
+
+    /// Build the `skillContext` JSON for result details.
+    fn build_skill_context_json(&self, ctx: &ResolvedSkillContext) -> Value {
+        let mut sc = json!({"skill": ctx.name});
+        if let Some(ref display) = ctx.display {
+            if let Some(ref label) = display.label {
+                sc["label"] = json!(label);
+            }
+            if let Some(ref icon) = display.icon {
+                sc["icon"] = json!(icon);
+            }
+            if let Some(ref color) = display.color {
+                sc["color"] = json!(color);
+            }
+        }
+        sc
     }
 
     /// Check if a PATH value points to suspicious locations (e.g., /tmp, hidden dirs).
@@ -232,6 +274,12 @@ impl TronTool for BashTool {
             "description": "Paths to symlink into the sandbox (read-only)",
             "items": {"type": "string"}
         }))
+        .property("skill", json!({
+            "type": "string",
+            "description": "Skill context for this command. Include the skill name when executing \
+             commands guided by a second-order skill. Activates skill-defined guards (output limits, \
+             rate limiting, secret injection, caching) and display metadata for the iOS app."
+        }))
         .build()
     }
 
@@ -252,7 +300,7 @@ impl TronTool for BashTool {
         let description = get_optional_string(&params, "description");
 
         // Parse env vars from params
-        let env_vars: std::collections::HashMap<String, String> = params
+        let mut env_vars: std::collections::HashMap<String, String> = params
             .get("env")
             .and_then(Value::as_object)
             .map(|obj| {
@@ -307,6 +355,76 @@ impl TronTool for BashTool {
         } else {
             timeout_ms
         };
+
+        // ── Skill context resolution ─────────────────────────────────
+        let skill_name = get_optional_string(&params, "skill");
+        let skill_ctx: Option<ResolvedSkillContext> = skill_name.as_ref().and_then(|name| {
+            self.skill_resolver
+                .as_ref()
+                .and_then(|r| r.resolve(name))
+        });
+
+        // ── Pre-execution guards ────────────────────────────────────
+        if let Some(ref ctx_s) = skill_ctx {
+            if let Some(ref guards) = ctx_s.guards {
+                // Rate limiting
+                if let Some(rate_ms) = guards.rate_limit_ms {
+                    if let Err(remaining) = self.rate_limiter.check(&ctx_s.name, rate_ms) {
+                        return Ok(TronToolResult {
+                            content: ToolResultBody::Blocks(vec![
+                                crate::core::content::ToolResultContent::text(format!(
+                                    "Rate limited for skill '{}'. Please wait {}ms before the next call.",
+                                    ctx_s.name, remaining
+                                )),
+                            ]),
+                            details: Some(json!({
+                                "command": command,
+                                "rateLimited": true,
+                                "remainingMs": remaining,
+                                "skillContext": self.build_skill_context_json(ctx_s),
+                            })),
+                            is_error: None,
+                            stop_turn: None,
+                        });
+                    }
+                }
+
+                // Secret injection
+                if let Some(ref secrets) = guards.secrets {
+                    for secret in secrets {
+                        // In production, we'd read from settings. For now, we inject
+                        // from the process environment as a fallback mechanism.
+                        // The actual settings integration happens in Phase 8.
+                        if let Ok(val) = std::env::var(&secret.env) {
+                            env_vars.insert(secret.env.clone(), val);
+                        }
+                    }
+                }
+
+                // Cache check
+                if let Some(ref cache_cfg) = guards.cache {
+                    if let Some(ref cache) = self.server_cache {
+                        let extractor = KeyExtractor::from_str_value(&cache_cfg.key_extractor);
+                        let cache_key = CacheKey::new(&ctx_s.name, &command, &extractor);
+                        if let Some(cached) = cache.get(&cache_key, cache_cfg.ttl) {
+                            return Ok(TronToolResult {
+                                content: ToolResultBody::Blocks(vec![
+                                    crate::core::content::ToolResultContent::text(&cached),
+                                ]),
+                                details: Some(json!({
+                                    "command": command,
+                                    "cacheHit": true,
+                                    "durationMs": 0,
+                                    "skillContext": self.build_skill_context_json(ctx_s),
+                                })),
+                                is_error: None,
+                                stop_turn: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         // Parse sandbox config
         let sandbox_mode = params.get("sandbox");
@@ -503,6 +621,45 @@ impl TronTool for BashTool {
         }
         if let Some(sandbox) = active_sandbox_mode {
             details["sandbox"] = json!(sandbox);
+        }
+
+        // ── Post-execution guards ───────────────────────────────────
+        if let Some(ref ctx_s) = skill_ctx {
+            if let Some(ref guards) = ctx_s.guards {
+                // Cache store (full output before our truncation)
+                if let Some(ref cache_cfg) = guards.cache {
+                    if let Some(ref cache) = self.server_cache {
+                        let extractor = KeyExtractor::from_str_value(&cache_cfg.key_extractor);
+                        let cache_key = CacheKey::new(&ctx_s.name, &command, &extractor);
+                        let _ = cache.set(cache_key, &combined);
+                    }
+                }
+
+                // Output line limiting (applied AFTER cache store)
+                if let Some(max_lines) = guards.max_output_lines {
+                    let lines: Vec<&str> = combined.lines().collect();
+                    if lines.len() > max_lines {
+                        let truncated_output: String =
+                            lines[..max_lines].join("\n");
+                        combined = format!(
+                            "{truncated_output}\n... [{} lines truncated by skill guard]",
+                            lines.len() - max_lines
+                        );
+                    }
+                }
+
+                // Output byte limiting
+                if let Some(max_bytes) = guards.max_output_bytes {
+                    if combined.len() > max_bytes {
+                        let boundary = safe_char_boundary(&combined, max_bytes);
+                        combined.truncate(boundary);
+                        combined.push_str("\n... [output truncated by skill guard]");
+                    }
+                }
+            }
+
+            // Enrich details with skill context
+            details["skillContext"] = self.build_skill_context_json(ctx_s);
         }
 
         Ok(TronToolResult {
@@ -1561,5 +1718,372 @@ mod tests {
     #[test]
     fn pty_does_not_redact_continue_prompt() {
         assert!(!is_sensitive_prompt("Continue? [y/n]"));
+    }
+
+    // ── Phase 3: Skill context tests ────────────────────────────
+
+    use crate::skills::types::{CacheConfig, SkillDisplay, SkillGuards, TruncationMode};
+    use crate::tools::cache::ServerCache;
+    use crate::tools::skill_context::{FnResolver, ResolvedSkillContext};
+
+    fn make_resolver(ctx: ResolvedSkillContext) -> Arc<dyn SkillContextResolver> {
+        let ctx = Arc::new(ctx);
+        Arc::new(FnResolver(move |name: &str| {
+            if name == ctx.name {
+                Some((*ctx).clone())
+            } else {
+                None
+            }
+        }))
+    }
+
+    fn skill_ctx_with_display() -> ResolvedSkillContext {
+        ResolvedSkillContext {
+            name: "code-search".into(),
+            display: Some(SkillDisplay {
+                label: Some("Code Search".into()),
+                icon: Some("magnifyingglass".into()),
+                color: Some("#4A90D9".into()),
+            }),
+            guards: None,
+        }
+    }
+
+    fn skill_ctx_with_guards(guards: SkillGuards) -> ResolvedSkillContext {
+        ResolvedSkillContext {
+            name: "test-skill".into(),
+            display: None,
+            guards: Some(guards),
+        }
+    }
+
+    // Schema
+
+    #[test]
+    fn schema_includes_skill_parameter() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
+        let def = tool.definition();
+        let props = def.parameters.properties.as_ref().unwrap();
+        assert!(props.contains_key("skill"));
+        assert_eq!(props["skill"]["type"], "string");
+    }
+
+    // Resolution
+
+    #[tokio::test]
+    async fn resolve_valid_skill_enriches_details() {
+        let resolver = make_resolver(skill_ctx_with_display());
+        let tool = BashTool::new(Arc::new(MockRunner::ok("output")), None)
+            .with_skill_resolver(resolver);
+        let r = tool
+            .execute(json!({"command": "rg pattern", "skill": "code-search"}), &make_ctx())
+            .await
+            .unwrap();
+        let details = r.details.unwrap();
+        let sc = &details["skillContext"];
+        assert_eq!(sc["skill"], "code-search");
+        assert_eq!(sc["label"], "Code Search");
+        assert_eq!(sc["icon"], "magnifyingglass");
+        assert_eq!(sc["color"], "#4A90D9");
+    }
+
+    #[tokio::test]
+    async fn resolve_unknown_skill_no_error() {
+        let resolver = make_resolver(skill_ctx_with_display());
+        let tool = BashTool::new(Arc::new(MockRunner::ok("output")), None)
+            .with_skill_resolver(resolver);
+        let r = tool
+            .execute(json!({"command": "echo hi", "skill": "nonexistent"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert!(details.get("skillContext").is_none());
+        assert!(text.contains("output"));
+    }
+
+    #[tokio::test]
+    async fn no_skill_param_unchanged_behavior() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
+        let r = tool
+            .execute(json!({"command": "echo hi"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert!(details.get("skillContext").is_none());
+        assert!(text.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn no_resolver_ignores_skill_param() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("output")), None);
+        // No resolver set — skill param silently ignored.
+        let r = tool
+            .execute(json!({"command": "echo hi", "skill": "anything"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.details.unwrap().get("skillContext").is_none());
+    }
+
+    // Rate limiting
+
+    #[tokio::test]
+    async fn rate_limit_first_call_passes() {
+        let guards = SkillGuards {
+            rate_limit_ms: Some(60_000),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None)
+            .with_skill_resolver(resolver);
+        let r = tool
+            .execute(json!({"command": "echo hi", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("ok"));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_blocks_fast_calls() {
+        let guards = SkillGuards {
+            rate_limit_ms: Some(60_000),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None)
+            .with_skill_resolver(resolver);
+
+        // First call succeeds.
+        tool.execute(json!({"command": "echo 1", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+
+        // Second call within 60s should be rate limited.
+        let r = tool
+            .execute(json!({"command": "echo 2", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert_eq!(details["rateLimited"], true);
+        assert!(text.contains("Rate limited"));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_per_skill() {
+        let guards_a = SkillGuards {
+            rate_limit_ms: Some(60_000),
+            ..Default::default()
+        };
+        // Resolver that returns guards for both skill-a and skill-b.
+        let resolver = Arc::new(FnResolver(move |name: &str| match name {
+            "skill-a" => Some(ResolvedSkillContext {
+                name: "skill-a".into(),
+                display: None,
+                guards: Some(guards_a.clone()),
+            }),
+            "skill-b" => Some(ResolvedSkillContext {
+                name: "skill-b".into(),
+                display: None,
+                guards: Some(SkillGuards {
+                    rate_limit_ms: Some(60_000),
+                    ..Default::default()
+                }),
+            }),
+            _ => None,
+        }));
+
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None)
+            .with_skill_resolver(resolver);
+
+        // Call skill-a.
+        tool.execute(json!({"command": "echo 1", "skill": "skill-a"}), &make_ctx())
+            .await
+            .unwrap();
+
+        // skill-b should NOT be rate limited by skill-a.
+        let r = tool
+            .execute(json!({"command": "echo 2", "skill": "skill-b"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.details.unwrap().get("rateLimited").is_none());
+    }
+
+    // Cache
+
+    #[tokio::test]
+    async fn cache_miss_executes_and_stores() {
+        let guards = SkillGuards {
+            cache: Some(CacheConfig {
+                ttl: 900,
+                key_extractor: "command".into(),
+            }),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let cache = Arc::new(ServerCache::with_defaults());
+        let tool = BashTool::new(Arc::new(MockRunner::ok("fresh result")), None)
+            .with_skill_resolver(resolver)
+            .with_server_cache(cache.clone());
+
+        let r = tool
+            .execute(json!({"command": "echo test", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert!(text.contains("fresh result"));
+        assert!(details.get("cacheHit").is_none());
+
+        // Cache should now have the result.
+        assert!(!cache.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cache_hit_returns_cached() {
+        let guards = SkillGuards {
+            cache: Some(CacheConfig {
+                ttl: 900,
+                key_extractor: "command".into(),
+            }),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let cache = Arc::new(ServerCache::with_defaults());
+
+        // Pre-populate cache.
+        let key = crate::tools::cache::CacheKey {
+            skill: "test-skill".into(),
+            key: "echo test".into(),
+        };
+        cache.set(key, "cached output");
+
+        let tool = BashTool::new(Arc::new(MockRunner::ok("should not see this")), None)
+            .with_skill_resolver(resolver)
+            .with_server_cache(cache);
+
+        let r = tool
+            .execute(json!({"command": "echo test", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert!(text.contains("cached output"));
+        assert_eq!(details["cacheHit"], true);
+    }
+
+    #[tokio::test]
+    async fn cache_includes_skill_context_display() {
+        let ctx = ResolvedSkillContext {
+            name: "test-skill".into(),
+            display: Some(SkillDisplay {
+                label: Some("Test".into()),
+                icon: Some("star".into()),
+                color: None,
+            }),
+            guards: Some(SkillGuards {
+                cache: Some(CacheConfig {
+                    ttl: 900,
+                    key_extractor: "command".into(),
+                }),
+                ..Default::default()
+            }),
+        };
+        let resolver = make_resolver(ctx);
+        let cache = Arc::new(ServerCache::with_defaults());
+        let key = crate::tools::cache::CacheKey {
+            skill: "test-skill".into(),
+            key: "echo hi".into(),
+        };
+        cache.set(key, "cached");
+
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None)
+            .with_skill_resolver(resolver)
+            .with_server_cache(cache);
+
+        let r = tool
+            .execute(json!({"command": "echo hi", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let details = r.details.unwrap();
+        let sc = &details["skillContext"];
+        assert_eq!(sc["label"], "Test");
+        assert_eq!(sc["icon"], "star");
+    }
+
+    // Output limiting
+
+    #[tokio::test]
+    async fn output_limited_by_max_lines() {
+        let guards = SkillGuards {
+            max_output_lines: Some(3),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let output = "line1\nline2\nline3\nline4\nline5";
+        let tool = BashTool::new(Arc::new(MockRunner::ok(output)), None)
+            .with_skill_resolver(resolver);
+
+        let r = tool
+            .execute(json!({"command": "cat file", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("line1"));
+        assert!(text.contains("line3"));
+        assert!(!text.contains("line4"));
+        assert!(text.contains("truncated by skill guard"));
+    }
+
+    #[tokio::test]
+    async fn output_limited_by_max_bytes() {
+        let guards = SkillGuards {
+            max_output_bytes: Some(10),
+            ..Default::default()
+        };
+        let resolver = make_resolver(skill_ctx_with_guards(guards));
+        let tool = BashTool::new(Arc::new(MockRunner::ok("abcdefghijklmnop")), None)
+            .with_skill_resolver(resolver);
+
+        let r = tool
+            .execute(json!({"command": "echo big", "skill": "test-skill"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("truncated by skill guard"));
+        // First 10 bytes should be present.
+        assert!(text.contains("abcdefghij"));
+    }
+
+    // Regression: existing behavior unchanged
+
+    #[tokio::test]
+    async fn danger_check_still_applies_with_skill() {
+        let resolver = make_resolver(skill_ctx_with_display());
+        let tool = BashTool::new(Arc::new(MockRunner::ok("")), None)
+            .with_skill_resolver(resolver);
+        let r = tool
+            .execute(json!({"command": "rm -rf /", "skill": "code-search"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("destructive"));
+    }
+
+    #[tokio::test]
+    async fn timeout_still_works_with_skill() {
+        let resolver = make_resolver(skill_ctx_with_display());
+        let tool = BashTool::new(Arc::new(MockRunner::with_timeout()), None)
+            .with_skill_resolver(resolver);
+        let r = tool
+            .execute(json!({"command": "sleep 999", "skill": "code-search"}), &make_ctx())
+            .await
+            .unwrap();
+        let details = r.details.unwrap();
+        assert_eq!(details["exitCode"], 124);
+        // skillContext should still be present even on timeout.
+        assert!(details.get("skillContext").is_some());
     }
 }
