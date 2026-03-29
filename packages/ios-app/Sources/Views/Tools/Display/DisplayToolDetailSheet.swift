@@ -3,7 +3,8 @@ import SwiftUI
 // MARK: - Display Tool Detail Sheet
 
 /// Detail sheet for the Display tool — renders rich content based on type.
-/// Supports: image, images, markdown, link, audio, stream.
+/// Images are always decoded from base64 data in the event details (the server
+/// encodes file contents), so this works regardless of filesystem access.
 @available(iOS 26.0, *)
 struct DisplayToolDetailSheet: View {
     let data: CommandToolChipData
@@ -13,10 +14,9 @@ struct DisplayToolDetailSheet: View {
         TintedColors(accent: .tronIndigo, colorScheme: colorScheme)
     }
 
-    // MARK: - Argument Extraction
+    // MARK: - Data Extraction
 
     private var displayType: String {
-        // Prefer from details (server-authoritative), fall back to arguments
         if let t = data.details?["displayType"]?.value as? String { return t }
         return ToolArgumentParser.string("type", from: data.arguments) ?? "unknown"
     }
@@ -26,20 +26,21 @@ struct DisplayToolDetailSheet: View {
         return ToolArgumentParser.string("title", from: data.arguments)
     }
 
-    private var path: String? {
-        if let p = data.details?["path"]?.value as? String { return p }
-        return ToolArgumentParser.string("path", from: data.arguments)
+    /// Decode a single image from base64 `imageData` in details.
+    private var decodedImage: UIImage? {
+        guard let b64 = data.details?["imageData"]?.value as? String,
+              let imageData = Data(base64Encoded: b64) else { return nil }
+        return UIImage(data: imageData)
     }
 
-    private var paths: [String] {
-        if let arr = data.details?["paths"]?.value as? [Any] {
-            return arr.compactMap { $0 as? String }
+    /// Decode multiple images from the `images` array in details.
+    private var decodedImages: [UIImage] {
+        guard let arr = data.details?["images"]?.value as? [[String: Any]] else { return [] }
+        return arr.compactMap { item in
+            guard let b64 = item["imageData"] as? String,
+                  let data = Data(base64Encoded: b64) else { return nil }
+            return UIImage(data: data)
         }
-        if let json = try? JSONSerialization.jsonObject(with: Data(data.arguments.utf8)) as? [String: Any],
-           let arr = json["paths"] as? [String] {
-            return arr
-        }
-        return []
     }
 
     private var markdownContent: String? {
@@ -93,6 +94,7 @@ struct DisplayToolDetailSheet: View {
 
                 contentForType
             }
+            .padding(.horizontal, 16)
         }
     }
 
@@ -124,45 +126,44 @@ struct DisplayToolDetailSheet: View {
         }
     }
 
-    // MARK: - Content Sections
+    // MARK: - Sections
 
     @ViewBuilder
     private var imageSection: some View {
-        if let path {
+        if let image = decodedImage {
             ToolDetailSection(title: "Image", tint: tint) {
-                if let uiImage = UIImage(contentsOfFile: path) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 400)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else {
-                    Text("Unable to load: \(path)")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(tint.subtle)
-                }
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         } else {
-            ToolEmptyState(title: "Image", icon: "photo", message: "No image path provided", accent: .tronIndigo, tint: tint)
+            ToolEmptyState(
+                title: "Image",
+                icon: "photo",
+                message: "Unable to load image",
+                accent: .tronIndigo,
+                tint: tint,
+                subtitle: data.details?["path"]?.value as? String
+            )
         }
     }
 
     @ViewBuilder
     private var imagesSection: some View {
-        if paths.isEmpty {
-            ToolEmptyState(title: "Images", icon: "photo.on.rectangle", message: "No images provided", accent: .tronIndigo, tint: tint)
+        let images = decodedImages
+        if images.isEmpty {
+            ToolEmptyState(title: "Images", icon: "photo.on.rectangle", message: "No images to display", accent: .tronIndigo, tint: tint)
         } else {
-            ToolDetailSection(title: "Images (\(paths.count))", tint: tint) {
+            ToolDetailSection(title: "Images (\(images.count))", tint: tint) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(paths, id: \.self) { imagePath in
-                            if let uiImage = UIImage(contentsOfFile: imagePath) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 200)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
+                        ForEach(Array(images.enumerated()), id: \.offset) { _, image in
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 200)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
@@ -216,7 +217,7 @@ struct DisplayToolDetailSheet: View {
 
     @ViewBuilder
     private var audioSection: some View {
-        if let path {
+        if let path = data.details?["path"]?.value as? String {
             ToolDetailSection(title: "Audio", tint: tint) {
                 HStack {
                     Image(systemName: "waveform")
