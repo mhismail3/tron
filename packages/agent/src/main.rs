@@ -214,6 +214,14 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         http.clone(),
     )));
 
+    // 10: WebSearch — conditional on Brave API key
+    if let Some(ref api_key) = config.brave_api_key {
+        registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
+            http,
+            api_key.clone(),
+        )));
+    }
+
     // 11: ComputerUse (screenshot, click, type, keypress, scroll, window management)
     registry.register(Arc::new(
         tron::tools::ui::computer_use::ComputerUseTool::new(
@@ -222,14 +230,6 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
             config.computer_use_settings.screenshot_throttle_ms,
         ),
     ));
-
-    // 12: WebSearch — conditional on Brave API key
-    if let Some(ref api_key) = config.brave_api_key {
-        registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
-            http,
-            api_key.clone(),
-        )));
-    }
 
     // Subagent tools: registered separately via SubagentManager (see main)
 
