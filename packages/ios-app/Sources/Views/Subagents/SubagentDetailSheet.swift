@@ -93,7 +93,6 @@ struct SubagentDetailSheet: View {
                 }
             }
         }
-        .background { Color.tronBackground.ignoresSafeArea() }
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .task(id: data.status) {

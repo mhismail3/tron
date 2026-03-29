@@ -317,7 +317,6 @@ struct ChatView: View {
                 inputAreaContent
             }
             .scrollContentBackground(.hidden)
-            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
     }
 

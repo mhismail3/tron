@@ -203,5 +203,5 @@ struct MessageSpellChips: View {
         )
     }
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }

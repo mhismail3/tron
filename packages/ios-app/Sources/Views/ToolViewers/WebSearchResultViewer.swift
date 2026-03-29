@@ -393,5 +393,5 @@ struct SearchResult {
         }
         .padding()
     }
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }

@@ -163,8 +163,6 @@ struct SessionSettingsPage: View {
                 .listSectionSpacing(16)
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

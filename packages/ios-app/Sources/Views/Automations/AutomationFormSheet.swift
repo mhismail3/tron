@@ -46,8 +46,6 @@ struct AutomationFormSheet: View {
                 advancedSection
             }
             .font(TronTypography.body)
-            .scrollContentBackground(.hidden)
-            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationTitle("New Automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)

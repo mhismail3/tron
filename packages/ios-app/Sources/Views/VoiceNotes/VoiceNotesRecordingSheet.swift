@@ -72,7 +72,6 @@ struct VoiceNotesRecordingSheet: View {
                 }
             }
         }
-        .background { Color.tronBackground.ignoresSafeArea() }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)

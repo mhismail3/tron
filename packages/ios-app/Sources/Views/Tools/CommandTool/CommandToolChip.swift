@@ -156,6 +156,6 @@ struct CommandToolChip: View {
         )
     }
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }
 #endif

@@ -196,8 +196,6 @@ struct SettingsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background { Color.tronBackground.ignoresSafeArea() }
         .environment(\.defaultMinListRowHeight, 40)
         .sheet(isPresented: $showLogViewer) {
             LogViewer()

@@ -82,7 +82,6 @@ struct StreamSheetView: View {
                     }
                 }
             }
-            .background { Color.tronBackground.ignoresSafeArea() }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }

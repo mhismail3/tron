@@ -95,6 +95,6 @@ struct NotifyAppChip: View {
         )
     }
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }
 #endif

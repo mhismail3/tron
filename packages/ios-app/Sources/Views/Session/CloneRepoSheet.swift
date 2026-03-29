@@ -100,7 +100,6 @@ struct CloneRepoSheet: View {
                 await loadHome()
             }
         }
-        .background { Color.tronBackground.ignoresSafeArea() }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isCloning)

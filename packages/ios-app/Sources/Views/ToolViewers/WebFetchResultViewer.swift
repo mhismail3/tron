@@ -417,7 +417,7 @@ struct WebFetchMetadata {
         )
     }
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }
 
 #Preview("WebFetch - Raw HTTP POST") {
@@ -427,7 +427,7 @@ struct WebFetchMetadata {
         isExpanded: .constant(false)
     )
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }
 
 #Preview("WebFetch - Raw HTTP GET") {
@@ -437,5 +437,5 @@ struct WebFetchMetadata {
         isExpanded: .constant(false)
     )
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }

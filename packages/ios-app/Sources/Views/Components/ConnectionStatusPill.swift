@@ -214,5 +214,5 @@ struct ConnectionStatusPill: View {
         ConnectionStatusPill(connectionState: .failed(reason: "Connection lost")) { }
     }
     .padding()
-    .background { Color.tronBackground.ignoresSafeArea() }
+    .background(Color.tronBackground)
 }
