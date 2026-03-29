@@ -2,9 +2,8 @@ import SwiftUI
 
 // MARK: - Display Tool Detail Sheet
 
-/// Detail sheet for the Display tool — renders rich content based on type.
-/// Images are fetched from blob storage via the `blob.get` RPC — the event
-/// details contain only a `blobId`, not raw image data.
+/// Detail sheet for the Display tool — renders visual content (images, streams).
+/// Images are fetched from blob storage via the `blob.get` RPC.
 @available(iOS 26.0, *)
 struct DisplayToolDetailSheet: View {
     let data: CommandToolChipData
@@ -26,12 +25,10 @@ struct DisplayToolDetailSheet: View {
         return ToolArgumentParser.string("title", from: data.arguments)
     }
 
-    /// Blob ID for single image display.
     private var imageBlobId: String? {
         data.details?["blobId"]?.value as? String
     }
 
-    /// Blob IDs for gallery display.
     private var galleryBlobIds: [(id: String, mime: String)] {
         guard let arr = data.details?["images"]?.value as? [[String: Any]] else { return [] }
         return arr.compactMap { item in
@@ -39,21 +36,6 @@ struct DisplayToolDetailSheet: View {
             let mime = item["mimeType"] as? String ?? "image/png"
             return (id: id, mime: mime)
         }
-    }
-
-    private var markdownContent: String? {
-        if let c = data.details?["content"]?.value as? String { return c }
-        return ToolArgumentParser.string("content", from: data.arguments)
-    }
-
-    private var url: String? {
-        if let u = data.details?["url"]?.value as? String { return u }
-        return ToolArgumentParser.string("url", from: data.arguments)
-    }
-
-    private var linkLabel: String? {
-        if let l = data.details?["label"]?.value as? String { return l }
-        return ToolArgumentParser.string("label", from: data.arguments)
     }
 
     private var streamId: String? {
@@ -64,9 +46,6 @@ struct DisplayToolDetailSheet: View {
     private var iconForType: String {
         switch displayType {
         case "image", "images": return "photo"
-        case "markdown": return "doc.richtext"
-        case "link": return "link"
-        case "audio": return "waveform"
         case "stream": return "play.rectangle"
         default: return "rectangle.on.rectangle"
         }
@@ -105,12 +84,6 @@ struct DisplayToolDetailSheet: View {
             imageSection
         case "images":
             imagesSection
-        case "markdown":
-            markdownSection
-        case "link":
-            linkSection
-        case "audio":
-            audioSection
         case "stream":
             streamSection
         default:
@@ -153,67 +126,6 @@ struct DisplayToolDetailSheet: View {
                     }
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var markdownSection: some View {
-        if let content = markdownContent, !content.isEmpty {
-            ToolDetailSection(title: "Content", tint: tint) {
-                Text(LocalizedStringKey(content))
-                    .font(.body)
-                    .textSelection(.enabled)
-            }
-        } else {
-            ToolEmptyState(title: "Content", icon: "doc.richtext", message: "No content provided", accent: .tronIndigo, tint: tint)
-        }
-    }
-
-    @ViewBuilder
-    private var linkSection: some View {
-        if let url {
-            ToolDetailSection(title: "Link", tint: tint) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let label = linkLabel, !label.isEmpty {
-                        Text(label)
-                            .font(.headline)
-                    }
-                    if let linkURL = URL(string: url) {
-                        Link(destination: linkURL) {
-                            HStack {
-                                Image(systemName: "arrow.up.right.square")
-                                Text(url)
-                                    .lineLimit(2)
-                                    .truncationMode(.middle)
-                            }
-                            .foregroundStyle(.tronInfo)
-                        }
-                    } else {
-                        Text(url)
-                            .font(.body.monospaced())
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-        } else {
-            ToolEmptyState(title: "Link", icon: "link", message: "No URL provided", accent: .tronIndigo, tint: tint)
-        }
-    }
-
-    @ViewBuilder
-    private var audioSection: some View {
-        if let path = data.details?["path"]?.value as? String {
-            ToolDetailSection(title: "Audio", tint: tint) {
-                HStack {
-                    Image(systemName: "waveform")
-                        .foregroundStyle(.tronIndigo)
-                    Text(URL(fileURLWithPath: path).lastPathComponent)
-                        .font(.body.monospaced())
-                        .lineLimit(1)
-                }
-            }
-        } else {
-            ToolEmptyState(title: "Audio", icon: "waveform", message: "No audio path provided", accent: .tronIndigo, tint: tint)
         }
     }
 

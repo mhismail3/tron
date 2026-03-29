@@ -1,19 +1,18 @@
-//! `Display` tool — general-purpose rich content presentation.
+//! `Display` tool — visual content presentation for the iOS app.
 //!
-//! Allows the agent to present images, markdown, links, audio, and streaming
-//! content to the user via the iOS app. This is the visual output primitive,
-//! complementing `AskUserQuestion` (interactive input) and `NotifyApp` (push
-//! notifications).
+//! Handles content types that can't be shown as inline chat text:
+//! - **image/images** — screenshots, generated images, diagrams
+//! - **stream** — live-updating views (browser windows, log tails)
+//!
+//! Text, links, and formatted content belong in the assistant's markdown
+//! response — NOT in this tool. Use GetConfirmation for approval gates.
 //!
 //! ## Image handling
 //!
-//! Images can be provided in two ways:
-//! - **`path`**: Server reads the file and stores it in blob storage.
-//! - **`data`**: Base64-encoded image data stored in blob storage directly.
-//!
-//! The result details contain a `blobId` (NOT raw image data) to keep event
-//! payloads small and avoid exceeding the 2MB WebSocket message limit. The iOS
-//! app fetches the blob content via the `blob.get` RPC when rendering.
+//! Images are stored in blob storage. The result details contain a `blobId`
+//! (NOT raw image data) to keep event payloads small and avoid exceeding
+//! the 2MB WebSocket message limit. The iOS app fetches blob content via
+//! the `blob.get` RPC when rendering.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -26,15 +25,11 @@ use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, err
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
-use crate::tools::utils::validation::{
-    get_optional_bool, get_optional_string, validate_required_string,
-};
+use crate::tools::utils::validation::{get_optional_string, validate_required_string};
 
 const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
-const MAX_AUDIO_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
 
 const SUPPORTED_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff"];
-const SUPPORTED_AUDIO_EXTS: &[&str] = &["mp3", "wav", "m4a", "aac", "ogg", "flac"];
 
 /// Map a file extension to its MIME type.
 fn mime_for_ext(ext: &str) -> &'static str {
@@ -46,17 +41,11 @@ fn mime_for_ext(ext: &str) -> &'static str {
         "svg" => "image/svg+xml",
         "bmp" => "image/bmp",
         "tiff" => "image/tiff",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "m4a" => "audio/mp4",
-        "aac" => "audio/aac",
-        "ogg" => "audio/ogg",
-        "flac" => "audio/flac",
         _ => "application/octet-stream",
     }
 }
 
-/// The `Display` tool presents rich content to the user via the iOS app.
+/// The `Display` tool presents visual content to the user via the iOS app.
 pub struct DisplayTool {
     blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>,
 }
@@ -81,24 +70,21 @@ impl TronTool for DisplayTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "Display",
-            "Present rich content to the user in the iOS app. Use this to show images, \
-             formatted text, links, or audio that would be better displayed in a dedicated \
-             sheet rather than inline text.\n\n\
+            "Show visual content to the user in the iOS app. Use this ONLY for content that \
+             can't be shown as inline chat text: images and live streams.\n\n\
+             Do NOT use this for text, links, or formatted content — put those in your \
+             regular markdown response instead.\n\n\
              Content types:\n\
-             - **image**: Show an image from a file path or inline base64 data\n\
+             - **image**: Show an image from a file path (e.g., ComputerUse screenshot path) \
+             or inline base64 data\n\
              - **images**: Show multiple images in a gallery\n\
-             - **markdown**: Show formatted text with code blocks, tables, etc.\n\
-             - **link**: Show a URL with optional label\n\
-             - **audio**: Play an audio file\n\
-             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\n\
-             For images: use `path` for a file on disk (e.g., the path returned by a ComputerUse \
-             screenshot), or `data` to pass base64 directly.",
+             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)",
         )
         .required_property(
             "type",
             json!({
                 "type": "string",
-                "enum": ["image", "images", "markdown", "link", "audio", "stream"],
+                "enum": ["image", "images", "stream"],
                 "description": "The content type to display"
             }),
         )
@@ -108,47 +94,27 @@ impl TronTool for DisplayTool {
         )
         .property(
             "path",
-            json!({"type": "string", "description": "File path (for image/audio types)"}),
+            json!({"type": "string", "description": "File path for a single image (e.g., from ComputerUse screenshot)"}),
         )
         .property(
             "data",
-            json!({"type": "string", "description": "Base64-encoded image data (alternative to path for image type). Use this when you already have the image in memory, e.g., from a ComputerUse screenshot."}),
+            json!({"type": "string", "description": "Base64-encoded image data (alternative to path)"}),
         )
         .property(
             "mimeType",
-            json!({"type": "string", "description": "MIME type for base64 data (default: image/png). Only used with 'data' parameter.", "default": "image/png"}),
+            json!({"type": "string", "description": "MIME type for base64 data (default: image/png)", "default": "image/png"}),
         )
         .property(
             "paths",
             json!({
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "File paths (for images type)"
+                "description": "File paths for multiple images (gallery)"
             }),
-        )
-        .property(
-            "content",
-            json!({"type": "string", "description": "Markdown content (for markdown type)"}),
-        )
-        .property(
-            "url",
-            json!({"type": "string", "description": "URL (for link type)"}),
-        )
-        .property(
-            "label",
-            json!({"type": "string", "description": "Link text (for link type)"}),
         )
         .property(
             "streamId",
             json!({"type": "string", "description": "Stream identifier (for stream type)"}),
-        )
-        .property(
-            "autoplay",
-            json!({"type": "boolean", "description": "Auto-play audio (default false)", "default": false}),
-        )
-        .property(
-            "interactive",
-            json!({"type": "boolean", "description": "If true, stops turn and waits for user acknowledgment", "default": false}),
         )
         .build()
     }
@@ -164,17 +130,13 @@ impl TronTool for DisplayTool {
         };
 
         let title = get_optional_string(&params, "title");
-        let interactive = get_optional_bool(&params, "interactive").unwrap_or(false);
 
         let result = match content_type.as_str() {
             "image" => self.handle_image(&params).await,
             "images" => self.handle_images(&params).await,
-            "markdown" => self.handle_markdown(&params),
-            "link" => self.handle_link(&params),
-            "audio" => self.handle_audio(&params).await,
             "stream" => self.handle_stream(&params),
             other => Ok(error_result(format!(
-                "Unsupported content type: '{other}'. Supported: image, images, markdown, link, audio, stream."
+                "Unsupported content type: '{other}'. Supported: image, images, stream."
             ))),
         };
 
@@ -186,7 +148,6 @@ impl TronTool for DisplayTool {
                     details["title"] = json!(t);
                 }
                 tool_result.details = Some(details);
-                tool_result.stop_turn = if interactive { Some(true) } else { None };
                 Ok(tool_result)
             }
             Err(e) => Err(e),
@@ -196,10 +157,7 @@ impl TronTool for DisplayTool {
 
 impl DisplayTool {
     /// Handle `image` type — from file path OR inline base64 data.
-    ///
-    /// Priority: `data` (inline base64) > `path` (file on disk).
     /// Image bytes are stored in blob storage; details contain `blobId` + `mimeType`.
-    /// The iOS app fetches blob content via the `blob.get` RPC.
     async fn handle_image(&self, params: &Value) -> Result<TronToolResult, ToolError> {
         let inline_data = get_optional_string(params, "data");
         let path = get_optional_string(params, "path");
@@ -214,14 +172,11 @@ impl DisplayTool {
                 .unwrap_or_else(|| "image/png".to_string());
             (decoded, mime)
         } else if let Some(ref path) = path {
-            let (bytes, mime) = self
-                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
-                .await?;
+            let (bytes, mime) = self.read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
             (bytes, mime.to_string())
         } else {
             return Ok(error_result(
-                "Missing 'path' or 'data' parameter for image type. \
-                 Provide a file path or base64-encoded image data.",
+                "Missing 'path' or 'data' parameter for image type.",
             ));
         };
 
@@ -249,25 +204,16 @@ impl DisplayTool {
         let paths: Vec<String> = params
             .get("paths")
             .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
             .unwrap_or_default();
 
         if paths.is_empty() {
-            return Ok(error_result(
-                "Missing or empty 'paths' array for images type.",
-            ));
+            return Ok(error_result("Missing or empty 'paths' array for images type."));
         }
 
         let mut images_data: Vec<Value> = Vec::with_capacity(paths.len());
         for path in &paths {
-            let (bytes, mime) = self
-                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
-                .await?;
+            let (bytes, mime) = self.read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
             let blob_id = self.store_blob(&bytes, mime).await?;
             images_data.push(json!({"blobId": blob_id, "mimeType": mime, "path": path}));
         }
@@ -275,8 +221,7 @@ impl DisplayTool {
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::text(format!(
-                    "Displaying {} images",
-                    paths.len()
+                    "Displaying {} images", paths.len()
                 )),
             ]),
             details: Some(json!({"images": images_data})),
@@ -285,81 +230,15 @@ impl DisplayTool {
         })
     }
 
-    fn handle_markdown(&self, params: &Value) -> Result<TronToolResult, ToolError> {
-        let content = match get_optional_string(params, "content") {
-            Some(c) if !c.is_empty() => c,
-            _ => {
-                return Ok(error_result(
-                    "Missing or empty 'content' parameter for markdown type.",
-                ))
-            }
-        };
-
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text("Displaying markdown content"),
-            ]),
-            details: Some(json!({"content": content})),
-            is_error: None,
-            stop_turn: None,
-        })
-    }
-
-    fn handle_link(&self, params: &Value) -> Result<TronToolResult, ToolError> {
-        let url = match get_optional_string(params, "url") {
-            Some(u) => u,
-            None => return Ok(error_result("Missing 'url' parameter for link type.")),
-        };
-        let label = get_optional_string(params, "label");
-
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Displaying link: {}",
-                    label.as_deref().unwrap_or(&url)
-                )),
-            ]),
-            details: Some(json!({"url": url, "label": label})),
-            is_error: None,
-            stop_turn: None,
-        })
-    }
-
-    async fn handle_audio(&self, params: &Value) -> Result<TronToolResult, ToolError> {
-        let path = match get_optional_string(params, "path") {
-            Some(p) => p,
-            None => return Ok(error_result("Missing 'path' parameter for audio type.")),
-        };
-
-        self.validate_file(&path, SUPPORTED_AUDIO_EXTS, MAX_AUDIO_BYTES, "Audio")?;
-
-        let autoplay = get_optional_bool(params, "autoplay").unwrap_or(false);
-
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!("Displaying audio: {path}")),
-            ]),
-            details: Some(json!({"path": path, "autoplay": autoplay})),
-            is_error: None,
-            stop_turn: None,
-        })
-    }
-
     fn handle_stream(&self, params: &Value) -> Result<TronToolResult, ToolError> {
         let stream_id = match get_optional_string(params, "streamId") {
             Some(s) => s,
-            None => {
-                return Ok(error_result(
-                    "Missing 'streamId' parameter for stream type.",
-                ))
-            }
+            None => return Ok(error_result("Missing 'streamId' parameter for stream type.")),
         };
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Opening stream: {stream_id}"
-                )),
+                crate::core::content::ToolResultContent::text(format!("Opening stream: {stream_id}")),
             ]),
             details: Some(json!({"streamId": stream_id})),
             is_error: None,
@@ -399,8 +278,6 @@ impl DisplayTool {
         match self.blob_store.as_ref() {
             Some(store) => store.store(content, mime_type).await,
             None => {
-                // Fallback: no blob store available (shouldn't happen in production).
-                // Return a synthetic ID with inline base64 for graceful degradation.
                 let b64 = base64::engine::general_purpose::STANDARD.encode(content);
                 Ok(format!("inline:{b64}"))
             }
@@ -466,19 +343,29 @@ mod tests {
     // ── Schema ─────────────────────────────────────────────────
 
     #[test]
-    fn schema_has_all_parameters() {
+    fn schema_has_correct_parameters() {
         let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        for key in &[
-            "type", "title", "path", "data", "mimeType", "paths", "content", "url", "label",
-            "streamId", "autoplay", "interactive",
-        ] {
+        for key in &["type", "title", "path", "data", "mimeType", "paths", "streamId"] {
             assert!(props.contains_key(*key), "missing schema property: {key}");
         }
+        // Removed params should NOT be present
+        for key in &["content", "url", "label", "autoplay", "interactive"] {
+            assert!(!props.contains_key(*key), "removed property still present: {key}");
+        }
         let required = def.parameters.required.as_ref().unwrap();
-        assert!(required.contains(&"type".to_string()));
-        assert_eq!(required.len(), 1, "only 'type' should be required");
+        assert_eq!(required, &["type"]);
+    }
+
+    #[test]
+    fn schema_enum_only_has_image_images_stream() {
+        let tool = DisplayTool::new(None);
+        let def = tool.definition();
+        let props = def.parameters.properties.as_ref().unwrap();
+        let type_enum = props["type"]["enum"].as_array().unwrap();
+        let types: Vec<&str> = type_enum.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(types, vec!["image", "images", "stream"]);
     }
 
     #[test]
@@ -488,7 +375,7 @@ mod tests {
         assert_eq!(tool.category(), ToolCategory::Custom);
     }
 
-    // ── Image from path (encodes to base64) ────────────────────
+    // ── Image from path ────────────────────────────────────────
 
     #[tokio::test]
     async fn image_path_produces_blob_id() {
@@ -497,17 +384,12 @@ mod tests {
         let path = tmp.path().to_string_lossy().to_string();
 
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "image", "path": path}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "image", "path": path}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert_eq!(details["displayType"], "image");
         assert_eq!(details["mimeType"], "image/png");
-        // Without blob store, fallback produces inline:<base64>
-        let blob_id = details["blobId"].as_str().unwrap();
-        assert!(blob_id.starts_with("inline:"));
+        assert!(details["blobId"].as_str().unwrap().starts_with("inline:"));
     }
 
     #[tokio::test]
@@ -517,28 +399,20 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(
-                json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx())
+            .await.unwrap();
         assert_eq!(r.details.unwrap()["mimeType"], "image/jpeg");
     }
 
-    // ── Image from inline base64 data ──────────────────────────
+    // ── Image from inline base64 ───────────────────────────────
 
     #[tokio::test]
     async fn image_with_data_param() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"inline image bytes");
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(
-                json!({"type": "image", "data": b64, "mimeType": "image/jpeg"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"type": "image", "data": b64, "mimeType": "image/jpeg"}), &make_ctx())
+            .await.unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert!(details["blobId"].as_str().is_some());
@@ -549,53 +423,34 @@ mod tests {
     async fn image_data_defaults_to_png_mime() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"data");
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "image", "data": b64}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "image", "data": b64}), &make_ctx()).await.unwrap();
         assert_eq!(r.details.unwrap()["mimeType"], "image/png");
     }
 
     #[tokio::test]
     async fn image_data_invalid_base64() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "image", "data": "not valid base64!!!"}),
-                &make_ctx(),
-            )
-            .await;
+        let r = tool.execute(json!({"type": "image", "data": "not valid!!!"}), &make_ctx()).await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("Invalid base64"));
     }
 
     #[tokio::test]
     async fn image_data_takes_priority_over_path() {
-        let b64 = base64::engine::general_purpose::STANDARD.encode(b"priority data");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"priority");
         let tool = DisplayTool::new(None);
-        // Both data and path provided — data wins, path ignored.
         let r = tool
-            .execute(
-                json!({"type": "image", "data": b64, "path": "/nonexistent.png"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"type": "image", "data": b64, "path": "/nonexistent.png"}), &make_ctx())
+            .await.unwrap();
         assert!(r.is_error.is_none());
-        assert!(r.details.unwrap()["blobId"].as_str().is_some());
     }
 
-    // ── Image validation edge cases ────────────────────────────
+    // ── Image validation ───────────────────────────────────────
 
     #[tokio::test]
     async fn image_missing_file() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "image", "path": "/nonexistent/file.png"}),
-                &make_ctx(),
-            )
-            .await;
+        let r = tool.execute(json!({"type": "image", "path": "/nonexistent.png"}), &make_ctx()).await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("File not found"));
     }
@@ -604,16 +459,10 @@ mod tests {
     async fn image_too_large() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("huge.png");
-        let data = vec![0u8; (MAX_IMAGE_BYTES + 1) as usize];
-        std::fs::write(&path, &data).unwrap();
+        std::fs::write(&path, vec![0u8; (MAX_IMAGE_BYTES + 1) as usize]).unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "image", "path": path.to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await;
+        let r = tool.execute(json!({"type": "image", "path": path.to_string_lossy().to_string()}), &make_ctx()).await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("limit"));
     }
@@ -624,12 +473,7 @@ mod tests {
         write!(tmp, "data").unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await;
+        let r = tool.execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx()).await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("Unsupported"));
     }
@@ -637,10 +481,7 @@ mod tests {
     #[tokio::test]
     async fn image_no_path_or_data() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "image"}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "image"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -651,12 +492,7 @@ mod tests {
         std::fs::write(&path, "data").unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "image", "path": path.to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await;
+        let r = tool.execute(json!({"type": "image", "path": path.to_string_lossy().to_string()}), &make_ctx()).await;
         assert!(r.is_err());
     }
 
@@ -671,15 +507,11 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(
-                json!({"type": "images", "paths": [
-                    t1.path().to_string_lossy().to_string(),
-                    t2.path().to_string_lossy().to_string()
-                ]}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"type": "images", "paths": [
+                t1.path().to_string_lossy().to_string(),
+                t2.path().to_string_lossy().to_string()
+            ]}), &make_ctx())
+            .await.unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         let images = details["images"].as_array().unwrap();
@@ -692,10 +524,7 @@ mod tests {
     #[tokio::test]
     async fn images_empty_array() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "images", "paths": []}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "images", "paths": []}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -706,171 +535,10 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(
-                json!({"type": "images", "paths": [
-                    t1.path().to_string_lossy().to_string(),
-                    "/nonexistent.png"
-                ]}),
-                &make_ctx(),
-            )
-            .await;
-        assert!(r.is_err());
-    }
-
-    // ── Markdown ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn markdown_valid() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "markdown", "content": "# Hello\nWorld"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let details = r.details.unwrap();
-        assert_eq!(details["displayType"], "markdown");
-        assert_eq!(details["content"], "# Hello\nWorld");
-    }
-
-    #[tokio::test]
-    async fn markdown_empty_content() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "markdown", "content": ""}), &make_ctx())
-            .await
-            .unwrap();
-        assert_eq!(r.is_error, Some(true));
-    }
-
-    #[tokio::test]
-    async fn markdown_missing_content() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "markdown"}), &make_ctx())
-            .await
-            .unwrap();
-        assert_eq!(r.is_error, Some(true));
-    }
-
-    // ── Link ───────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn link_valid_with_label() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "link", "url": "https://example.com", "label": "Example"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let details = r.details.unwrap();
-        assert_eq!(details["url"], "https://example.com");
-        assert_eq!(details["label"], "Example");
-    }
-
-    #[tokio::test]
-    async fn link_valid_without_label() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "link", "url": "https://example.com"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn link_missing_url() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "link"}), &make_ctx())
-            .await
-            .unwrap();
-        assert_eq!(r.is_error, Some(true));
-    }
-
-    // ── Audio ──────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn audio_valid_mp3() {
-        let mut tmp = NamedTempFile::with_suffix(".mp3").unwrap();
-        write!(tmp, "audio data").unwrap();
-
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        assert_eq!(r.details.unwrap()["autoplay"], false);
-    }
-
-    #[tokio::test]
-    async fn audio_with_autoplay() {
-        let mut tmp = NamedTempFile::with_suffix(".wav").unwrap();
-        write!(tmp, "audio data").unwrap();
-
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string(), "autoplay": true}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(r.details.unwrap()["autoplay"], true);
-    }
-
-    #[tokio::test]
-    async fn audio_unsupported_format() {
-        let mut tmp = NamedTempFile::with_suffix(".wma").unwrap();
-        write!(tmp, "data").unwrap();
-
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
-            .await;
-        assert!(r.is_err());
-    }
-
-    #[tokio::test]
-    async fn audio_missing_file() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "audio", "path": "/nonexistent/audio.mp3"}),
-                &make_ctx(),
-            )
-            .await;
-        assert!(r.is_err());
-    }
-
-    #[tokio::test]
-    async fn audio_too_large() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("huge.mp3");
-        let data = vec![0u8; (MAX_AUDIO_BYTES + 1) as usize];
-        std::fs::write(&path, &data).unwrap();
-
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "audio", "path": path.to_string_lossy().to_string()}),
-                &make_ctx(),
-            )
+            .execute(json!({"type": "images", "paths": [
+                t1.path().to_string_lossy().to_string(),
+                "/nonexistent.png"
+            ]}), &make_ctx())
             .await;
         assert!(r.is_err());
     }
@@ -880,13 +548,7 @@ mod tests {
     #[tokio::test]
     async fn stream_valid() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "stream", "streamId": "browser-123"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "stream", "streamId": "browser-123"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert_eq!(details["streamId"], "browser-123");
@@ -896,50 +558,16 @@ mod tests {
     #[tokio::test]
     async fn stream_missing_id() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "stream"}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "stream"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
-    // ── Interactive mode ───────────────────────────────────────
-
-    #[tokio::test]
-    async fn interactive_true_stops_turn() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "markdown", "content": "Review this", "interactive": true}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(r.stop_turn, Some(true));
-    }
-
-    #[tokio::test]
-    async fn interactive_false_does_not_stop() {
-        let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(
-                json!({"type": "markdown", "content": "FYI"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.stop_turn.is_none());
-    }
-
-    // ── General / edge cases ───────────────────────────────────
+    // ── General ────────────────────────────────────────────────
 
     #[tokio::test]
     async fn unknown_type_returns_error() {
         let tool = DisplayTool::new(None);
-        let r = tool
-            .execute(json!({"type": "video"}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({"type": "markdown"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -952,24 +580,23 @@ mod tests {
 
     #[tokio::test]
     async fn title_flows_to_details() {
+        let mut tmp = NamedTempFile::with_suffix(".png").unwrap();
+        write!(tmp, "data").unwrap();
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(
-                json!({"type": "markdown", "content": "text", "title": "My Title"}),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
+            .execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string(), "title": "My Title"}), &make_ctx())
+            .await.unwrap();
         assert_eq!(r.details.unwrap()["title"], "My Title");
     }
 
     #[tokio::test]
     async fn title_absent_not_in_details() {
+        let mut tmp = NamedTempFile::with_suffix(".png").unwrap();
+        write!(tmp, "data").unwrap();
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "markdown", "content": "text"}), &make_ctx())
-            .await
-            .unwrap();
+            .execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx())
+            .await.unwrap();
         assert!(r.details.unwrap().get("title").is_none());
     }
 
@@ -979,8 +606,6 @@ mod tests {
         assert_eq!(mime_for_ext("jpg"), "image/jpeg");
         assert_eq!(mime_for_ext("jpeg"), "image/jpeg");
         assert_eq!(mime_for_ext("gif"), "image/gif");
-        assert_eq!(mime_for_ext("mp3"), "audio/mpeg");
-        assert_eq!(mime_for_ext("wav"), "audio/wav");
         assert_eq!(mime_for_ext("unknown"), "application/octet-stream");
     }
 }
