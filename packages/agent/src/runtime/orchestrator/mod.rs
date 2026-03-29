@@ -12,6 +12,7 @@
 //! | `agent_factory` | Creates `TronAgent` instances with provider/tools/hooks |
 //! | `event_persister` | Persists agent events to the event store |
 //! | `subagent_manager` | Spawns/manages child agents for parallel tool execution |
+//! | `process_manager` | Centralized lifecycle management for deterministic processes |
 //! | `tool_call_tracker` | Tracks in-flight tool calls for cancellation |
 //!
 //! ## Critical Event Ordering
@@ -25,6 +26,7 @@ pub mod agent_runner;
 pub mod event_persister;
 #[allow(clippy::module_inception)]
 pub mod orchestrator;
+pub mod process_manager;
 pub mod session_context;
 pub mod session_manager;
 pub mod session_reconstructor;
