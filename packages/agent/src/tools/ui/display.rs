@@ -245,8 +245,13 @@ impl DisplayTool {
         })
     }
 
-    /// Handle `stream` type — start a screen capture loop, block until cancelled,
-    /// then save the last frame to blob storage and return.
+    /// Handle `stream` type — start a screen capture loop in the background
+    /// and return immediately so the agent can continue working.
+    ///
+    /// The producer runs as a detached tokio task tied to the session's
+    /// cancellation token. When the session ends or is aborted, the token
+    /// fires, the producer stops, and the last frame is saved to blob storage
+    /// via a fire-and-forget cleanup task.
     async fn handle_stream(
         &self,
         params: &Value,
@@ -275,43 +280,37 @@ impl DisplayTool {
             tool_call_id: ctx.tool_call_id.clone(),
         };
 
-        // Spawn the frame producer as a background task.
+        // Spawn the frame producer as a detached background task.
+        // It runs independently of the tool call lifetime — the agent
+        // continues working while frames stream to iOS.
         let cancel = ctx.cancellation.clone();
-        let producer_handle = tokio::spawn(
-            crate::tools::ui::display_stream::screen_capture_loop(event_tx, config, cancel),
-        );
+        let blob_store = self.blob_store.clone();
+        tokio::spawn(async move {
+            let last_frame_data =
+                crate::tools::ui::display_stream::screen_capture_loop(event_tx, config, cancel)
+                    .await;
 
-        // Block until cancelled (agent abort, turn end, etc.)
-        ctx.cancellation.cancelled().await;
+            // Save last frame to blob storage for the static fallback
+            // when the user taps the Display chip after streaming ends.
+            if let (Some(data), Some(store)) = (last_frame_data, blob_store) {
+                match store.store(&data, "image/jpeg").await {
+                    Ok(id) => tracing::debug!(blob_id = %id, "Saved last stream frame to blob"),
+                    Err(e) => tracing::warn!(error = %e, "Failed to save last stream frame"),
+                }
+            }
+        });
 
-        // Collect last frame from the producer.
-        let last_frame_data = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            producer_handle,
-        )
-        .await
-        {
-            Ok(Ok(data)) => data,
-            _ => None,
-        };
-
-        // Save last frame to blob storage for the static fallback.
-        let last_frame_blob_id = if let Some(ref data) = last_frame_data {
-            self.store_blob(data, "image/jpeg").await.ok()
-        } else {
-            None
-        };
-
+        // Return immediately — the agent can continue with its next tool call.
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::text(format!(
-                    "Stream '{stream_id}' ended."
+                    "Screen stream '{stream_id}' started. Frames are being sent to the user's device at ~3 FPS. \
+                     The stream will continue in the background while you work. It stops automatically when the session ends."
                 )),
             ]),
             details: Some(json!({
                 "streamId": stream_id,
-                "blobId": last_frame_blob_id,
-                "mimeType": "image/jpeg",
+                "streaming": true,
             })),
             is_error: None,
             stop_turn: None,
@@ -635,41 +634,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_returns_on_cancel_with_blob_id() {
+    async fn stream_returns_immediately() {
         let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
         let tool = DisplayTool::new(None).with_event_tx(tx);
 
-        // Create a context with a cancellation token we control.
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let ctx = crate::tools::traits::ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: cancel.clone(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-            workspace_id: None,
-            output_tx: None,
-        };
-
-        // Cancel after a short delay to let the producer start.
-        let cancel_clone = cancel.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-            cancel_clone.cancel();
-        });
-
         let r = tool
-            .execute(json!({"type": "stream", "streamId": "test-stream"}), &ctx)
+            .execute(json!({"type": "stream", "streamId": "test-stream"}), &make_ctx())
             .await
             .unwrap();
 
-        // Tool should return after cancellation.
+        // Tool should return immediately (not block).
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert_eq!(details["streamId"], "test-stream");
+        assert_eq!(details["streaming"], true);
         assert_eq!(details["displayType"], "stream");
-        // blobId may or may not be set depending on whether screencapture produced frames.
     }
 
     // ── General ────────────────────────────────────────────────
