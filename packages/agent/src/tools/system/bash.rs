@@ -485,6 +485,9 @@ impl TronTool for BashTool {
                     combined.push_str(&docker_output.stderr);
                 }
                 let is_error = if docker_output.exit_code != 0 { Some(true) } else { None };
+                // NOTE: Docker early return bypasses post-execution skill guards
+                // (cache store, output limiting, skillContext enrichment).
+                // Pre-execution guards (rate limit, cache check) still apply.
                 return Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         crate::core::content::ToolResultContent::text(&combined),
