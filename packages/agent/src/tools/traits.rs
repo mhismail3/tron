@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,7 @@ pub enum ExecutionMode {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Execution context passed to every tool invocation.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ToolContext {
     /// Unique ID of this tool call.
     pub tool_call_id: String,
@@ -55,6 +56,22 @@ pub struct ToolContext {
     /// Channel for streaming tool output in real time (e.g., bash stdout chunks).
     /// Tools send String chunks; the runtime forwards them as `ToolExecutionUpdate` events.
     pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// Process manager for spawning/managing background processes.
+    pub process_manager: Option<Arc<dyn ProcessManagerOps>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("tool_call_id", &self.tool_call_id)
+            .field("session_id", &self.session_id)
+            .field("working_directory", &self.working_directory)
+            .field("subagent_depth", &self.subagent_depth)
+            .field("subagent_max_depth", &self.subagent_max_depth)
+            .field("workspace_id", &self.workspace_id)
+            .field("process_manager", &self.process_manager.as_ref().map(|_| "..."))
+            .finish_non_exhaustive()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,6 +257,136 @@ pub struct NotifyResult {
     /// Diagnostic message (device count, errors).
     #[serde(default)]
     pub message: Option<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Managed process types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Taxonomy for tracked processes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessKind {
+    /// Shell command (Bash tool).
+    Shell,
+    /// Display screen capture stream.
+    DisplayStream,
+    /// Generic long-running tool operation.
+    ToolOperation,
+}
+
+/// Lifecycle state of a managed process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessState {
+    /// Running in the foreground (tool call is awaiting it).
+    Foreground,
+    /// Promoted to background (tool call returned, process continues).
+    Background,
+    /// Completed successfully.
+    Completed,
+    /// Failed or errored.
+    Failed,
+    /// Explicitly cancelled.
+    Cancelled,
+}
+
+/// Configuration for spawning a managed process.
+#[derive(Clone, Debug)]
+pub struct ManagedProcessConfig {
+    /// Human-readable label (command text or "display_stream:{id}").
+    pub label: String,
+    /// Process taxonomy.
+    pub kind: ProcessKind,
+    /// Timeout in milliseconds (None = no timeout, runs until cancelled).
+    pub timeout_ms: Option<u64>,
+    /// Whether to suggest sandboxing for background shell commands.
+    pub sandbox: bool,
+}
+
+/// Result from a completed managed process.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedProcessResult {
+    /// Process identifier.
+    pub process_id: String,
+    /// Combined output summary (head+tail if large).
+    pub output: String,
+    /// Exit code (None for non-shell processes like streams).
+    pub exit_code: Option<i32>,
+    /// Duration in milliseconds.
+    pub duration_ms: u64,
+    /// Whether the process was killed by timeout.
+    pub timed_out: bool,
+    /// Whether the process was cancelled.
+    pub cancelled: bool,
+    /// Blob ID for large outputs stored externally.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_id: Option<String>,
+}
+
+/// Handle returned when spawning a managed process.
+#[derive(Clone, Debug)]
+pub struct ManagedProcessHandle {
+    /// Process identifier.
+    pub process_id: String,
+    /// Result (populated only for foreground/blocking processes).
+    pub result: Option<ManagedProcessResult>,
+}
+
+/// Summary info for listing processes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessInfo {
+    /// Process identifier.
+    pub process_id: String,
+    /// Human-readable label.
+    pub label: String,
+    /// Process taxonomy.
+    pub kind: ProcessKind,
+    /// Current state as string.
+    pub state: String,
+    /// Milliseconds since process started.
+    pub elapsed_ms: u64,
+    /// Session that owns this process.
+    pub session_id: String,
+    /// Tool call that spawned this process.
+    pub tool_call_id: String,
+}
+
+/// Managed process execution for shell commands, streams, and long-running ops.
+#[async_trait]
+pub trait ProcessManagerOps: Send + Sync {
+    /// Spawn a managed process running a future. If `background` is false,
+    /// blocks until completion. If true, returns immediately with a handle.
+    async fn spawn_managed(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        config: ManagedProcessConfig,
+        task: std::pin::Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
+        background: bool,
+    ) -> Result<ManagedProcessHandle, ToolError>;
+
+    /// Promote a foreground process to background. Unblocks the awaiting tool call.
+    fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError>;
+
+    /// Cancel a running process (any state).
+    fn cancel_process(&self, process_id: &str) -> Result<(), ToolError>;
+
+    /// List processes for a session (active + recently completed).
+    fn list_processes(&self, session_id: &str) -> Vec<ProcessInfo>;
+
+    /// Get result of a completed process (None if still running).
+    fn get_result(&self, process_id: &str) -> Option<ManagedProcessResult>;
+
+    /// Find a process by label prefix within a session.
+    fn find_by_label(&self, session_id: &str, label_prefix: &str) -> Option<String>;
+
+    /// Cancel all processes for a session.
+    fn cancel_session_processes(&self, session_id: &str);
+
+    /// Cancel ALL tracked processes (server shutdown).
+    fn cancel_all(&self);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -447,6 +594,7 @@ mod tests {
             subagent_max_depth: 0,
             workspace_id: None,
             output_tx: None,
+            process_manager: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -464,6 +612,7 @@ mod tests {
             subagent_max_depth: 0,
             workspace_id: None,
             output_tx: None,
+            process_manager: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -480,6 +629,7 @@ mod tests {
             subagent_max_depth: 5,
             workspace_id: None,
             output_tx: None,
+            process_manager: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -539,6 +689,120 @@ mod tests {
             ExecutionMode::Serialized("shell".into())
         );
     }
+
+    // ── Managed process types ──────────────────────────────────
+
+    #[test]
+    fn process_kind_serde_roundtrip() {
+        for kind in [ProcessKind::Shell, ProcessKind::DisplayStream, ProcessKind::ToolOperation] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: ProcessKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn process_kind_snake_case_serialization() {
+        assert_eq!(serde_json::to_string(&ProcessKind::Shell).unwrap(), "\"shell\"");
+        assert_eq!(serde_json::to_string(&ProcessKind::DisplayStream).unwrap(), "\"display_stream\"");
+        assert_eq!(serde_json::to_string(&ProcessKind::ToolOperation).unwrap(), "\"tool_operation\"");
+    }
+
+    #[test]
+    fn managed_process_config_construction() {
+        let config = ManagedProcessConfig {
+            label: "cargo build".into(),
+            kind: ProcessKind::Shell,
+            timeout_ms: Some(120_000),
+            sandbox: true,
+        };
+        assert_eq!(config.label, "cargo build");
+        assert_eq!(config.kind, ProcessKind::Shell);
+        assert_eq!(config.timeout_ms, Some(120_000));
+        assert!(config.sandbox);
+    }
+
+    #[test]
+    fn managed_process_result_serde_roundtrip() {
+        let result = ManagedProcessResult {
+            process_id: "proc-abc".into(),
+            output: "build complete".into(),
+            exit_code: Some(0),
+            duration_ms: 5000,
+            timed_out: false,
+            cancelled: false,
+            blob_id: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let back: ManagedProcessResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.process_id, "proc-abc");
+        assert_eq!(back.exit_code, Some(0));
+        assert!(back.blob_id.is_none());
+    }
+
+    #[test]
+    fn managed_process_result_with_blob_id() {
+        let result = ManagedProcessResult {
+            process_id: "proc-xyz".into(),
+            output: "truncated...".into(),
+            exit_code: Some(1),
+            duration_ms: 10000,
+            timed_out: false,
+            cancelled: false,
+            blob_id: Some("blob-123".into()),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("blob-123"));
+        let back: ManagedProcessResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.blob_id.as_deref(), Some("blob-123"));
+    }
+
+    #[test]
+    fn process_info_serde_roundtrip() {
+        let info = ProcessInfo {
+            process_id: "proc-1".into(),
+            label: "npm test".into(),
+            kind: ProcessKind::Shell,
+            state: "background".into(),
+            elapsed_ms: 3000,
+            session_id: "sess-1".into(),
+            tool_call_id: "tc-1".into(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let back: ProcessInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.process_id, "proc-1");
+        assert_eq!(back.kind, ProcessKind::Shell);
+        assert_eq!(back.session_id, "sess-1");
+    }
+
+    #[test]
+    fn process_state_equality() {
+        assert_eq!(ProcessState::Foreground, ProcessState::Foreground);
+        assert_eq!(ProcessState::Background, ProcessState::Background);
+        assert_eq!(ProcessState::Completed, ProcessState::Completed);
+        assert_eq!(ProcessState::Failed, ProcessState::Failed);
+        assert_eq!(ProcessState::Cancelled, ProcessState::Cancelled);
+        assert_ne!(ProcessState::Foreground, ProcessState::Background);
+        assert_ne!(ProcessState::Completed, ProcessState::Failed);
+    }
+
+    #[test]
+    fn tool_context_process_manager_is_optional() {
+        let ctx = ToolContext {
+            tool_call_id: String::new(),
+            session_id: String::new(),
+            working_directory: String::new(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            output_tx: None,
+            process_manager: None,
+        };
+        assert!(ctx.process_manager.is_none());
+    }
+
+    // ── Process options ───────────────────────────────────────
 
     #[test]
     fn process_options_default_construction() {

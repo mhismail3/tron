@@ -202,6 +202,7 @@ mod tests {
             subagent_max_depth: 0,
             workspace_id: None,
             output_tx: None,
+            process_manager: None,
         }
     }
 

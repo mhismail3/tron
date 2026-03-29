@@ -195,6 +195,7 @@ pub async fn execute_tool(
         subagent_max_depth: ctx.subagent_max_depth,
         workspace_id: ctx.workspace_id.map(String::from),
         output_tx: Some(output_tx),
+        process_manager: None, // TODO(Phase 4): wire from ToolExecutionContext
     };
 
     // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events

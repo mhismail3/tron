@@ -440,6 +440,7 @@ mod tests {
             subagent_max_depth: max_depth,
             workspace_id: None,
             output_tx: None,
+            process_manager: None,
         }
     }
 
