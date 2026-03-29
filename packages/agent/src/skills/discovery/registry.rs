@@ -26,12 +26,44 @@ impl SkillRegistry {
 
     /// Initialize the registry by scanning skill directories.
     ///
-    /// Scans both global (`~/.tron/skills/`) and project-local skill directories.
-    /// Project skills take precedence over global skills with the same name.
+    /// Scans builtin (`~/.tron/skills/_builtin/`), global (`~/.tron/skills/`),
+    /// and project-local skill directories. Precedence: project > global > builtin.
+    /// Builtins missing from the filesystem fall back to embedded content.
     pub fn initialize(&mut self, working_dir: &str) {
-        let (global_result, project_result) = loader::scan_all(working_dir);
+        use crate::skills::builtins;
 
-        // Add project skills first (they take precedence)
+        let (global_result, project_result, builtin_result) = loader::scan_all(working_dir);
+
+        // 1. Insert builtin skills (lowest precedence)
+        let mut found_builtin_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for skill in builtin_result.skills {
+            found_builtin_names.insert(skill.name.clone());
+            let _ = self.skills.insert(skill.name.clone(), skill);
+        }
+
+        // 2. Insert embedded fallbacks for builtins missing from filesystem
+        for fallback in builtins::embedded_fallbacks(&found_builtin_names) {
+            debug!(name = %fallback.name, "Using embedded fallback for missing builtin skill");
+            let _ = self.skills.insert(fallback.name.clone(), fallback);
+        }
+
+        for error in &builtin_result.errors {
+            warn!(path = %error.path, message = %error.message, "Builtin skill scan error");
+        }
+
+        // 3. Insert global (user) skills — override builtins with same name
+        for skill in global_result.skills {
+            if self.skills.contains_key(&skill.name) {
+                debug!(name = %skill.name, "Builtin skill shadowed by user skill");
+            }
+            let _ = self.skills.insert(skill.name.clone(), skill);
+        }
+
+        for error in &global_result.errors {
+            warn!(path = %error.path, message = %error.message, "Global skill scan error");
+        }
+
+        // 4. Insert project skills (highest precedence)
         for skill in project_result.skills {
             let _ = self.skills.insert(skill.name.clone(), skill);
         }
@@ -40,20 +72,12 @@ impl SkillRegistry {
             warn!(path = %err.path, message = %err.message, "Project skill scan error");
         }
 
-        // Add global skills only if not shadowed by project
-        for skill in global_result.skills {
-            if self.skills.contains_key(&skill.name) {
-                debug!(name = %skill.name, "Global skill shadowed by project skill");
-            } else {
-                let _ = self.skills.insert(skill.name.clone(), skill);
-            }
-        }
-
-        for error in &global_result.errors {
-            warn!(path = %error.path, message = %error.message, "Global skill scan error");
-        }
-
         debug!(count = self.skills.len(), "Skill registry initialized");
+    }
+
+    /// Check if a skill name is a builtin name.
+    pub fn is_builtin_name(name: &str) -> bool {
+        crate::skills::builtins::builtin_names().contains(name)
     }
 
     /// Get a skill by name.

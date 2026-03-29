@@ -13,6 +13,8 @@ pub enum SkillSource {
     Global,
     /// Loaded from project-local `.claude/skills/` or `.tron/skills/`.
     Project,
+    /// Loaded from `~/.tron/skills/_builtin/` (code-defined, resettable).
+    Builtin,
 }
 
 impl std::fmt::Display for SkillSource {
@@ -20,6 +22,7 @@ impl std::fmt::Display for SkillSource {
         match self {
             Self::Global => write!(f, "global"),
             Self::Project => write!(f, "project"),
+            Self::Builtin => write!(f, "builtin"),
         }
     }
 }

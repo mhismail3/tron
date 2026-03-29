@@ -89,13 +89,16 @@ pub fn scan_directory(dir: &Path, source: SkillSource) -> SkillScanResult {
     result
 }
 
-/// Scan both global and project skill directories.
+/// Scan global, project, and builtin skill directories.
 ///
-/// Returns `(global_result, project_result)`. Project skills take precedence
-/// when names conflict (handled by the registry, not here).
-pub fn scan_all(working_dir: &str) -> (SkillScanResult, SkillScanResult) {
+/// Returns `(global_result, project_result, builtin_result)`. Precedence:
+/// project > global (user) > builtin (handled by the registry, not here).
+pub fn scan_all(working_dir: &str) -> (SkillScanResult, SkillScanResult, SkillScanResult) {
     let global_dir = global_skills_dir();
     let global_result = scan_directory(&global_dir, SkillSource::Global);
+
+    let builtin_dir = global_dir.join(crate::skills::builtins::BUILTIN_SUBDIR);
+    let builtin_result = scan_directory(&builtin_dir, SkillSource::Builtin);
 
     let mut project_result = SkillScanResult::default();
     for dir in project_skills_dirs(working_dir) {
@@ -104,7 +107,7 @@ pub fn scan_all(working_dir: &str) -> (SkillScanResult, SkillScanResult) {
         project_result.errors.extend(scan.errors);
     }
 
-    (global_result, project_result)
+    (global_result, project_result, builtin_result)
 }
 
 /// Load a single skill from its directory.
