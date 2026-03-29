@@ -190,6 +190,7 @@ struct ToolStatusRow<AdditionalPills: View>: View {
                 additionalPills()
             }
         }
+        .scrollClipDisabled()
     }
 }
 

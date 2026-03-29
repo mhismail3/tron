@@ -47,5 +47,6 @@ struct DangerZoneSection: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.red)
         }
+        .listSectionSpacing(.custom(32))
     }
 }

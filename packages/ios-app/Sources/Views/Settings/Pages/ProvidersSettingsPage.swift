@@ -123,6 +123,7 @@ struct ProvidersSettingsPage: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Provider Row
