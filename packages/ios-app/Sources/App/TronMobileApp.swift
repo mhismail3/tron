@@ -44,12 +44,12 @@ struct TronMobileApp: App {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.tronBackground)
+                            .background { Color.tronBackground.ignoresSafeArea() }
                     case .failed(let message):
                         InitializationErrorView(message: message) {
                             Task { await initializeApp() }
                         }
-                        .background(Color.tronBackground)
+                        .background { Color.tronBackground.ignoresSafeArea() }
                     }
                 } else {
                     Text("This app requires iOS 26 or later")

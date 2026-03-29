@@ -108,7 +108,7 @@ struct ContextAuditView: View {
                 Task { await reloadContextInBackground() }
             }
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)

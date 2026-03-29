@@ -11,7 +11,7 @@ struct AppearanceSettingsPage: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
+            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

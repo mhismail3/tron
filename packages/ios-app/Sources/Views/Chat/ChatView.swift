@@ -77,8 +77,7 @@ struct ChatView: View {
         )
         .sheet(isPresented: $viewModel.showStreamSheet) {
             StreamSheetView(
-                frameImage: viewModel.streamFrameImage,
-                isStreamActive: viewModel.isStreamActive,
+                viewModel: viewModel,
                 onClose: { viewModel.showStreamSheet = false },
                 onStop: { viewModel.stopDisplayStream() }
             )
@@ -318,9 +317,7 @@ struct ChatView: View {
                 inputAreaContent
             }
             .scrollContentBackground(.hidden)
-            .background {
-                Color.tronBackground.ignoresSafeArea()
-            }
+            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
     }
 

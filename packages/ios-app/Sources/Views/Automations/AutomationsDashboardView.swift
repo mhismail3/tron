@@ -49,7 +49,7 @@ struct AutomationsDashboardView: View {
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {

@@ -71,7 +71,7 @@ struct ContainerDetailSheet: View {
                 }
             }
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .presentationDragIndicator(.hidden)
         .tint(.tronIndigo)
     }

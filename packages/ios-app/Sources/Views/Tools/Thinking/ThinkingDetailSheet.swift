@@ -57,7 +57,7 @@ struct ThinkingDetailSheetFallback: View {
                 .padding(.top, 16)
                 .padding(.bottom, 24)
             }
-            .background(Color.tronBackground)
+            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationTitle("Thinking")
             .navigationBarTitleDisplayMode(.inline)
         }

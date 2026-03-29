@@ -35,7 +35,7 @@ struct AutomationDetailSheet: View {
                 }
             }
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .sheet(item: $selectedRun) { run in
             AutomationRunDetailSheet(run: run)
         }

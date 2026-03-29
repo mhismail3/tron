@@ -3,16 +3,23 @@ import SwiftUI
 /// Live stream sheet that displays frames from the Display tool's stream type.
 /// Auto-presented on first frame, can be dismissed and re-opened via toolbar icon.
 /// When the stream has ended, shows the last captured frame with stop button disabled.
+///
+/// Takes the viewModel directly rather than `let` copies so that `@Observable`
+/// tracking keeps the UI reactive (stop button, toolbar, frame image all update
+/// in real time when stream state changes).
 @available(iOS 26.0, *)
 struct StreamSheetView: View {
-    let frameImage: UIImage?
-    let isStreamActive: Bool
+    let viewModel: ChatViewModel
     let onClose: () -> Void
     let onStop: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        // Read from viewModel in body so @Observable tracks these accesses.
+        let frameImage = viewModel.streamFrameImage
+        let isActive = viewModel.isStreamActive
+
         NavigationStack {
             Group {
                 if let image = frameImage {
@@ -21,6 +28,16 @@ struct StreamSheetView: View {
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .padding()
+                } else if !isActive {
+                    VStack(spacing: 16) {
+                        Image(systemName: "stop.circle")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.tronTextMuted)
+                        Text("Stream ended")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     VStack(spacing: 16) {
                         ProgressView()
@@ -42,15 +59,15 @@ struct StreamSheetView: View {
                     } label: {
                         Image(systemName: "stop.fill")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(isStreamActive ? .red : .tronTextMuted)
+                            .foregroundStyle(isActive ? .red : .tronTextMuted)
                     }
-                    .disabled(!isStreamActive)
+                    .disabled(!isActive)
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         Image(systemName: "play.rectangle.fill")
                             .foregroundStyle(.tronIndigo)
-                        Text(isStreamActive ? "Live Stream" : "Stream Ended")
+                        Text(isActive ? "Live Stream" : "Stream Ended")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronIndigo)
                     }
@@ -65,7 +82,7 @@ struct StreamSheetView: View {
                     }
                 }
             }
-            .background(Color.tronBackground)
+            .background { Color.tronBackground.ignoresSafeArea() }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }

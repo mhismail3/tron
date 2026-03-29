@@ -222,7 +222,7 @@ struct NewSessionFlow: View {
                 // Don't auto-open workspace selector - let user explicitly tap to select
             }
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)

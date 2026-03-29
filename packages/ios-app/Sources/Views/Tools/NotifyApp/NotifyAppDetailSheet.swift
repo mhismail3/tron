@@ -171,7 +171,7 @@ struct NotifyAppDetailSheetFallback: View {
                 }
                 .padding()
             }
-            .background(Color.tronBackground)
+            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationTitle("Notification")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

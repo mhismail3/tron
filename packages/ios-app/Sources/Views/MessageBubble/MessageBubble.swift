@@ -257,5 +257,5 @@ struct ConfirmedActionChipView: View {
         }
         .padding()
     }
-    .background(Color.tronBackground)
+    .background { Color.tronBackground.ignoresSafeArea() }
 }

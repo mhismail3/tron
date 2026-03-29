@@ -44,7 +44,7 @@ struct ToolDetailSheetContainer<Content: View>: View {
             ZStack {
                 content()
             }
-            .background(Color.tronBackground)
+            .background { Color.tronBackground.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

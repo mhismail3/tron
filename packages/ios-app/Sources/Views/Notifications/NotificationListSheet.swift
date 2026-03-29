@@ -55,7 +55,7 @@ struct NotificationListSheet: View {
                 }
             }
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea() }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .task {
