@@ -853,6 +853,27 @@ tron_events! {
         branch_preserved: bool,
         deleted: bool,
     } => "worktree.released",
+
+    // -- Display streaming --
+
+    /// A single frame in a display stream (transient, not persisted).
+    DisplayFrame {
+        /// Stream identifier.
+        #[serde(rename = "streamId")]
+        stream_id: String,
+        /// Tool call that initiated the stream.
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        /// Base64-encoded JPEG frame data.
+        data: String,
+        /// Monotonically increasing frame counter.
+        #[serde(rename = "frameId")]
+        frame_id: u64,
+        /// Frame width in pixels.
+        width: u32,
+        /// Frame height in pixels.
+        height: u32,
+    } => "display_frame",
 }
 
 impl TronEvent {
@@ -1637,10 +1658,19 @@ mod tests {
                 strategy: "merge".into(),
             },
             TronEvent::WorktreeReleased {
-                base,
+                base: base.clone(),
                 final_commit: Some("cafebabe".into()),
                 branch_preserved: true,
                 deleted: true,
+            },
+            TronEvent::DisplayFrame {
+                base,
+                stream_id: "stream-1".into(),
+                tool_call_id: "call-1".into(),
+                data: "base64data".into(),
+                frame_id: 1,
+                width: 1280,
+                height: 720,
             },
         ];
 
@@ -1746,5 +1776,44 @@ mod tests {
         assert_eq!(e.event_type(), "skill_removed");
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["skillName"], "web-search");
+    }
+
+    #[test]
+    fn display_frame_event_type_and_fields() {
+        let e = TronEvent::DisplayFrame {
+            base: BaseEvent::now("sess-1"),
+            stream_id: "stream-1".into(),
+            tool_call_id: "call-1".into(),
+            data: "base64jpeg".into(),
+            frame_id: 42,
+            width: 1280,
+            height: 720,
+        };
+        assert_eq!(e.event_type(), "display_frame");
+        assert_eq!(e.session_id(), "sess-1");
+
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["streamId"], "stream-1");
+        assert_eq!(json["toolCallId"], "call-1");
+        assert_eq!(json["data"], "base64jpeg");
+        assert_eq!(json["frameId"], 42);
+        assert_eq!(json["width"], 1280);
+        assert_eq!(json["height"], 720);
+    }
+
+    #[test]
+    fn display_frame_serde_roundtrip() {
+        let original = TronEvent::DisplayFrame {
+            base: BaseEvent::now("s1"),
+            stream_id: "s".into(),
+            tool_call_id: "t".into(),
+            data: "d".into(),
+            frame_id: 1,
+            width: 640,
+            height: 480,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: TronEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
     }
 }
