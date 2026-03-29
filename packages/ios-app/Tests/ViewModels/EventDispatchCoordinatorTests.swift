@@ -652,6 +652,9 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleWorktreeReleasedCalledWith = result
     }
 
+    // Display streaming
+    func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

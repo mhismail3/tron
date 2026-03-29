@@ -39,6 +39,19 @@ final class ChatViewModel {
     /// Whether currently loading more messages
     var isLoadingMoreMessages = false
 
+    // MARK: - Display Stream State
+
+    /// Active stream identifier (nil when no stream is active).
+    var activeStreamId: String?
+    /// Latest frame image from the active stream.
+    var streamFrameImage: UIImage?
+    /// Tool call ID that initiated the active stream.
+    var streamToolCallId: String?
+    /// Whether the stream sheet is presented.
+    var showStreamSheet = false
+    /// Whether a display stream is currently active.
+    var isStreamActive: Bool { activeStreamId != nil }
+
     // MARK: - Input State (delegated to InputBarState for backward compatibility)
 
     /// Text input - delegated to inputBarState

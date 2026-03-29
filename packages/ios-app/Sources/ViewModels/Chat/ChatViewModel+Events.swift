@@ -125,6 +125,11 @@ extension ChatViewModel {
         // Clear thinking accumulation (streaming finalization handled by coordinator)
         thinkingState.clearCurrentStreaming()
 
+        // End any active display stream.
+        if isStreamActive {
+            endDisplayStream()
+        }
+
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
 

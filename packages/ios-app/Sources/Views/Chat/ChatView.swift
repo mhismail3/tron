@@ -75,6 +75,12 @@ struct ChatView: View {
             skillStore: skillStore,
             workspaceDeleted: workspaceDeleted
         )
+        .sheet(isPresented: $viewModel.showStreamSheet) {
+            StreamSheetView(
+                frameImage: viewModel.streamFrameImage,
+                onClose: { viewModel.showStreamSheet = false }
+            )
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {

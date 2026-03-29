@@ -58,6 +58,10 @@ import Foundation
     func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result)
 }
 
+@MainActor protocol DisplayStreamEventHandler: AnyObject {
+    func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -70,5 +74,6 @@ import Foundation
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
-    ServerEventHandler, WorktreeEventHandler, EventDispatchLogger {}
+    ServerEventHandler, WorktreeEventHandler, DisplayStreamEventHandler,
+    EventDispatchLogger {}
 

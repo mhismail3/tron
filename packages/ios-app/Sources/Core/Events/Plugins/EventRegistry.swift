@@ -121,6 +121,9 @@ final class EventRegistry: @unchecked Sendable {
         register(WorktreeMergedPlugin.self)
         register(WorktreeReleasedPlugin.self)
 
+        // Display streaming events
+        register(DisplayFramePlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 
