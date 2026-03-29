@@ -100,6 +100,8 @@ struct Cli {
 enum Command {
     /// Reset ~/.tron/memory/rules/SYSTEM.md to the built-in default.
     ResetPrompt,
+    /// Reset all builtin skills in ~/.tron/skills/_builtin/ to their defaults.
+    ResetSkills,
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -162,14 +164,16 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     registry.register(Arc::new(tron::tools::fs::write::WriteTool::new(fs.clone())));
     registry.register(Arc::new(tron::tools::fs::edit::EditTool::new(fs.clone())));
 
-    // 4: Bash (with blob store for large output storage + sandbox settings)
+    // 4: Bash (with blob store for large output storage + sandbox settings + server cache)
     let blob_store: Arc<dyn tron::tools::traits::BlobStore> = config.event_store.clone();
+    let server_cache = Arc::new(tron::tools::cache::ServerCache::with_defaults());
     registry.register(Arc::new(
         tron::tools::system::bash::BashTool::new(runner.clone(), Some(blob_store))
             .with_sandbox_settings(
                 config.sandbox_settings.default_image.clone(),
                 config.sandbox_settings.network_enabled,
-            ),
+            )
+            .with_server_cache(server_cache),
     ));
 
     // 5: Search
@@ -223,7 +227,10 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         ),
     ));
 
-    // 12: WebSearch — conditional on Brave API key
+    // 12: Display (rich content presentation — images, markdown, audio, etc.)
+    registry.register(Arc::new(tron::tools::ui::display::DisplayTool::new()));
+
+    // 13: WebSearch — conditional on Brave API key
     if let Some(ref api_key) = config.brave_api_key {
         registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
             http,
@@ -269,6 +276,18 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                 }
+            }
+            Command::ResetSkills => {
+                let tron_home = tron::settings::tron_home_dir();
+                let written = tron::skills::builtins::reset_builtin_skills(&tron_home);
+                println!(
+                    "Reset {written} builtin skill(s) in {}.",
+                    tron_home
+                        .join("skills")
+                        .join(tron::skills::builtins::BUILTIN_SUBDIR)
+                        .display()
+                );
+                std::process::exit(0);
             }
         }
     }
@@ -324,6 +343,9 @@ async fn main() -> Result<()> {
 
         // Seed global SYSTEM.md (system prompt override) if missing or not customized.
         let _ = tron::runtime::context::system_prompts::seed_global_system_prompt(&tron_home);
+
+        // Seed builtin skills to ~/.tron/skills/_builtin/ if missing or not customized.
+        let _ = tron::skills::builtins::seed_builtin_skills(&tron_home);
     }
 
     // Database (events + tasks share one SQLite file) — set up before logging
@@ -1433,11 +1455,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 11 tools without Brave API key (no WebSearch), without subagent tools
+        // 12 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            11,
-            "expected 11 tools (no WebSearch without Brave key), got: {:?}",
+            12,
+            "expected 12 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1451,8 +1473,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            12,
-            "expected 12 tools with WebSearch, got: {:?}",
+            13,
+            "expected 13 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }
