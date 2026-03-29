@@ -48,12 +48,27 @@ fn mime_for_ext(ext: &str) -> &'static str {
 /// The `Display` tool presents visual content to the user via the iOS app.
 pub struct DisplayTool {
     blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>,
+    /// Broadcast sender for emitting DisplayFrame events during streaming.
+    event_tx: Option<tokio::sync::broadcast::Sender<crate::core::events::TronEvent>>,
 }
 
 impl DisplayTool {
     /// Create a new Display tool instance.
     pub fn new(blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>) -> Self {
-        Self { blob_store }
+        Self {
+            blob_store,
+            event_tx: None,
+        }
+    }
+
+    /// Set the event broadcast sender for streaming support.
+    #[must_use]
+    pub fn with_event_tx(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<crate::core::events::TronEvent>,
+    ) -> Self {
+        self.event_tx = Some(tx);
+        self
     }
 }
 
@@ -134,7 +149,7 @@ impl TronTool for DisplayTool {
         let result = match content_type.as_str() {
             "image" => self.handle_image(&params).await,
             "images" => self.handle_images(&params).await,
-            "stream" => self.handle_stream(&params),
+            "stream" => self.handle_stream(&params, _ctx).await,
             other => Ok(error_result(format!(
                 "Unsupported content type: '{other}'. Supported: image, images, stream."
             ))),
@@ -230,17 +245,74 @@ impl DisplayTool {
         })
     }
 
-    fn handle_stream(&self, params: &Value) -> Result<TronToolResult, ToolError> {
+    /// Handle `stream` type — start a screen capture loop, block until cancelled,
+    /// then save the last frame to blob storage and return.
+    async fn handle_stream(
+        &self,
+        params: &Value,
+        ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
         let stream_id = match get_optional_string(params, "streamId") {
             Some(s) => s,
             None => return Ok(error_result("Missing 'streamId' parameter for stream type.")),
         };
 
+        let event_tx = match self.event_tx.as_ref() {
+            Some(tx) => tx.clone(),
+            None => {
+                return Ok(error_result(
+                    "Streaming not available (event emitter not configured).",
+                ))
+            }
+        };
+
+        let config = crate::tools::ui::display_stream::StreamConfig {
+            interval: std::time::Duration::from_millis(
+                crate::tools::ui::display_stream::DEFAULT_INTERVAL_MS,
+            ),
+            session_id: ctx.session_id.clone(),
+            stream_id: stream_id.clone(),
+            tool_call_id: ctx.tool_call_id.clone(),
+        };
+
+        // Spawn the frame producer as a background task.
+        let cancel = ctx.cancellation.clone();
+        let producer_handle = tokio::spawn(
+            crate::tools::ui::display_stream::screen_capture_loop(event_tx, config, cancel),
+        );
+
+        // Block until cancelled (agent abort, turn end, etc.)
+        ctx.cancellation.cancelled().await;
+
+        // Collect last frame from the producer.
+        let last_frame_data = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            producer_handle,
+        )
+        .await
+        {
+            Ok(Ok(data)) => data,
+            _ => None,
+        };
+
+        // Save last frame to blob storage for the static fallback.
+        let last_frame_blob_id = if let Some(ref data) = last_frame_data {
+            self.store_blob(data, "image/jpeg").await.ok()
+        } else {
+            None
+        };
+
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!("Opening stream: {stream_id}")),
+                crate::core::content::ToolResultContent::text(format!(
+                    "Stream '{stream_id}' ended."
+                )),
             ]),
-            details: Some(json!({"streamId": stream_id})),
+            details: Some(json!({
+                "streamId": stream_id,
+                "blobId": last_frame_blob_id,
+                "mimeType": "image/jpeg",
+            })),
             is_error: None,
             stop_turn: None,
         })
@@ -546,20 +618,58 @@ mod tests {
     // ── Stream ─────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn stream_valid() {
-        let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "stream", "streamId": "browser-123"}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-        let details = r.details.unwrap();
-        assert_eq!(details["streamId"], "browser-123");
-        assert_eq!(details["displayType"], "stream");
-    }
-
-    #[tokio::test]
     async fn stream_missing_id() {
         let tool = DisplayTool::new(None);
         let r = tool.execute(json!({"type": "stream"}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn stream_no_event_tx_returns_error() {
+        let tool = DisplayTool::new(None); // no event_tx
+        let r = tool
+            .execute(json!({"type": "stream", "streamId": "s1"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn stream_returns_on_cancel_with_blob_id() {
+        let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
+        let tool = DisplayTool::new(None).with_event_tx(tx);
+
+        // Create a context with a cancellation token we control.
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let ctx = crate::tools::traits::ToolContext {
+            tool_call_id: "call-1".into(),
+            session_id: "sess-1".into(),
+            working_directory: "/tmp".into(),
+            cancellation: cancel.clone(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            output_tx: None,
+        };
+
+        // Cancel after a short delay to let the producer start.
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            cancel_clone.cancel();
+        });
+
+        let r = tool
+            .execute(json!({"type": "stream", "streamId": "test-stream"}), &ctx)
+            .await
+            .unwrap();
+
+        // Tool should return after cancellation.
+        assert!(r.is_error.is_none());
+        let details = r.details.unwrap();
+        assert_eq!(details["streamId"], "test-stream");
+        assert_eq!(details["displayType"], "stream");
+        // blobId may or may not be set depending on whether screencapture produced frames.
     }
 
     // ── General ────────────────────────────────────────────────
