@@ -466,13 +466,18 @@ impl ComputerUseTool {
         };
 
         // Save to persistent screenshots directory so Display tool can reference the file.
+        // In tests, ctx.working_directory is /tmp — we save there instead of polluting ~/.tron/.
         let ext = if mime_type == "image/jpeg" { "jpg" } else { "png" };
         let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let rand_suffix: u16 = rand::random();
         let screenshot_filename = format!("screenshot-{ts}-{rand_suffix:04x}.{ext}");
-        let screenshots_dir = crate::settings::tron_home_dir()
-            .join("memory")
-            .join("screenshots");
+        let screenshots_dir = if cfg!(test) {
+            std::path::PathBuf::from(&ctx.working_directory).join("screenshots")
+        } else {
+            crate::settings::tron_home_dir()
+                .join("memory")
+                .join("screenshots")
+        };
         let _ = tokio::fs::create_dir_all(&screenshots_dir).await;
         let screenshot_path = screenshots_dir.join(&screenshot_filename);
 
