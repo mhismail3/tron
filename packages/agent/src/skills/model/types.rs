@@ -82,6 +82,86 @@ pub struct DenyPattern {
     pub patterns: Vec<String>,
 }
 
+/// Display metadata for a skill, flowing to iOS app via event details.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDisplay {
+    /// Label text shown on chip/header in the iOS app.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// SF Symbol name for icon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Hex color for accent (e.g., "#4A90D9").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+/// Truncation mode for output limiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncationMode {
+    /// Keep head and tail, truncate middle.
+    HeadTail,
+    /// Smart context-preserving truncation (for search results).
+    SmartContext,
+    /// Keep only the head.
+    HeadOnly,
+    /// No truncation applied by guard (existing Bash limits still apply).
+    None,
+}
+
+/// Secret binding: inject a setting value as an environment variable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretBinding {
+    /// Environment variable name (model uses `$ENV` in commands).
+    pub env: String,
+    /// Settings.json path to read the secret from.
+    pub setting: String,
+}
+
+/// Cache configuration for skill-guided Bash calls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheConfig {
+    /// Time-to-live in seconds.
+    pub ttl: u64,
+    /// How to extract cache key: "url", "command", or "auto".
+    #[serde(default = "default_key_extractor")]
+    pub key_extractor: String,
+}
+
+fn default_key_extractor() -> String {
+    "auto".to_string()
+}
+
+/// Harness-level guards applied by Bash when skill context is active.
+///
+/// Each guard is independent and composable. A skill can define any combination.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillGuards {
+    /// Maximum output lines (overrides Bash default inline limit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_lines: Option<usize>,
+    /// Maximum output bytes (alternative to lines).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<usize>,
+    /// Truncation mode when output exceeds limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<TruncationMode>,
+    /// Minimum milliseconds between calls with this skill context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_ms: Option<u64>,
+    /// Secrets to inject as environment variables before execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<Vec<SecretBinding>>,
+    /// Cache configuration for response caching.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<CacheConfig>,
+}
+
 /// YAML frontmatter parsed from a SKILL.md file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +193,12 @@ pub struct SkillFrontmatter {
     /// Model override for subagent execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_model: Option<String>,
+    /// Display metadata (flows to iOS app via event details).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<SkillDisplay>,
+    /// Harness-level guards for Bash skill context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guards: Option<SkillGuards>,
 }
 
 /// Full metadata for a loaded skill.
