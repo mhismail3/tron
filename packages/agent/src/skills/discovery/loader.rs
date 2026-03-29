@@ -391,4 +391,31 @@ mod tests {
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].message.contains("Invalid skill name"));
     }
+
+    #[test]
+    fn scan_builtin_subdir_with_builtin_source() {
+        let tmp = TempDir::new().unwrap();
+        let builtin_dir = tmp.path().join(crate::skills::builtins::BUILTIN_SUBDIR);
+        create_skill(&builtin_dir, "code-search", "---\nname: CS\n---\nBody");
+
+        let result = scan_directory(&builtin_dir, SkillSource::Builtin);
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.skills[0].name, "code-search");
+        assert_eq!(result.skills[0].source, SkillSource::Builtin);
+    }
+
+    #[test]
+    fn global_scan_skips_builtin_subdir() {
+        // _builtin starts with underscore → fails is_valid_skill_name → skipped
+        let tmp = TempDir::new().unwrap();
+        let builtin_dir = tmp.path().join(crate::skills::builtins::BUILTIN_SUBDIR);
+        create_skill(&builtin_dir, "code-search", "---\nname: CS\n---\nBody");
+        // Also add a normal skill
+        create_skill(tmp.path(), "my-skill", "---\nname: My\n---\nBody");
+
+        let result = scan_directory(tmp.path(), SkillSource::Global);
+        // Should find my-skill but NOT _builtin (invalid name)
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.skills[0].name, "my-skill");
+    }
 }
