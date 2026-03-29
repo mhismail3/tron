@@ -37,7 +37,7 @@ impl SkillRegistry {
         // 1. Insert builtin skills (lowest precedence)
         let mut found_builtin_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for skill in builtin_result.skills {
-            found_builtin_names.insert(skill.name.clone());
+            let _ = found_builtin_names.insert(skill.name.clone());
             let _ = self.skills.insert(skill.name.clone(), skill);
         }
 

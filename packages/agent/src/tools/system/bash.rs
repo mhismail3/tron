@@ -1725,7 +1725,7 @@ mod tests {
 
     // ── Phase 3: Skill context tests ────────────────────────────
 
-    use crate::skills::types::{CacheConfig, SkillDisplay, SkillGuards, TruncationMode};
+    use crate::skills::types::{CacheConfig, SkillDisplay, SkillGuards};
     use crate::tools::cache::ServerCache;
     use crate::tools::skill_context::{FnResolver, ResolvedSkillContext};
 

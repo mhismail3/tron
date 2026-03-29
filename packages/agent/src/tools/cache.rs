@@ -112,7 +112,7 @@ impl ServerCache {
         let elapsed = entry.created_at.elapsed().as_secs();
         if elapsed >= ttl_secs {
             drop(entry);
-            self.entries.remove(key);
+            let _ = self.entries.remove(key);
             return None;
         }
         Some(entry.value.clone())
@@ -133,7 +133,7 @@ impl ServerCache {
         }
 
         let order = self.counter.fetch_add(1, Ordering::Relaxed);
-        self.entries.insert(
+        let _ = self.entries.insert(
             key,
             CacheEntry {
                 value: value.to_string(),
@@ -167,7 +167,7 @@ impl ServerCache {
         }
 
         if let Some(key) = min_key {
-            self.entries.remove(&key);
+            let _ = self.entries.remove(&key);
         }
     }
 }
@@ -193,6 +193,7 @@ fn extract_url(command: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(unused_results)]
 mod tests {
     use super::*;
 

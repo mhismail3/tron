@@ -214,6 +214,7 @@ pub fn embedded_fallbacks(found_names: &HashSet<String>) -> Vec<SkillMetadata> {
 }
 
 #[cfg(test)]
+#[allow(unused_results)]
 mod tests {
     use super::*;
 
