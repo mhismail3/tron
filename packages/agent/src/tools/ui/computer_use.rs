@@ -20,7 +20,7 @@ use crate::tools::utils::validation::{
 };
 
 /// Actions that modify system state and require confirmation when enabled.
-const MUTATING_ACTIONS: &[&str] = &["click", "type", "keypress", "scroll", "moveMouse"];
+const MUTATING_ACTIONS: &[&str] = &["click", "clickElement", "type", "keypress", "scroll", "moveMouse"];
 
 /// The `ComputerUse` tool provides GUI automation on macOS.
 pub struct ComputerUseTool {
@@ -85,24 +85,31 @@ impl TronTool for ComputerUseTool {
         ToolSchemaBuilder::new(
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
+             **Screenshots are 1:1 with screen coordinates.** Pixel (x,y) in a full-screen screenshot IS \
+             screen point (x,y) — click there directly with no math. For window screenshots, add the window \
+             position (shown in the response) to the pixel coordinates.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the full screen, or a specific window by name/title. The screenshot is saved to ~/.tron/memory/screenshots/ — use the returned file path with the Display tool to show it to the user.\n\
-             - **click**: Click at screen coordinates. Needs Accessibility permission.\n\
-             - **type**: Type a text string. Needs Accessibility permission.\n\
-             - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
-             - **scroll**: Scroll at a position. Uses Quartz scroll wheel events.\n\
-             - **getWindows**: List all windows (including off-screen) with process name, title, position, size, and visibility status. Works from background processes.\n\
-             - **focusWindow**: Bring a window to front by title using native activation. Verifies the window is on-screen after activation. If the app is on another Space, it will be brought to the current one.\n\
+             - **screenshot**: Capture full screen or a specific window. 1:1 pixel-to-point mapping.\n\
+             - **click**: Click at screen coordinates. For full-screen screenshots, use pixel positions directly. \
+             For window screenshots, add the window offset from the screenshot response.\n\
+             - **clickElement**: Click a UI element by its text label (button, link, menu item, etc.). \
+             Uses macOS Accessibility API — no coordinates needed. Best for labeled UI elements.\n\
+             - **type**: Type a text string into the focused field.\n\
+             - **keypress**: Press key combinations (Tab, Enter, Escape, arrows, Cmd+shortcuts). \
+             Prefer keyboard navigation when possible.\n\
+             - **scroll**: Scroll at a position.\n\
+             - **getWindows**: List all windows with position, size, and visibility.\n\
+             - **focusWindow**: Bring a window to front by name. Works across Spaces.\n\
              - **moveMouse**: Move the mouse cursor without clicking.\n\n\
              NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
              calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
-             System Settings > Privacy & Security. Do NOT attempt workarounds — the tool handles window management internally.",
+             System Settings > Privacy & Security.",
         )
         .required_property("action", json!({
             "type": "string",
             "description": "The action to perform",
-            "enum": ["screenshot", "click", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"]
+            "enum": ["screenshot", "click", "clickElement", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"]
         }))
         .property("x", json!({"type": "number", "description": "X coordinate (for click, scroll, moveMouse)"}))
         .property("y", json!({"type": "number", "description": "Y coordinate (for click, scroll, moveMouse)"}))
@@ -145,8 +152,9 @@ impl TronTool for ComputerUseTool {
             "getWindows" => self.get_windows(ctx).await,
             "focusWindow" => self.focus_window(&params, ctx).await,
             "moveMouse" => self.move_mouse(&params, ctx).await,
+            "clickElement" => self.click_element(&params, ctx).await,
             other => Ok(error_result(format!(
-                "Unknown action: {other}. Valid actions: screenshot, click, type, keypress, scroll, getWindows, focusWindow, moveMouse"
+                "Unknown action: {other}. Valid actions: screenshot, click, clickElement, type, keypress, scroll, getWindows, focusWindow, moveMouse"
             ))),
         }
     }
@@ -166,6 +174,10 @@ impl ComputerUseTool {
                 } else {
                     format!("Click at ({x}, {y})")
                 }
+            }
+            "clickElement" => {
+                let text = get_optional_string(params, "text").unwrap_or_default();
+                format!("Click element: \"{text}\"")
             }
             "type" => {
                 let text = get_optional_string(params, "text").unwrap_or_default();
@@ -204,23 +216,13 @@ impl ComputerUseTool {
     /// - +500,000 if normal layer (`kCGWindowLayer == 0`)
     /// - +area (width * height) — prefers larger content windows
     ///
-    /// Output: `windowId\tonScreen\twidth\theight`
+    /// Output: `windowId\tonScreen\twidth\theight\tx\ty`
     /// On failure (no match): exit 1, available window names on stderr.
     fn build_screenshot_window_swift(search: &str) -> String {
         let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
         format!(
-            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOnScreen = onScreen; bestW = bw; bestH = bh }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)"); Foundation.exit(0)"#
+            r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var names = [String](); var bestId = -1; var bestScore = -1; var bestOnScreen = false; var bestW = 0.0; var bestH = 0.0; var bestX = 0.0; var bestY = 0.0; for w in ws {{ let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if !name.isEmpty {{ names.append("\(owner): \(name)") }}; guard owner.localizedCaseInsensitiveContains("{escaped}") || name.localizedCaseInsensitiveContains("{escaped}") else {{ continue }}; let layer = w[kCGWindowLayer as String] as? Int ?? 999; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let bw = bounds["Width"] as? Double ?? 0; let bh = bounds["Height"] as? Double ?? 0; let bx = bounds["X"] as? Double ?? 0; let by = bounds["Y"] as? Double ?? 0; let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; let area = Int(bw * bh); let score = (onScreen ? 1000000 : 0) + (layer == 0 ? 500000 : 0) + area; if score > bestScore {{ bestScore = score; bestId = w[kCGWindowNumber as String] as! Int; bestOnScreen = onScreen; bestW = bw; bestH = bh; bestX = bx; bestY = by }} }}; guard bestId >= 0 else {{ fputs(names.joined(separator: "\n"), stderr); Foundation.exit(1) }}; print("\(bestId)\t\(bestOnScreen)\t\(bestW)\t\(bestH)\t\(bestX)\t\(bestY)"); Foundation.exit(0)"#
         )
-    }
-
-    /// Parse width and height from a PNG file's IHDR chunk (bytes 16-23).
-    fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
-        if data.len() < 24 {
-            return None;
-        }
-        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
-        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
-        if w > 0 && h > 0 { Some((w, h)) } else { None }
     }
 
     /// Run an osascript command via the process runner.
@@ -329,6 +331,12 @@ impl ComputerUseTool {
         let tmp_path = format!("/tmp/tron-screenshot-{}.png", uuid::Uuid::now_v7());
         let window = get_optional_string(params, "window");
 
+        // Window logical dimensions and position (set during window lookup below)
+        let mut win_w: f64 = 0.0;
+        let mut win_h: f64 = 0.0;
+        let mut win_x: f64 = 0.0;
+        let mut win_y: f64 = 0.0;
+
         if let Some(ref w) = window {
             // Window-specific capture: use scored CGWindowList lookup via Swift to find
             // the best matching window ID, then screencapture -l <id>.
@@ -350,15 +358,17 @@ impl ComputerUseTool {
                 )));
             }
 
-            // Parse: "windowId\tonScreen\twidth\theight"
-            let parts: Vec<&str> = wid_output.stdout.trim().splitn(4, '\t').collect();
+            // Parse: "windowId\tonScreen\twidth\theight\tx\ty"
+            let parts: Vec<&str> = wid_output.stdout.trim().splitn(6, '\t').collect();
             let window_id = parts.first().unwrap_or(&"").to_string();
             let on_screen = parts.get(1).map(|s| *s == "true").unwrap_or(true);
-            let _win_w: f64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-            let _win_h: f64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+            win_w = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            win_h = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            win_x = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            win_y = parts.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
             tracing::debug!(
-                window = %w, id = %window_id, on_screen, width = _win_w, height = _win_h,
+                window = %w, id = %window_id, on_screen, width = win_w, height = win_h,
                 "Window lookup result for screenshot"
             );
 
@@ -403,11 +413,26 @@ impl ComputerUseTool {
             }
         };
 
-        // Step 1: Resize PNG to max 1280px (consistent dimensions regardless of
-        // Retina scaling). This ensures the image the LLM sees always has a known
-        // relationship to the screen coordinate system.
+        // Step 1: Resize PNG to exact logical dimensions so that
+        // 1 image pixel = 1 screen point. This eliminates all coordinate math —
+        // the agent clicks exactly where it sees in the image.
+        //
+        // For window screenshots, resize to the window's logical dimensions.
+        // For full screen, resize to the screen's logical dimensions.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let resize_target = if window.is_some() {
+            // Use window logical dimensions (from CGWindowList metadata)
+            (win_w as u32, win_h as u32)
+        } else {
+            // Use screen logical dimensions
+            self.screen_bounds().await
+                .map(|(w, h)| (w as u32, h as u32))
+                .unwrap_or((1280, 800))
+        };
+
         let resize_cmd = format!(
-            "sips --resampleHeightWidthMax 1280 '{tmp_path}'",
+            "sips --resampleWidth {} --resampleHeight {} '{tmp_path}'",
+            resize_target.0, resize_target.1
         );
         let _ = self.run_shell(&resize_cmd, ctx).await;
 
@@ -422,8 +447,6 @@ impl ComputerUseTool {
         let original_size = resized_png.len();
 
         // Parse image dimensions from PNG header (bytes 16-23 of IHDR chunk)
-        let (img_w, img_h) = Self::png_dimensions(&resized_png).unwrap_or((0, 0));
-
         // Step 2: Try JPEG compression on the resized PNG.
         let jpg_path = format!("{}.jpg", &tmp_path[..tmp_path.len() - 4]);
         let sips_cmd = format!(
@@ -512,47 +535,37 @@ impl ComputerUseTool {
             "action": "screenshot",
             "window": window,
             "sizeBytes": image_data.len(),
-            "originalSizeBytes": original_size,
             "mimeType": mime_type,
-            "imageWidth": img_w,
-            "imageHeight": img_h,
         });
         if let Some((w, h)) = screen {
             details["screenWidth"] = json!(w);
             details["screenHeight"] = json!(h);
         }
+        if window.is_some() {
+            details["windowX"] = json!(win_x as i32);
+            details["windowY"] = json!(win_y as i32);
+        }
         details["screenshotPath"] = json!(saved_path);
 
-        // Build informative text with coordinate mapping guide
         let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
         let mut text = format!(
-            "Screenshot captured ({img_w}x{img_h} image, {} bytes {format_label})",
+            "Screenshot captured ({} bytes {format_label})",
             image_data.len()
         );
 
-        // Coordinate mapping guide — this is critical for click accuracy
-        if let Some((sw, sh)) = screen {
-            if img_w > 0 && img_h > 0 {
-                #[allow(clippy::cast_precision_loss)]
-                let scale_x = sw / img_w as f64;
-                #[allow(clippy::cast_precision_loss)]
-                let scale_y = sh / img_h as f64;
-
-                if window.is_some() {
-                    text.push_str(&format!(
-                        "\nCoordinate mapping: this is a WINDOW screenshot. \
-                         Use getWindows to find the window's screen position, then: \
-                         screen_x = window_x + (image_x * {scale_x:.2}), \
-                         screen_y = window_y + (image_y * {scale_y:.2})"
-                    ));
-                } else {
-                    text.push_str(&format!(
-                        "\nCoordinate mapping: screen is {sw}x{sh} points, image is {img_w}x{img_h}px. \
-                         To click where you see pixel (x,y) in the image: \
-                         screen_x = image_x * {scale_x:.2}, screen_y = image_y * {scale_y:.2}"
-                    ));
-                }
+        // 1:1 coordinate guide — image pixels map directly to screen points
+        if window.is_some() {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                text.push_str(&format!(
+                    "\nWindow at ({}, {}). Pixel (x,y) in this image = screen point ({} + x, {} + y).",
+                    win_x as i32, win_y as i32, win_x as i32, win_y as i32
+                ));
             }
+        } else if let Some((sw, sh)) = screen {
+            text.push_str(&format!(
+                "\nScreen is {sw}x{sh}. Image is 1:1 with screen — pixel (x,y) in this image = screen point (x,y)."
+            ));
         }
 
         if !size_warning.is_empty() {
@@ -910,6 +923,80 @@ impl ComputerUseTool {
         })
     }
 
+    /// Swift script that searches the accessibility tree of the frontmost app
+    /// for an element matching the given text, then performs AXPress on it.
+    /// Falls back to clicking at the element's center if AXPress is unsupported.
+    ///
+    /// Output on success: `found\taction\trole\ttitle\tx\ty\twidth\theight`
+    /// Output on failure: exit 1, available element titles on stderr.
+    fn build_click_element_swift(search: &str) -> String {
+        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            r#"import Cocoa; func find(_ e: AXUIElement, _ q: String, _ d: Int) -> AXUIElement? {{ if d > 15 {{ return nil }}; for attr in ["AXTitle", "AXDescription", "AXValue", "AXLabel"] {{ var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, attr as CFString, &v); if let s = v as? String, s.localizedCaseInsensitiveContains(q) {{ return e }} }}; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] {{ for k in kids {{ if let r = find(k, q, d+1) {{ return r }} }} }}; return nil }}; func titles(_ e: AXUIElement, _ d: Int) -> [String] {{ if d > 5 {{ return [] }}; var r = [String](); var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXTitle" as CFString, &v); if let s = v as? String, !s.isEmpty {{ var rv: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXRole" as CFString, &rv); let role = rv as? String ?? ""; r.append("\(role): \(s)") }}; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] {{ for k in kids {{ r += titles(k, d+1) }} }}; return r }}; let app = NSWorkspace.shared.frontmostApplication!; let ax = AXUIElementCreateApplication(app.processIdentifier); if let el = find(ax, "{escaped}", 0) {{ var rv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXRole" as CFString, &rv); let role = rv as? String ?? ""; var tv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXTitle" as CFString, &tv); let title = tv as? String ?? ""; let pressed = AXUIElementPerformAction(el, "AXPress" as CFString) == .success; if pressed {{ print("found\tpressed\t\(role)\t\(title)\t0\t0\t0\t0") }} else {{ var pv: CFTypeRef?; var sv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXPosition" as CFString, &pv); AXUIElementCopyAttributeValue(el, "AXSize" as CFString, &sv); var pos = CGPoint.zero; var size = CGSize.zero; if let p = pv {{ AXValueGetValue(p as! AXValue, .cgPoint, &pos) }}; if let s = sv {{ AXValueGetValue(s as! AXValue, .cgSize, &size) }}; let cx = pos.x + size.width/2; let cy = pos.y + size.height/2; let e = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; e.post(tap: .cghidEventTap); Thread.sleep(forTimeInterval: 0.05); let u = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; u.post(tap: .cghidEventTap); print("found\tclicked\t\(role)\t\(title)\t\(Int(pos.x))\t\(Int(pos.y))\t\(Int(size.width))\t\(Int(size.height))") }} }} else {{ let available = titles(ax, 0); fputs(available.joined(separator: "\n"), stderr); Foundation.exit(1) }}"#
+        )
+    }
+
+    async fn click_element(
+        &self,
+        params: &Value,
+        ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
+        let text = match validate_required_string(params, "text", "text label of the element to click") {
+            Ok(t) => t,
+            Err(e) => return Ok(e),
+        };
+
+        // Confirmation gate
+        let confirmed = params.get("confirmed").and_then(Value::as_bool).unwrap_or(false);
+        if self.confirm_before_action && !confirmed {
+            return Ok(error_result(
+                "clickElement requires confirmation. Call GetConfirmation first, then retry with confirmed: true.".to_string(),
+            ));
+        }
+
+        let swift_script = Self::build_click_element_swift(&text);
+        let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
+        let output = self.run_shell(&cmd, ctx).await?;
+
+        if output.exit_code != 0 {
+            let available = output.stderr.trim();
+            let list = if available.is_empty() {
+                "No accessible elements found. The app may not expose accessibility data.".to_string()
+            } else {
+                format!("Available elements:\n{available}")
+            };
+            return Ok(error_result(format!(
+                "Element '{text}' not found in the frontmost app. {list}"
+            )));
+        }
+
+        // Parse: "found\tpressed|clicked\trole\ttitle\tx\ty\twidth\theight"
+        let parts: Vec<&str> = output.stdout.trim().splitn(8, '\t').collect();
+        let action = parts.get(1).unwrap_or(&"unknown");
+        let role = parts.get(2).unwrap_or(&"");
+        let title = parts.get(3).unwrap_or(&"");
+
+        tracing::debug!(
+            search = %text, action = %action, role = %role, title = %title,
+            "clickElement result"
+        );
+
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                format!("Clicked element: \"{title}\" ({role}, {action})")
+            )]),
+            details: Some(json!({
+                "action": "clickElement",
+                "text": text,
+                "method": *action,
+                "role": *role,
+                "title": *title,
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
+    }
+
     async fn move_mouse(
         &self,
         params: &Value,
@@ -1168,7 +1255,7 @@ mod tests {
         let props = def.parameters.properties.unwrap();
         let action = &props["action"];
         let enum_values = action["enum"].as_array().unwrap();
-        for expected in ["screenshot", "click", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"] {
+        for expected in ["screenshot", "click", "clickElement", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"] {
             assert!(enum_values.contains(&json!(expected)), "missing: {expected}");
         }
     }
@@ -1726,7 +1813,6 @@ mod tests {
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/jpeg");
         assert_eq!(d["sizeBytes"], 500);
-        assert_eq!(d["originalSizeBytes"], 1000);
     }
 
     #[tokio::test]
@@ -1743,35 +1829,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn screenshot_text_includes_image_dimensions() {
+    async fn screenshot_text_has_1to1_mapping() {
         let t = tool_with_runner(screenshot_runner(1000, Some(500)), false);
         let r = t.execute(json!({"action": "screenshot"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        // Must include image pixel dimensions
-        assert!(text.contains("1280x960 image"), "should have image dimensions: {text}");
-        // On macOS, should include coordinate mapping guide
+        assert!(text.contains("bytes JPEG"), "should state format: {text}");
         #[cfg(target_os = "macos")]
-        {
-            assert!(text.contains("Coordinate mapping"), "should have coord guide: {text}");
-            assert!(text.contains("screen_x"), "should show formula: {text}");
-        }
-        // Details should also have imageWidth/imageHeight
-        let d = r.details.unwrap();
-        assert_eq!(d["imageWidth"], 1280);
-        assert_eq!(d["imageHeight"], 960);
+        assert!(text.contains("1:1"), "should mention 1:1 mapping: {text}");
     }
 
     #[tokio::test]
-    async fn screenshot_window_text_includes_window_mapping() {
-        let runner = window_screenshot_runner("42\ttrue\t1187\t1100", 0, 0, "");
+    async fn screenshot_window_text_has_position() {
+        let runner = window_screenshot_runner("42\ttrue\t1187\t1100\t505\t273", 0, 0, "");
         let t = tool_with_runner(runner, false);
         let r = t.execute(json!({"action": "screenshot", "window": "Safari"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let text = extract_text(&r);
-        // Window screenshots should explain they need getWindows for position
-        #[cfg(target_os = "macos")]
-        assert!(text.contains("WINDOW screenshot"), "should say it's a window screenshot: {text}");
+        // Should include window position for coordinate offset
+        assert!(text.contains("505"), "should include window x position: {text}");
+        assert!(text.contains("273"), "should include window y position: {text}");
+        // Details should have windowX/windowY
+        let d = r.details.unwrap();
+        assert_eq!(d["windowX"], 505);
+        assert_eq!(d["windowY"], 273);
     }
 
     #[tokio::test]
@@ -2146,6 +2227,104 @@ mod tests {
         assert_eq!(r.is_error, Some(true));
         let text = extract_text(&r);
         assert!(text.contains("activation failed"), "should say failed: {text}");
+    }
+
+    // ─── clickElement tests ───
+
+    #[tokio::test]
+    async fn click_element_pressed() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "found\tpressed\tAXButton\tSubmit\t0\t0\t0\t0".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "clickElement", "text": "Submit", "confirmed": true}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let text = extract_text(&r);
+        assert!(text.contains("Submit"), "should mention element: {text}");
+        assert!(text.contains("pressed"), "should say pressed: {text}");
+        let d = r.details.unwrap();
+        assert_eq!(d["action"], "clickElement");
+        assert_eq!(d["method"], "pressed");
+    }
+
+    #[tokio::test]
+    async fn click_element_clicked_fallback() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: "found\tclicked\tAXLink\tLearn more\t200\t300\t100\t20".into(),
+                    stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "clickElement", "text": "Learn more", "confirmed": true}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+        let d = r.details.unwrap();
+        assert_eq!(d["method"], "clicked");
+    }
+
+    #[tokio::test]
+    async fn click_element_not_found() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("swift") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "AXButton: OK\nAXLink: Cancel".into(),
+                    exit_code: 1,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({"action": "clickElement", "text": "Nonexistent", "confirmed": true}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("not found"), "should say not found: {text}");
+        assert!(text.contains("Available elements"), "should list available: {text}");
+    }
+
+    #[tokio::test]
+    async fn click_element_requires_confirmation() {
+        let t = tool(true);
+        let r = t.execute(json!({"action": "clickElement", "text": "Submit"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let text = extract_text(&r);
+        assert!(text.contains("requires confirmation"), "should require confirmation: {text}");
+    }
+
+    #[tokio::test]
+    async fn click_element_missing_text() {
+        let t = tool(false);
+        let r = t.execute(json!({"action": "clickElement", "confirmed": true}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn click_element_is_mutating() {
+        assert!(ComputerUseTool::is_mutating("clickElement"));
     }
 
     // ─── Window visibility diagnosis tests ───
