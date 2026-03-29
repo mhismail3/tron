@@ -86,7 +86,7 @@ impl TronTool for ComputerUseTool {
             "ComputerUse",
             "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
              Actions:\n\
-             - **screenshot**: Capture the full screen, or a specific window by name/title. Returns base64 image with screen resolution in details. Attempts capture regardless of window visibility state.\n\
+             - **screenshot**: Capture the full screen, or a specific window by name/title. The screenshot is saved to ~/.tron/memory/screenshots/ — use the returned file path with the Display tool to show it to the user.\n\
              - **click**: Click at screen coordinates. Needs Accessibility permission.\n\
              - **type**: Type a text string. Needs Accessibility permission.\n\
              - **keypress**: Press key combinations (e.g., cmd+c, enter, tab). Needs Accessibility permission.\n\
@@ -465,6 +465,28 @@ impl ComputerUseTool {
             }
         };
 
+        // Save to persistent screenshots directory so Display tool can reference the file.
+        let ext = if mime_type == "image/jpeg" { "jpg" } else { "png" };
+        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let rand_suffix: u16 = rand::random();
+        let screenshot_filename = format!("screenshot-{ts}-{rand_suffix:04x}.{ext}");
+        let screenshots_dir = crate::settings::tron_home_dir()
+            .join("memory")
+            .join("screenshots");
+        let _ = tokio::fs::create_dir_all(&screenshots_dir).await;
+        let screenshot_path = screenshots_dir.join(&screenshot_filename);
+
+        let saved_path = match tokio::fs::write(&screenshot_path, &image_data).await {
+            Ok(()) => {
+                tracing::debug!(path = %screenshot_path.display(), "Screenshot saved");
+                Some(screenshot_path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to persist screenshot — continuing without file");
+                None
+            }
+        };
+
         // Update throttle timestamp
         self.last_screenshot_ms.store(Self::now_ms(), Ordering::Relaxed);
 
@@ -494,6 +516,7 @@ impl ComputerUseTool {
             details["screenWidth"] = json!(w);
             details["screenHeight"] = json!(h);
         }
+        details["screenshotPath"] = json!(saved_path);
 
         // Build informative text with coordinate mapping guide
         let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
@@ -529,6 +552,13 @@ impl ComputerUseTool {
 
         if !size_warning.is_empty() {
             text.push_str(size_warning);
+        }
+
+        if let Some(ref path) = saved_path {
+            text.push_str(&format!("\nScreenshot saved to: {path}"));
+            text.push_str(
+                "\nUse Display(type: \"image\", path: \"<this path>\") to show it to the user.",
+            );
         }
 
         Ok(TronToolResult {

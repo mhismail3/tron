@@ -85,18 +85,14 @@ impl TronTool for DisplayTool {
              formatted text, links, or audio that would be better displayed in a dedicated \
              sheet rather than inline text.\n\n\
              Content types:\n\
-             - **image**: Show an image. Pass base64 via `data` or a file path via `path`.\n\
-             - **images**: Show multiple images in a gallery (file paths).\n\
+             - **image**: Show an image from a file path or inline base64 data\n\
+             - **images**: Show multiple images in a gallery\n\
              - **markdown**: Show formatted text with code blocks, tables, etc.\n\
-             - **link**: Show a URL with optional label.\n\
-             - **audio**: Play an audio file from a path.\n\
-             - **stream**: Open a live-updating view (for browser streams, log tails, etc.).\n\n\
-             ## Images\n\
-             When you already have image data in memory (e.g., a ComputerUse screenshot returns \
-             base64 image data), pass it directly via the `data` parameter — do NOT save to disk \
-             first. Use `path` only when the image is already a file on disk.\n\n\
-             Example with ComputerUse screenshot: take screenshot → pass the returned base64 data \
-             straight to Display(type: \"image\", data: \"<base64>\", title: \"Screenshot\").",
+             - **link**: Show a URL with optional label\n\
+             - **audio**: Play an audio file\n\
+             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\n\
+             For images: use `path` for a file on disk (e.g., the path returned by a ComputerUse \
+             screenshot), or `data` to pass base64 directly.",
         )
         .required_property(
             "type",
