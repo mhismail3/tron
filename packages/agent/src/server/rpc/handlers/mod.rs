@@ -22,6 +22,7 @@
 
 pub mod agent;
 pub mod auth;
+pub mod blob;
 pub mod browser;
 pub mod canvas;
 pub mod communication;
@@ -64,6 +65,9 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("system.ping", system::PingHandler);
     registry.register("system.getInfo", system::GetInfoHandler);
     registry.register("system.shutdown", system::ShutdownHandler);
+
+    // Blob
+    registry.register("blob.get", blob::GetBlobHandler);
 
     // Session
     registry.register("session.create", session::CreateSessionHandler);
@@ -498,8 +502,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            115,
-            "expected 115 methods, got {}",
+            116,
+            "expected 116 methods (115 + blob.get), got {}",
             reg.methods().len()
         );
     }

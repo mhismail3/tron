@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Display Tool Detail Sheet
 
 /// Detail sheet for the Display tool — renders rich content based on type.
-/// Images are always decoded from base64 data in the event details (the server
-/// encodes file contents), so this works regardless of filesystem access.
+/// Images are fetched from blob storage via the `blob.get` RPC — the event
+/// details contain only a `blobId`, not raw image data.
 @available(iOS 26.0, *)
 struct DisplayToolDetailSheet: View {
     let data: CommandToolChipData
@@ -26,20 +26,18 @@ struct DisplayToolDetailSheet: View {
         return ToolArgumentParser.string("title", from: data.arguments)
     }
 
-    /// Decode a single image from base64 `imageData` in details.
-    private var decodedImage: UIImage? {
-        guard let b64 = data.details?["imageData"]?.value as? String,
-              let imageData = Data(base64Encoded: b64) else { return nil }
-        return UIImage(data: imageData)
+    /// Blob ID for single image display.
+    private var imageBlobId: String? {
+        data.details?["blobId"]?.value as? String
     }
 
-    /// Decode multiple images from the `images` array in details.
-    private var decodedImages: [UIImage] {
+    /// Blob IDs for gallery display.
+    private var galleryBlobIds: [(id: String, mime: String)] {
         guard let arr = data.details?["images"]?.value as? [[String: Any]] else { return [] }
         return arr.compactMap { item in
-            guard let b64 = item["imageData"] as? String,
-                  let data = Data(base64Encoded: b64) else { return nil }
-            return UIImage(data: data)
+            guard let id = item["blobId"] as? String else { return nil }
+            let mime = item["mimeType"] as? String ?? "image/png"
+            return (id: id, mime: mime)
         }
     }
 
@@ -130,40 +128,27 @@ struct DisplayToolDetailSheet: View {
 
     @ViewBuilder
     private var imageSection: some View {
-        if let image = decodedImage {
+        if let blobId = imageBlobId {
             ToolDetailSection(title: "Image", tint: tint) {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                BlobImageView(blobId: blobId)
             }
         } else {
-            ToolEmptyState(
-                title: "Image",
-                icon: "photo",
-                message: "Unable to load image",
-                accent: .tronIndigo,
-                tint: tint,
-                subtitle: data.details?["path"]?.value as? String
-            )
+            ToolEmptyState(title: "Image", icon: "photo", message: "No image data available", accent: .tronIndigo, tint: tint)
         }
     }
 
     @ViewBuilder
     private var imagesSection: some View {
-        let images = decodedImages
-        if images.isEmpty {
+        let blobs = galleryBlobIds
+        if blobs.isEmpty {
             ToolEmptyState(title: "Images", icon: "photo.on.rectangle", message: "No images to display", accent: .tronIndigo, tint: tint)
         } else {
-            ToolDetailSection(title: "Images (\(images.count))", tint: tint) {
+            ToolDetailSection(title: "Images (\(blobs.count))", tint: tint) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(Array(images.enumerated()), id: \.offset) { _, image in
-                            Image(uiImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
+                        ForEach(Array(blobs.enumerated()), id: \.offset) { _, blob in
+                            BlobImageView(blobId: blob.id)
                                 .frame(maxHeight: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
@@ -246,5 +231,60 @@ struct DisplayToolDetailSheet: View {
         } else {
             ToolEmptyState(title: "Stream", icon: "play.rectangle", message: "No stream ID provided", accent: .tronIndigo, tint: tint)
         }
+    }
+}
+
+// MARK: - Blob Image View
+
+/// Fetches and displays an image from blob storage via the `blob.get` RPC.
+@available(iOS 26.0, *)
+private struct BlobImageView: View {
+    let blobId: String
+    @Environment(\.dependencies) private var dependencies
+    @State private var image: UIImage?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 100)
+            } else if let errorMessage {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.tronAmber)
+                    Text(errorMessage)
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .frame(maxWidth: .infinity, minHeight: 100)
+            }
+        }
+        .task {
+            await fetchBlob()
+        }
+    }
+
+    @MainActor
+    private func fetchBlob() async {
+        do {
+            if let data = try await dependencies.rpcClient.blob.getImageData(blobId: blobId) {
+                self.image = UIImage(data: data)
+                if self.image == nil {
+                    self.errorMessage = "Failed to decode image data"
+                }
+            } else {
+                self.errorMessage = "Invalid image data"
+            }
+        } catch {
+            self.errorMessage = "Failed to load: \(error.localizedDescription)"
+        }
+        self.isLoading = false
     }
 }

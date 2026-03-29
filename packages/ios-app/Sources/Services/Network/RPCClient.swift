@@ -81,6 +81,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var mcp: MCPClient = MCPClient(transport: self)
 
+    /// Blob storage client (for Display tool image loading).
+    @ObservationIgnored
+    lazy var blob: BlobClient = BlobClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.

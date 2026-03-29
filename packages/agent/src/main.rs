@@ -223,7 +223,11 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     }
 
     // 11: Display (rich content presentation — images, markdown, audio, etc.)
-    registry.register(Arc::new(tron::tools::ui::display::DisplayTool::new()));
+    //     Uses blob storage for images to avoid exceeding WebSocket message limits.
+    let display_blob_store: Arc<dyn tron::tools::traits::BlobStore> = config.event_store.clone();
+    registry.register(Arc::new(tron::tools::ui::display::DisplayTool::new(
+        Some(display_blob_store),
+    )));
 
     // 12: ComputerUse (screenshot, click, type, keypress, scroll, window management)
     registry.register(Arc::new(

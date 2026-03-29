@@ -8,15 +8,15 @@
 //! ## Image handling
 //!
 //! Images can be provided in two ways:
-//! - **`path`**: Server reads the file and base64-encodes it into the result
-//!   details, so the iOS app can render without filesystem access.
-//! - **`data`**: Base64-encoded image data passed directly (e.g., from
-//!   ComputerUse screenshot output), skipping file I/O entirely.
+//! - **`path`**: Server reads the file and stores it in blob storage.
+//! - **`data`**: Base64-encoded image data stored in blob storage directly.
 //!
-//! The iOS app always renders from `details.imageData` (base64), never from
-//! file paths — the server and client may be on different machines.
+//! The result details contain a `blobId` (NOT raw image data) to keep event
+//! payloads small and avoid exceeding the 2MB WebSocket message limit. The iOS
+//! app fetches the blob content via the `blob.get` RPC when rendering.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -57,18 +57,14 @@ fn mime_for_ext(ext: &str) -> &'static str {
 }
 
 /// The `Display` tool presents rich content to the user via the iOS app.
-pub struct DisplayTool;
+pub struct DisplayTool {
+    blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>,
+}
 
 impl DisplayTool {
     /// Create a new Display tool instance.
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for DisplayTool {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>) -> Self {
+        Self { blob_store }
     }
 }
 
@@ -206,65 +202,53 @@ impl DisplayTool {
     /// Handle `image` type — from file path OR inline base64 data.
     ///
     /// Priority: `data` (inline base64) > `path` (file on disk).
-    /// Always produces `imageData` + `mimeType` in details for iOS rendering.
+    /// Image bytes are stored in blob storage; details contain `blobId` + `mimeType`.
+    /// The iOS app fetches blob content via the `blob.get` RPC.
     async fn handle_image(&self, params: &Value) -> Result<TronToolResult, ToolError> {
         let inline_data = get_optional_string(params, "data");
         let path = get_optional_string(params, "path");
 
-        if let Some(ref b64) = inline_data {
-            // Validate that the base64 decodes successfully.
+        let (image_bytes, mime) = if let Some(ref b64) = inline_data {
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(b64)
                 .map_err(|e| ToolError::Validation {
                     message: format!("Invalid base64 data: {e}"),
                 })?;
-
             let mime = get_optional_string(params, "mimeType")
                 .unwrap_or_else(|| "image/png".to_string());
-
-            return Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    crate::core::content::ToolResultContent::text(format!(
-                        "Displaying image ({} bytes)",
-                        decoded.len()
-                    )),
-                ]),
-                details: Some(json!({
-                    "imageData": b64,
-                    "mimeType": mime,
-                })),
-                is_error: None,
-                stop_turn: None,
-            });
-        }
-
-        let path = match path {
-            Some(p) => p,
-            None => {
-                return Ok(error_result(
-                    "Missing 'path' or 'data' parameter for image type. \
-                     Provide a file path or base64-encoded image data.",
-                ))
-            }
+            (decoded, mime)
+        } else if let Some(ref path) = path {
+            let (bytes, mime) = self
+                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
+                .await?;
+            (bytes, mime.to_string())
+        } else {
+            return Ok(error_result(
+                "Missing 'path' or 'data' parameter for image type. \
+                 Provide a file path or base64-encoded image data.",
+            ));
         };
 
-        let (b64, mime) = self.read_and_encode(&path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
+        let size = image_bytes.len();
+        let blob_id = self.store_blob(&image_bytes, &mime).await?;
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!("Displaying image: {path}")),
+                crate::core::content::ToolResultContent::text(format!(
+                    "Displaying image ({size} bytes)"
+                )),
             ]),
             details: Some(json!({
-                "path": path,
-                "imageData": b64,
+                "blobId": blob_id,
                 "mimeType": mime,
+                "sizeBytes": size,
             })),
             is_error: None,
             stop_turn: None,
         })
     }
 
-    /// Handle `images` type — multiple file paths, each encoded to base64.
+    /// Handle `images` type — multiple file paths, each stored in blob storage.
     async fn handle_images(&self, params: &Value) -> Result<TronToolResult, ToolError> {
         let paths: Vec<String> = params
             .get("paths")
@@ -285,10 +269,11 @@ impl DisplayTool {
 
         let mut images_data: Vec<Value> = Vec::with_capacity(paths.len());
         for path in &paths {
-            let (b64, mime) = self
-                .read_and_encode(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
+            let (bytes, mime) = self
+                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
                 .await?;
-            images_data.push(json!({"imageData": b64, "mimeType": mime, "path": path}));
+            let blob_id = self.store_blob(&bytes, mime).await?;
+            images_data.push(json!({"blobId": blob_id, "mimeType": mime, "path": path}));
         }
 
         Ok(TronToolResult {
@@ -386,14 +371,14 @@ impl DisplayTool {
         })
     }
 
-    /// Read a file, validate it, and return `(base64_data, mime_type)`.
-    async fn read_and_encode(
+    /// Read a file, validate it, and return `(raw_bytes, mime_type)`.
+    async fn read_file(
         &self,
         path: &str,
         supported_exts: &[&str],
         max_bytes: u64,
         kind: &str,
-    ) -> Result<(String, &'static str), ToolError> {
+    ) -> Result<(Vec<u8>, &'static str), ToolError> {
         self.validate_file(path, supported_exts, max_bytes, kind)?;
 
         let file_path = Path::new(path);
@@ -410,8 +395,20 @@ impl DisplayTool {
                 message: format!("Failed to read file: {e}"),
             })?;
 
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-        Ok((b64, mime))
+        Ok((data, mime))
+    }
+
+    /// Store content in blob storage. Returns the blob ID.
+    async fn store_blob(&self, content: &[u8], mime_type: &str) -> Result<String, ToolError> {
+        match self.blob_store.as_ref() {
+            Some(store) => store.store(content, mime_type).await,
+            None => {
+                // Fallback: no blob store available (shouldn't happen in production).
+                // Return a synthetic ID with inline base64 for graceful degradation.
+                let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+                Ok(format!("inline:{b64}"))
+            }
+        }
     }
 
     /// Validate a file exists, has a supported extension, and is within size limits.
@@ -474,7 +471,7 @@ mod tests {
 
     #[test]
     fn schema_has_all_parameters() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
         for key in &[
@@ -490,7 +487,7 @@ mod tests {
 
     #[test]
     fn tool_name_and_category() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         assert_eq!(tool.name(), "Display");
         assert_eq!(tool.category(), ToolCategory::Custom);
     }
@@ -498,12 +495,12 @@ mod tests {
     // ── Image from path (encodes to base64) ────────────────────
 
     #[tokio::test]
-    async fn image_path_encodes_to_base64() {
+    async fn image_path_produces_blob_id() {
         let mut tmp = NamedTempFile::with_suffix(".png").unwrap();
         write!(tmp, "fake png data").unwrap();
         let path = tmp.path().to_string_lossy().to_string();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "image", "path": path}), &make_ctx())
             .await
@@ -512,12 +509,9 @@ mod tests {
         let details = r.details.unwrap();
         assert_eq!(details["displayType"], "image");
         assert_eq!(details["mimeType"], "image/png");
-        // imageData should be base64 of "fake png data"
-        let image_data = details["imageData"].as_str().unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(image_data)
-            .unwrap();
-        assert_eq!(decoded, b"fake png data");
+        // Without blob store, fallback produces inline:<base64>
+        let blob_id = details["blobId"].as_str().unwrap();
+        assert!(blob_id.starts_with("inline:"));
     }
 
     #[tokio::test]
@@ -525,7 +519,7 @@ mod tests {
         let mut tmp = NamedTempFile::with_suffix(".jpg").unwrap();
         write!(tmp, "jpeg data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
@@ -541,7 +535,7 @@ mod tests {
     #[tokio::test]
     async fn image_with_data_param() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"inline image bytes");
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "data": b64, "mimeType": "image/jpeg"}),
@@ -551,14 +545,14 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
-        assert_eq!(details["imageData"], b64);
+        assert!(details["blobId"].as_str().is_some());
         assert_eq!(details["mimeType"], "image/jpeg");
     }
 
     #[tokio::test]
     async fn image_data_defaults_to_png_mime() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"data");
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "image", "data": b64}), &make_ctx())
             .await
@@ -568,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn image_data_invalid_base64() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "data": "not valid base64!!!"}),
@@ -582,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn image_data_takes_priority_over_path() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"priority data");
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         // Both data and path provided — data wins, path ignored.
         let r = tool
             .execute(
@@ -592,14 +586,14 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert_eq!(r.details.unwrap()["imageData"], b64);
+        assert!(r.details.unwrap()["blobId"].as_str().is_some());
     }
 
     // ── Image validation edge cases ────────────────────────────
 
     #[tokio::test]
     async fn image_missing_file() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "path": "/nonexistent/file.png"}),
@@ -617,7 +611,7 @@ mod tests {
         let data = vec![0u8; (MAX_IMAGE_BYTES + 1) as usize];
         std::fs::write(&path, &data).unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "path": path.to_string_lossy().to_string()}),
@@ -633,7 +627,7 @@ mod tests {
         let mut tmp = NamedTempFile::with_suffix(".exe").unwrap();
         write!(tmp, "data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
@@ -646,7 +640,7 @@ mod tests {
 
     #[tokio::test]
     async fn image_no_path_or_data() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "image"}), &make_ctx())
             .await
@@ -660,7 +654,7 @@ mod tests {
         let path = dir.path().join("noext");
         std::fs::write(&path, "data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "image", "path": path.to_string_lossy().to_string()}),
@@ -673,13 +667,13 @@ mod tests {
     // ── Images (gallery) ───────────────────────────────────────
 
     #[tokio::test]
-    async fn images_encodes_all_to_base64() {
+    async fn images_stores_all_as_blobs() {
         let mut t1 = NamedTempFile::with_suffix(".jpg").unwrap();
         let mut t2 = NamedTempFile::with_suffix(".png").unwrap();
         write!(t1, "img1").unwrap();
         write!(t2, "img2").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "images", "paths": [
@@ -694,14 +688,14 @@ mod tests {
         let details = r.details.unwrap();
         let images = details["images"].as_array().unwrap();
         assert_eq!(images.len(), 2);
-        assert!(images[0]["imageData"].is_string());
+        assert!(images[0]["blobId"].as_str().is_some());
         assert_eq!(images[0]["mimeType"], "image/jpeg");
         assert_eq!(images[1]["mimeType"], "image/png");
     }
 
     #[tokio::test]
     async fn images_empty_array() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "images", "paths": []}), &make_ctx())
             .await
@@ -714,7 +708,7 @@ mod tests {
         let mut t1 = NamedTempFile::with_suffix(".jpg").unwrap();
         write!(t1, "data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "images", "paths": [
@@ -731,7 +725,7 @@ mod tests {
 
     #[tokio::test]
     async fn markdown_valid() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "markdown", "content": "# Hello\nWorld"}),
@@ -747,7 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn markdown_empty_content() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "markdown", "content": ""}), &make_ctx())
             .await
@@ -757,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     async fn markdown_missing_content() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "markdown"}), &make_ctx())
             .await
@@ -769,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_valid_with_label() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "link", "url": "https://example.com", "label": "Example"}),
@@ -785,7 +779,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_valid_without_label() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "link", "url": "https://example.com"}),
@@ -798,7 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_missing_url() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "link"}), &make_ctx())
             .await
@@ -813,7 +807,7 @@ mod tests {
         let mut tmp = NamedTempFile::with_suffix(".mp3").unwrap();
         write!(tmp, "audio data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string()}),
@@ -830,7 +824,7 @@ mod tests {
         let mut tmp = NamedTempFile::with_suffix(".wav").unwrap();
         write!(tmp, "audio data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string(), "autoplay": true}),
@@ -846,7 +840,7 @@ mod tests {
         let mut tmp = NamedTempFile::with_suffix(".wma").unwrap();
         write!(tmp, "data").unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "audio", "path": tmp.path().to_string_lossy().to_string()}),
@@ -858,7 +852,7 @@ mod tests {
 
     #[tokio::test]
     async fn audio_missing_file() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "audio", "path": "/nonexistent/audio.mp3"}),
@@ -875,7 +869,7 @@ mod tests {
         let data = vec![0u8; (MAX_AUDIO_BYTES + 1) as usize];
         std::fs::write(&path, &data).unwrap();
 
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "audio", "path": path.to_string_lossy().to_string()}),
@@ -889,7 +883,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_valid() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "stream", "streamId": "browser-123"}),
@@ -905,7 +899,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_missing_id() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "stream"}), &make_ctx())
             .await
@@ -917,7 +911,7 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_true_stops_turn() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "markdown", "content": "Review this", "interactive": true}),
@@ -930,7 +924,7 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_false_does_not_stop() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "markdown", "content": "FYI"}),
@@ -945,7 +939,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_type_returns_error() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "video"}), &make_ctx())
             .await
@@ -955,14 +949,14 @@ mod tests {
 
     #[tokio::test]
     async fn missing_type_returns_error() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn title_flows_to_details() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(
                 json!({"type": "markdown", "content": "text", "title": "My Title"}),
@@ -975,7 +969,7 @@ mod tests {
 
     #[tokio::test]
     async fn title_absent_not_in_details() {
-        let tool = DisplayTool::new();
+        let tool = DisplayTool::new(None);
         let r = tool
             .execute(json!({"type": "markdown", "content": "text"}), &make_ctx())
             .await
