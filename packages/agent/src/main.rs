@@ -485,11 +485,6 @@ async fn main() -> Result<()> {
     };
 
     // Tool registry config (shared resources for per-session tool factories)
-    // Create a broadcast channel for Display tool streaming.
-    // The sender goes to DisplayTool; the orchestrator subscribes the receiver
-    // to the event bridge so frames reach iOS via WebSocket.
-    let (display_tx, _) = tokio::sync::broadcast::channel::<tron::core::events::TronEvent>(64);
-
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         brave_api_key,
@@ -497,7 +492,9 @@ async fn main() -> Result<()> {
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
-        display_event_tx: Some(display_tx),
+        // Use the orchestrator's broadcast sender so DisplayFrame events
+        // flow through the same channel the EventBridge listens to.
+        display_event_tx: Some(orchestrator.broadcast().sender()),
         mcp_search,
         mcp_call,
     });
