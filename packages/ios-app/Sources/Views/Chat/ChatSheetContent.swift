@@ -142,6 +142,8 @@ struct ChatSheetContent: View {
             WebSearchToolDetailSheet(data: liveData)
         case "computeruse":
             ComputerUseToolDetailSheet(data: liveData)
+        case "display":
+            DisplayToolDetailSheet(data: liveData)
         case "remember":
             RememberToolDetailSheet(data: liveData)
         default:

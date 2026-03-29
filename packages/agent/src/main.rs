@@ -222,7 +222,10 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         )));
     }
 
-    // 11: ComputerUse (screenshot, click, type, keypress, scroll, window management)
+    // 11: Display (rich content presentation — images, markdown, audio, etc.)
+    registry.register(Arc::new(tron::tools::ui::display::DisplayTool::new()));
+
+    // 12: ComputerUse (screenshot, click, type, keypress, scroll, window management)
     registry.register(Arc::new(
         tron::tools::ui::computer_use::ComputerUseTool::new(
             cu_runner,
@@ -1419,7 +1422,8 @@ mod tests {
         assert_eq!(names[7], "GetConfirmation");
         assert_eq!(names[8], "NotifyApp");
         assert_eq!(names[9], "WebFetch");
-        assert_eq!(names[10], "ComputerUse");
+        assert_eq!(names[10], "Display");
+        assert_eq!(names[11], "ComputerUse");
     }
 
     #[test]
@@ -1433,11 +1437,11 @@ mod tests {
     fn tool_registry_count() {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
-        // 11 tools without Brave API key (no WebSearch), without subagent tools
+        // 12 tools without Brave API key (no WebSearch), without subagent tools
         assert_eq!(
             registry.len(),
-            11,
-            "expected 11 tools (no WebSearch without Brave key), got: {:?}",
+            12,
+            "expected 12 tools (no WebSearch without Brave key), got: {:?}",
             registry.names()
         );
     }
@@ -1451,8 +1455,8 @@ mod tests {
         let registry = create_tool_registry(&config);
         assert_eq!(
             registry.len(),
-            12,
-            "expected 12 tools with WebSearch, got: {:?}",
+            13,
+            "expected 13 tools with WebSearch, got: {:?}",
             registry.names()
         );
     }

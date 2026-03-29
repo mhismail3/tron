@@ -36,6 +36,7 @@ enum ToolRegistry {
         "search", "glob", "find",
         "webfetch", "websearch",
         "computeruse",
+        "display",
         "mcpsearch", "mcpcall"
     ]
 
@@ -238,6 +239,19 @@ enum ToolRegistry {
                     isExpanded: isExpanded
                 ))
             }
+        ),
+        "display": ToolDescriptor(
+            icon: "rectangle.on.rectangle",
+            iconColor: .tronIndigo,
+            displayName: "Display",
+            completedDisplayName: "Displayed",
+            summaryExtractor: { args in
+                let type_ = ToolArgumentParser.string("type", from: args) ?? ""
+                let title = ToolArgumentParser.string("title", from: args) ?? ""
+                if !title.isEmpty { return "\(type_): \(ToolArgumentParser.truncate(title, maxLength: 30))" }
+                return type_
+            },
+            viewerFactory: nil
         ),
         "mcpsearch": ToolDescriptor(
             icon: "magnifyingglass.circle",
