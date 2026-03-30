@@ -130,38 +130,6 @@ final class TokenFormatterTests: XCTestCase {
         XCTAssertEqual(usage.formattedCacheWrite, "2.0k")
     }
 
-    // MARK: - formatFullSession() Tests (includes cache tokens)
-
-    func test_formatFullSession_noCacheTokens_returnsBasePair() {
-        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 0)
-        XCTAssertEqual(result, "↑500 ↓63")
-    }
-
-    func test_formatFullSession_cacheReadOnly_noCacheIndicator() {
-        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20300, cacheWrite: 0)
-        XCTAssertEqual(result, "↑500 ↓63")
-    }
-
-    func test_formatFullSession_cacheWriteOnly_noCacheIndicator() {
-        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 8000)
-        XCTAssertEqual(result, "↑500 ↓63")
-    }
-
-    func test_formatFullSession_bothCacheReadAndWrite_noCacheIndicator() {
-        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20000, cacheWrite: 8000)
-        XCTAssertEqual(result, "↑500 ↓63")
-    }
-
-    func test_formatFullSession_largeNumbers_formatsCorrectly() {
-        let result = TokenFormatter.formatFullSession(input: 100000, output: 25000, cacheRead: 1500000, cacheWrite: 500000)
-        XCTAssertEqual(result, "↑100.0k ↓25.0k")
-    }
-
-    func test_formatFullSession_nilValues_treatedAsZero() {
-        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: nil, cacheWrite: nil)
-        XCTAssertEqual(result, "↑500 ↓63")
-    }
-
     // MARK: - SessionInfo.formattedTokens Tests
 
     func test_sessionInfo_formattedTokens_combinesInputAndCacheRead() {

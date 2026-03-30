@@ -40,12 +40,6 @@ enum TokenFormatter {
         return "↑\(inStr) ↓\(outStr)"
     }
 
-    /// Format session tokens as simplified input/output pair.
-    /// Cache breakdown is available in the Analytics section.
-    static func formatFullSession(input: Int, output: Int, cacheRead: Int?, cacheWrite: Int?) -> String {
-        formatPair(input: input, output: output)
-    }
-
     // MARK: - Private
 
     private static func formatCompact(_ count: Int) -> String {

@@ -449,41 +449,6 @@ extension ChatViewModel {
             || allReconstructedMessages.count > displayedMessageCount
     }
 
-    /// Load messages from EventDatabase (sync version - kept for compatibility)
-    func loadPersistedMessages() {
-        guard let manager = eventStoreManager else { return }
-
-        do {
-            let state = try manager.getReconstructedState(sessionId: sessionId)
-            allReconstructedMessages = state.messages
-            replaceAllMessages(with: state.messages)
-
-            currentTurn = state.currentTurn
-
-            // Token state from reconstructed state (server events = single source of truth)
-            let usage = state.totalTokenUsage
-
-            // Set token state from reconstructed state (derived from server events)
-            contextState.setAccumulatedTokens(from: usage)
-            contextState.lastTurnInputTokens = state.lastTurnInputTokens
-            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
-            logger.info("[TOKEN-FIX] RESUME (sync) from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
-
-            // Get cost from iOS DB session cache (just for display)
-            do {
-                if let session = try manager.eventDB.sessions.get(sessionId) {
-                    contextState.accumulatedCost = session.cost
-                }
-            } catch {
-                logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
-            }
-
-            logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)
-        } catch {
-            logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
-        }
-    }
-
     /// Append a new message to the display (streaming messages during active session)
     /// Also syncs to MessageWindowManager and MessageIndex for virtual scrolling
     /// Required by context protocols

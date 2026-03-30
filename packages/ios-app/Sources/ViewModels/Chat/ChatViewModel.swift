@@ -481,28 +481,7 @@ final class ChatViewModel {
         return windowed.isEmpty ? messages : windowed
     }
 
-    /// Whether more older messages are available (from MessageWindowManager)
-    var hasMoreOlderMessages: Bool {
-        messageWindowManager.hasMoreOlder
-    }
-
-    /// Load older messages through MessageWindowManager
-    func loadOlderMessages() async {
-        await messageWindowManager.loadOlder()
-    }
-
     // MARK: - Message Updates
-
-    func updateStreamingMessage(with content: MessageContent) {
-        guard let id = streamingManager.streamingMessageId,
-              let index = messageIndex.index(for: id) else {
-            return
-        }
-        messages[index].content = content
-
-        // Sync to MessageWindowManager
-        messageWindowManager.updateMessage(messages[index])
-    }
 
     func finalizeStreamingMessage() {
         // Use StreamingManager for finalization (clears streamingMessageId and streamingText)
@@ -569,10 +548,6 @@ final class ChatViewModel {
     }
 
     // MARK: - Commands
-
-    func clearMessages() {
-        clearAllMessages()
-    }
 
     /// Add an in-chat notification when model is switched
     func addModelChangeNotification(from previousModel: String, to newModel: String) {
