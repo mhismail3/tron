@@ -20,7 +20,7 @@ use crate::tools::utils::validation::{
 };
 
 /// Actions that modify system state and require confirmation when enabled.
-const MUTATING_ACTIONS: &[&str] = &["click", "clickElement", "type", "keypress", "scroll", "moveMouse"];
+const MUTATING_ACTIONS: &[&str] = &["clickElement", "type", "keypress", "scroll"];
 
 /// The `ComputerUse` tool provides GUI automation on macOS.
 pub struct ComputerUseTool {
@@ -84,24 +84,25 @@ impl TronTool for ComputerUseTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "ComputerUse",
-            "GUI automation on macOS. Take screenshots, click, type, press keys, scroll, and manage windows.\n\n\
-             **Screenshots are 1:1 with screen coordinates.** Pixel (x,y) in a full-screen screenshot IS \
-             screen point (x,y) — click there directly with no math. For window screenshots, add the window \
-             position (shown in the response) to the pixel coordinates.\n\n\
+            "GUI automation on macOS. Take screenshots, interact with UI elements, type, press keys, scroll, and manage windows.\n\n\
+             **To interact with UI elements, use clickElement or keypress — never guess coordinates.**\n\
+             - clickElement finds buttons, links, menu items, and controls by their text label via macOS Accessibility.\n\
+             - listElements shows what's clickable in any app (including Dock items).\n\
+             - keypress handles keyboard navigation (Tab, arrows, Enter, Escape, Cmd+shortcuts).\n\
+             - screenshot is for visual verification only.\n\n\
              Actions:\n\
-             - **screenshot**: Capture full screen or a specific window. 1:1 pixel-to-point mapping.\n\
-             - **click**: Click at screen coordinates. For full-screen screenshots, use pixel positions directly. \
-             For window screenshots, add the window offset from the screenshot response.\n\
-             - **clickElement**: Click a UI element by its text label (button, link, menu item, etc.). \
-             Uses macOS Accessibility API — no coordinates needed. Best for labeled UI elements.\n\
-             - **type**: Type a text string into the focused field.\n\
-             - **keypress**: Press key combinations (Tab, Enter, Escape, arrows, Cmd+shortcuts). \
-             Prefer keyboard navigation when possible.\n\
-             - **scroll**: Scroll at a position.\n\
+             - **clickElement**: Click a UI element by its text label. Works on buttons, links, menu items, \
+             dock icons, text fields — anything with an accessibility label. Set `app` to target a specific \
+             app (e.g. \"Dock\", \"Finder\", \"Safari\"). Defaults to the frontmost app.\n\
+             - **listElements**: List clickable elements in an app. Set `app` to target a specific app \
+             (e.g. \"Dock\", \"Safari\"). Defaults to frontmost app. Use before clickElement to see what's available.\n\
+             - **screenshot**: Capture full screen or a specific window by name.\n\
+             - **keypress**: Press key combinations. Primary navigation method alongside clickElement.\n\
+             - **type**: Type text into the focused input field.\n\
+             - **scroll**: Scroll in a direction (up/down/left/right).\n\
              - **getWindows**: List all windows with position, size, and visibility.\n\
-             - **focusWindow**: Bring a window to front by name. Works across Spaces.\n\
-             - **moveMouse**: Move the mouse cursor without clicking.\n\n\
-             NOTE: Mutating actions (click, type, keypress, scroll, moveMouse) may require \
+             - **focusWindow**: Bring a window to front by name. Works across Spaces.\n\n\
+             NOTE: Mutating actions (clickElement, type, keypress, scroll) may require \
              calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
              System Settings > Privacy & Security.",
@@ -109,15 +110,12 @@ impl TronTool for ComputerUseTool {
         .required_property("action", json!({
             "type": "string",
             "description": "The action to perform",
-            "enum": ["screenshot", "click", "clickElement", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"]
+            "enum": ["screenshot", "clickElement", "listElements", "type", "keypress", "scroll", "getWindows", "focusWindow"]
         }))
-        .property("x", json!({"type": "number", "description": "X coordinate (for click, scroll, moveMouse)"}))
-        .property("y", json!({"type": "number", "description": "Y coordinate (for click, scroll, moveMouse)"}))
-        .property("text", json!({"type": "string", "description": "Text to type (for type action)"}))
+        .property("text", json!({"type": "string", "description": "Text label of the element to click (for clickElement), or text to type (for type action)"}))
+        .property("app", json!({"type": "string", "description": "Target app name for clickElement/listElements (e.g. 'Dock', 'Safari', 'Finder'). Defaults to frontmost app."}))
         .property("keys", json!({"type": "array", "items": {"type": "string"}, "description": "Keys to press (for keypress action), e.g. [\"cmd\", \"c\"]"}))
-        .property("button", json!({"type": "string", "description": "Mouse button: left (default), right, middle", "default": "left"}))
-        .property("clicks", json!({"type": "number", "description": "Number of clicks: 1 (default) or 2 for double-click", "default": 1}))
-        .property("window", json!({"type": "string", "description": "Window title (for screenshot, focusWindow)"}))
+        .property("window", json!({"type": "string", "description": "Window name or title (for screenshot, focusWindow)"}))
         .property("direction", json!({"type": "string", "description": "Scroll direction: up, down, left, right", "enum": ["up", "down", "left", "right"]}))
         .property("amount", json!({"type": "number", "description": "Scroll amount in pixels (default: 100)", "default": 100}))
         .property("confirmed", json!({"type": "boolean", "description": "Set to true after user has confirmed via GetConfirmation (bypasses confirmation gate)"}))
@@ -145,16 +143,15 @@ impl TronTool for ComputerUseTool {
 
         match action.as_str() {
             "screenshot" => self.take_screenshot(&params, ctx).await,
-            "click" => self.click(&params, ctx).await,
+            "clickElement" => self.click_element(&params, ctx).await,
+            "listElements" => self.list_elements(&params, ctx).await,
             "type" => self.type_text(&params, ctx).await,
             "keypress" => self.keypress(&params, ctx).await,
             "scroll" => self.scroll(&params, ctx).await,
             "getWindows" => self.get_windows(ctx).await,
             "focusWindow" => self.focus_window(&params, ctx).await,
-            "moveMouse" => self.move_mouse(&params, ctx).await,
-            "clickElement" => self.click_element(&params, ctx).await,
             other => Ok(error_result(format!(
-                "Unknown action: {other}. Valid actions: screenshot, click, clickElement, type, keypress, scroll, getWindows, focusWindow, moveMouse"
+                "Unknown action: {other}. Valid actions: screenshot, clickElement, listElements, type, keypress, scroll, getWindows, focusWindow"
             ))),
         }
     }
@@ -165,19 +162,13 @@ impl ComputerUseTool {
     #[allow(clippy::unused_self)]
     fn describe_action(&self, action: &str, params: &Value) -> String {
         match action {
-            "click" => {
-                let x = get_optional_f64(params, "x").unwrap_or(0.0);
-                let y = get_optional_f64(params, "y").unwrap_or(0.0);
-                let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
-                if clicks > 1 {
-                    format!("Double-click at ({x}, {y})")
-                } else {
-                    format!("Click at ({x}, {y})")
-                }
-            }
             "clickElement" => {
                 let text = get_optional_string(params, "text").unwrap_or_default();
-                format!("Click element: \"{text}\"")
+                let app = get_optional_string(params, "app");
+                match app {
+                    Some(a) => format!("Click element \"{text}\" in {a}"),
+                    None => format!("Click element \"{text}\""),
+                }
             }
             "type" => {
                 let text = get_optional_string(params, "text").unwrap_or_default();
@@ -199,11 +190,6 @@ impl ComputerUseTool {
                 let dir = get_optional_string(params, "direction").unwrap_or_else(|| "down".into());
                 let amount = get_optional_u64(params, "amount").unwrap_or(100);
                 format!("Scroll {dir} by {amount}px")
-            }
-            "moveMouse" => {
-                let x = get_optional_f64(params, "x").unwrap_or(0.0);
-                let y = get_optional_f64(params, "y").unwrap_or(0.0);
-                format!("Move mouse to ({x}, {y})")
             }
             _ => action.to_string(),
         }
@@ -285,30 +271,6 @@ impl ComputerUseTool {
         {
             None
         }
-    }
-
-    /// Validate coordinates are within screen bounds.
-    /// Returns an error result if coordinates are out of bounds.
-    async fn validate_coordinates(
-        &self,
-        x: f64,
-        y: f64,
-    ) -> Option<TronToolResult> {
-        if x < 0.0 || y < 0.0 {
-            return Some(error_result(format!(
-                "Invalid coordinates ({x}, {y}): coordinates must be non-negative"
-            )));
-        }
-
-        if let Some((max_x, max_y)) = self.screen_bounds().await
-            && (x > max_x || y > max_y)
-        {
-            return Some(error_result(format!(
-                "Coordinates ({x}, {y}) are outside screen bounds ({max_x}x{max_y}). \
-                 Use getWindows to see where windows are positioned."
-            )));
-        }
-        None
     }
 
     async fn take_screenshot(
@@ -593,58 +555,6 @@ impl ComputerUseTool {
         })
     }
 
-    async fn click(
-        &self,
-        params: &Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_f64(params, "x")
-            .ok_or_else(|| ToolError::Validation { message: "click requires x coordinate".into() })?;
-        let y = get_optional_f64(params, "y")
-            .ok_or_else(|| ToolError::Validation { message: "click requires y coordinate".into() })?;
-
-        if let Some(err) = self.validate_coordinates(x, y).await {
-            return Ok(err);
-        }
-
-        let clicks = get_optional_u64(params, "clicks").unwrap_or(1);
-        let button = get_optional_string(params, "button").unwrap_or_else(|| "left".into());
-
-        let result = {
-            #[cfg(target_os = "macos")]
-            {
-                if self.use_native_input {
-                    super::input::click(x, y, &button, clicks).await
-                } else {
-                    // Test/fallback path: use osascript
-                    let xi = x as i64;
-                    let yi = y as i64;
-                    let script = format!("tell application \"System Events\" to click at {{{xi}, {yi}}}");
-                    self.run_osascript(&script, ctx).await.map(|_| ())
-                        .map_err(|e| format!("{e}"))
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err::<(), String>("ComputerUse click is only supported on macOS".into())
-            }
-        };
-
-        match result {
-            Ok(()) => Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    crate::core::content::ToolResultContent::text(format!(
-                        "Clicked at ({x}, {y}){}", if clicks > 1 { " (double-click)" } else { "" }
-                    )),
-                ]),
-                details: Some(json!({"action": "click", "x": x, "y": y, "clicks": clicks, "button": button})),
-                is_error: None,
-                stop_turn: None,
-            }),
-            Err(e) => Ok(error_result(format!("Click failed: {e}"))),
-        }
-    }
-
     async fn type_text(
         &self,
         params: &Value,
@@ -750,15 +660,6 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_f64(params, "x").unwrap_or(0.0);
-        let y = get_optional_f64(params, "y").unwrap_or(0.0);
-
-        if (x != 0.0 || y != 0.0)
-            && let Some(err) = self.validate_coordinates(x, y).await
-        {
-            return Ok(err);
-        }
-
         let direction = get_optional_string(params, "direction")
             .unwrap_or_else(|| "down".to_string());
         let amount = get_optional_u64(params, "amount").unwrap_or(100) as i32;
@@ -768,11 +669,12 @@ impl ComputerUseTool {
             return Ok(error_result(format!("Unknown scroll direction: {direction}")));
         }
 
+        // Scroll at current cursor position (x=0, y=0 means "don't reposition")
         let result = {
             #[cfg(target_os = "macos")]
             {
                 if self.use_native_input {
-                    super::input::scroll(&direction, amount, x, y).await
+                    super::input::scroll(&direction, amount, 0.0, 0.0).await
                 } else {
                     let script = "tell application \"System Events\" to key code 125".to_string();
                     self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
@@ -788,11 +690,11 @@ impl ComputerUseTool {
             Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
-                        "Scrolled {direction} by {amount}px at ({x}, {y})"
+                        "Scrolled {direction} by {amount}px"
                     )),
                 ]),
                 details: Some(json!({
-                    "action": "scroll", "x": x, "y": y,
+                    "action": "scroll",
                     "direction": direction, "amount": amount,
                 })),
                 is_error: None,
@@ -923,18 +825,27 @@ impl ComputerUseTool {
         })
     }
 
-    /// Swift script that searches the accessibility tree of the frontmost app
-    /// for an element matching the given text, then performs AXPress on it.
-    /// Falls back to clicking at the element's center if AXPress is unsupported.
-    ///
-    /// Output on success: `found\taction\trole\ttitle\tx\ty\twidth\theight`
-    /// Output on failure: exit 1, available element titles on stderr.
-    fn build_click_element_swift(search: &str) -> String {
-        let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
-        format!(
-            r#"import Cocoa; func find(_ e: AXUIElement, _ q: String, _ d: Int) -> AXUIElement? {{ if d > 15 {{ return nil }}; for attr in ["AXTitle", "AXDescription", "AXValue", "AXLabel"] {{ var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, attr as CFString, &v); if let s = v as? String, s.localizedCaseInsensitiveContains(q) {{ return e }} }}; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] {{ for k in kids {{ if let r = find(k, q, d+1) {{ return r }} }} }}; return nil }}; func titles(_ e: AXUIElement, _ d: Int) -> [String] {{ if d > 5 {{ return [] }}; var r = [String](); var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXTitle" as CFString, &v); if let s = v as? String, !s.isEmpty {{ var rv: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXRole" as CFString, &rv); let role = rv as? String ?? ""; r.append("\(role): \(s)") }}; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] {{ for k in kids {{ r += titles(k, d+1) }} }}; return r }}; let app = NSWorkspace.shared.frontmostApplication!; let ax = AXUIElementCreateApplication(app.processIdentifier); if let el = find(ax, "{escaped}", 0) {{ var rv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXRole" as CFString, &rv); let role = rv as? String ?? ""; var tv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXTitle" as CFString, &tv); let title = tv as? String ?? ""; let pressed = AXUIElementPerformAction(el, "AXPress" as CFString) == .success; if pressed {{ print("found\tpressed\t\(role)\t\(title)\t0\t0\t0\t0") }} else {{ var pv: CFTypeRef?; var sv: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXPosition" as CFString, &pv); AXUIElementCopyAttributeValue(el, "AXSize" as CFString, &sv); var pos = CGPoint.zero; var size = CGSize.zero; if let p = pv {{ AXValueGetValue(p as! AXValue, .cgPoint, &pos) }}; if let s = sv {{ AXValueGetValue(s as! AXValue, .cgSize, &size) }}; let cx = pos.x + size.width/2; let cy = pos.y + size.height/2; let e = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; e.post(tap: .cghidEventTap); Thread.sleep(forTimeInterval: 0.05); let u = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; u.post(tap: .cghidEventTap); print("found\tclicked\t\(role)\t\(title)\t\(Int(pos.x))\t\(Int(pos.y))\t\(Int(size.width))\t\(Int(size.height))") }} }} else {{ let available = titles(ax, 0); fputs(available.joined(separator: "\n"), stderr); Foundation.exit(1) }}"#
-        )
+    /// Build Swift code to resolve the target AXUIElement for a given app name.
+    /// Returns Swift code that sets `let ax: AXUIElement` to the target app.
+    /// If app_name is None, targets the frontmost app.
+    fn swift_resolve_app(app_name: Option<&str>) -> String {
+        match app_name {
+            Some(name) if name.eq_ignore_ascii_case("dock") => {
+                // Dock is a special process
+                format!(r#"var ax: AXUIElement!; for a in NSWorkspace.shared.runningApplications {{ if a.bundleIdentifier == "com.apple.dock" {{ ax = AXUIElementCreateApplication(a.processIdentifier); break }} }}; guard ax != nil else {{ fputs("Dock process not found", stderr); Foundation.exit(1) }}"#)
+            }
+            Some(name) => {
+                let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+                format!(r#"var ax: AXUIElement!; for a in NSWorkspace.shared.runningApplications {{ if a.activationPolicy == .regular, let n = a.localizedName, n.localizedCaseInsensitiveContains("{escaped}") {{ ax = AXUIElementCreateApplication(a.processIdentifier); break }} }}; guard ax != nil else {{ fputs("App '{escaped}' not found", stderr); Foundation.exit(1) }}"#)
+            }
+            None => {
+                r#"let app = NSWorkspace.shared.frontmostApplication!; let ax = AXUIElementCreateApplication(app.processIdentifier)"#.to_string()
+            }
+        }
     }
+
+    /// Common Swift functions for searching and listing AX elements.
+    const AX_HELPERS: &'static str = r#"func find(_ e: AXUIElement, _ q: String, _ d: Int) -> AXUIElement? { if d > 15 { return nil }; for attr in ["AXTitle", "AXDescription", "AXValue", "AXLabel"] { var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, attr as CFString, &v); if let s = v as? String, s.localizedCaseInsensitiveContains(q) { return e } }; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] { for k in kids { if let r = find(k, q, d+1) { return r } } }; return nil }; func titles(_ e: AXUIElement, _ d: Int) -> [String] { if d > 8 { return [] }; var r = [String](); var v: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXTitle" as CFString, &v); var dv: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXDescription" as CFString, &dv); let t = v as? String ?? ""; let ds = dv as? String ?? ""; var rv: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXRole" as CFString, &rv); let role = rv as? String ?? ""; if !t.isEmpty { r.append("\(role): \(t)") } else if !ds.isEmpty { r.append("\(role): [\(ds)]") }; var c: CFTypeRef?; AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &c); if let kids = c as? [AXUIElement] { for k in kids { r += titles(k, d+1) } }; return r }"#;
 
     async fn click_element(
         &self,
@@ -946,49 +857,51 @@ impl ComputerUseTool {
             Err(e) => return Ok(e),
         };
 
-        // Confirmation gate
-        let confirmed = params.get("confirmed").and_then(Value::as_bool).unwrap_or(false);
-        if self.confirm_before_action && !confirmed {
-            return Ok(error_result(
-                "clickElement requires confirmation. Call GetConfirmation first, then retry with confirmed: true.".to_string(),
-            ));
-        }
+        let app_name = get_optional_string(params, "app");
+        let app_resolve = Self::swift_resolve_app(app_name.as_deref());
+        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
 
-        let swift_script = Self::build_click_element_swift(&text);
-        let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
+        let script = format!(
+            "import Cocoa; {helpers}; {resolve}; if let el = find(ax, \"{escaped}\", 0) {{ var rv: CFTypeRef?; AXUIElementCopyAttributeValue(el, \"AXRole\" as CFString, &rv); let role = rv as? String ?? \"\"; var tv: CFTypeRef?; AXUIElementCopyAttributeValue(el, \"AXTitle\" as CFString, &tv); let title = tv as? String ?? \"\"; let pressed = AXUIElementPerformAction(el, \"AXPress\" as CFString) == .success; if pressed {{ print(\"found\\tpressed\\t\\(role)\\t\\(title)\") }} else {{ var pv: CFTypeRef?; var sv: CFTypeRef?; AXUIElementCopyAttributeValue(el, \"AXPosition\" as CFString, &pv); AXUIElementCopyAttributeValue(el, \"AXSize\" as CFString, &sv); var pos = CGPoint.zero; var size = CGSize.zero; if let p = pv {{ AXValueGetValue(p as! AXValue, .cgPoint, &pos) }}; if let s = sv {{ AXValueGetValue(s as! AXValue, .cgSize, &size) }}; let cx = pos.x + size.width/2; let cy = pos.y + size.height/2; let e = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; e.post(tap: .cghidEventTap); Thread.sleep(forTimeInterval: 0.05); let u = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: CGPoint(x: cx, y: cy), mouseButton: .left)!; u.post(tap: .cghidEventTap); print(\"found\\tclicked\\t\\(role)\\t\\(title)\") }} }} else {{ let available = titles(ax, 0); fputs(available.joined(separator: \"\\n\"), stderr); Foundation.exit(1) }}",
+            helpers = Self::AX_HELPERS,
+            resolve = app_resolve
+        );
+
+        let cmd = format!("swift -e '{}'", script.replace('\'', "'\\''"));
         let output = self.run_shell(&cmd, ctx).await?;
 
         if output.exit_code != 0 {
-            let available = output.stderr.trim();
-            let list = if available.is_empty() {
-                "No accessible elements found. The app may not expose accessibility data.".to_string()
+            let stderr = output.stderr.trim();
+            let target = app_name.as_deref().unwrap_or("the frontmost app");
+            let list = if stderr.is_empty() {
+                format!("No accessible elements found in {target}.")
             } else {
-                format!("Available elements:\n{available}")
+                format!("Available elements in {target}:\n{stderr}")
             };
             return Ok(error_result(format!(
-                "Element '{text}' not found in the frontmost app. {list}"
+                "Element '{text}' not found. {list}"
             )));
         }
 
-        // Parse: "found\tpressed|clicked\trole\ttitle\tx\ty\twidth\theight"
-        let parts: Vec<&str> = output.stdout.trim().splitn(8, '\t').collect();
-        let action = parts.get(1).unwrap_or(&"unknown");
+        let parts: Vec<&str> = output.stdout.trim().splitn(4, '\t').collect();
+        let method = parts.get(1).unwrap_or(&"unknown");
         let role = parts.get(2).unwrap_or(&"");
         let title = parts.get(3).unwrap_or(&"");
 
         tracing::debug!(
-            search = %text, action = %action, role = %role, title = %title,
-            "clickElement result"
+            search = %text, method = %method, role = %role, title = %title,
+            app = ?app_name, "clickElement result"
         );
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
-                format!("Clicked element: \"{title}\" ({role}, {action})")
+                format!("Clicked: \"{title}\" ({role}, {method})")
             )]),
             details: Some(json!({
                 "action": "clickElement",
                 "text": text,
-                "method": *action,
+                "app": app_name,
+                "method": *method,
                 "role": *role,
                 "title": *title,
             })),
@@ -997,52 +910,47 @@ impl ComputerUseTool {
         })
     }
 
-    async fn move_mouse(
+    async fn list_elements(
         &self,
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let x = get_optional_f64(params, "x")
-            .ok_or_else(|| ToolError::Validation { message: "moveMouse requires x coordinate".into() })?;
-        let y = get_optional_f64(params, "y")
-            .ok_or_else(|| ToolError::Validation { message: "moveMouse requires y coordinate".into() })?;
+        let app_name = get_optional_string(params, "app");
+        let app_resolve = Self::swift_resolve_app(app_name.as_deref());
 
-        if let Some(err) = self.validate_coordinates(x, y).await {
-            return Ok(err);
+        let script = format!(
+            "import Cocoa; {helpers}; {resolve}; let items = titles(ax, 0); print(items.joined(separator: \"\\n\"))",
+            helpers = Self::AX_HELPERS,
+            resolve = app_resolve
+        );
+
+        let cmd = format!("swift -e '{}'", script.replace('\'', "'\\''"));
+        let output = self.run_shell(&cmd, ctx).await?;
+
+        if output.exit_code != 0 {
+            let target = app_name.as_deref().unwrap_or("the frontmost app");
+            return Ok(error_result(format!(
+                "Could not list elements in {target}: {}",
+                output.stderr.trim()
+            )));
         }
 
-        let result = {
-            #[cfg(target_os = "macos")]
-            {
-                if self.use_native_input {
-                    super::input::move_mouse(x, y).await
+        let trimmed = output.stdout.trim();
+        let target = app_name.as_deref().unwrap_or("frontmost app");
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                if trimmed.is_empty() {
+                    format!("No accessible elements found in {target}.")
                 } else {
-                    let xi = x as i64;
-                    let yi = y as i64;
-                    let script = format!("tell application \"System Events\" to set position of mouse to {{{xi}, {yi}}}");
-                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                    format!("Elements in {target}:\n{trimmed}")
                 }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err::<(), String>("ComputerUse moveMouse is only supported on macOS".into())
-            }
-        };
-
-        match result {
-            Ok(()) => Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    crate::core::content::ToolResultContent::text(format!(
-                        "Moved mouse to ({x}, {y})"
-                    )),
-                ]),
-                details: Some(json!({"action": "moveMouse", "x": x, "y": y})),
-                is_error: None,
-                stop_turn: None,
-            }),
-            Err(e) => Ok(error_result(format!("moveMouse failed: {e}"))),
-        }
+            )]),
+            details: Some(json!({"action": "listElements", "app": app_name})),
+            is_error: None,
+            stop_turn: None,
+        })
     }
+
 }
 
 // MARK: - Startup Permission Check
@@ -1255,7 +1163,7 @@ mod tests {
         let props = def.parameters.properties.unwrap();
         let action = &props["action"];
         let enum_values = action["enum"].as_array().unwrap();
-        for expected in ["screenshot", "click", "clickElement", "type", "keypress", "scroll", "getWindows", "focusWindow", "moveMouse"] {
+        for expected in ["screenshot", "clickElement", "listElements", "type", "keypress", "scroll", "getWindows", "focusWindow"] {
             assert!(enum_values.contains(&json!(expected)), "missing: {expected}");
         }
     }
@@ -1356,52 +1264,6 @@ mod tests {
         let t = tool(false);
         let r = t.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
-    }
-
-    #[tokio::test]
-    async fn click_requires_coordinates() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click"}), &make_ctx()).await;
-        assert!(r.is_err());
-    }
-
-    #[tokio::test]
-    async fn click_at_coordinates() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click", "x": 100, "y": 200}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("Clicked at (100, 200)"));
-        let d = r.details.unwrap();
-        assert_eq!(d["action"], "click");
-        assert_eq!(d["x"], 100.0);
-        assert_eq!(d["y"], 200.0);
-    }
-
-    #[tokio::test]
-    async fn click_accepts_float_coordinates() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click", "x": 100.5, "y": 200.7}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-        let d = r.details.unwrap();
-        assert_eq!(d["x"], 100.5);
-        assert_eq!(d["y"], 200.7);
-    }
-
-    #[tokio::test]
-    async fn click_negative_coordinates_rejected() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click", "x": -10, "y": 200}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("non-negative"));
-    }
-
-    #[tokio::test]
-    async fn double_click() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click", "x": 50, "y": 50, "clicks": 2}), &make_ctx()).await.unwrap();
-        let text = extract_text(&r);
-        assert!(text.contains("double-click"));
     }
 
     #[tokio::test]
@@ -1569,81 +1431,6 @@ mod tests {
         let r = t.execute(json!({"action": "scroll"}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         assert!(extract_text(&r).contains("Scrolled down"));
-    }
-
-    #[tokio::test]
-    async fn scroll_negative_coordinates_rejected() {
-        let t = tool(false);
-        let r = t.execute(
-            json!({"action": "scroll", "x": -10, "y": 100, "direction": "down"}),
-            &make_ctx(),
-        ).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("non-negative"));
-    }
-
-    #[tokio::test]
-    async fn scroll_out_of_bounds_rejected() {
-        let runner = MockRunner::with_handler(|cmd| {
-            if cmd.contains("bounds of window of desktop") {
-                ProcessOutput {
-                    stdout: "0, 0, 1920, 1080\n".into(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            } else {
-                ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            }
-        });
-
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(
-            json!({"action": "scroll", "x": 5000, "y": 500, "direction": "down"}),
-            &make_ctx(),
-        ).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("outside screen bounds"));
-    }
-
-    #[tokio::test]
-    async fn scroll_zero_coordinates_skip_validation() {
-        // Default (0, 0) should skip validation entirely
-        let t = tool(false);
-        let r = t.execute(json!({"action": "scroll", "direction": "up"}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn move_mouse() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "moveMouse", "x": 300, "y": 400}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("Moved mouse to (300, 400)"));
-    }
-
-    #[tokio::test]
-    async fn move_mouse_negative_rejected() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "moveMouse", "x": -5, "y": 100}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("non-negative"));
-    }
-
-    #[tokio::test]
-    async fn move_mouse_requires_coordinates() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "moveMouse"}), &make_ctx()).await;
-        assert!(r.is_err());
     }
 
     // ─── Screenshot throttle tests ───
@@ -1885,98 +1672,6 @@ mod tests {
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
-    }
-
-    // ─── Coordinate bounds tests ───
-
-    #[tokio::test]
-    async fn click_out_of_bounds_rejected() {
-        // Mock runner that returns screen bounds for Finder query
-        let runner = MockRunner::with_handler(|cmd| {
-            if cmd.contains("bounds of window of desktop") {
-                ProcessOutput {
-                    stdout: "0, 0, 1920, 1080\n".into(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            } else {
-                ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            }
-        });
-
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(json!({"action": "click", "x": 3000, "y": 500}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("outside screen bounds"));
-    }
-
-    #[tokio::test]
-    async fn click_within_bounds_succeeds() {
-        let runner = MockRunner::with_handler(|cmd| {
-            if cmd.contains("bounds of window of desktop") {
-                ProcessOutput {
-                    stdout: "0, 0, 1920, 1080\n".into(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            } else {
-                ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            }
-        });
-
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(json!({"action": "click", "x": 960, "y": 540}), &make_ctx()).await.unwrap();
-        assert!(r.is_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn move_mouse_out_of_bounds_rejected() {
-        let runner = MockRunner::with_handler(|cmd| {
-            if cmd.contains("bounds of window of desktop") {
-                ProcessOutput {
-                    stdout: "0, 0, 1920, 1080\n".into(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            } else {
-                ProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    duration_ms: 10,
-                    timed_out: false,
-                    interrupted: false,
-                }
-            }
-        });
-
-        let t = tool_with_runner(runner, false);
-        let r = t.execute(json!({"action": "moveMouse", "x": 100, "y": 2000}), &make_ctx()).await.unwrap();
-        assert_eq!(r.is_error, Some(true));
-        assert!(extract_text(&r).contains("outside screen bounds"));
     }
 
     // ─── Window selection scoring tests ───
@@ -2542,20 +2237,6 @@ mod tests {
     // ─── Confirmation describe_action tests ───
 
     #[test]
-    fn describe_click_action() {
-        let t = tool(true);
-        let desc = t.describe_action("click", &json!({"x": 100, "y": 200}));
-        assert_eq!(desc, "Click at (100, 200)");
-    }
-
-    #[test]
-    fn describe_double_click_action() {
-        let t = tool(true);
-        let desc = t.describe_action("click", &json!({"x": 100, "y": 200, "clicks": 2}));
-        assert_eq!(desc, "Double-click at (100, 200)");
-    }
-
-    #[test]
     fn describe_type_action_truncated() {
         let t = tool(true);
         let desc = t.describe_action("type", &json!({"text": "This is a very long string that should be truncated in the description"}));
@@ -2574,11 +2255,10 @@ mod tests {
 
     #[test]
     fn mutating_actions_identified() {
-        assert!(ComputerUseTool::is_mutating("click"));
+        assert!(ComputerUseTool::is_mutating("clickElement"));
         assert!(ComputerUseTool::is_mutating("type"));
         assert!(ComputerUseTool::is_mutating("keypress"));
         assert!(ComputerUseTool::is_mutating("scroll"));
-        assert!(ComputerUseTool::is_mutating("moveMouse"));
     }
 
     #[test]
@@ -2586,20 +2266,10 @@ mod tests {
         assert!(!ComputerUseTool::is_mutating("screenshot"));
         assert!(!ComputerUseTool::is_mutating("getWindows"));
         assert!(!ComputerUseTool::is_mutating("focusWindow"));
+        assert!(!ComputerUseTool::is_mutating("listElements"));
     }
 
     // ─── Details/audit logging tests ───
-
-    #[tokio::test]
-    async fn click_details_include_coordinates() {
-        let t = tool(false);
-        let r = t.execute(json!({"action": "click", "x": 42, "y": 99}), &make_ctx()).await.unwrap();
-        let d = r.details.unwrap();
-        assert_eq!(d["action"], "click");
-        assert_eq!(d["x"], 42.0);
-        assert_eq!(d["y"], 99.0);
-        assert_eq!(d["clicks"], 1);
-    }
 
     #[tokio::test]
     async fn scroll_details_include_direction() {
