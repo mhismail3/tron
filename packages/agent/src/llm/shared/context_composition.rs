@@ -61,6 +61,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         parts.push(subagent.clone());
     }
 
+    if let Some(ref process) = context.process_results_context
+        && !process.is_empty()
+    {
+        parts.push(process.clone());
+    }
+
     if let Some(ref tasks) = context.task_context
         && !tasks.is_empty()
     {
@@ -162,6 +168,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         volatile.push(subagent.clone());
     }
 
+    if let Some(ref process) = context.process_results_context
+        && !process.is_empty()
+    {
+        volatile.push(process.clone());
+    }
+
     if let Some(ref tasks) = context.task_context
         && !tasks.is_empty()
     {
@@ -195,6 +207,7 @@ mod tests {
             memory_content: Some("User prefers concise responses.".into()),
             skill_context: Some("Available skill: /commit".into()),
             subagent_results_context: None,
+            process_results_context: None,
             task_context: Some("Task #1: Fix the bug".into()),
             dynamic_rules_context: Some("Rule: no console.log".into()),
             server_origin: None,
@@ -234,6 +247,7 @@ mod tests {
             memory_content: None,
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -254,6 +268,7 @@ mod tests {
             memory_content: Some("memory".into()),
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -275,6 +290,7 @@ mod tests {
             memory_content: None,
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -320,6 +336,7 @@ mod tests {
             memory_content: None,
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -341,6 +358,7 @@ mod tests {
             memory_content: None,
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -389,6 +407,7 @@ mod tests {
             memory_content: None,
             skill_context: Some("Skill".into()),
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,

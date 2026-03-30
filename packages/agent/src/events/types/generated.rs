@@ -97,6 +97,10 @@ define_events! {
         SubagentFailed => "subagent.failed" => payloads::subagent::SubagentFailedPayload,
         /// Subagent results consumed by parent agent.
         SubagentResultsConsumed => "subagent.results_consumed" => payloads::notification::SubagentResultsConsumedPayload,
+        /// Background process result notification.
+        NotificationProcessResult => "notification.process_result" => payloads::notification::NotificationProcessResultPayload,
+        /// Process results consumed by agent.
+        ProcessResultsConsumed => "process.results_consumed" => payloads::notification::ProcessResultsConsumedPayload,
         /// Todo list written.
         TodoWrite => "todo.write" => payloads::todo::TodoWritePayload,
         /// Turn failed.
@@ -144,7 +148,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 49] = [
+    const EXPECTED: [(EventType, &str); 51] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -197,6 +201,14 @@ mod tests {
             EventType::SubagentResultsConsumed,
             "subagent.results_consumed",
         ),
+        (
+            EventType::NotificationProcessResult,
+            "notification.process_result",
+        ),
+        (
+            EventType::ProcessResultsConsumed,
+            "process.results_consumed",
+        ),
         (EventType::TodoWrite, "todo.write"),
         (EventType::TurnFailed, "turn.failed"),
         (EventType::HookTriggered, "hook.triggered"),
@@ -209,8 +221,8 @@ mod tests {
     ];
 
     #[test]
-    fn all_event_types_constant_has_49_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 50);
+    fn all_event_types_constant_has_51_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 52);
     }
 
     #[test]

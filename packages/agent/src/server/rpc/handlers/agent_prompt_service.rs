@@ -298,6 +298,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             PromptBootstrapData {
                 artifacts: PromptContextArtifacts::default(),
                 subagent_results_context: None,
+                process_results_context: None,
             }
         }
     };
@@ -309,6 +310,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let memory: Option<String> = None;
     let subagent_results_context = prompt_bootstrap.subagent_results_context;
+    let process_results_context = prompt_bootstrap.process_results_context;
 
     let memory = if let Some(ref worktree) = worktree_info {
         let worktree_context = format!(
@@ -464,6 +466,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
         skill_context,
         subagent_results: subagent_results_context,
+        process_results: process_results_context,
         user_content_override,
         device_context,
         ..Default::default()

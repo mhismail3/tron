@@ -402,6 +402,9 @@ pub struct Context {
     /// Sub-agent results context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_results_context: Option<String>,
+    /// Background process results context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_results_context: Option<String>,
     /// Task context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_context: Option<String>,
@@ -792,6 +795,7 @@ mod tests {
             memory_content: None,
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
             server_origin: None,

@@ -198,6 +198,7 @@ pub struct PromptContextArtifacts {
 pub struct PromptBootstrapData {
     pub artifacts: PromptContextArtifacts,
     pub subagent_results_context: Option<String>,
+    pub process_results_context: Option<String>,
 }
 
 pub struct ResumedPromptSession {
@@ -348,6 +349,113 @@ pub fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
     Some(ctx)
 }
 
+/// Query pending (unconsumed) background process results for a session.
+pub fn get_pending_process_results(
+    event_store: &crate::events::EventStore,
+    session_id: &str,
+) -> Vec<(String, Value)> {
+    let notifications = event_store
+        .get_events_by_type(session_id, &["notification.process_result"], None)
+        .unwrap_or_default();
+
+    if notifications.is_empty() {
+        return vec![];
+    }
+
+    let consumed_events = event_store
+        .get_events_by_type(session_id, &["process.results_consumed"], None)
+        .unwrap_or_default();
+
+    let mut consumed_ids: HashSet<String> = HashSet::new();
+    for event in &consumed_events {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
+            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array())
+        {
+            for id in ids {
+                if let Some(s) = id.as_str() {
+                    let _ = consumed_ids.insert(s.to_owned());
+                }
+            }
+        }
+    }
+
+    notifications
+        .into_iter()
+        .filter(|event| !consumed_ids.contains(&event.id))
+        .filter_map(|event| {
+            serde_json::from_str::<Value>(&event.payload)
+                .ok()
+                .map(|payload| (event.id, payload))
+        })
+        .collect()
+}
+
+/// Format pending process results into markdown context string.
+pub fn format_process_results(results: &[(String, Value)]) -> Option<String> {
+    if results.is_empty() {
+        return None;
+    }
+
+    let mut ctx = String::from("# Completed Background Processes\n\n");
+    ctx.push_str(
+        "The following background process(es) have completed since your last turn.\n\n",
+    );
+
+    for (_event_id, payload) in results {
+        let success = payload
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let icon = if success { "+" } else { "x" };
+        let process_id = payload
+            .get("processId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let label = payload
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let exit_code = payload.get("exitCode").and_then(Value::as_i64);
+        let duration = payload.get("duration").and_then(Value::as_i64).unwrap_or(0);
+
+        let _ = writeln!(ctx, "## [{icon}] Process: `{label}` ({process_id})\n");
+        let status_str = if success {
+            match exit_code {
+                Some(code) => format!("Completed (exit code {code})"),
+                None => "Completed".into(),
+            }
+        } else {
+            match exit_code {
+                Some(code) => format!("Failed (exit code {code})"),
+                None => "Failed".into(),
+            }
+        };
+        let _ = writeln!(ctx, "**Status**: {status_str}");
+        #[allow(clippy::cast_precision_loss)]
+        let duration_secs = duration as f64 / 1000.0;
+        let _ = writeln!(ctx, "**Duration**: {duration_secs:.1}s");
+
+        if let Some(output) = payload.get("output").and_then(Value::as_str)
+            && !output.is_empty()
+        {
+            let truncated = if output.len() > 2000 {
+                format!("{}\n\n... [Output truncated]", &output[..2000])
+            } else {
+                output.to_string()
+            };
+            let _ = write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n");
+        }
+
+        if let Some(blob_id) = payload.get("blobId").and_then(Value::as_str) {
+            let _ = writeln!(ctx, "\nFull output available: `{blob_id}`");
+        }
+
+        ctx.push_str("\n---\n\n");
+    }
+
+    Some(ctx)
+}
+
 /// Gather recent event types and Bash tool call commands since the last compact.boundary.
 ///
 /// Returns `(event_types, bash_commands)` for the compaction trigger's progress-signal check.
@@ -459,9 +567,30 @@ pub async fn load_prompt_bootstrap(
             formatted
         };
 
+        let pending_procs = get_pending_process_results(event_store.as_ref(), &session_id);
+        let process_results_context = if pending_procs.is_empty() {
+            None
+        } else {
+            let event_ids: Vec<String> = pending_procs.iter().map(|(id, _)| id.clone()).collect();
+            let formatted = format_process_results(&pending_procs);
+            if formatted.is_some() {
+                let _ = event_store.append(&crate::events::AppendOptions {
+                    session_id: &session_id,
+                    event_type: EventType::ProcessResultsConsumed,
+                    payload: serde_json::json!({
+                        "consumedEventIds": event_ids,
+                        "count": pending_procs.len(),
+                    }),
+                    parent_id: None,
+                });
+            }
+            formatted
+        };
+
         Ok(PromptBootstrapData {
             artifacts,
             subagent_results_context,
+            process_results_context,
         })
     })
     .await

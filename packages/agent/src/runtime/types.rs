@@ -221,6 +221,9 @@ pub struct RunContext {
     /// Device context line from iOS app for system prompt injection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_context: Option<String>,
+    /// Background process results to inject.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_results: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

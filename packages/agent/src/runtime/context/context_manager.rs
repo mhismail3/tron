@@ -566,6 +566,7 @@ impl ContextManager {
             memory_content: self.get_full_memory_content(),
             skill_context: None,
             subagent_results_context: None,
+            process_results_context: None,
             task_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
             server_origin: None,
