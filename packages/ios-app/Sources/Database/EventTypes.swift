@@ -74,15 +74,22 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             return "User message"
 
         case .messageAssistant:
-            // Extract text content
-            var content = ""
-            if let text = payload.string("content"), !text.isEmpty {
-                content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if let text = payload.string("text"), !text.isEmpty {
-                content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else {
-                content = "Assistant response"
+            // Extract text from content blocks or plain string
+            var text = ""
+            if let contentArray = payload["content"]?.value as? [[String: Any]] {
+                // Array of content blocks — extract text blocks
+                let textParts = contentArray.compactMap { block -> String? in
+                    guard (block["type"] as? String) == "text" else { return nil }
+                    return block["text"] as? String
+                }
+                text = textParts.joined(separator: " ")
+            } else if let plain = payload.string("content"), !plain.isEmpty {
+                text = plain
             }
+
+            var summary = text.isEmpty
+                ? "Assistant response"
+                : String(text.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines)
 
             // Add metadata indicators
             var indicators: [String] = []
@@ -94,9 +101,9 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             }
 
             if !indicators.isEmpty {
-                content += " • " + indicators.joined(separator: " • ")
+                summary += " • " + indicators.joined(separator: " • ")
             }
-            return content
+            return summary
 
         case .toolCall:
             let name = payload.string("name") ?? "unknown"
@@ -242,6 +249,35 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
 
+        case .worktreeAcquired:
+            let branch = payload.string("branch") ?? ""
+            return branch.isEmpty ? "Worktree acquired" : "Worktree: \(branch)"
+
+        case .worktreeCommit:
+            let message = payload.string("message") ?? ""
+            if !message.isEmpty {
+                return "Commit: \(String(message.prefix(35)))"
+            }
+            return "Worktree commit"
+
+        case .worktreeReleased:
+            let deleted = payload.bool("deleted") ?? false
+            return deleted ? "Worktree released (deleted)" : "Worktree released"
+
+        case .worktreeMerged:
+            return "Worktree merged"
+
+        case .notificationProcessResult:
+            let label = payload.string("label") ?? ""
+            if !label.isEmpty {
+                return "Process done: \(String(label.prefix(30)))"
+            }
+            return "Process result"
+
+        case .processResultsConsumed:
+            let count = payload.int("count") ?? 0
+            return count > 0 ? "Results consumed (\(count))" : "Results consumed"
+
         case .unknown:
             // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
             let formatted = type
@@ -288,40 +324,58 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
     /// Extended content for expanded view (Phase 3 enhanced)
     var expandedContent: String? {
         switch eventType {
+        case .messageUser:
+            guard let content = payload.string("content"), !content.isEmpty else { return nil }
+            // Only show expanded if content is longer than the summary preview
+            guard content.count > 50 else { return nil }
+            return String(content.prefix(500))
+
         case .messageAssistant:
             var lines: [String] = []
 
-            // Model info
+            // Full text content from content blocks
+            var fullText = ""
+            if let contentArray = payload["content"]?.value as? [[String: Any]] {
+                let textParts = contentArray.compactMap { block -> String? in
+                    guard (block["type"] as? String) == "text" else { return nil }
+                    return block["text"] as? String
+                }
+                fullText = textParts.joined(separator: "\n\n")
+            } else if let plain = payload.string("content") {
+                fullText = plain
+            }
+
+            if !fullText.isEmpty {
+                lines.append(String(fullText.prefix(500)))
+            }
+
+            // Metadata section
+            var meta: [String] = []
             if let model = payload["model"]?.value as? String {
-                lines.append("Model: \(model)")
+                meta.append("Model: \(model)")
             }
-
-            // Turn info
             if let turn = payload["turn"]?.value as? Int {
-                lines.append("Turn: \(turn)")
+                meta.append("Turn: \(turn)")
             }
-
-            // Latency
             if let latency = payload["latency"]?.value as? Int {
-                lines.append("Latency: \(formatLatency(latency))")
+                meta.append("Latency: \(formatLatency(latency))")
             }
-
-            // Stop reason
             if let stopReason = payload["stopReason"]?.value as? String {
-                lines.append("Stop reason: \(stopReason)")
+                meta.append("Stop reason: \(stopReason)")
             }
-
-            // Extended thinking
             if payload["hasThinking"]?.value as? Bool == true {
-                lines.append("Extended thinking: Yes")
+                meta.append("Extended thinking: Yes")
             }
-
-            // Token usage from tokenRecord
             if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
                let source = tokenRecord["source"] as? [String: Any],
                let input = source["rawInputTokens"] as? Int,
                let output = source["rawOutputTokens"] as? Int {
-                lines.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
+                meta.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
+            }
+
+            if !meta.isEmpty {
+                if !lines.isEmpty { lines.append("") }
+                lines.append(contentsOf: meta)
             }
 
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
@@ -514,6 +568,16 @@ enum SessionEventType: String, Codable {
     case errorAgent = "error.agent"
     case errorTool = "error.tool"
     case errorProvider = "error.provider"
+
+    // Worktree
+    case worktreeAcquired = "worktree.acquired"
+    case worktreeCommit = "worktree.commit"
+    case worktreeReleased = "worktree.released"
+    case worktreeMerged = "worktree.merged"
+
+    // Process management
+    case notificationProcessResult = "notification.process_result"
+    case processResultsConsumed = "process.results_consumed"
 
     case unknown
 }

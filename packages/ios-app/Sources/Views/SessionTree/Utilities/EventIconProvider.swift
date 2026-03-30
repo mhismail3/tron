@@ -57,6 +57,18 @@ enum EventIconProvider {
             return "arrow.right.circle"
         case .streamTurnEnd:
             return "arrow.down.circle"
+        case .worktreeAcquired:
+            return "arrow.triangle.branch"
+        case .worktreeCommit:
+            return "checkmark.diamond.fill"
+        case .worktreeReleased:
+            return "arrow.uturn.backward.circle"
+        case .worktreeMerged:
+            return "arrow.triangle.merge"
+        case .notificationProcessResult:
+            return "bell.badge.fill"
+        case .processResultsConsumed:
+            return "tray.and.arrow.down.fill"
         default:
             return "circle.fill"
         }
@@ -114,6 +126,12 @@ enum EventIconProvider {
             return .tronTextMuted
         case .streamTurnStart, .streamTurnEnd:
             return .tronBlue
+        case .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged:
+            return .tronCyan
+        case .notificationProcessResult:
+            return .tronWarning
+        case .processResultsConsumed:
+            return .tronSuccess
         default:
             return .tronTextMuted
         }
