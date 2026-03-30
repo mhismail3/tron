@@ -425,6 +425,39 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
         }
         return String(describing: value)
     }
+
+    // MARK: - Fork Safety
+
+    /// Whether this event is a safe fork point for session branching.
+    ///
+    /// Only events where the message reconstruction state is consistent
+    /// (no pending tool results, no unmatched tool_use blocks) are forkable.
+    /// Mirrors the invariants in the Rust `build_messages` function in reconstruct.rs.
+    var isForkable: Bool {
+        switch eventType {
+        case .messageUser:
+            return true
+        case .messageAssistant:
+            return !contentHasToolUse
+        default:
+            return false
+        }
+    }
+
+    /// Whether this assistant message's content contains tool_use blocks.
+    /// Mirrors the Rust `content_has_tool_use` function in reconstruct.rs.
+    private var contentHasToolUse: Bool {
+        // Fast path: stopReason explicitly indicates tool use
+        if payload.string("stopReason") == "tool_use" {
+            return true
+        }
+        // Check content array for tool_use blocks (handles interrupted messages
+        // where stopReason may be "interrupted" but content still has tool_use)
+        guard let contentArray = payload["content"]?.value as? [[String: Any]] else {
+            return false
+        }
+        return contentArray.contains { ($0["type"] as? String) == "tool_use" }
+    }
 }
 
 /// Known session event types

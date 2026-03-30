@@ -35,7 +35,8 @@ struct ThisSessionSection: View {
                             EventRow(
                                 event: event,
                                 isHead: event.id == headEventId,
-                                showForkButton: event.id != headEventId,
+                                forkButtonState: event.id == headEventId ? .hidden
+                                    : event.isForkable ? .active : .disabled,
                                 onFork: { onFork(event.id) }
                             )
                             .id(event.id)

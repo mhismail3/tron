@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// Fork button display state for event rows
+enum ForkButtonState {
+    /// HEAD event — no button shown
+    case hidden
+    /// Safe fork point — tappable button
+    case active
+    /// Unsafe fork point — dimmed, non-interactive icon
+    case disabled
+}
+
 // MARK: - Event Row
 
 /// Row display for session events in the history list view
@@ -7,7 +17,7 @@ struct EventRow: View {
     let event: SessionEvent
     var isHead: Bool = false
     var isMuted: Bool = false
-    var showForkButton: Bool = true
+    var forkButtonState: ForkButtonState = .active
     let onFork: () -> Void
 
     @State private var isExpanded = false
@@ -53,8 +63,11 @@ struct EventRow: View {
                         .clipShape(Capsule())
                 }
 
-                // Fork button with circular background
-                if showForkButton {
+                // Fork button
+                switch forkButtonState {
+                case .hidden:
+                    EmptyView()
+                case .active:
                     Button(action: onFork) {
                         Image(systemName: "arrow.triangle.branch")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -64,6 +77,11 @@ struct EventRow: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
+                case .disabled:
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted.opacity(0.3))
+                        .frame(width: 28, height: 28)
                 }
             }
             .padding(.vertical, 8)
