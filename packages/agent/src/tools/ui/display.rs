@@ -20,6 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use crate::tools::errors::ToolError;
@@ -310,7 +311,12 @@ impl DisplayTool {
         };
 
         let blob_store = self.blob_store.clone();
-        let stream_cancel = ctx.cancellation.child_token();
+        // Use an independent token — NOT a child of ctx.cancellation.
+        // Background streams must survive agent turn interruptions. The
+        // ProcessManager owns the lifecycle: its cancel_process() drops the
+        // task future, which breaks the capture loop. A child token would
+        // cause the stream to die whenever the user interrupts the agent.
+        let stream_cancel = CancellationToken::new();
 
         let task: std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> = Box::pin(async move {
             let start = std::time::Instant::now();

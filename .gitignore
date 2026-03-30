@@ -44,3 +44,6 @@ temp/
 
 # Debug
 .debug/
+
+# Tron agent worktrees
+.worktrees/
