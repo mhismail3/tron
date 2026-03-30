@@ -27,7 +27,6 @@ struct InputBar: View {
     @State private var skillMentionQuery = ""
     @State private var showSpellMentionPopup = false
     @State private var spellMentionQuery = ""
-    @State private var isMicPulsing = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
     @State private var showMicButton = false

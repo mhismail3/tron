@@ -37,15 +37,6 @@ final class MediaClient {
         )
     }
 
-    func listTranscriptionModels() async throws -> TranscribeListModelsResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "transcribe.listModels",
-            params: EmptyParams()
-        )
-    }
-
     // MARK: - Voice Notes Methods
 
     /// Save a voice note with transcription

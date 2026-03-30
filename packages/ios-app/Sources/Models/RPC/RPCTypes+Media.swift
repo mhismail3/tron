@@ -152,16 +152,3 @@ struct TranscribeAudioResult: Decodable {
     let cleanupMode: String
 }
 
-struct TranscriptionModelInfo: Decodable, Identifiable {
-    let id: String
-    let name: String
-    let size: String
-    let language: String
-    let `default`: Bool
-    let cached: Bool
-    let engineLoaded: Bool
-}
-
-struct TranscribeListModelsResult: Decodable {
-    let models: [TranscriptionModelInfo]
-}

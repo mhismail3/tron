@@ -15,99 +15,6 @@ extension View {
         }
     }
 
-    @ViewBuilder
-    func ifLet<T, Content: View>(
-        _ value: T?,
-        transform: (Self, T) -> Content
-    ) -> some View {
-        if let value = value {
-            transform(self, value)
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func hidden(_ hidden: Bool) -> some View {
-        if hidden {
-            self.hidden()
-        } else {
-            self
-        }
-    }
-
-    func readSize(onChange: @escaping @Sendable (CGSize) -> Void) -> some View {
-        background(
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(key: SizePreferenceKey.self, value: proxy.size)
-            }
-        )
-        .onPreferenceChange(SizePreferenceKey.self, perform: onChange)
-    }
-
-    func navigationBackButton(action: @escaping () -> Void) -> some View {
-        navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: action) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                            Text("Back")
-                        }
-                        .foregroundStyle(.tronMint)
-                    }
-                }
-            }
-    }
-
-    func shimmer(active: Bool = true) -> some View {
-        self.modifier(ShimmerModifier(active: active))
-    }
-}
-
-// MARK: - Size Preference Key
-
-private struct SizePreferenceKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-// MARK: - Shimmer Modifier
-
-struct ShimmerModifier: ViewModifier {
-    let active: Bool
-    @State private var phase: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        if active {
-            content
-                .overlay(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            .clear,
-                            Color.tronOverlay(0.1),
-                            .clear
-                        ]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .rotationEffect(.degrees(20))
-                    .offset(x: phase)
-                )
-                .clipped()
-                .onAppear {
-                    withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                        phase = 400
-                    }
-                }
-        } else {
-            content
-        }
-    }
 }
 
 // MARK: - Button Styles
@@ -176,21 +83,6 @@ struct NoFeedbackButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == NoFeedbackButtonStyle {
     static var noFeedback: NoFeedbackButtonStyle { NoFeedbackButtonStyle() }
-}
-
-// MARK: - Keyboard Handling
-
-extension View {
-    func dismissKeyboardOnTap() -> some View {
-        self.onTapGesture {
-            UIApplication.shared.sendAction(
-                #selector(UIResponder.resignFirstResponder),
-                to: nil,
-                from: nil,
-                for: nil
-            )
-        }
-    }
 }
 
 // MARK: - Adaptive Presentation Detents

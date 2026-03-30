@@ -177,15 +177,7 @@ struct ResetChatResult: Decodable {
     let eventCount: Int
 }
 
-// MARK: - Session Delete/Fork
-
-struct SessionDeleteParams: Encodable {
-    let sessionId: String
-}
-
-struct SessionDeleteResult: Decodable {
-    let deleted: Bool
-}
+// MARK: - Session Fork
 
 struct SessionForkParams: Encodable {
     let sessionId: String
@@ -208,25 +200,3 @@ struct ForkWorktreeInfo: Decodable {
     let path: String
 }
 
-/// Session info from server (for session.list with full event metadata)
-struct ServerSessionInfo: Decodable {
-    let sessionId: String
-    let workspaceId: String?
-    let headEventId: String?
-    let rootEventId: String?
-    let title: String?
-    let model: String
-    let provider: String?
-    let workingDirectory: String?
-    let createdAt: String
-    let lastActivityAt: String?
-    let eventCount: Int?
-    let messageCount: Int
-    let inputTokens: Int?
-    let outputTokens: Int?
-    let isActive: Bool
-    let isArchived: Bool?
-    let archivedAt: String?
-    let source: String?
-    let isChat: Bool?
-}
