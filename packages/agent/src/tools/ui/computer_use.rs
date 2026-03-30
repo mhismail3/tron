@@ -16,7 +16,7 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{ProcessRunner, ProcessOptions, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::{
-    get_optional_f64, get_optional_string, get_optional_u64, validate_required_string,
+    get_optional_string, get_optional_u64, validate_required_string,
 };
 
 /// Actions that modify system state and require confirmation when enabled.
@@ -367,7 +367,7 @@ impl ComputerUseTool {
         }
 
         // Read the raw PNG screenshot
-        let raw_data = match tokio::fs::read(&tmp_path).await {
+        let _raw_data = match tokio::fs::read(&tmp_path).await {
             Ok(data) => data,
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;

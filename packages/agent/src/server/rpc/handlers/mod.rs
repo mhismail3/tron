@@ -16,7 +16,7 @@
 //!
 //! ## `register_platform` — Platform-specific
 //!
-//! `browser` (stream), `canvas`, `worktree` (git), `transcription`,
+//! `browser` (stream), `worktree` (git), `transcription`,
 //! `device` (push tokens), `notifications` (inbox), `plan`,
 //! `communication`, `voice_notes`, `git`, `sandbox`
 
@@ -24,7 +24,6 @@ pub mod agent;
 pub mod auth;
 pub mod blob;
 pub mod browser;
-pub mod canvas;
 pub mod communication;
 pub mod context;
 pub mod cron;
@@ -191,9 +190,6 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("process.cancel", process::CancelHandler);
     registry.register("process.list", process::ListHandler);
     registry.register("process.status", process::StatusHandler);
-
-    // Canvas
-    registry.register("canvas.get", canvas::GetCanvasHandler);
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);
@@ -515,8 +511,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            121,
-            "expected 121 methods, got {}",
+            120,
+            "expected 120 methods, got {}",
             reg.methods().len()
         );
     }
