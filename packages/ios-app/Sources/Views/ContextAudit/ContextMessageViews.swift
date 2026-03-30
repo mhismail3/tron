@@ -8,7 +8,6 @@ struct DetailedMessageRow: View {
     let isLast: Bool
 
     @State private var isExpanded = false
-    @State private var contentExpanded = false
 
     private var icon: String {
         switch message.role {
@@ -125,11 +124,8 @@ struct DetailedMessageRow: View {
                     if !message.content.isEmpty {
                         LineNumberedContentView(
                             content: message.content,
-                            maxCollapsedLines: 12,
-                            isExpanded: $contentExpanded,
                             fontSize: 10,
-                            lineNumFontSize: 9,
-                            maxCollapsedHeight: 200
+                            lineNumFontSize: 9
                         )
                         .sectionFill(iconColor, cornerRadius: 6, subtle: true)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

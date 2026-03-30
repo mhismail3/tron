@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for miscellaneous RPC methods.
-/// Handles system, skills, worktree, tasks, device token, memory, and message operations.
+/// Handles system, skills, worktree, device token, memory, message, sandbox, and log operations.
 @MainActor
 final class MiscClient {
     private unowned let transport: RPCTransport
@@ -52,28 +52,6 @@ final class MiscClient {
 
     // MARK: - Memory Methods
 
-    func searchMemory(
-        query: String? = nil,
-        type: String? = nil,
-        source: String? = nil,
-        limit: Int = 20
-    ) async throws -> MemorySearchResult {
-        let ws = try transport.requireConnection()
-
-        let params = MemorySearchParams(
-            searchText: query,
-            type: type,
-            source: source,
-            limit: limit
-        )
-
-        return try await ws.send(
-            method: "memory.search",
-            params: params
-        )
-    }
-
-    /// Get paginated ledger entries, optionally scoped to a workspace
     /// Trigger manual memory retention — summarizes the session and appends to the memory log.
     func retainMemory(sessionId: String) async throws -> MemoryRetainResult {
         let ws = try transport.requireConnection()
@@ -212,16 +190,6 @@ final class MiscClient {
         return try await ws.send(method: "skill.remove", params: params)
     }
 
-    // MARK: - Task Methods
-
-    /// List tasks with optional filters
-    func listTasks(status: String? = nil, limit: Int? = nil) async throws -> TaskListResult {
-        let ws = try transport.requireConnection()
-
-        let params = TaskListParams(status: status, limit: limit)
-        return try await ws.send(method: "tasks.list", params: params)
-    }
-
     // MARK: - Device Token Methods (Push Notifications)
 
     /// Check if this is a production build (for APNS environment)
@@ -318,20 +286,6 @@ final class MiscClient {
         return try await ws.send(
             method: "sandbox.removeContainer",
             params: ContainerActionParams(name: name)
-        )
-    }
-
-    // MARK: - Device Request Methods
-
-    /// Respond to a device request from the server.
-    /// Respond to a device request from the server (legacy, retained for protocol compatibility).
-    func deviceRespond(requestId: String, result: [String: AnyCodable]) async throws {
-        let ws = try transport.requireConnection()
-
-        let params = DeviceRespondParams(requestId: requestId, result: AnyCodable(result))
-        let _: DeviceRespondResult = try await ws.send(
-            method: "device.respond",
-            params: params
         )
     }
 

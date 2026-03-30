@@ -4,7 +4,6 @@ import SwiftUI
 
 struct StandaloneToolResultView: View {
     let result: ToolResultData
-    @State private var isExpanded = false
 
     /// Extract a short summary from arguments for display (e.g., command for Bash, path for Read)
     private var toolDetail: String {
@@ -104,11 +103,8 @@ struct StandaloneToolResultView: View {
             // Content lines
             LineNumberedContentView(
                 content: result.content,
-                maxCollapsedLines: 8,
-                isExpanded: $isExpanded,
                 fontSize: 11,
                 lineNumFontSize: 10,
-                maxCollapsedHeight: 160,
                 lineHeight: 18
             )
         }

@@ -5,7 +5,6 @@ import SwiftUI
 struct ReadResultViewer: View {
     let filePath: String
     let content: String
-    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var parsedLines: [ContentLineParser.ParsedLine] {
         ContentLineParser.parse(content)
@@ -179,7 +178,6 @@ struct WriteResultViewer: View {
 struct EditResultViewer: View {
     let filePath: String
     let result: String
-    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     /// Check if result contains a proper diff format
     private var hasDiffFormat: Bool {

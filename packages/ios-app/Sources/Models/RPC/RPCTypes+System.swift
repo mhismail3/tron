@@ -38,19 +38,6 @@ struct DeviceTokenUnregisterResult: Decodable {
     let success: Bool
 }
 
-// MARK: - Device Request Methods
-
-/// Parameters for device.respond
-struct DeviceRespondParams: Encodable {
-    let requestId: String
-    let result: AnyCodable
-}
-
-/// Result of device.respond
-struct DeviceRespondResult: Decodable {
-    let resolved: Bool
-}
-
 // MARK: - Logs Methods
 
 /// A single log entry for ingestion into the server database.

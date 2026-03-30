@@ -18,7 +18,14 @@ RPCClient (WebSocket transport)
     ├── EventSyncClient  - event synchronization
     ├── ContextClient    - context management
     ├── MediaClient      - transcription, voice notes
-    └── MiscClient       - skills, canvas, device, etc.
+    ├── CronClient       - automation scheduling
+    ├── NotificationClient - inbox notifications
+    ├── AuthClient       - provider auth, OAuth
+    ├── MCPClient        - MCP server management
+    ├── ProcessClient    - background processes
+    ├── BlobClient       - display tool images
+    ├── DisplayClient    - display stream control
+    └── MiscClient       - skills, worktree, device, memory, etc.
 ```
 
 ## RPC Pattern

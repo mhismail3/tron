@@ -16,9 +16,11 @@ paths:
 |-------|---------|
 | `SubagentState` | Tracks active sub-agents, events |
 | `ThinkingState` | Thinking/extended thinking |
-| `TodoState` | Todo list state |
+| `ProcessState` | Background process tracking |
 | `InputBarState` | Input field state |
 | `SheetState` | Active sheet management |
+| `ContextTrackingState` | Token counts, costs, context window |
+| `WorktreeIsolationState` | Worktree status, merge/commit |
 
 ## Managers (`ViewModels/Managers/`)
 

@@ -84,10 +84,13 @@ That's it — no coordinator switch case needed. The plugin dispatches itself.
 | `StreamingEventHandler` | Text/thinking deltas |
 | `ToolEventHandler` | Tool start/end |
 | `TurnLifecycleEventHandler` | Turn start/end, complete, error |
-| `ContextEventHandler` | Compaction, memory, context cleared |
-| `BrowserEventHandler` | Browser frames, closed |
+| `ContextEventHandler` | Compaction, context cleared |
+| `DisplayStreamEventHandler` | Display frames |
 | `SubagentEventHandler` | Subagent lifecycle |
-| `TaskEventHandler` | Task created/updated/deleted |
+| `ProcessEventHandler` | Process spawned/completed/status |
+| `MemoryEventHandler` | Memory updating/updated |
+| `ServerEventHandler` | Server restarting |
+| `WorktreeEventHandler` | Worktree acquired/released/merged/commit |
 | `EventDispatchLogger` | Logging |
 
 All compose into `EventDispatchTarget` which ChatViewModel conforms to.

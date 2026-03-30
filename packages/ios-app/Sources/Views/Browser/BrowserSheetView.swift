@@ -6,7 +6,6 @@ import UIKit
 struct BrowserSheetView: View {
     let frameImage: UIImage?
     let currentUrl: String?
-    let isStreaming: Bool
     let onCloseBrowser: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -72,7 +71,6 @@ struct BrowserSheetView: View {
         BrowserSheetView(
             frameImage: nil,
             currentUrl: "https://example.com",
-            isStreaming: true,
             onCloseBrowser: {}
         )
     }

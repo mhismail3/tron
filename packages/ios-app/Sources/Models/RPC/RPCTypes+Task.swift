@@ -92,11 +92,6 @@ struct TaskListResult: Decodable {
     let total: Int
 }
 
-/// Parameters for tasks.get
-struct TaskGetParams: Encodable {
-    let taskId: String
-}
-
 // MARK: - Short Relative Time Formatting
 
 /// Format as short relative time (e.g., "1m", "5h", "2d")

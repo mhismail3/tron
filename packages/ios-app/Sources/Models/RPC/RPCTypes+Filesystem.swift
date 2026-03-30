@@ -68,25 +68,3 @@ struct GitCloneResult: Decodable {
     let error: String?
 }
 
-// MARK: - Memory Methods
-
-struct MemorySearchParams: Encodable {
-    let searchText: String?
-    let type: String?
-    let source: String?
-    let limit: Int?
-}
-
-struct MemoryEntry: Decodable, Identifiable {
-    let id: String
-    let type: String
-    let content: String
-    let source: String
-    let relevance: Double?
-    let timestamp: String?
-}
-
-struct MemorySearchResult: Decodable {
-    let entries: [MemoryEntry]
-    let totalCount: Int
-}

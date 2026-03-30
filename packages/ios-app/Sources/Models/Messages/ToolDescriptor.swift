@@ -65,11 +65,10 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(ReadResultViewer(
                     filePath: ToolArgumentParser.filePath(from: tool.arguments),
-                    content: tool.result ?? "",
-                    isExpanded: isExpanded
+                    content: tool.result ?? ""
                 ))
             }
         ),
@@ -81,7 +80,7 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(WriteResultViewer(
                     filePath: ToolArgumentParser.filePath(from: tool.arguments),
                     content: ToolArgumentParser.content(from: tool.arguments),
@@ -97,11 +96,10 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(EditResultViewer(
                     filePath: ToolArgumentParser.filePath(from: tool.arguments),
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
+                    result: tool.result ?? ""
                 ))
             }
         ),
@@ -113,11 +111,10 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 BashSummaryHelper.summary(from: args)
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(BashResultViewer(
                     command: ToolArgumentParser.command(from: tool.arguments),
-                    output: tool.result ?? "",
-                    isExpanded: isExpanded
+                    output: tool.result ?? ""
                 ))
             }
         ),
@@ -134,11 +131,10 @@ enum ToolRegistry {
                 }
                 return "\"\(pattern)\""
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(SearchToolViewer(
                     pattern: ToolArgumentParser.pattern(from: tool.arguments),
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
+                    result: tool.result ?? ""
                 ))
             }
         ),
@@ -148,11 +144,10 @@ enum ToolRegistry {
             displayName: "Find",
             completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(FindResultViewer(
                     pattern: ToolArgumentParser.pattern(from: tool.arguments),
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
+                    result: tool.result ?? ""
                 ))
             }
         ),
@@ -162,11 +157,10 @@ enum ToolRegistry {
             displayName: "Glob",
             completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(FindResultViewer(
                     pattern: ToolArgumentParser.pattern(from: tool.arguments),
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
+                    result: tool.result ?? ""
                 ))
             }
         ),
@@ -234,10 +228,9 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 ComputerUseSummaryHelper.summary(from: args)
             },
-            viewerFactory: { tool, isExpanded in
+            viewerFactory: { tool, _ in
                 AnyView(ComputerUseResultViewer(
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
+                    result: tool.result ?? ""
                 ))
             }
         ),

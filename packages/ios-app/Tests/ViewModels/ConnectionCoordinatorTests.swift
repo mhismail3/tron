@@ -419,9 +419,6 @@ final class MockConnectionContext: ConnectionContext {
     var resumeSessionCalled = false
     var lastResumeSessionId: String?
     var getAgentStateCalled = false
-    var listTasksCalled = false
-    var updateTasksCalled = false
-    var lastTasksCount: Int = 0
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
     var showErrorAlertCalled = false
@@ -441,14 +438,6 @@ final class MockConnectionContext: ConnectionContext {
     var agentStateIsRunning = false
     var agentStateCurrentTurnText: String?
     var agentStateToolCalls: [TestToolCall] = []
-    var listTasksShouldFail = false
-    var tasksResult: TaskListResult = {
-        let json = """
-        {"tasks": [], "total": 0}
-        """.data(using: .utf8)!
-        return try! JSONDecoder().decode(TaskListResult.self, from: json)
-    }()
-
     // MARK: - Protocol Methods
 
     func connect() async {
@@ -508,19 +497,6 @@ final class MockConnectionContext: ConnectionContext {
         }
         """.data(using: .utf8)!
         return try! JSONDecoder().decode(AgentStateResult.self, from: json)
-    }
-
-    func listTasks() async throws -> TaskListResult {
-        listTasksCalled = true
-        if listTasksShouldFail {
-            throw ConnectionTestError.generic
-        }
-        return tasksResult
-    }
-
-    func updateTasks(_ tasks: [RpcTask]) {
-        updateTasksCalled = true
-        lastTasksCount = tasks.count
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {

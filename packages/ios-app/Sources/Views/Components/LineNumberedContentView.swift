@@ -4,14 +4,10 @@ import SwiftUI
 /// Strips server-side line prefixes and displays clean formatted output
 struct LineNumberedContentView: View {
     let content: String
-    let maxCollapsedLines: Int  // Kept for API compatibility, but unused
-    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     var fontSize: CGFloat = 11
     var lineNumFontSize: CGFloat = 9
-    var maxCollapsedHeight: CGFloat = 200  // Unused
     var lineHeight: CGFloat = 16
-    var showExpandButton: Bool = true  // Unused
 
     private var parsedLines: [ContentLineParser.ParsedLine] {
         ContentLineParser.parse(content)
@@ -54,25 +50,18 @@ struct LineNumberedContentView: View {
 
 // MARK: - Wrapper with internal state management
 
-/// Wrapper that manages its own expansion state
+/// Wrapper for call sites that don't need to customize font sizes
 struct LineNumberedContentViewWithState: View {
     let content: String
-    let maxCollapsedLines: Int
     var fontSize: CGFloat = 11
     var lineNumFontSize: CGFloat = 9
-    var maxCollapsedHeight: CGFloat = 200
     var lineHeight: CGFloat = 16
-
-    @State private var isExpanded = false
 
     var body: some View {
         LineNumberedContentView(
             content: content,
-            maxCollapsedLines: maxCollapsedLines,
-            isExpanded: $isExpanded,
             fontSize: fontSize,
             lineNumFontSize: lineNumFontSize,
-            maxCollapsedHeight: maxCollapsedHeight,
             lineHeight: lineHeight
         )
     }

@@ -84,7 +84,7 @@ struct ToolResultRouter: View {
         if let factory = descriptor.viewerFactory {
             factory(tool, $isExpanded)
         } else {
-            GenericResultViewer(result: result, isExpanded: $isExpanded)
+            GenericResultViewer(result: result)
         }
     }
 

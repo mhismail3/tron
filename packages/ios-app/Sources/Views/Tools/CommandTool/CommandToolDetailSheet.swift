@@ -9,7 +9,6 @@ struct CommandToolDetailSheet: View {
     let data: CommandToolChipData
     var onOpenURL: ((URL) -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var isResultExpanded = true
 
     /// Parsed URL for tools that provide a URL to open
     private var parsedURL: URL? {
@@ -305,8 +304,7 @@ struct CommandToolDetailSheet: View {
         case "read":
             ReadResultViewer(
                 filePath: extractFilePath(from: data.arguments),
-                content: result,
-                isExpanded: $isResultExpanded
+                content: result
             )
         case "write":
             WriteResultViewer(
@@ -317,34 +315,29 @@ struct CommandToolDetailSheet: View {
         case "edit":
             EditResultViewer(
                 filePath: extractFilePath(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
+                result: result
             )
         case "bash":
             BashResultViewer(
                 command: extractCommand(from: data.arguments),
-                output: result,
-                isExpanded: $isResultExpanded
+                output: result
             )
         case "search":
             SearchToolViewer(
                 pattern: extractPattern(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
+                result: result
             )
         case "find", "glob":
             FindResultViewer(
                 pattern: extractPattern(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
+                result: result
             )
         case "computeruse":
             ComputerUseResultViewer(
-                result: result,
-                isExpanded: $isResultExpanded
+                result: result
             )
         default:
-            GenericResultViewer(result: result, isExpanded: $isResultExpanded)
+            GenericResultViewer(result: result)
         }
     }
 

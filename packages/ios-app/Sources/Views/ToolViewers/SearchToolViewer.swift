@@ -6,7 +6,6 @@ import SwiftUI
 struct FindResultViewer: View {
     let pattern: String
     let result: String
-    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var files: [String] {
         result.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -88,7 +87,6 @@ struct FindResultViewer: View {
 struct SearchToolViewer: View {
     let pattern: String
     let result: String
-    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var lines: [String] {
         result.components(separatedBy: "\n").filter { !$0.isEmpty }
