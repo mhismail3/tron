@@ -114,12 +114,29 @@ extension View {
     /// - iPad: Uses custom `.largeForm` sizing (60% width, 80% height) - smaller than page, larger than form
     /// - iPhone: Uses `.presentationDetents` to allow medium/large sizing
     /// - iOS 26+: Partial-height detents automatically get Liquid Glass appearance
+    /// - Large detent in light mode gets cream background to match dashboard
     ///
     /// On iPad, `presentationDetents` is ignored for floating modals.
-    @ViewBuilder
     func adaptivePresentationDetents(_ detents: Set<PresentationDetent> = [.medium, .large]) -> some View {
-        self
-            .presentationDetents(detents)
-            .presentationSizing(.largeForm)
+        self.modifier(AdaptivePresentationModifier(detents: detents))
+    }
+}
+
+private struct AdaptivePresentationModifier: ViewModifier {
+    let detents: Set<PresentationDetent>
+    @State private var selectedDetent: PresentationDetent = .medium
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        if selectedDetent == .large && colorScheme == .light {
+            content
+                .presentationDetents(detents, selection: $selectedDetent)
+                .presentationSizing(.largeForm)
+                .presentationBackground(Color.tronBackground)
+        } else {
+            content
+                .presentationDetents(detents, selection: $selectedDetent)
+                .presentationSizing(.largeForm)
+        }
     }
 }
