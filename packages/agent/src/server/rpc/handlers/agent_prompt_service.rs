@@ -444,7 +444,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         build_user_content_override(&prompt, &model, images.as_deref(), attachments.as_deref());
 
     let skill_index_context = {
-        let registry = skill_registry.read();
+        let mut registry = skill_registry.write();
+        registry.refresh_if_stale(&working_dir);
         let all_skills = registry.list(None);
         let index = crate::skills::injector::build_skill_index(&all_skills);
         if index.is_empty() { None } else { Some(index) }

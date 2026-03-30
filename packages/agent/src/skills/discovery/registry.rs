@@ -2,18 +2,107 @@
 //!
 //! Maintains a `HashMap` of skills keyed by name. Project skills take
 //! precedence over global skills with the same name.
+//!
+//! Supports staleness detection via filesystem fingerprinting: before each
+//! prompt, callers can use [`SkillRegistry::refresh_if_stale`] to cheaply
+//! check whether skill directories have changed on disk and only do a full
+//! rescan when something is different.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 use tracing::{debug, warn};
 
 use crate::skills::loader;
 use crate::skills::types::{SkillInfo, SkillMetadata, SkillSource};
 
+// =============================================================================
+// Fingerprint
+// =============================================================================
+
+/// Lightweight fingerprint of skill directories for staleness detection.
+///
+/// Tracks modification times of skill directories and SKILL.md files.
+/// Two fingerprints are equal iff they have exactly the same set of paths
+/// with the same modification times.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillFingerprint {
+    /// Sorted map of absolute path -> mtime (seconds since epoch).
+    /// Includes both parent directories and individual SKILL.md files.
+    entries: BTreeMap<String, u64>,
+}
+
+impl SkillFingerprint {
+    /// Compute a fingerprint by stat-ing all skill directories and SKILL.md files.
+    ///
+    /// This is cheap: only `readdir` + `stat` calls, no file content is read.
+    pub fn compute(working_dir: &str) -> Self {
+        let mut entries = BTreeMap::new();
+
+        let global_dir = loader::global_skills_dir();
+        Self::scan_dir(&global_dir, &mut entries);
+
+        for dir in loader::project_skills_dirs(working_dir) {
+            Self::scan_dir(&dir, &mut entries);
+        }
+
+        Self { entries }
+    }
+
+    /// Scan a single skills directory and add entries for the directory itself
+    /// and each SKILL.md file found within subdirectories.
+    fn scan_dir(dir: &Path, entries: &mut BTreeMap<String, u64>) {
+        // Record the directory's own mtime (detects new/removed subdirectories)
+        if let Ok(meta) = std::fs::metadata(dir) {
+            if let Ok(mtime) = meta.modified() {
+                let secs = mtime
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                entries.insert(dir.to_string_lossy().into_owned(), secs);
+            }
+        } else {
+            // Directory doesn't exist — record absence so creation is detected
+            entries.insert(dir.to_string_lossy().into_owned(), 0);
+            return;
+        }
+
+        // Record each subdirectory's SKILL.md mtime (detects content changes)
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return;
+        };
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let skill_md = path.join(crate::skills::constants::SKILL_MD_FILENAME);
+            let mtime = std::fs::metadata(&skill_md)
+                .and_then(|m| m.modified())
+                .map(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                })
+                .unwrap_or(0);
+            entries.insert(skill_md.to_string_lossy().into_owned(), mtime);
+        }
+    }
+}
+
+// =============================================================================
+// Registry
+// =============================================================================
+
 /// In-memory registry of available skills.
 #[derive(Debug)]
 pub struct SkillRegistry {
     skills: HashMap<String, SkillMetadata>,
+    /// Fingerprint from the last refresh (for staleness detection).
+    last_fingerprint: Option<SkillFingerprint>,
+    /// Working directory used for the last refresh.
+    last_working_dir: Option<String>,
 }
 
 impl SkillRegistry {
@@ -21,6 +110,8 @@ impl SkillRegistry {
     pub fn new() -> Self {
         Self {
             skills: HashMap::new(),
+            last_fingerprint: None,
+            last_working_dir: None,
         }
     }
 
@@ -125,10 +216,39 @@ impl SkillRegistry {
         self.skills.is_empty()
     }
 
-    /// Clear and reload all skills.
+    /// Clear and reload all skills from disk, updating the fingerprint.
     pub fn refresh(&mut self, working_dir: &str) {
         self.skills.clear();
         self.initialize(working_dir);
+        self.last_fingerprint = Some(SkillFingerprint::compute(working_dir));
+        self.last_working_dir = Some(working_dir.to_string());
+    }
+
+    /// Refresh only if skill directories have changed on disk.
+    ///
+    /// Computes a cheap filesystem fingerprint (stat calls only, no file reads)
+    /// and compares it to the fingerprint from the last refresh. Returns `true`
+    /// if a refresh was performed.
+    ///
+    /// This is designed to be called before every prompt — the fingerprint
+    /// check is <1ms even with many skills.
+    pub fn refresh_if_stale(&mut self, working_dir: &str) -> bool {
+        let current = SkillFingerprint::compute(working_dir);
+
+        // Check if working directory changed (session switched projects)
+        let dir_changed = self.last_working_dir.as_deref() != Some(working_dir);
+
+        if !dir_changed {
+            if let Some(ref last) = self.last_fingerprint {
+                if *last == current {
+                    return false;
+                }
+            }
+        }
+
+        debug!("Skill directory changed on disk, refreshing registry");
+        self.refresh(working_dir);
+        true
     }
 
     /// Insert a skill directly (for testing or programmatic use).
@@ -251,5 +371,165 @@ mod tests {
         registry.insert(make_skill("a", "Second", SkillSource::Project));
         assert_eq!(registry.size(), 1);
         assert_eq!(registry.get("a").unwrap().display_name, "Second");
+    }
+
+    // --- SkillFingerprint ---
+
+    #[test]
+    fn fingerprint_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let fp = SkillFingerprint::compute(dir.path().to_str().unwrap());
+        // Should have entries for the non-existent skill dirs (recorded as 0)
+        assert!(!fp.entries.is_empty());
+    }
+
+    #[test]
+    fn fingerprint_equal_when_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().to_str().unwrap();
+        let fp1 = SkillFingerprint::compute(wd);
+        let fp2 = SkillFingerprint::compute(wd);
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_changes_when_skill_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".tron/skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let wd = dir.path().to_str().unwrap();
+
+        let fp_before = SkillFingerprint::compute(wd);
+
+        // Add a new skill
+        let skill_dir = skills_dir.join("new-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: New Skill\ndescription: A test\n---\nContent",
+        )
+        .unwrap();
+
+        let fp_after = SkillFingerprint::compute(wd);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn fingerprint_changes_when_skill_md_modified() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".tron/skills");
+        let skill_dir = skills_dir.join("test-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_md = skill_dir.join("SKILL.md");
+        std::fs::write(&skill_md, "---\nname: Test\n---\nOriginal").unwrap();
+
+        let wd = dir.path().to_str().unwrap();
+        let fp_before = SkillFingerprint::compute(wd);
+
+        // Wait to ensure mtime changes (filesystem granularity)
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&skill_md, "---\nname: Test\n---\nModified").unwrap();
+
+        let fp_after = SkillFingerprint::compute(wd);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn fingerprint_changes_when_skill_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".tron/skills");
+        let skill_dir = skills_dir.join("doomed");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Doomed\n---\nContent",
+        )
+        .unwrap();
+
+        let wd = dir.path().to_str().unwrap();
+        let fp_before = SkillFingerprint::compute(wd);
+
+        std::fs::remove_dir_all(&skill_dir).unwrap();
+
+        let fp_after = SkillFingerprint::compute(wd);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn fingerprint_nonexistent_dir_is_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().join("nonexistent").to_string_lossy().to_string();
+        let fp1 = SkillFingerprint::compute(&wd);
+        let fp2 = SkillFingerprint::compute(&wd);
+        assert_eq!(fp1, fp2);
+    }
+
+    // --- refresh_if_stale ---
+
+    #[test]
+    fn refresh_if_stale_returns_true_on_first_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().to_str().unwrap();
+        let mut registry = SkillRegistry::new();
+        assert!(registry.refresh_if_stale(wd));
+    }
+
+    #[test]
+    fn refresh_if_stale_returns_false_when_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().to_str().unwrap();
+        let mut registry = SkillRegistry::new();
+        registry.refresh_if_stale(wd);
+        assert!(!registry.refresh_if_stale(wd));
+    }
+
+    #[test]
+    fn refresh_if_stale_detects_new_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".tron/skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let wd = dir.path().to_str().unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.refresh_if_stale(wd);
+        let initial_count = registry.size();
+        assert!(!registry.has("hot-skill"));
+
+        // Add a new skill to the project skills dir
+        let skill_dir = skills_dir.join("hot-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Hot Skill\ndescription: Just added\n---\n# Hot Skill",
+        )
+        .unwrap();
+
+        assert!(registry.refresh_if_stale(wd));
+        assert!(registry.has("hot-skill"));
+        assert_eq!(registry.size(), initial_count + 1);
+    }
+
+    #[test]
+    fn refresh_if_stale_detects_working_dir_change() {
+        let dir1 = tempfile::tempdir().unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        let wd1 = dir1.path().to_str().unwrap();
+        let wd2 = dir2.path().to_str().unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.refresh_if_stale(wd1);
+        // Different working dir should trigger refresh
+        assert!(registry.refresh_if_stale(wd2));
+    }
+
+    #[test]
+    fn refresh_stores_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().to_str().unwrap();
+        let mut registry = SkillRegistry::new();
+        assert!(registry.last_fingerprint.is_none());
+        registry.refresh(wd);
+        assert!(registry.last_fingerprint.is_some());
+        assert_eq!(registry.last_working_dir.as_deref(), Some(wd));
     }
 }

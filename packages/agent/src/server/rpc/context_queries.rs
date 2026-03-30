@@ -36,7 +36,8 @@ impl ContextQueryService {
                     tool_definitions.clone(),
                 )?;
                 let skill_index_content = {
-                    let registry = skill_registry.read();
+                    let mut registry = skill_registry.write();
+                    registry.refresh_if_stale(&prepared.session.working_directory);
                     let skills = registry.list(None);
                     let index = crate::skills::injector::build_skill_index(&skills);
                     if index.is_empty() { None } else { Some(index) }
@@ -210,9 +211,10 @@ fn build_detailed_snapshot_response(
         mut context_manager,
     } = prepared;
 
-    // Set skill index content so token estimation includes it
+    // Refresh registry if skills changed on disk, then build index for token estimation
     let skill_index_content = {
-        let registry = skill_registry.read();
+        let mut registry = skill_registry.write();
+        registry.refresh_if_stale(&session.working_directory);
         let skills = registry.list(None);
         let index = crate::skills::injector::build_skill_index(&skills);
         if index.is_empty() { None } else { Some(index) }
