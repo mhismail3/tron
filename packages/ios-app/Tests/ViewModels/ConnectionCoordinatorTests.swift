@@ -142,6 +142,32 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.getAgentStateCalled)
     }
 
+    func testReconnectAndResumeSetsShouldDismissOnSessionNotFound() async {
+        // Given: Connected, but session not found on server
+        mockContext.isConnected = true
+        mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
+
+        // When: Reconnect and resume
+        await coordinator.reconnectAndResume(context: mockContext)
+
+        // Then: Should set shouldDismiss and show error (same behavior as connectAndResume)
+        XCTAssertTrue(mockContext.shouldDismiss)
+        XCTAssertTrue(mockContext.showErrorAlertCalled)
+    }
+
+    func testReconnectAndResumeDoesNotDismissOnOtherErrors() async {
+        // Given: Connected, generic resume error
+        mockContext.isConnected = true
+        mockContext.resumeSessionError = ConnectionTestError.generic
+
+        // When: Reconnect and resume
+        await coordinator.reconnectAndResume(context: mockContext)
+
+        // Then: Should NOT set shouldDismiss (same behavior as connectAndResume)
+        XCTAssertFalse(mockContext.shouldDismiss)
+        XCTAssertFalse(mockContext.showErrorAlertCalled)
+    }
+
     // MARK: - Check and Resume Agent State Tests
 
     func testCheckAgentStateSetsProcessingWhenAgentRunning() async {
