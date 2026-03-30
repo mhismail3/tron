@@ -40,6 +40,62 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "height": height,
             })),
         )),
+        TronEvent::ProcessSpawned {
+            process_id,
+            label,
+            kind,
+            background,
+            tool_call_id,
+            ..
+        } => Some(session_scoped(
+            event,
+            "process.spawned",
+            Some(json!({
+                "processId": process_id,
+                "label": label,
+                "kind": kind,
+                "background": background,
+                "toolCallId": tool_call_id,
+            })),
+        )),
+        TronEvent::ProcessStatusUpdate {
+            process_id,
+            status,
+            ..
+        } => Some(session_scoped(
+            event,
+            "process.status_update",
+            Some(json!({
+                "processId": process_id,
+                "status": status,
+            })),
+        )),
+        TronEvent::ProcessCompleted {
+            parent_session_id,
+            process_id,
+            label,
+            success,
+            exit_code,
+            duration,
+            result_summary,
+            blob_id,
+            completed_at,
+            ..
+        } => Some(session_scoped(
+            event,
+            "process.completed",
+            Some(json!({
+                "parentSessionId": parent_session_id,
+                "processId": process_id,
+                "label": label,
+                "success": success,
+                "exitCode": exit_code,
+                "duration": duration,
+                "resultSummary": result_summary,
+                "blobId": blob_id,
+                "completedAt": completed_at,
+            })),
+        )),
         _ => None,
     }
 }
@@ -106,5 +162,133 @@ mod tests {
             base: BaseEvent::now("s1"),
         };
         assert!(convert(&event).is_none());
+    }
+
+    // ── Process event bridge tests ──
+
+    #[test]
+    fn process_spawned_bridge_wire_type() {
+        let event = TronEvent::ProcessSpawned {
+            base: BaseEvent::now("sess-1"),
+            process_id: "proc-1".into(),
+            label: "cargo build".into(),
+            kind: "shell".into(),
+            background: true,
+            tool_call_id: "tc-1".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        assert_eq!(bridged.rpc_event.event_type, "process.spawned");
+    }
+
+    #[test]
+    fn process_spawned_bridge_fields() {
+        let event = TronEvent::ProcessSpawned {
+            base: BaseEvent::now("sess-1"),
+            process_id: "proc-abc".into(),
+            label: "npm test".into(),
+            kind: "shell".into(),
+            background: false,
+            tool_call_id: "tc-42".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        let data = bridged.rpc_event.data.as_ref().unwrap();
+        assert_eq!(data["processId"], "proc-abc");
+        assert_eq!(data["label"], "npm test");
+        assert_eq!(data["kind"], "shell");
+        assert_eq!(data["background"], false);
+        assert_eq!(data["toolCallId"], "tc-42");
+    }
+
+    #[test]
+    fn process_spawned_is_session_scoped() {
+        let event = TronEvent::ProcessSpawned {
+            base: BaseEvent::now("sess-99"),
+            process_id: "p".into(),
+            label: "l".into(),
+            kind: "shell".into(),
+            background: true,
+            tool_call_id: "t".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        assert_eq!(bridged.rpc_event.session_id.as_deref(), Some("sess-99"));
+    }
+
+    #[test]
+    fn process_status_update_bridge_wire_type() {
+        let event = TronEvent::ProcessStatusUpdate {
+            base: BaseEvent::now("s1"),
+            process_id: "proc-1".into(),
+            status: "background".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        assert_eq!(bridged.rpc_event.event_type, "process.status_update");
+        let data = bridged.rpc_event.data.as_ref().unwrap();
+        assert_eq!(data["processId"], "proc-1");
+        assert_eq!(data["status"], "background");
+    }
+
+    #[test]
+    fn process_completed_bridge_wire_type() {
+        let event = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("sess-1"),
+            parent_session_id: "sess-1".into(),
+            process_id: "proc-1".into(),
+            label: "build".into(),
+            success: true,
+            exit_code: Some(0),
+            duration: 5000,
+            result_summary: "ok".into(),
+            blob_id: None,
+            completed_at: "2026-03-29T12:00:00Z".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        assert_eq!(bridged.rpc_event.event_type, "process.completed");
+    }
+
+    #[test]
+    fn process_completed_bridge_all_fields() {
+        let event = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("sess-1"),
+            parent_session_id: "sess-1".into(),
+            process_id: "proc-abc".into(),
+            label: "npm test".into(),
+            success: false,
+            exit_code: Some(1),
+            duration: 12000,
+            result_summary: "3 failed".into(),
+            blob_id: Some("blob-xyz".into()),
+            completed_at: "2026-03-29T15:00:00Z".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        let data = bridged.rpc_event.data.as_ref().unwrap();
+        assert_eq!(data["parentSessionId"], "sess-1");
+        assert_eq!(data["processId"], "proc-abc");
+        assert_eq!(data["label"], "npm test");
+        assert_eq!(data["success"], false);
+        assert_eq!(data["exitCode"], 1);
+        assert_eq!(data["duration"], 12000);
+        assert_eq!(data["resultSummary"], "3 failed");
+        assert_eq!(data["blobId"], "blob-xyz");
+        assert_eq!(data["completedAt"], "2026-03-29T15:00:00Z");
+    }
+
+    #[test]
+    fn process_completed_nullable_blob_id() {
+        let event = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("s1"),
+            parent_session_id: "s1".into(),
+            process_id: "p".into(),
+            label: "l".into(),
+            success: true,
+            exit_code: None,
+            duration: 100,
+            result_summary: "ok".into(),
+            blob_id: None,
+            completed_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let bridged = convert(&event).expect("should convert");
+        let data = bridged.rpc_event.data.as_ref().unwrap();
+        assert!(data["exitCode"].is_null());
+        assert!(data["blobId"].is_null());
     }
 }

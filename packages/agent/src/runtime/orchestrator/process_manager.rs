@@ -29,7 +29,7 @@ use uuid::Uuid;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
     ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult, ProcessInfo,
-    ProcessKind, ProcessManagerOps, ProcessState,
+    ProcessManagerOps, ProcessState,
 };
 
 mod tracking;
@@ -339,6 +339,7 @@ impl ProcessManagerOps for ProcessManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::traits::ProcessKind;
     use std::time::Duration;
 
     fn make_config(label: &str) -> ManagedProcessConfig {

@@ -874,6 +874,63 @@ tron_events! {
         /// Frame height in pixels.
         height: u32,
     } => "display_frame",
+
+    // -- Process management --
+
+    /// A managed process was spawned (foreground or background).
+    ProcessSpawned {
+        /// Process identifier.
+        #[serde(rename = "processId")]
+        process_id: String,
+        /// Human-readable label.
+        label: String,
+        /// Process kind ("shell", "display_stream", "tool_operation").
+        kind: String,
+        /// Whether the process was started in the background.
+        background: bool,
+        /// Tool call that spawned this process.
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+    } => "process_spawned",
+
+    /// A managed process changed status (promoted, cancelled).
+    ProcessStatusUpdate {
+        /// Process identifier.
+        #[serde(rename = "processId")]
+        process_id: String,
+        /// New status ("background", "cancelled").
+        status: String,
+    } => "process_status_update",
+
+    /// A background process completed — result available for agent context.
+    ProcessCompleted {
+        /// Session that owns the process.
+        #[serde(rename = "parentSessionId")]
+        parent_session_id: String,
+        /// Process identifier.
+        #[serde(rename = "processId")]
+        process_id: String,
+        /// Human-readable label.
+        label: String,
+        /// Whether the process completed successfully.
+        success: bool,
+        /// Exit code (None for non-shell processes).
+        #[serde(rename = "exitCode")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        /// Duration in milliseconds.
+        duration: u64,
+        /// Truncated output summary.
+        #[serde(rename = "resultSummary")]
+        result_summary: String,
+        /// Blob ID for full output (if large).
+        #[serde(rename = "blobId")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        blob_id: Option<String>,
+        /// ISO 8601 completion timestamp.
+        #[serde(rename = "completedAt")]
+        completed_at: String,
+    } => "process_completed",
 }
 
 impl TronEvent {
@@ -1664,13 +1721,38 @@ mod tests {
                 deleted: true,
             },
             TronEvent::DisplayFrame {
-                base,
+                base: base.clone(),
                 stream_id: "stream-1".into(),
                 tool_call_id: "call-1".into(),
                 data: "base64data".into(),
                 frame_id: 1,
                 width: 1280,
                 height: 720,
+            },
+            TronEvent::ProcessSpawned {
+                base: base.clone(),
+                process_id: "proc-1".into(),
+                label: "test".into(),
+                kind: "shell".into(),
+                background: false,
+                tool_call_id: "tc-1".into(),
+            },
+            TronEvent::ProcessStatusUpdate {
+                base: base.clone(),
+                process_id: "proc-1".into(),
+                status: "background".into(),
+            },
+            TronEvent::ProcessCompleted {
+                base,
+                parent_session_id: "s1".into(),
+                process_id: "proc-1".into(),
+                label: "test".into(),
+                success: true,
+                exit_code: Some(0),
+                duration: 100,
+                result_summary: "ok".into(),
+                blob_id: None,
+                completed_at: "2026-01-01T00:00:00Z".into(),
             },
         ];
 
@@ -1815,5 +1897,121 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: TronEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    // ── Process management events ──
+
+    #[test]
+    fn process_spawned_event_type_and_fields() {
+        let e = TronEvent::ProcessSpawned {
+            base: BaseEvent::now("sess-1"),
+            process_id: "proc-abc".into(),
+            label: "cargo build".into(),
+            kind: "shell".into(),
+            background: true,
+            tool_call_id: "tc-1".into(),
+        };
+        assert_eq!(e.event_type(), "process_spawned");
+        assert_eq!(e.session_id(), "sess-1");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["processId"], "proc-abc");
+        assert_eq!(json["label"], "cargo build");
+        assert_eq!(json["kind"], "shell");
+        assert_eq!(json["background"], true);
+        assert_eq!(json["toolCallId"], "tc-1");
+    }
+
+    #[test]
+    fn process_spawned_serde_roundtrip() {
+        let original = TronEvent::ProcessSpawned {
+            base: BaseEvent::now("s1"),
+            process_id: "proc-1".into(),
+            label: "test".into(),
+            kind: "shell".into(),
+            background: false,
+            tool_call_id: "tc-1".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: TronEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn process_status_update_event_type() {
+        let e = TronEvent::ProcessStatusUpdate {
+            base: BaseEvent::now("s1"),
+            process_id: "proc-1".into(),
+            status: "background".into(),
+        };
+        assert_eq!(e.event_type(), "process_status_update");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["processId"], "proc-1");
+        assert_eq!(json["status"], "background");
+    }
+
+    #[test]
+    fn process_completed_event_type_and_fields() {
+        let e = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("sess-1"),
+            parent_session_id: "sess-1".into(),
+            process_id: "proc-abc".into(),
+            label: "npm test".into(),
+            success: false,
+            exit_code: Some(1),
+            duration: 12300,
+            result_summary: "3 tests failed".into(),
+            blob_id: Some("blob-xyz".into()),
+            completed_at: "2026-03-29T12:00:00Z".into(),
+        };
+        assert_eq!(e.event_type(), "process_completed");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["parentSessionId"], "sess-1");
+        assert_eq!(json["processId"], "proc-abc");
+        assert_eq!(json["label"], "npm test");
+        assert_eq!(json["success"], false);
+        assert_eq!(json["exitCode"], 1);
+        assert_eq!(json["duration"], 12300);
+        assert_eq!(json["resultSummary"], "3 tests failed");
+        assert_eq!(json["blobId"], "blob-xyz");
+        assert_eq!(json["completedAt"], "2026-03-29T12:00:00Z");
+    }
+
+    #[test]
+    fn process_completed_nullable_fields() {
+        let e = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("s1"),
+            parent_session_id: "s1".into(),
+            process_id: "proc-1".into(),
+            label: "stream".into(),
+            success: true,
+            exit_code: None,
+            duration: 5000,
+            result_summary: "stream ended".into(),
+            blob_id: None,
+            completed_at: "2026-03-29T12:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&e).unwrap();
+        // skip_serializing_if = None means these fields should be absent.
+        assert!(json.get("exitCode").is_none());
+        assert!(json.get("blobId").is_none());
+    }
+
+    #[test]
+    fn process_completed_serde_roundtrip() {
+        let original = TronEvent::ProcessCompleted {
+            base: BaseEvent::now("s1"),
+            parent_session_id: "s1".into(),
+            process_id: "proc-1".into(),
+            label: "test".into(),
+            success: true,
+            exit_code: Some(0),
+            duration: 100,
+            result_summary: "ok".into(),
+            blob_id: None,
+            completed_at: "2026-03-29T12:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: TronEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, back);
     }
 }
