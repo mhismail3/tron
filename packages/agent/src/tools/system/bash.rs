@@ -123,6 +123,108 @@ impl BashTool {
             })
             .collect()
     }
+
+    /// Execute a command in the background via ProcessManager.
+    async fn execute_background(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        description: &Option<String>,
+        shell: &str,
+        env_vars: &std::collections::HashMap<String, String>,
+        stdin: Option<String>,
+        ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
+        let pm = ctx.process_manager.as_ref().ok_or(ToolError::Internal {
+            message: "Background execution requires ProcessManager (not available)".into(),
+        })?;
+
+        let config = crate::tools::traits::ManagedProcessConfig {
+            label: command.to_owned(),
+            kind: crate::tools::traits::ProcessKind::Shell,
+            timeout_ms: Some(timeout_ms),
+            sandbox: false,
+        };
+
+        let runner = self.runner.clone();
+        let cmd = command.to_owned();
+        let shell = shell.to_owned();
+        let env_vars = env_vars.clone();
+        let working_dir = ctx.working_directory.clone();
+        let cancel = ctx.cancellation.clone();
+
+        let task: std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> = Box::pin(async move {
+            let start = std::time::Instant::now();
+            let opts = ProcessOptions {
+                working_directory: working_dir,
+                timeout_ms,
+                cancellation: cancel,
+                env: env_vars,
+                stdin,
+                shell,
+                interactive: false,
+                pty_input: Vec::new(),
+                output_tx: None, // No streaming for background
+            };
+
+            match runner.run_command(&cmd, &opts).await {
+                Ok(output) => {
+                    let mut combined = output.stdout;
+                    if !output.stderr.is_empty() {
+                        if !combined.is_empty() { combined.push('\n'); }
+                        combined.push_str(&output.stderr);
+                    }
+                    crate::tools::traits::ManagedProcessResult {
+                        process_id: String::new(),
+                        output: combined,
+                        exit_code: Some(output.exit_code),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                        timed_out: output.timed_out,
+                        cancelled: output.interrupted,
+                        blob_id: None,
+                    }
+                }
+                Err(e) => {
+                    crate::tools::traits::ManagedProcessResult {
+                        process_id: String::new(),
+                        output: format!("Error: {e}"),
+                        exit_code: None,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                        timed_out: false,
+                        cancelled: false,
+                        blob_id: None,
+                    }
+                }
+            }
+        });
+
+        let handle = pm
+            .spawn_managed(
+                &ctx.session_id,
+                &ctx.tool_call_id,
+                config,
+                task,
+                true, // background
+            )
+            .await?;
+
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![
+                crate::core::content::ToolResultContent::text(format!(
+                    "Command backgrounded ({}). You will be notified when it completes.",
+                    handle.process_id
+                )),
+            ]),
+            details: Some(json!({
+                "command": command,
+                "processId": handle.process_id,
+                "background": true,
+                "description": description,
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
+    }
 }
 
 /// Check if a PTY prompt string indicates sensitive input.
@@ -232,6 +334,11 @@ impl TronTool for BashTool {
             "description": "Paths to symlink into the sandbox (read-only)",
             "items": {"type": "string"}
         }))
+        .property("background", json!({
+            "type": "boolean",
+            "description": "Run in background. Returns immediately with a process ID. You will be notified when it completes. Use for long-running commands (builds, test suites).",
+            "default": false
+        }))
         .build()
     }
 
@@ -307,6 +414,14 @@ impl TronTool for BashTool {
         } else {
             timeout_ms
         };
+
+        // Background execution via ProcessManager
+        let background = get_optional_bool(&params, "background").unwrap_or(false);
+        if background {
+            return self.execute_background(
+                &command, timeout_ms, &description, &shell, &env_vars, stdin, ctx,
+            ).await;
+        }
 
         // Parse sandbox config
         let sandbox_mode = params.get("sandbox");
@@ -1561,5 +1676,84 @@ mod tests {
     #[test]
     fn pty_does_not_redact_continue_prompt() {
         assert!(!is_sensitive_prompt("Continue? [y/n]"));
+    }
+
+    // ── Background execution ──────────────────────────────────
+
+    #[test]
+    fn bash_schema_has_background_param() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let def = tool.definition();
+        let props = def.parameters.properties.as_ref().unwrap();
+        assert!(props.contains_key("background"), "missing background property");
+        assert_eq!(props["background"]["type"], "boolean");
+    }
+
+    #[tokio::test]
+    async fn bash_background_no_process_manager_returns_error() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let ctx = make_ctx(); // process_manager is None
+        let r = tool
+            .execute(json!({"command": "echo hello", "background": true}), &ctx)
+            .await;
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("ProcessManager"));
+    }
+
+    #[tokio::test]
+    async fn bash_foreground_unchanged_when_background_false() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
+        let r = tool
+            .execute(json!({"command": "echo hello", "background": false}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        assert!(text.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn bash_foreground_unchanged_when_background_omitted() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("world")), None);
+        let r = tool
+            .execute(json!({"command": "echo world"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).contains("world"));
+    }
+
+    #[tokio::test]
+    async fn bash_background_dangerous_command_still_blocked() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+        let mut ctx = make_ctx();
+        let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
+        ctx.process_manager = Some(pm);
+
+        let r = tool
+            .execute(json!({"command": "rm -rf /", "background": true}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn bash_background_returns_immediately_with_process_id() {
+        let tool = BashTool::new(Arc::new(MockRunner::ok("output")), None);
+        let mut ctx = make_ctx();
+        let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
+        ctx.process_manager = Some(pm);
+
+        let r = tool
+            .execute(json!({"command": "echo hello", "background": true}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        let details = r.details.unwrap();
+        assert_eq!(details["background"], true);
+        assert!(details["processId"].as_str().unwrap().starts_with("proc-"));
+        assert!(text.contains("backgrounded"));
     }
 }
