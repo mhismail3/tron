@@ -83,6 +83,30 @@ struct SourceChangesSheet: View {
                             }
                         }
                         .disabled(isPruning)
+                        .popover(isPresented: $showPruneConfirmation, arrowEdge: .bottom) {
+                            GlassActionSheet(
+                                actions: [
+                                    GlassAction(
+                                        title: "Delete all \(branches.filter({ !$0.isActive }).count) branches",
+                                        icon: "trash",
+                                        color: .tronError,
+                                        role: .destructive
+                                    ) {
+                                        showPruneConfirmation = false
+                                        pruneAllBranches()
+                                    },
+                                    GlassAction(
+                                        title: "Cancel",
+                                        icon: nil,
+                                        color: .tronTextMuted,
+                                        role: .cancel
+                                    ) {
+                                        showPruneConfirmation = false
+                                    }
+                                ]
+                            )
+                            .presentationCompactAdaptation(.popover)
+                        }
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -126,19 +150,6 @@ struct SourceChangesSheet: View {
             )
             .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large])
-        }
-        .confirmationDialog(
-            "Prune all preserved branches?",
-            isPresented: $showPruneConfirmation
-        ) {
-            let count = branches.filter({ !$0.isActive }).count
-            Button("Delete all \(count) branches", role: .destructive) {
-                pruneAllBranches()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            let count = branches.filter({ !$0.isActive }).count
-            Text("This will delete all \(count) preserved branches. This cannot be undone.")
         }
     }
 
