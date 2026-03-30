@@ -695,15 +695,6 @@ cmd_deploy() {
     print_status "Updating launchd plist..."
     create_launchd_plist
 
-    # Regenerate auto-deploy plist if installed (keeps paths in sync)
-    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
-        print_status "Updating auto-deploy plist..."
-        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
-        create_auto_deploy_plist
-        launchctl load "$AUTO_DEPLOY_PLIST_PATH"
-        print_success "Auto-deploy plist updated"
-    fi
-
     # Record new commit
     local new_commit
     new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -766,6 +757,18 @@ SENTINEL
 
         write_deployment_result "failed" "Service failed to start"
         return 1
+    fi
+
+    # Regenerate auto-deploy plist if installed (keeps paths in sync).
+    # This MUST happen after the service is started — if auto-deploy invoked
+    # this deploy, `launchctl unload` kills the calling process. Doing it last
+    # ensures the service is already running before we risk that.
+    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
+        print_status "Updating auto-deploy plist..."
+        create_auto_deploy_plist
+        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+        launchctl load "$AUTO_DEPLOY_PLIST_PATH"
+        print_success "Auto-deploy plist updated"
     fi
 
     echo ""
