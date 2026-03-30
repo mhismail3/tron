@@ -696,6 +696,7 @@ async fn main() -> Result<()> {
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router,
         display_stream_registry: None,
+        process_manager: None,
     };
 
     // Method registry
@@ -1334,6 +1335,7 @@ mod tests {
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
             display_stream_registry: None,
+            process_manager: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1522,6 +1524,7 @@ mod tests {
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
             display_stream_registry: None,
+            process_manager: None,
         };
 
         let mut registry = MethodRegistry::new();

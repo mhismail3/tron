@@ -31,6 +31,7 @@ pub mod cron;
 pub mod device;
 pub mod display;
 pub mod events;
+pub(crate) mod process;
 pub mod filesystem;
 pub mod git;
 pub mod logs;
@@ -184,6 +185,12 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Display
     registry.register("display.stopStream", display::StopStreamHandler);
+
+    // Process management
+    registry.register("process.promote", process::PromoteHandler);
+    registry.register("process.cancel", process::CancelHandler);
+    registry.register("process.list", process::ListHandler);
+    registry.register("process.status", process::StatusHandler);
 
     // Canvas
     registry.register("canvas.get", canvas::GetCanvasHandler);
@@ -478,6 +485,7 @@ pub(crate) mod test_helpers {
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
             display_stream_registry: None,
+            process_manager: None,
         }
     }
 }
@@ -507,8 +515,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            117,
-            "expected 117 methods, got {}",
+            121,
+            "expected 121 methods, got {}",
             reg.methods().len()
         );
     }

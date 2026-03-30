@@ -122,6 +122,7 @@ mod tests {
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
             display_stream_registry: None,
+            process_manager: None,
         }
     }
 

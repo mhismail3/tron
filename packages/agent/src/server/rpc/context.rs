@@ -80,6 +80,8 @@ pub struct RpcContext {
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
     /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
     pub display_stream_registry: Option<crate::tools::ui::display_stream::ActiveStreamRegistry>,
+    /// Process manager for background process lifecycle (shared with tools).
+    pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 impl RpcContext {
