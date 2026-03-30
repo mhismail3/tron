@@ -347,8 +347,6 @@ impl ContextManager {
         self.config.tools.iter().map(|t| t.name.clone()).collect()
     }
 
-    #[must_use]
-    /// Estimate combined static + dynamic rules token count.
     /// Set skill index content for token estimation.
     pub fn set_skill_index_content(&mut self, content: Option<String>) {
         self.skill_index_content = content;
