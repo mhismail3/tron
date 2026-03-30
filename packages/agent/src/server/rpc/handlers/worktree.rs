@@ -237,6 +237,11 @@ impl MethodHandler for AcquireHandler {
                 "baseCommit": info.base_commit,
                 "baseBranch": info.base_branch,
             })),
+            Ok(crate::worktree::AcquireResult::Deferred(reason)) => Ok(serde_json::json!({
+                "acquired": false,
+                "deferred": true,
+                "reason": format!("{reason:?}"),
+            })),
             Ok(crate::worktree::AcquireResult::Passthrough) => Ok(serde_json::json!({
                 "acquired": false,
                 "reason": "not a git repo or isolation disabled",

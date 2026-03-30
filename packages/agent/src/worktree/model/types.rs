@@ -75,10 +75,21 @@ pub struct WorktreeInfo {
     pub repo_root: PathBuf,
 }
 
+/// Why worktree creation was deferred (repo exists but isn't ready).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeferralReason {
+    /// Repository has no commits yet (`git init` without any commit).
+    EmptyRepository,
+}
+
 /// Result of attempting to acquire a worktree.
+#[derive(Debug)]
 pub enum AcquireResult {
     /// Worktree created — use `worktree_path` as working directory.
     Acquired(WorktreeInfo),
+    /// Worktree creation deferred — repo exists but isn't ready yet.
+    /// Will be re-evaluated on the next turn.
+    Deferred(DeferralReason),
     /// No worktree needed — use original working directory.
     Passthrough,
 }

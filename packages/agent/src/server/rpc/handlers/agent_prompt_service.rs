@@ -257,6 +257,14 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                     );
                     Some(info)
                 }
+                Ok(crate::worktree::AcquireResult::Deferred(reason)) => {
+                    debug!(
+                        session_id = %session_id,
+                        reason = ?reason,
+                        "worktree deferred, using original directory"
+                    );
+                    None
+                }
                 Ok(crate::worktree::AcquireResult::Passthrough) => None,
                 Err(error) => {
                     warn!(

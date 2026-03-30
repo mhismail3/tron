@@ -32,6 +32,7 @@ pub use coordinator::{WorktreeCoordinator, count_diff_stats, split_diff_by_file}
 pub use errors::WorktreeError;
 pub use types::{
     AcquireResult, CommitEntry, CommitResult, CommittedDiffResult, CommittedFileEntry,
-    DeleteBranchResult, DiffSummary, IsolationMode, MergeResult, MergeStrategy, PruneBranchesResult,
-    PruneFailure, ReleaseInfo, SessionBranchInfo, WorktreeConfig, WorktreeInfo, WorktreeStatus,
+    DeferralReason, DeleteBranchResult, DiffSummary, IsolationMode, MergeResult, MergeStrategy,
+    PruneBranchesResult, PruneFailure, ReleaseInfo, SessionBranchInfo, WorktreeConfig,
+    WorktreeInfo, WorktreeStatus,
 };

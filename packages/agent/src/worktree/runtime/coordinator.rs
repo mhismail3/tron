@@ -21,8 +21,8 @@ use crate::worktree::errors::{Result, WorktreeError};
 use crate::worktree::git::GitExecutor;
 use crate::worktree::isolation;
 use crate::worktree::types::{
-    AcquireResult, CommitEntry, CommittedDiffResult, CommittedFileEntry, DiffSummary, MergeResult,
-    MergeStrategy, SessionBranchInfo, WorktreeConfig, WorktreeInfo,
+    AcquireResult, CommitEntry, CommittedDiffResult, CommittedFileEntry, DeferralReason,
+    DiffSummary, MergeResult, MergeStrategy, SessionBranchInfo, WorktreeConfig, WorktreeInfo,
 };
 
 /// Worktree coordinator — manages worktree lifecycle across sessions.
@@ -166,9 +166,16 @@ impl WorktreeCoordinator {
         session_id: &str,
         working_dir: &std::path::Path,
     ) -> Result<AcquireResult> {
-        // Idempotent: return existing worktree
-        if let Some(info) = self.state.lock().active_info(session_id) {
-            return Ok(AcquireResult::Acquired(info.clone()));
+        // Idempotent: return existing worktree if still healthy
+        let cached = self.state.lock().active_info(session_id);
+        if let Some(info) = cached {
+            let path_exists = info.worktree_path.exists();
+            if path_exists && self.git.is_git_repo(&info.repo_root).await {
+                return Ok(AcquireResult::Acquired(info));
+            }
+            warn!(session_id, "tracked worktree is stale, clearing");
+            self.state.lock().untrack(session_id);
+            // Fall through to re-evaluate from scratch
         }
 
         let is_git = self.git.is_git_repo(working_dir).await;
@@ -184,6 +191,12 @@ impl WorktreeCoordinator {
 
         if !isolation::should_isolate(&self.config.mode, is_git, repo_count, false) {
             return Ok(AcquireResult::Passthrough);
+        }
+
+        // Empty repo guard: git init without commits can't support worktrees
+        if !self.git.has_commits(working_dir).await {
+            debug!(session_id, "git repo has no commits, deferring worktree creation");
+            return Ok(AcquireResult::Deferred(DeferralReason::EmptyRepository));
         }
 
         let info =
@@ -435,6 +448,18 @@ impl WorktreeCoordinator {
         let Some(info) = self.state.lock().active_info(session_id) else {
             return Ok(None);
         };
+
+        // Health check: verify worktree path and repo root still exist
+        if !info.worktree_path.exists() || !self.git.is_git_repo(&info.repo_root).await {
+            warn!(
+                session_id,
+                worktree_path = %info.worktree_path.display(),
+                repo_root = %info.repo_root.display(),
+                "worktree or repo root gone, releasing stale session"
+            );
+            self.state.lock().untrack(session_id);
+            return Ok(None);
+        }
 
         let has_changes = self
             .git
@@ -1169,7 +1194,7 @@ mod tests {
         let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
         let info = match result {
             AcquireResult::Acquired(i) => i,
-            AcquireResult::Passthrough => panic!("expected Acquired"),
+            other => panic!("expected Acquired, got {other:?}"),
         };
 
         assert!(coord.effective_working_dir(sid).is_some());
@@ -1213,7 +1238,7 @@ mod tests {
         let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
         let info = match result {
             AcquireResult::Acquired(i) => i,
-            AcquireResult::Passthrough => panic!("expected Acquired"),
+            other => panic!("expected Acquired, got {other:?}"),
         };
 
         // Initially: no changes, no commits
@@ -1270,7 +1295,7 @@ mod tests {
         let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
         let info = match result {
             AcquireResult::Acquired(i) => i,
-            AcquireResult::Passthrough => panic!("expected Acquired"),
+            other => panic!("expected Acquired, got {other:?}"),
         };
 
         // Create files and commit
@@ -1646,7 +1671,7 @@ mod tests {
         let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
         let info = match result {
             AcquireResult::Acquired(i) => i,
-            AcquireResult::Passthrough => panic!("expected Acquired"),
+            other => panic!("expected Acquired, got {other:?}"),
         };
         let event = rx.try_recv().unwrap();
         assert_eq!(event.event_type(), "worktree.acquired");
@@ -1662,5 +1687,238 @@ mod tests {
         coord.release(sid).await.unwrap();
         let event = rx.try_recv().unwrap();
         assert_eq!(event.event_type(), "worktree.released");
+    }
+
+    // --- Empty repo deferral tests ---
+
+    #[tokio::test]
+    async fn acquire_empty_repo_returns_deferred() {
+        let dir = tempdir().unwrap();
+        run_cmd(dir.path(), &["git", "init"]).await;
+
+        let store = make_store();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-empty", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Deferred(DeferralReason::EmptyRepository)),
+            "expected Deferred(EmptyRepository), got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn acquire_empty_repo_then_commit_then_acquire() {
+        let dir = tempdir().unwrap();
+        run_cmd(dir.path(), &["git", "init"]).await;
+        run_cmd(dir.path(), &["git", "config", "user.email", "test@test.com"]).await;
+        run_cmd(dir.path(), &["git", "config", "user.name", "Test"]).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        // First attempt: deferred (no commits)
+        let result = coord.maybe_acquire("test-defer", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Deferred(_)));
+
+        // Make first commit
+        std::fs::write(dir.path().join("README.md"), "# test").unwrap();
+        run_cmd(dir.path(), &["git", "add", "-A"]).await;
+        run_cmd(dir.path(), &["git", "commit", "-m", "init"]).await;
+
+        // Second attempt: acquired
+        let result = coord.maybe_acquire("test-defer", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Acquired(_)),
+            "expected Acquired after first commit, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_not_tracked_in_state() {
+        let dir = tempdir().unwrap();
+        run_cmd(dir.path(), &["git", "init"]).await;
+
+        let store = make_store();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-untracked", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Deferred(_)));
+
+        assert!(coord.get_info("test-untracked").is_none());
+        assert!(coord.list_active().is_empty());
+    }
+
+    // --- Reverse case: staleness tests ---
+
+    #[tokio::test]
+    async fn acquire_then_delete_git_dir_returns_passthrough() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-stale", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Acquired(_)));
+
+        // Delete .git directory
+        std::fs::remove_dir_all(dir.path().join(".git")).unwrap();
+
+        // Next acquire should detect staleness and return Passthrough
+        let result = coord.maybe_acquire("test-stale", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Passthrough),
+            "expected Passthrough after .git deletion, got {result:?}"
+        );
+        assert!(coord.list_active().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_status_after_git_dir_deleted_returns_none() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-status", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Acquired(_)));
+
+        // Delete .git directory
+        std::fs::remove_dir_all(dir.path().join(".git")).unwrap();
+
+        // get_status should detect and clean up
+        let status = coord.get_status("test-status").await.unwrap();
+        assert!(status.is_none());
+        assert!(coord.get_info("test-status").is_none());
+    }
+
+    #[tokio::test]
+    async fn acquire_then_delete_worktree_dir_detects_staleness() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-wt-gone", dir.path()).await.unwrap();
+        let wt_path = match &result {
+            AcquireResult::Acquired(info) => info.worktree_path.clone(),
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+
+        // Delete worktree directory
+        std::fs::remove_dir_all(&wt_path).unwrap();
+
+        // Next acquire detects staleness and untracks, then falls through.
+        // Re-creation fails because the branch still exists in git — this is
+        // expected; the stale worktree left behind an orphan branch that
+        // recover_orphans() would clean up on server restart.
+        let result = coord.maybe_acquire("test-wt-gone", dir.path()).await;
+        // Staleness was detected: session was untracked
+        assert!(coord.get_info("test-wt-gone").is_none());
+        // The re-create attempt returns BranchExists error (orphan branch)
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_status_after_worktree_dir_deleted_returns_none() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire("test-wt-status", dir.path()).await.unwrap();
+        let wt_path = match &result {
+            AcquireResult::Acquired(info) => info.worktree_path.clone(),
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+
+        // Delete worktree directory
+        std::fs::remove_dir_all(&wt_path).unwrap();
+
+        // get_status should detect and clean up
+        let status = coord.get_status("test-wt-status").await.unwrap();
+        assert!(status.is_none());
+        assert!(coord.get_info("test-wt-status").is_none());
+    }
+
+    // --- Isolation mode coverage ---
+
+    #[tokio::test]
+    async fn acquire_empty_repo_lazy_mode_deferred() {
+        let dir = tempdir().unwrap();
+        run_cmd(dir.path(), &["git", "init"]).await;
+
+        let store = make_store();
+        let config = WorktreeConfig {
+            mode: crate::settings::types::IsolationMode::Lazy,
+            ..WorktreeConfig::default()
+        };
+        let coord = WorktreeCoordinator::new(config, store);
+
+        // Lazy mode with no other sessions → Passthrough (isolation not triggered)
+        let result = coord.maybe_acquire("test-lazy-empty", dir.path()).await.unwrap();
+        assert!(matches!(result, AcquireResult::Passthrough));
+    }
+
+    // --- Full lifecycle integration ---
+
+    #[tokio::test]
+    async fn full_lifecycle_git_init_midsession() {
+        let dir = tempdir().unwrap();
+
+        let store = make_store();
+        let _ = store
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+            .unwrap();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        // 1. Non-git directory → Passthrough
+        let result = coord.maybe_acquire("test-mid", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Passthrough),
+            "expected Passthrough for non-git dir, got {result:?}"
+        );
+
+        // 2. git init (no commits) → Deferred
+        run_cmd(dir.path(), &["git", "init"]).await;
+        run_cmd(dir.path(), &["git", "config", "user.email", "test@test.com"]).await;
+        run_cmd(dir.path(), &["git", "config", "user.name", "Test"]).await;
+        let result = coord.maybe_acquire("test-mid", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Deferred(DeferralReason::EmptyRepository)),
+            "expected Deferred for empty repo, got {result:?}"
+        );
+
+        // 3. First commit → Acquired
+        std::fs::write(dir.path().join("README.md"), "# test").unwrap();
+        run_cmd(dir.path(), &["git", "add", "-A"]).await;
+        run_cmd(dir.path(), &["git", "commit", "-m", "init"]).await;
+        let result = coord.maybe_acquire("test-mid", dir.path()).await.unwrap();
+        assert!(
+            matches!(result, AcquireResult::Acquired(_)),
+            "expected Acquired after first commit, got {result:?}"
+        );
+
+        // Verify tracked
+        assert!(coord.get_info("test-mid").is_some());
+        assert_eq!(coord.list_active().len(), 1);
     }
 }

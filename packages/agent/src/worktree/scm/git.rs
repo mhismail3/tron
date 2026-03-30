@@ -52,6 +52,14 @@ impl GitExecutor {
         self.run(dir, &["rev-parse", "HEAD"]).await
     }
 
+    /// Check whether the repository has at least one commit.
+    ///
+    /// Returns `false` for empty repos (after `git init` with no commits)
+    /// and for non-git directories.
+    pub async fn has_commits(&self, path: &Path) -> bool {
+        self.run_status(path, &["rev-parse", "--verify", "HEAD"]).await
+    }
+
     /// Get the current branch name (None-ish error for detached HEAD).
     pub async fn current_branch(&self, dir: &Path) -> Result<String> {
         self.run(dir, &["symbolic-ref", "--short", "HEAD"]).await
@@ -486,6 +494,28 @@ branch refs/heads/session/x
         let dir = tempdir().unwrap();
         let git = GitExecutor::new(30_000);
         assert!(!git.is_git_repo(dir.path()).await);
+    }
+
+    #[tokio::test]
+    async fn has_commits_true_with_commits() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(git.has_commits(dir.path()).await);
+    }
+
+    #[tokio::test]
+    async fn has_commits_false_empty_repo() {
+        let dir = tempdir().unwrap();
+        run_cmd(dir.path(), &["git", "init"]).await;
+        let git = GitExecutor::new(30_000);
+        assert!(!git.has_commits(dir.path()).await);
+    }
+
+    #[tokio::test]
+    async fn has_commits_false_non_git() {
+        let dir = tempdir().unwrap();
+        let git = GitExecutor::new(30_000);
+        assert!(!git.has_commits(dir.path()).await);
     }
 
     #[tokio::test]

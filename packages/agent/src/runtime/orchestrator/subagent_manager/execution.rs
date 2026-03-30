@@ -506,6 +506,14 @@ async fn acquire_worktree_directory(
         Ok(crate::worktree::AcquireResult::Acquired(info)) => {
             info.worktree_path.to_string_lossy().to_string()
         }
+        Ok(crate::worktree::AcquireResult::Deferred(reason)) => {
+            tracing::debug!(
+                session_id = %session_id,
+                reason = ?reason,
+                "{label} worktree deferred, using original directory"
+            );
+            working_directory
+        }
         Ok(crate::worktree::AcquireResult::Passthrough) => working_directory,
         Err(error) => {
             tracing::warn!(
