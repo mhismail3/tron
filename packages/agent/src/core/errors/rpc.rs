@@ -71,9 +71,6 @@ pub enum RpcErrorCode {
     /// Skill execution error.
     #[serde(rename = "SKILL_ERROR")]
     SkillError,
-    /// Canvas operation error.
-    #[serde(rename = "CANVAS_ERROR")]
-    CanvasError,
     /// Tool result failed.
     #[serde(rename = "TOOL_RESULT_FAILED")]
     ToolResultFailed,
@@ -426,7 +423,6 @@ mod tests {
             RpcErrorCode::PermissionDenied,
             RpcErrorCode::BrowserError,
             RpcErrorCode::SkillError,
-            RpcErrorCode::CanvasError,
             RpcErrorCode::ToolResultFailed,
             RpcErrorCode::TranscriptionError,
             RpcErrorCode::VoiceNoteError,

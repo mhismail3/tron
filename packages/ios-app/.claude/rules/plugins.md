@@ -87,7 +87,6 @@ That's it — no coordinator switch case needed. The plugin dispatches itself.
 | `ContextEventHandler` | Compaction, memory, context cleared |
 | `BrowserEventHandler` | Browser frames, closed |
 | `SubagentEventHandler` | Subagent lifecycle |
-| `UICanvasEventHandler` | UI render lifecycle |
 | `TaskEventHandler` | Task created/updated/deleted |
 | `EventDispatchLogger` | Logging |
 
@@ -95,7 +94,7 @@ All compose into `EventDispatchTarget` which ChatViewModel conforms to.
 
 ## Plugin Categories
 
-Streaming, Tool, Lifecycle, Session, Subagent, UICanvas, Browser, Task
+Streaming, Tool, Lifecycle, Session, Subagent, Browser, Task
 
 ## Common Patterns
 

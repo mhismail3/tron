@@ -70,22 +70,3 @@ struct SkillRemoveParams: Encodable {
     let skillName: String
 }
 
-// MARK: - Canvas Methods
-
-struct CanvasGetParams: Encodable {
-    let canvasId: String
-}
-
-struct CanvasArtifactData: Decodable {
-    let canvasId: String
-    let sessionId: String
-    let title: String?
-    let ui: [String: AnyCodable]
-    let state: [String: AnyCodable]?
-    let savedAt: String
-}
-
-struct CanvasGetResult: Decodable {
-    let found: Bool
-    let canvas: CanvasArtifactData?
-}

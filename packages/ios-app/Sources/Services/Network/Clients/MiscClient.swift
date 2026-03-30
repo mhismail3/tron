@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for miscellaneous RPC methods.
-/// Handles system, skills, canvas, worktree, tasks, device token, memory, and message operations.
+/// Handles system, skills, worktree, tasks, device token, memory, and message operations.
 @MainActor
 final class MiscClient {
     private unowned let transport: RPCTransport
@@ -210,16 +210,6 @@ final class MiscClient {
 
         let params = SkillRemoveParams(sessionId: sessionId, skillName: skillName)
         return try await ws.send(method: "skill.remove", params: params)
-    }
-
-    // MARK: - Canvas Methods
-
-    /// Get a persisted canvas artifact from the server
-    func getCanvas(canvasId: String) async throws -> CanvasGetResult {
-        let ws = try transport.requireConnection()
-
-        let params = CanvasGetParams(canvasId: canvasId)
-        return try await ws.send(method: "canvas.get", params: params)
     }
 
     // MARK: - Task Methods

@@ -45,7 +45,7 @@ extension ChatViewModel: FeatureContext {
 Handler protocols are split by domain (see `EventDispatchContext.swift`):
 - `StreamingEventHandler`, `ToolEventHandler`, `TurnLifecycleEventHandler`
 - `ContextEventHandler`, `BrowserEventHandler`, `SubagentEventHandler`
-- `UICanvasEventHandler`, `TaskEventHandler`, `EventDispatchLogger`
+- `TaskEventHandler`, `EventDispatchLogger`
 
 These compose into `EventDispatchTarget` which ChatViewModel conforms to.
 

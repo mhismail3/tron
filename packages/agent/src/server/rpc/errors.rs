@@ -38,8 +38,6 @@ pub const PERMISSION_DENIED: &str = "PERMISSION_DENIED";
 pub const BROWSER_ERROR: &str = "BROWSER_ERROR";
 /// Skill loading/execution error.
 pub const SKILL_ERROR: &str = "SKILL_ERROR";
-/// Canvas error.
-pub const CANVAS_ERROR: &str = "CANVAS_ERROR";
 /// Tool result submission failed.
 pub const TOOL_RESULT_FAILED: &str = "TOOL_RESULT_FAILED";
 /// Transcription error.

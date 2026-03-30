@@ -94,14 +94,15 @@ impl TronTool for DisplayTool {
              - **image**: Show an image from a file path (e.g., ComputerUse screenshot path) \
              or inline base64 data\n\
              - **images**: Show multiple images in a gallery\n\
-             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\n\
+             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\
+             - **webview**: Show a web page in an embedded browser (generated UIs, dashboards, etc.)\n\n\
              To stop an active stream, call with type=\"stream\", action=\"stop\", and the streamId.",
         )
         .required_property(
             "type",
             json!({
                 "type": "string",
-                "enum": ["image", "images", "stream"],
+                "enum": ["image", "images", "stream", "webview"],
                 "description": "The content type to display"
             }),
         )
@@ -141,6 +142,10 @@ impl TronTool for DisplayTool {
             "streamId",
             json!({"type": "string", "description": "Stream identifier (for stream type)"}),
         )
+        .property(
+            "url",
+            json!({"type": "string", "description": "URL to display in an embedded WebView (for webview type)"}),
+        )
         .build()
     }
 
@@ -164,8 +169,9 @@ impl TronTool for DisplayTool {
             "images" => self.handle_images(&params).await,
             "stream" if action == "stop" => self.handle_stop_stream(&params, _ctx).await,
             "stream" => self.handle_stream(&params, _ctx).await,
+            "webview" => self.handle_webview(&params).await,
             other => Ok(error_result(format!(
-                "Unsupported content type: '{other}'. Supported: image, images, stream."
+                "Unsupported content type: '{other}'. Supported: image, images, stream, webview."
             ))),
         };
 
@@ -424,6 +430,32 @@ impl DisplayTool {
         }
     }
 
+    /// Handle `webview` type — pass through a URL to be rendered in a WKWebView on iOS.
+    async fn handle_webview(&self, params: &Value) -> Result<TronToolResult, ToolError> {
+        let url = match get_optional_string(params, "url") {
+            Some(u) if !u.is_empty() => u,
+            _ => return Ok(error_result("Missing 'url' parameter for webview type.")),
+        };
+
+        // Only allow http:// and https:// — reject file://, javascript:, data:, etc.
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Ok(error_result(
+                "URL must use http:// or https:// scheme. Use an HTTP server for local files.",
+            ));
+        }
+
+        Ok(TronToolResult {
+            content: ToolResultBody::Blocks(vec![
+                crate::core::content::ToolResultContent::text(format!(
+                    "Displaying WebView: {url}"
+                )),
+            ]),
+            details: Some(json!({"url": url})),
+            is_error: None,
+            stop_turn: None,
+        })
+    }
+
     /// Read a file, validate it, and return `(raw_bytes, mime_type)`.
     async fn read_file(
         &self,
@@ -525,11 +557,11 @@ mod tests {
         let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        for key in &["type", "action", "title", "path", "data", "mimeType", "paths", "streamId"] {
+        for key in &["type", "action", "title", "path", "data", "mimeType", "paths", "streamId", "url"] {
             assert!(props.contains_key(*key), "missing schema property: {key}");
         }
         // Removed params should NOT be present
-        for key in &["content", "url", "label", "autoplay", "interactive"] {
+        for key in &["content", "label", "autoplay", "interactive"] {
             assert!(!props.contains_key(*key), "removed property still present: {key}");
         }
         let required = def.parameters.required.as_ref().unwrap();
@@ -537,13 +569,13 @@ mod tests {
     }
 
     #[test]
-    fn schema_enum_only_has_image_images_stream() {
+    fn schema_type_enum_includes_all_types() {
         let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
         let type_enum = props["type"]["enum"].as_array().unwrap();
         let types: Vec<&str> = type_enum.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(types, vec!["image", "images", "stream"]);
+        assert_eq!(types, vec!["image", "images", "stream", "webview"]);
     }
 
     #[test]
@@ -870,5 +902,69 @@ mod tests {
         assert_eq!(mime_for_ext("jpeg"), "image/jpeg");
         assert_eq!(mime_for_ext("gif"), "image/gif");
         assert_eq!(mime_for_ext("unknown"), "application/octet-stream");
+    }
+
+    // ── WebView ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn webview_returns_url_in_details() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "http://localhost:3000"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        let details = r.details.unwrap();
+        assert_eq!(details["displayType"], "webview");
+        assert_eq!(details["url"], "http://localhost:3000");
+    }
+
+    #[tokio::test]
+    async fn webview_https_url() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "https://example.com/dashboard"}), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        assert_eq!(r.details.unwrap()["url"], "https://example.com/dashboard");
+    }
+
+    #[tokio::test]
+    async fn webview_missing_url_returns_error() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn webview_empty_url_returns_error() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": ""}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn webview_file_scheme_rejected() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "file:///etc/passwd"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn webview_javascript_scheme_rejected() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "javascript:alert(1)"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn webview_data_scheme_rejected() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "data:text/html,<h1>hi</h1>"}), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn webview_title_flows_to_details() {
+        let tool = DisplayTool::new(None);
+        let r = tool.execute(json!({"type": "webview", "url": "http://localhost:8080", "title": "Dashboard"}), &make_ctx()).await.unwrap();
+        let details = r.details.unwrap();
+        assert_eq!(details["title"], "Dashboard");
+        assert_eq!(details["url"], "http://localhost:8080");
     }
 }

@@ -51,7 +51,6 @@ enum MyEventPlugin: DispatchableEventPlugin {
 | Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_removed, turn_failed |
 | Session | `Plugins/Session/` | connected |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
-| UICanvas | `Plugins/UICanvas/` | render_start, render_chunk, render_complete, render_error, render_retry |
 | Browser | `Plugins/Browser/` | browser_frame, browser_closed |
 | Task | `Plugins/Task/` | task.created, task.updated, task.deleted |
 
@@ -99,13 +98,13 @@ Handlers are split into domain-specific protocols:
 }
 
 // ... TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
-//     SubagentEventHandler, UICanvasEventHandler, TaskEventHandler, EventDispatchLogger
+//     SubagentEventHandler, TaskEventHandler, EventDispatchLogger
 
 // Composed target — ChatViewModel conforms to this
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TaskEventHandler, EventDispatchLogger {}
+    TaskEventHandler, EventDispatchLogger {}
 ```
 
 ### Implementation

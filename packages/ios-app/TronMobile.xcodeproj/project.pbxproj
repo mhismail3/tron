@@ -316,7 +316,6 @@
 		84449B66727E90F803CD53C6 /* ContentAreaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D71FD429E259D6D18119E1 /* ContentAreaView.swift */; };
 		84C2D650F2A9D3443D1516A5 /* MessageMetadataBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A7D28E3375D78943565750 /* MessageMetadataBadge.swift */; };
 		8519741C7E5F4AD67799C230 /* TurnBreakdownViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78C9B3D5A8D1DFCE0A9F6B9 /* TurnBreakdownViews.swift */; };
-		851C97F2A1A8B5106FE82FFB /* UICanvasParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F844575E0B0AF1FF179706 /* UICanvasParser.swift */; };
 		85B121F1968F5A611FC725F1 /* DependencyEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F8018C19B3B2DB0E6F99DDB /* DependencyEnvironment.swift */; };
 		85C14B3A6FE000D8C04FC0BC /* ErrorClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B995E75BD5DDE55D650FEE3 /* ErrorClassificationTests.swift */; };
 		85EDE22937DEE699495D51D8 /* SessionClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 726EDF035D69F2DACEEB821C /* SessionClientTests.swift */; };
@@ -371,7 +370,6 @@
 		9D333F2999B798F35A5893E1 /* AudioCaptureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DC7F8960212C41E30082A8 /* AudioCaptureEngine.swift */; };
 		9DB9687EB1930DCC877BBEF8 /* RPCTypes+Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE3591CDCDECA82757FC01F /* RPCTypes+Model.swift */; };
 		9E228A4BE7C33552B78B4945 /* TokenStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 149F27377773C5AADC991D16 /* TokenStateManager.swift */; };
-		9E3C8AEBB522D76A5C7CB17D /* UICanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60B217A91B8DB4DA206F9D1 /* UICanvas.swift */; };
 		9EA4C5CF9E418B94F328F408 /* SystemEventHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B2C355DEF5149969794E2A7 /* SystemEventHandlers.swift */; };
 		9EDD90D91889AF874F4CE794 /* AutomationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD4579B18A126F09229C08BA /* AutomationDetailSheet.swift */; };
 		9F439EB7D668D60FC3034B27 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D8B9E48B0D5CA4B520777A /* AudioRecorder.swift */; };
@@ -463,6 +461,7 @@
 		C8D276EE7F2AA301B173EED0 /* DatabaseTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0765D88B5586B7D58BFBEE90 /* DatabaseTransport.swift */; };
 		C8D290D02B30EF31D86C253B /* WorkspaceSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F629B1556A7F9BA7B37205A /* WorkspaceSelector.swift */; };
 		C8FF9F298CA63E0D7F663688 /* SandboxesDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF71E640CC0F7917E5FE42B6 /* SandboxesDashboardView.swift */; };
+		C94B47A5039D36442D9EDB16 /* GenerativeWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB6C8BAE94BDDB44124DB9D /* GenerativeWebView.swift */; };
 		C9F653247068AA0A2E95D4BE /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C646A336E35F47DB4BEE2F8C /* PushNotificationService.swift */; };
 		CA108EDBDE08C589D6EDC3D8 /* EventDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */; };
 		CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */; };
@@ -1015,7 +1014,6 @@
 		A59652752128F5912CBE6B94 /* QueryAgentChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryAgentChip.swift; sourceTree = "<group>"; };
 		A5ABAB315B28D05412B8C2A3 /* RPCTypes+Diff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Diff.swift"; sourceTree = "<group>"; };
 		A5D4142619E7C63B4A63C1DF /* GetConfirmationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetConfirmationState.swift; sourceTree = "<group>"; };
-		A60B217A91B8DB4DA206F9D1 /* UICanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvas.swift; sourceTree = "<group>"; };
 		A6FAAEEF211947DC3C34F4EC /* RPCTypes+System.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+System.swift"; sourceTree = "<group>"; };
 		A7170BDE82B7EED1E313977D /* ToolResultRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultRouter.swift; sourceTree = "<group>"; };
 		A78B5797B885EDB71E2BF6B4 /* ErrorHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandlers.swift; sourceTree = "<group>"; };
@@ -1086,7 +1084,6 @@
 		C7297D9A306D121FEC63F0C2 /* ParsedEventV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsedEventV2.swift; sourceTree = "<group>"; };
 		C7530F5B9BC8A9C86E308887 /* ToolSharedComponentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedComponentsTests.swift; sourceTree = "<group>"; };
 		C7AAA801C9BFC6243D9FFBF1 /* ForkIndicators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForkIndicators.swift; sourceTree = "<group>"; };
-		C7F844575E0B0AF1FF179706 /* UICanvasParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasParser.swift; sourceTree = "<group>"; };
 		C7FCCBA9998AE63F266DA0C1 /* EventStoreManager+Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Sync.swift"; sourceTree = "<group>"; };
 		C80DB0E6F2AECF50A2F590BE /* WriteToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteToolDetailSheet.swift; sourceTree = "<group>"; };
 		C8D8FFEFE3AFC29958CF8D47 /* ContentLineParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentLineParserTests.swift; sourceTree = "<group>"; };
@@ -1141,6 +1138,7 @@
 		DF881DA76CF64054893335E0 /* NewSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlow.swift; sourceTree = "<group>"; };
 		DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericToolViewer.swift; sourceTree = "<group>"; };
 		DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingCaption.swift; sourceTree = "<group>"; };
+		DFB6C8BAE94BDDB44124DB9D /* GenerativeWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeWebView.swift; sourceTree = "<group>"; };
 		E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventIconProvider.swift; sourceTree = "<group>"; };
 		E10F44727A46F0F661FB6C0E /* NotificationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViews.swift; sourceTree = "<group>"; };
 		E1E598A914A7C7F0A6CECCF2 /* RPCTypes+Cron.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Cron.swift"; sourceTree = "<group>"; };
@@ -1384,7 +1382,6 @@
 				9064238431EB8376145EAAC5 /* SubagentResultParser.swift */,
 				133CF7985DA0C485864FACFD /* ToolArgumentParser.swift */,
 				7063B12F01E83878098A95D1 /* ToolResultParser.swift */,
-				C7F844575E0B0AF1FF179706 /* UICanvasParser.swift */,
 			);
 			path = Parsing;
 			sourceTree = "<group>";
@@ -2483,6 +2480,7 @@
 			isa = PBXGroup;
 			children = (
 				7E1F25607746D9A795896094 /* DisplayToolDetailSheet.swift */,
+				DFB6C8BAE94BDDB44124DB9D /* GenerativeWebView.swift */,
 				D993D7E0FB114273142BEA70 /* StreamSheetView.swift */,
 			);
 			path = Display;
@@ -2893,7 +2891,6 @@
 				0DDABE80C4EB6BDE32A42B9E /* Rules.swift */,
 				75C354688A011B9B926C2D15 /* Skill.swift */,
 				ECBA63E06BF1573F3F831E9F /* ThinkingBlock.swift */,
-				A60B217A91B8DB4DA206F9D1 /* UICanvas.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -3235,6 +3232,7 @@
 				8833F5D26556DFA720E9A7E7 /* FontFamily.swift in Sources */,
 				946C51267F3836E6BB6B7115 /* FontSettings.swift in Sources */,
 				FBEF1BB888DC834C87F40F10 /* ForkIndicators.swift in Sources */,
+				C94B47A5039D36442D9EDB16 /* GenerativeWebView.swift in Sources */,
 				0469B9AB3EBA290338B09CAD /* GenericToolViewer.swift in Sources */,
 				0DEA26FDB6CB1EE17BE9FE62 /* GetConfirmationCoordinator.swift in Sources */,
 				203502021E79F1431EFC7BCA /* GetConfirmationDetector.swift in Sources */,
@@ -3482,8 +3480,6 @@
 				760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */,
 				0BBBA0C6949E8B4A7D92C354 /* TurnLifecycleCoordinator.swift in Sources */,
 				0EB1252C2D1DD49C7A70EC89 /* TurnStartPlugin.swift in Sources */,
-				9E3C8AEBB522D76A5C7CB17D /* UICanvas.swift in Sources */,
-				851C97F2A1A8B5106FE82FFB /* UICanvasParser.swift in Sources */,
 				DFD1465183617D8EE8B69A5F /* UIUpdateQueue.swift in Sources */,
 				635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */,
 				43CBD93CFE2708C6EF008CBE /* UseCase.swift in Sources */,

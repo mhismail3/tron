@@ -43,10 +43,16 @@ struct DisplayToolDetailSheet: View {
         return ToolArgumentParser.string("streamId", from: data.arguments)
     }
 
+    private var webviewURL: URL? {
+        guard let urlString = data.details?["url"]?.value as? String else { return nil }
+        return URL(string: urlString)
+    }
+
     private var iconForType: String {
         switch displayType {
         case "image", "images": return "photo"
         case "stream": return "play.rectangle"
+        case "webview": return "globe"
         default: return "rectangle.on.rectangle"
         }
     }
@@ -60,7 +66,7 @@ struct DisplayToolDetailSheet: View {
             accent: .tronIndigo,
             copyContent: nil
         ) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: displayType == "webview" ? 8 : 16) {
                 ToolStatusRow(status: data.status, durationMs: data.durationMs) {
                     ToolInfoPill(
                         icon: iconForType,
@@ -71,7 +77,7 @@ struct DisplayToolDetailSheet: View {
 
                 contentForType
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 8)
         }
     }
 
@@ -86,6 +92,8 @@ struct DisplayToolDetailSheet: View {
             imagesSection
         case "stream":
             streamSection
+        case "webview":
+            webviewSection
         default:
             ToolEmptyState(
                 title: "Display",
@@ -142,6 +150,83 @@ struct DisplayToolDetailSheet: View {
             }
         } else {
             ToolEmptyState(title: "Stream", icon: "play.rectangle", message: "No stream ID provided", accent: .tronIndigo, tint: tint)
+        }
+    }
+
+    @ViewBuilder
+    private var webviewSection: some View {
+        if let url = webviewURL {
+            WebViewSection(url: url, tint: tint)
+        } else {
+            ToolEmptyState(
+                title: "Web View", icon: "globe",
+                message: "No URL provided",
+                accent: .tronIndigo, tint: tint
+            )
+        }
+    }
+}
+
+// MARK: - WebView Section
+
+@available(iOS 26.0, *)
+private struct WebViewSection: View {
+    let url: URL
+    let tint: TintedColors
+    @State private var isLoading = true
+    @State private var loadError: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let error = loadError {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.title2)
+                        .foregroundStyle(.tronAmber)
+                    Text("Failed to load")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(error)
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .multilineTextAlignment(.center)
+                    Text("Check that the server is running")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .italic()
+                }
+                .padding(.horizontal, 24)
+                Spacer()
+            } else {
+                ZStack {
+                    GenerativeWebView(url: url, isLoading: $isLoading, loadError: $loadError)
+
+                    if isLoading {
+                        ProgressView()
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            // URL bar
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                    .foregroundStyle(.tronTextMuted)
+                    .font(.caption)
+                Text(url.host ?? url.absoluteString)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
     }
 }
