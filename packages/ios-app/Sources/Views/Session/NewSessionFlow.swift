@@ -62,7 +62,7 @@ struct NewSessionFlow: View {
                             .padding(.vertical, 14)
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
                             .font(TronTypography.codeCaption)
@@ -91,7 +91,7 @@ struct NewSessionFlow: View {
                             .padding(.vertical, 14)
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("Clone a GitHub repo and start a session")
                             .font(TronTypography.codeCaption)
@@ -129,7 +129,7 @@ struct NewSessionFlow: View {
                             .padding(.vertical, 14)
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text(modelDescription)
                             .font(TronTypography.codeCaption)
