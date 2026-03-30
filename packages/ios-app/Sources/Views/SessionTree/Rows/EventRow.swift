@@ -100,7 +100,7 @@ struct EventRow: View {
             // Expanded content
             if isExpanded, let content = event.expandedContent {
                 Text(content)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(isMuted ? .tronTextMuted : .tronTextSecondary)
                     .lineLimit(12)
                     .padding(10)

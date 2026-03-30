@@ -28,7 +28,7 @@ struct ToolCodeBlock: View {
     private var lineNumWidth: CGFloat {
         let maxNum = lines.last?.lineNumber ?? lines.count
         let digits = max(String(maxNum).count, 1)
-        return CGFloat(max(digits * 8, 16))
+        return CGFloat(max(digits * 10, 18))
     }
 
     var body: some View {
@@ -91,7 +91,7 @@ struct ToolCodeBlock: View {
 
                     let displayContent = lineTransform?(line.content) ?? line.content
                     Text(displayContent.isEmpty ? " " : displayContent)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(tint.body)
                         .if(wrapsContent) { $0.fixedSize(horizontal: false, vertical: true) }
                 }

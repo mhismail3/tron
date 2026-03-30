@@ -101,8 +101,14 @@ enum TronTypography {
 
     // MARK: - Semantic Presets (Code — always Recursive Mono)
 
-    /// Code blocks - 15pt (only preset that forces Recursive Mono)
+    /// Code blocks - 15pt (always Recursive Mono)
     @MainActor static var codeBlock: Font { code(size: sizeBodyLG) }
+
+    /// Inline code content - 11pt (always Recursive Mono, for commands, output, paths, identifiers)
+    @MainActor static var codeContent: Font { code(size: sizeBody2) }
+
+    /// Small code content - 10pt (always Recursive Mono, for env vars, metadata identifiers)
+    @MainActor static var codeContentSM: Font { code(size: sizeCaption) }
 
     // MARK: - Semantic Presets (Selected Font)
 

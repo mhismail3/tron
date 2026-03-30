@@ -132,7 +132,7 @@ struct WorkspaceSelector: View {
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 16)
                 Text(currentPath)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(.tronEmerald.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -311,7 +311,7 @@ struct WorkspaceSelector: View {
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
                         Text(error)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronError)
                         Spacer()
                     }

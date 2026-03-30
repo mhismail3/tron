@@ -37,7 +37,7 @@ struct SubagentEventRow: View {
 
                 if let detail = event.detail, !detail.isEmpty {
                     Text(detail)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(6)
                         .lineSpacing(2)

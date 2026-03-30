@@ -37,7 +37,7 @@ struct InheritedSection: View {
                     }
 
                     Text("\(events.count) events")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 }
 

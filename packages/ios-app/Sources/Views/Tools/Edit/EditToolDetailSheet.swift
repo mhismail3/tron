@@ -180,7 +180,7 @@ struct EditToolDetailSheet: View {
 
             // Content
             Text(line.content.isEmpty ? " " : line.content)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -210,7 +210,7 @@ struct EditToolDetailSheet: View {
     private func fallbackResultSection(_ result: String) -> some View {
         ToolDetailSection(title: "Result", accent: .orange, tint: tint) {
             Text(result)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
         }
@@ -307,7 +307,7 @@ enum EditDiffParser {
     static func lineNumberWidth(for lines: [EditDiffLine]) -> CGFloat {
         let maxNum = lines.compactMap(\.lineNum).max() ?? 0
         let digits = max(String(maxNum).count, 1)
-        return CGFloat(max(digits * 8, 16))
+        return CGFloat(max(digits * 10, 18))
     }
 }
 

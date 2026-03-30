@@ -72,7 +72,7 @@ private struct SourceHeader: View {
 
             if !source.url.isEmpty {
                 Text(source.url)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
             }

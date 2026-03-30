@@ -139,7 +139,7 @@ struct RememberToolDetailSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody2))
                             .foregroundStyle(tint.subtle)
                         Text(sessionId)
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(tint.secondary)
                             .lineLimit(1)
                     }
@@ -162,7 +162,7 @@ struct RememberToolDetailSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody2))
                             .foregroundStyle(tint.subtle)
                         Text(filter.label)
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(tint.secondary)
                     }
                 }

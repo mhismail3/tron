@@ -167,7 +167,8 @@ struct FloatingChatPill: View {
                 : .regular.tint(Color.tronMint.opacity(0.2)).interactive(),
             in: .capsule
         )
-        .contentShape([.interaction], Capsule())
+        .contentShape([.interaction, .hoverEffect], Capsule())
+        .hoverEffect(.highlight)
         .onTapGesture { onTap() }
     }
 }
@@ -309,10 +310,11 @@ struct CachedSessionSidebarRow: View {
         .glassEffect(
             isSelected
                 ? .regular.tint(Color.tronEmerald.opacity(0.25)).interactive()
-                : .regular.tint(Color.tronPhthaloGreen.opacity(0.25)),
+                : .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
-        .contentShape([.interaction], RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .hoverEffect(.highlight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
         .accessibilityAddTraits(.isButton)

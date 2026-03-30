@@ -51,6 +51,11 @@ final class ScrollStateCoordinator {
 
     // MARK: - History Loading
 
+    /// Suppresses scroll-away detection during history prepend.
+    /// The button tap registers as user interaction, and the prepend shifts the viewport
+    /// away from bottom — without this guard, the "New content" pill would flash.
+    private var isPrependingHistory = false
+
     private var anchoredItemId: UUID?
 
     // MARK: - Scroll Phase
@@ -97,6 +102,7 @@ final class ScrollStateCoordinator {
     /// Call when new content arrives (streaming text, new messages).
     /// Only marks unseen content if the user is actually scrolled away.
     func contentDidArrive() {
+        guard !isPrependingHistory else { return }
         if userScrolledAway {
             hasUnseenContent = true
         }
@@ -116,6 +122,16 @@ final class ScrollStateCoordinator {
 
     func willPrependHistory(firstVisibleId: UUID?) {
         anchoredItemId = firstVisibleId
+        isPrependingHistory = true
+        // Schedule flag clear for the next main actor iteration.
+        // loadMoreMessages() is synchronous, so isLoadingMoreMessages goes
+        // false→true→false in one frame — SwiftUI coalesces the net-zero change
+        // and the onChange(of: isLoadingMoreMessages) never fires. The Task dispatch
+        // ensures the flag is cleared after SwiftUI processes all pending onChange
+        // callbacks from the prepend.
+        Task { @MainActor in
+            self.isPrependingHistory = false
+        }
     }
 
     func didPrependHistory(using proxy: ScrollViewProxy?) {
@@ -123,6 +139,7 @@ final class ScrollStateCoordinator {
             proxy?.scrollTo(id, anchor: .top)
             anchoredItemId = nil
         }
+        isPrependingHistory = false
     }
 
     // MARK: - Navigation

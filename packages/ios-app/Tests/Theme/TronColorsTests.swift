@@ -97,8 +97,8 @@ struct TronColorsTests {
     // MARK: - Light Mode Backgrounds (ensure warm cream preserved)
 
     @Test func lightModeBackgroundsAreWarmCream() {
-        #expect(lightHex(of: .tronBackground) == "#F5F0E8")
-        #expect(lightHex(of: .tronSurface) == "#FAF6EF")
-        #expect(lightHex(of: .tronSurfaceElevated) == "#EDE8DF")
+        #expect(lightHex(of: .tronBackground) == "#F3EDE3")
+        #expect(lightHex(of: .tronSurface) == "#F8F3EA")
+        #expect(lightHex(of: .tronSurfaceElevated) == "#EBE5DA")
     }
 }

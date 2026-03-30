@@ -176,7 +176,7 @@ struct VoiceNoteRow: View {
                 Spacer()
 
                 Text(note.formattedDuration)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
             }
 

@@ -130,7 +130,7 @@ struct WebFetchToolDetailSheet: View {
 
                 if !url.isEmpty {
                     Text(url)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(tint.secondary)
                         .textSelection(.enabled)
                         .lineLimit(3)
@@ -289,7 +289,7 @@ struct WebFetchToolDetailSheet: View {
             if !url.isEmpty {
                 let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
                 Text(url)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(errorTint.secondary)
                     .textSelection(.enabled)
             }

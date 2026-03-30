@@ -129,7 +129,7 @@ struct WebSearchToolDetailSheet: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(domains.joined(separator: ", "))
-                                .font(TronTypography.codeCaption)
+                                .font(TronTypography.codeContent)
                                 .foregroundStyle(tint.secondary)
                                 .lineLimit(1)
                         }
@@ -210,7 +210,7 @@ struct WebSearchToolDetailSheet: View {
                 }
 
                 Text(result.displayUrl)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
                     .padding(.leading, 26)

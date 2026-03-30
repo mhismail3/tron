@@ -116,6 +116,8 @@ extension ChatViewModel {
     func handleTurnEnd(_ pluginResult: TurnEndPlugin.Result) {
         // Delegate directly to coordinator — plugin result fields match
         turnLifecycleCoordinator.handleTurnEnd(pluginResult, context: self)
+        // Prune old messages from SwiftUI observation to prevent memory pressure in long sessions
+        pruneOldMessagesIfNeeded()
     }
 
     func handleComplete() {

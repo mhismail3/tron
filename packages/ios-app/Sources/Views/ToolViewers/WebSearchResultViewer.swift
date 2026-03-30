@@ -127,7 +127,7 @@ private struct SearchResultRow: View {
 
                 // URL
                 Text(result.displayUrl)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
                     .padding(.leading, 22)

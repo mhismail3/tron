@@ -237,10 +237,24 @@ final class ChatViewModel {
     static let initialMessageBatchSize = 50
     /// Number of messages to load on scroll-up
     static let additionalMessageBatchSize = 30
+    /// Prune when messages exceed this count during live sessions
+    static let liveSessionPruneThreshold = 200
+    /// Keep this many messages after pruning
+    static let liveSessionPruneTarget = 100
+    /// Max pruned messages to buffer (beyond this, oldest discarded to DB-only recovery)
+    static let maxPrunedBufferSize = 500
     /// Current number of messages displayed (from the end)
     var displayedMessageCount = 0
     /// Whether initial history has been loaded (prevents redundant loads on view re-entry)
     var hasInitiallyLoaded = false
+
+    /// Messages pruned from display during live sessions. NOT tracked by SwiftUI.
+    /// Used for instant "Load Earlier Messages" recovery without DB reconstruction.
+    @ObservationIgnored
+    var prunedLiveMessages: [ChatMessage] = []
+
+    /// Incremented after each prune — view observes this to anchor scroll position.
+    var prunedVersion: Int = 0
 
     // MARK: - Initialization
 
@@ -293,6 +307,7 @@ final class ChatViewModel {
                 self.runningToolCount = 0
                 self.clearDisplayStreamState()
                 self.clearProcessState()
+                self.prunedLiveMessages.removeAll()
             }
         })
 

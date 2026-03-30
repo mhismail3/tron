@@ -39,7 +39,7 @@ struct ReadResultViewer: View {
     private var lineNumWidth: CGFloat {
         let maxNum = parsedLines.last?.lineNum ?? parsedLines.count
         let digits = String(maxNum).count
-        return CGFloat(max(digits * 8, 16)) // ~8pt per digit, min 16pt
+        return CGFloat(max(digits * 10, 18))
     }
 
     var body: some View {
@@ -96,7 +96,7 @@ struct ReadResultViewer: View {
 
                             // Line content (cleaned)
                             Text(line.content.isEmpty ? " " : line.content)
-                                .font(TronTypography.codeCaption)
+                                .font(TronTypography.codeContent)
                                 .foregroundStyle(.tronTextSecondary)
                         }
                         .frame(minHeight: 16)
@@ -289,7 +289,7 @@ struct EditResultViewer: View {
             } else if !result.isEmpty {
                 // Fallback: show raw result text
                 Text(result)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(.tronTextSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -341,7 +341,7 @@ struct DiffLineView: View {
 
             // Content
             Text(content.isEmpty ? " " : content)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(contentColor)
         }
         .frame(minHeight: 16)

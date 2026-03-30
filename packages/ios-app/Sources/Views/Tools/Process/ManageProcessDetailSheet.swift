@@ -19,7 +19,7 @@ struct ManageProcessResultViewer: View {
             }
             if !result.isEmpty {
                 Text(result)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.codeContentSM)
                     .foregroundStyle(.primary)
                     .lineLimit(isExpanded ? nil : 8)
             }

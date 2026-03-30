@@ -115,7 +115,7 @@ struct SearchToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(pattern)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(tint.body)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -128,7 +128,7 @@ struct SearchToolDetailSheet: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(searchPath)
-                                .font(TronTypography.codeCaption)
+                                .font(TronTypography.codeContent)
                                 .foregroundStyle(tint.secondary)
                         }
                     }
@@ -139,7 +139,7 @@ struct SearchToolDetailSheet: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBody2))
                                 .foregroundStyle(tint.subtle)
                             Text(filter)
-                                .font(TronTypography.codeCaption)
+                                .font(TronTypography.codeContent)
                                 .foregroundStyle(tint.secondary)
                         }
                     }
@@ -249,7 +249,7 @@ struct SearchToolDetailSheet: View {
             }
 
             Text(match.content.isEmpty ? " " : match.content)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -328,7 +328,7 @@ struct SearchToolDetailSheet: View {
                 let lines = result.components(separatedBy: "\n")
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     Text(line.isEmpty ? " " : line)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(tint.body)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 1)
@@ -359,7 +359,7 @@ struct SearchToolDetailSheet: View {
         let classification = SearchErrorClassifier.classify(result)
         return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
             Text(result)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(TintedColors(accent: .tronError, colorScheme: colorScheme).body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

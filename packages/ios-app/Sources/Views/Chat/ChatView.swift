@@ -612,6 +612,11 @@ struct ChatView: View {
                         scrollCoordinator.didPrependHistory(using: proxy)
                     }
                 }
+                // Re-anchor scroll position after live session pruning
+                .onChange(of: viewModel.prunedVersion) { _, _ in
+                    guard scrollCoordinator.shouldAutoScroll else { return }
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
                 // Scroll to bottom when keyboard appears
                 .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
                     guard initialLoadComplete else { return }

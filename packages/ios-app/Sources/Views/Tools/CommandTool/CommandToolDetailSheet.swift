@@ -173,7 +173,7 @@ struct CommandToolDetailSheet: View {
 
             // Full summary/command
             Text(fullArgumentsSummary)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(.tronTextSecondary)
                 .textSelection(.enabled)
                 .padding(.horizontal, 12)

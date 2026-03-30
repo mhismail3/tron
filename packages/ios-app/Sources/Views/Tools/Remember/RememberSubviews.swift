@@ -130,7 +130,7 @@ extension RememberToolDetailSheet {
 
             HStack(spacing: 12) {
                 Text(session.sessionId.count > 16 ? String(session.sessionId.prefix(16)) + "..." : session.sessionId)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(tint.subtle)
 
                 if !session.date.isEmpty {
@@ -191,7 +191,7 @@ extension RememberToolDetailSheet {
                                     .padding(.horizontal, 4)
                             }
                             Text(entry)
-                                .font(TronTypography.codeCaption)
+                                .font(TronTypography.codeContent)
                                 .foregroundStyle(tint.body)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -275,7 +275,7 @@ extension RememberToolDetailSheet {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(result)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(tint.body)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)

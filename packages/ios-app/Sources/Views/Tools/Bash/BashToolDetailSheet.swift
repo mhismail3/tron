@@ -197,7 +197,7 @@ struct BashToolDetailSheet: View {
                 }
 
                 Text(command)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(tint.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -215,7 +215,7 @@ struct BashToolDetailSheet: View {
     private func stdinSection(_ content: String) -> some View {
         ToolDetailSection(title: "stdin", accent: .tronEmerald, tint: tint) {
             Text(content)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -231,13 +231,13 @@ struct BashToolDetailSheet: View {
                 ForEach(env.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
                     HStack(spacing: 4) {
                         Text(key)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                             .foregroundStyle(tint.heading)
                         Text("=")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.codeContentSM)
                             .foregroundStyle(tint.subtle)
                         Text(value)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.codeContentSM)
                             .foregroundStyle(tint.body)
                             .lineLimit(1)
                     }
@@ -258,7 +258,7 @@ struct BashToolDetailSheet: View {
                             .font(TronTypography.pill)
                             .foregroundStyle(.tronTextMuted)
                         Text(pair["wait"] ?? "")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.codeContentSM)
                             .foregroundStyle(tint.body)
                         Image(systemName: "arrow.right")
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
@@ -267,7 +267,7 @@ struct BashToolDetailSheet: View {
                             .font(TronTypography.pill)
                             .foregroundStyle(.tronTextMuted)
                         Text(pair["send"] ?? "")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.codeContentSM)
                             .foregroundStyle(pair["send"] == "[REDACTED]" ? .tronAmber : tint.body)
                     }
                 }
@@ -337,7 +337,7 @@ struct BashToolDetailSheet: View {
                             .padding(.trailing, 8)
 
                         Text(BashOutputHelpers.capLineLength(line))
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(tint.body)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -431,7 +431,7 @@ struct BashToolDetailSheet: View {
         let classification = BashErrorClassifier.classify(result)
         return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
             Text(result)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(TintedColors(accent: .tronError, colorScheme: colorScheme).body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -478,7 +478,7 @@ struct BashToolDetailSheet: View {
                             .padding(.trailing, 8)
 
                         Text(BashOutputHelpers.capLineLength(line))
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(tint.body)
                             .fixedSize(horizontal: false, vertical: true)
                     }

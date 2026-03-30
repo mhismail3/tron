@@ -40,7 +40,7 @@ struct FindResultViewer: View {
                             .frame(width: 14)
 
                         Text(file)
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(.tronTextSecondary)
                             .lineLimit(1)
                     }
@@ -124,7 +124,7 @@ struct SearchToolViewer: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         Text(line)
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(.tronTextSecondary)
                             .frame(minHeight: 16, alignment: .leading)
                             .padding(.leading, 8)

@@ -354,6 +354,12 @@ extension ChatViewModel {
     func loadMoreMessages() {
         guard hasMoreMessages, !isLoadingMoreMessages else { return }
 
+        // Live session pruned messages: load from in-memory buffer (instant)
+        if !prunedLiveMessages.isEmpty {
+            loadPrunedMessages()
+            return
+        }
+
         isLoadingMoreMessages = true
 
         let historicalCount = allReconstructedMessages.count
@@ -375,6 +381,72 @@ extension ChatViewModel {
 
         hasMoreMessages = displayedMessageCount < historicalCount
         isLoadingMoreMessages = false
+    }
+
+    // MARK: - Live Session Pruning
+
+    /// Prune old messages from memory during long-running live sessions.
+    ///
+    /// Called at turn_end boundaries when all messages are stable (no streaming, no running tools).
+    /// Moves oldest messages to `prunedLiveMessages` buffer for instant "Load Earlier" recovery.
+    /// Only the `messages` array (SwiftUI data source) is trimmed; pruned messages remain in memory
+    /// but outside SwiftUI observation, eliminating the observation overhead that causes crashes.
+    func pruneOldMessagesIfNeeded() {
+        guard messages.count > Self.liveSessionPruneThreshold else { return }
+        guard turnStartMessageIndex == nil else { return }
+
+        let countBefore = messages.count
+        let countToRemove = countBefore - Self.liveSessionPruneTarget
+
+        // Move pruned messages to buffer (chronological order: oldest at front)
+        let pruned = Array(messages.prefix(countToRemove))
+        prunedLiveMessages.append(contentsOf: pruned)
+
+        // Cap the buffer to bound raw memory
+        if prunedLiveMessages.count > Self.maxPrunedBufferSize {
+            let overflow = prunedLiveMessages.count - Self.maxPrunedBufferSize
+            prunedLiveMessages.removeFirst(overflow)
+        }
+
+        // Remove stale catch-up IDs
+        let kept = Array(messages.suffix(Self.liveSessionPruneTarget))
+        let keptIds = Set(kept.map { $0.id })
+        catchUpMessageIds = catchUpMessageIds.intersection(keptIds)
+
+        // Replace display array (rebuilds MessageIndex)
+        replaceAllMessages(with: kept)
+        messageWindowManager.reload(with: messages)
+
+        hasMoreMessages = true
+        displayedMessageCount = messages.count
+        prunedVersion += 1
+
+        logger.info("Live session prune: \(countBefore) → \(messages.count) messages, buffer: \(prunedLiveMessages.count)", category: .session)
+    }
+
+    /// Load older messages from the pruned buffer (instant, no DB access).
+    /// Takes the most recent batch from the buffer (closest to current display)
+    /// and prepends to messages.
+    private func loadPrunedMessages() {
+        isLoadingMoreMessages = true
+        defer { isLoadingMoreMessages = false }
+
+        let batchSize = min(Self.additionalMessageBatchSize, prunedLiveMessages.count)
+        guard batchSize > 0 else {
+            hasMoreMessages = false
+            return
+        }
+
+        // Take from the end (most recent pruned = closest to current display)
+        let startIndex = prunedLiveMessages.count - batchSize
+        let batch = Array(prunedLiveMessages[startIndex...])
+        prunedLiveMessages.removeLast(batchSize)
+
+        insertAtFrontOfMessages(batch)
+
+        // More available if buffer has entries OR if historical messages exist
+        hasMoreMessages = !prunedLiveMessages.isEmpty
+            || allReconstructedMessages.count > displayedMessageCount
     }
 
     /// Load messages from EventDatabase (sync version - kept for compatibility)

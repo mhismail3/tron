@@ -93,7 +93,7 @@ struct GlobToolDetailSheet: View {
         ToolDetailSection(title: "Pattern", accent: .cyan, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(pattern)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(tint.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -104,7 +104,7 @@ struct GlobToolDetailSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody2))
                             .foregroundStyle(tint.subtle)
                         Text(searchPath)
-                            .font(TronTypography.codeCaption)
+                            .font(TronTypography.codeContent)
                             .foregroundStyle(tint.secondary)
                             .textSelection(.enabled)
                     }
@@ -176,13 +176,13 @@ struct GlobToolDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.fileName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.body)
                     .lineLimit(1)
 
                 if entry.directoryPath != nil {
                     Text(entry.displayPath)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.codeContentSM)
                         .foregroundStyle(tint.subtle)
                         .lineLimit(1)
                 }
@@ -226,7 +226,7 @@ struct GlobToolDetailSheet: View {
         let classification = GlobErrorClassifier.classify(result)
         return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
             Text(result)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(TintedColors(accent: .tronError, colorScheme: colorScheme).body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

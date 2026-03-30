@@ -40,7 +40,7 @@ struct ToolFileInfoSection: View {
 
             if !fileInfo.filePath.isEmpty {
                 Text(fileInfo.filePath)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.codeContent)
                     .foregroundStyle(tint.secondary)
                     .textSelection(.enabled)
                     .padding(.top, 6)

@@ -32,7 +32,7 @@ struct CommandToolChip: View {
 
                 if !data.summary.isEmpty {
                     Text(data.summary)
-                        .font(TronTypography.codeCaption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(statusColor.opacity(0.7))
                         .lineLimit(1)
                         .transition(.blurReplace)
