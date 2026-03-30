@@ -5,15 +5,19 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct SkillReferencesSection: View {
     let skills: [Skill]
+    /// Server-reported token count for the skill index (from breakdown.skillIndex).
+    /// When nil, falls back to a rough estimate.
+    var serverTokens: Int?
     @State private var isExpanded = false
 
-    /// Estimated tokens for all skill frontmatter (description + metadata)
-    /// Rough estimate: ~50 tokens per skill on average for frontmatter
-    private var estimatedTokens: Int {
-        skills.reduce(0) { total, skill in
-            // Estimate based on description length + metadata overhead
-            let descriptionTokens = skill.description.count / 4  // ~4 chars per token
-            let metadataTokens = 20  // name, tags, source, etc.
+    /// Token count: use server-reported value when available, else estimate
+    private var displayTokens: Int {
+        if let server = serverTokens, server > 0 {
+            return server
+        }
+        return skills.reduce(0) { total, skill in
+            let descriptionTokens = skill.description.count / 4
+            let metadataTokens = 20
             return total + descriptionTokens + metadataTokens
         }
     }
@@ -38,7 +42,7 @@ struct SkillReferencesSection: View {
                 Spacer()
 
                 // Token count
-                Text(TokenFormatter.format(estimatedTokens))
+                Text(TokenFormatter.format(displayTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 

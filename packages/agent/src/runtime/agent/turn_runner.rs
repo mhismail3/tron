@@ -412,6 +412,9 @@ fn build_turn_context(
     let mut context = context_manager.build_base_context();
     context.messages = context_manager.get_messages_arc();
     context.tools = Some(registry.definitions());
+    context
+        .skill_index_context
+        .clone_from(&run_context.skill_index_context);
     context.skill_context.clone_from(&run_context.skill_context);
     context
         .subagent_results_context

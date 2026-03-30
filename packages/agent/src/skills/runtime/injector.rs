@@ -109,6 +109,27 @@ pub fn remove_skill_references(prompt: &str, references: &[SkillReference]) -> S
     MULTI_SPACE.replace_all(&result, " ").trim().to_string()
 }
 
+/// Build a lightweight skill index listing all available skills.
+///
+/// Returns a markdown block with one line per skill (`- @name — description`).
+/// Returns an empty string if no skills are provided.
+pub fn build_skill_index(skills: &[SkillInfo]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    use std::fmt::Write;
+    let mut out =
+        String::from("# Available Skills\n\nUse `@skill-name` to load a skill's full instructions.\n\n");
+    for skill in skills {
+        if skill.description.is_empty() {
+            let _ = writeln!(out, "- `@{}`", skill.name);
+        } else {
+            let _ = writeln!(out, "- `@{}` \u{2014} {}", skill.name, skill.description);
+        }
+    }
+    out
+}
+
 /// Build a `<skills>` XML context block from skill metadata.
 ///
 /// Returns an empty string if no skills are provided.
@@ -458,5 +479,93 @@ mod tests {
         assert_eq!(escape_xml("<tag>"), "&lt;tag&gt;");
         assert_eq!(escape_xml("\"quoted\""), "&quot;quoted&quot;");
         assert_eq!(escape_xml("it's"), "it&apos;s");
+    }
+
+    // --- build_skill_index ---
+
+    fn make_skill_info(name: &str, description: &str) -> SkillInfo {
+        SkillInfo {
+            name: name.to_string(),
+            display_name: name.to_string(),
+            description: description.to_string(),
+            source: SkillSource::Global,
+            tags: None,
+        }
+    }
+
+    #[test]
+    fn test_build_skill_index_empty() {
+        assert!(build_skill_index(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_build_skill_index_single() {
+        let skills = vec![make_skill_info("sandbox", "Create sandboxed containers")];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("# Available Skills"));
+        assert!(index.contains("- `@sandbox`"));
+        assert!(index.contains("Create sandboxed containers"));
+    }
+
+    #[test]
+    fn test_build_skill_index_multiple_preserves_order() {
+        let skills = vec![
+            make_skill_info("alpha", "First skill"),
+            make_skill_info("beta", "Second skill"),
+            make_skill_info("gamma", "Third skill"),
+        ];
+        let index = build_skill_index(&skills);
+        let alpha_pos = index.find("@alpha").unwrap();
+        let beta_pos = index.find("@beta").unwrap();
+        let gamma_pos = index.find("@gamma").unwrap();
+        assert!(alpha_pos < beta_pos);
+        assert!(beta_pos < gamma_pos);
+    }
+
+    #[test]
+    fn test_build_skill_index_format() {
+        let skills = vec![make_skill_info("browser", "Browse the web")];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("- `@browser` \u{2014} Browse the web"));
+    }
+
+    #[test]
+    fn test_build_skill_index_empty_description() {
+        let skills = vec![make_skill_info("mystery", "")];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("- `@mystery`"));
+        // Should not contain em dash when description is empty
+        assert!(!index.contains("\u{2014}"));
+    }
+
+    #[test]
+    fn test_build_skill_index_special_chars_in_description() {
+        let skills = vec![make_skill_info(
+            "test",
+            "Handles `code`, **bold**, and [links](url)",
+        )];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("Handles `code`, **bold**, and [links](url)"));
+    }
+
+    #[test]
+    fn test_build_skill_index_header_content() {
+        let skills = vec![make_skill_info("any", "Any skill")];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("@skill-name"));
+        assert!(index.contains("Available Skills"));
+    }
+
+    #[test]
+    fn test_build_skill_index_mixed_descriptions() {
+        let skills = vec![
+            make_skill_info("with-desc", "Has a description"),
+            make_skill_info("no-desc", ""),
+            make_skill_info("also-desc", "Also described"),
+        ];
+        let index = build_skill_index(&skills);
+        assert!(index.contains("- `@with-desc` \u{2014} Has a description"));
+        assert!(index.contains("- `@no-desc`\n"));
+        assert!(index.contains("- `@also-desc` \u{2014} Also described"));
     }
 }

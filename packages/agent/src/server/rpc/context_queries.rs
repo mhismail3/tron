@@ -23,17 +23,25 @@ impl ContextQueryService {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
+        let skill_registry = ctx.skill_registry.clone();
         let tool_definitions = tool_definitions(ctx);
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.get_snapshot", move || {
             retry_context_read("context.get_snapshot", || {
-                let prepared = build_context_manager_for_session(
+                let mut prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
                     tool_definitions.clone(),
                 )?;
+                let skill_index_content = {
+                    let registry = skill_registry.read();
+                    let skills = registry.list(None);
+                    let index = crate::skills::injector::build_skill_index(&skills);
+                    if index.is_empty() { None } else { Some(index) }
+                };
+                prepared.context_manager.set_skill_index_content(skill_index_content);
                 let snapshot = prepared.context_manager.get_snapshot();
                 Ok(snapshot_response(&snapshot))
             })
@@ -184,6 +192,7 @@ fn snapshot_response(snapshot: &crate::runtime::context::types::ContextSnapshot)
             "systemPrompt": snapshot.breakdown.system_prompt,
             "tools": snapshot.breakdown.tools,
             "rules": snapshot.breakdown.rules,
+            "skillIndex": snapshot.breakdown.skill_index,
             "messages": snapshot.breakdown.messages,
         },
     })
@@ -198,8 +207,18 @@ fn build_detailed_snapshot_response(
     let PreparedSessionContext {
         session,
         artifacts,
-        context_manager,
+        mut context_manager,
     } = prepared;
+
+    // Set skill index content so token estimation includes it
+    let skill_index_content = {
+        let registry = skill_registry.read();
+        let skills = registry.list(None);
+        let index = crate::skills::injector::build_skill_index(&skills);
+        if index.is_empty() { None } else { Some(index) }
+    };
+    context_manager.set_skill_index_content(skill_index_content);
+
     let detailed = context_manager.get_detailed_snapshot();
     let added_skills = build_added_skills(event_store, session_id)?;
     let composed_system_prompt =
@@ -214,6 +233,7 @@ fn build_detailed_snapshot_response(
             "systemPrompt": detailed.snapshot.breakdown.system_prompt,
             "tools": detailed.snapshot.breakdown.tools,
             "rules": detailed.snapshot.breakdown.rules,
+            "skillIndex": detailed.snapshot.breakdown.skill_index,
             "messages": detailed.snapshot.breakdown.messages,
         },
         "messages": build_detailed_messages(&detailed.messages),

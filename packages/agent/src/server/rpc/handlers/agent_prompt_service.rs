@@ -443,6 +443,12 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let user_content_override =
         build_user_content_override(&prompt, &model, images.as_deref(), attachments.as_deref());
 
+    let skill_index_context = {
+        let registry = skill_registry.read();
+        let all_skills = registry.list(None);
+        let index = crate::skills::injector::build_skill_index(&all_skills);
+        if index.is_empty() { None } else { Some(index) }
+    };
     let skill_context = match build_skill_context(
         skill_registry,
         event_store.clone(),
@@ -465,6 +471,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let run_context = RunContext {
         reasoning_level: reasoning_level
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
+        skill_index_context,
         skill_context,
         subagent_results: subagent_results_context,
         process_results: process_results_context,

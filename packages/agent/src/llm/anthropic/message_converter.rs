@@ -456,6 +456,7 @@ mod tests {
             working_directory: None,
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,

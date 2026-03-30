@@ -32,6 +32,8 @@ pub trait SnapshotDeps: Send + Sync {
     fn estimate_tools_tokens(&self) -> u64;
     /// Estimated rules tokens.
     fn estimate_rules_tokens(&self) -> u64;
+    /// Estimated skill index tokens.
+    fn estimate_skill_index_tokens(&self) -> u64;
     /// Total message tokens from the message store.
     fn get_messages_tokens(&self) -> u64;
     /// Token estimate for a single message.
@@ -83,6 +85,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
                 system_prompt: self.deps.estimate_system_prompt_tokens(),
                 tools: self.deps.estimate_tools_tokens(),
                 rules: self.deps.estimate_rules_tokens(),
+                skill_index: self.deps.estimate_skill_index_tokens(),
                 messages: self.deps.get_messages_tokens(),
             },
             rules: None,
@@ -271,6 +274,9 @@ mod tests {
         }
         fn estimate_rules_tokens(&self) -> u64 {
             self.rules_tokens
+        }
+        fn estimate_skill_index_tokens(&self) -> u64 {
+            0
         }
         fn get_messages_tokens(&self) -> u64 {
             self.messages_tokens

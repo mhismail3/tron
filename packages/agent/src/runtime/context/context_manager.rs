@@ -43,6 +43,8 @@ pub struct ContextManager {
     rules_content: Option<String>,
     /// Dynamic scoped rules (path-activated).
     dynamic_rules_content: Option<String>,
+    /// Lightweight skill index content (auto-generated listing of available skills).
+    skill_index_content: Option<String>,
     /// Workspace memory content.
     memory_content: Option<String>,
     /// Session-scoped memory entries.
@@ -77,6 +79,7 @@ impl ContextManager {
             system_prompt,
             rules_content,
             dynamic_rules_content: None,
+            skill_index_content: None,
             memory_content: None,
             session_memories: Vec::new(),
             on_compaction_needed: None,
@@ -288,6 +291,7 @@ impl ContextManager {
         self.estimate_system_prompt_tokens()
             + self.estimate_tools_tokens()
             + self.estimate_rules_tokens()
+            + self.estimate_skill_index_tokens()
             + self.get_messages_tokens()
     }
 
@@ -345,6 +349,19 @@ impl ContextManager {
 
     #[must_use]
     /// Estimate combined static + dynamic rules token count.
+    /// Set skill index content for token estimation.
+    pub fn set_skill_index_content(&mut self, content: Option<String>) {
+        self.skill_index_content = content;
+    }
+
+    #[must_use]
+    /// Estimate skill index token count.
+    pub fn estimate_skill_index_tokens(&self) -> u64 {
+        u64::from(token_estimator::estimate_rules_tokens(
+            self.skill_index_content.as_deref(),
+        ))
+    }
+
     pub fn estimate_rules_tokens(&self) -> u64 {
         let static_rules = u64::from(token_estimator::estimate_rules_tokens(
             self.rules_content.as_deref(),
@@ -564,6 +581,7 @@ impl ContextManager {
             working_directory: Some(self.get_working_directory().to_owned()),
             rules_content: self.get_rules_content().map(String::from),
             memory_content: self.get_full_memory_content(),
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -626,6 +644,9 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
     }
     fn estimate_rules_tokens(&self) -> u64 {
         self.manager.estimate_rules_tokens()
+    }
+    fn estimate_skill_index_tokens(&self) -> u64 {
+        self.manager.estimate_skill_index_tokens()
     }
     fn get_messages_tokens(&self) -> u64 {
         self.manager.get_messages_tokens()

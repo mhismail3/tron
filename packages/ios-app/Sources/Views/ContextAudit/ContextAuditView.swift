@@ -303,7 +303,10 @@ struct ContextAuditView: View {
                                 )
 
                                 if let skills = skillStore?.skills, !skills.isEmpty {
-                                    SkillReferencesSection(skills: skills)
+                                    SkillReferencesSection(
+                                        skills: skills,
+                                        serverTokens: snapshot.breakdown.skillIndex
+                                    )
                                 }
 
                                 if let rules = snapshot.rules, rules.totalFiles > 0 {

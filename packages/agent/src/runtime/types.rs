@@ -199,7 +199,10 @@ impl Default for AgentConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContext {
-    /// Skill context to inject.
+    /// Lightweight skill index context (auto-generated from registry).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_index_context: Option<String>,
+    /// Skill context to inject (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
     /// Subagent results to inject.
@@ -403,6 +406,7 @@ mod tests {
     #[test]
     fn run_context_default() {
         let ctx = RunContext::default();
+        assert!(ctx.skill_index_context.is_none());
         assert!(ctx.skill_context.is_none());
         assert!(ctx.subagent_results.is_none());
         assert!(ctx.process_results.is_none());
@@ -413,12 +417,17 @@ mod tests {
     #[test]
     fn run_context_serde_roundtrip() {
         let ctx = RunContext {
+            skill_index_context: Some("# Available Skills\n".into()),
             skill_context: Some("skill ctx".into()),
             reasoning_level: Some(ReasoningLevel::High),
             ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: RunContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.skill_index_context.as_deref(),
+            Some("# Available Skills\n")
+        );
         assert_eq!(back.skill_context.as_deref(), Some("skill ctx"));
         assert_eq!(back.reasoning_level, Some(ReasoningLevel::High));
     }

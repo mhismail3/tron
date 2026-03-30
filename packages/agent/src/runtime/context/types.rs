@@ -106,6 +106,8 @@ pub struct TokenBreakdown {
     pub tools: u64,
     /// Rules content tokens.
     pub rules: u64,
+    /// Skill index tokens (lightweight listing of available skills).
+    pub skill_index: u64,
     /// Message tokens.
     pub messages: u64,
 }
@@ -556,6 +558,7 @@ mod tests {
                 system_prompt: 1000,
                 tools: 2000,
                 rules: 500,
+                skill_index: 0,
                 messages: 1500,
             },
             rules: None,

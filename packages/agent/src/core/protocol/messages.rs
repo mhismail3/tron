@@ -396,7 +396,10 @@ pub struct Context {
     /// Memory content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_content: Option<String>,
-    /// Skill context.
+    /// Lightweight skill index (name + description for all available skills).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_index_context: Option<String>,
+    /// Skill context (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
     /// Sub-agent results context.
@@ -787,6 +790,7 @@ mod tests {
             working_directory: Some("/tmp".into()),
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,

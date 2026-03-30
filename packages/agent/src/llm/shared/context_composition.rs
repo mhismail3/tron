@@ -18,10 +18,11 @@ use crate::core::messages::Context;
 /// 2. `rules_content` (with `"# Project Rules\n\n"` header)
 /// 3. `memory_content`
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
-/// 5. `skill_context`
-/// 6. `subagent_results_context`
-/// 7. `process_results_context`
-/// 8. `working_directory` (appended as `"Current working directory: <path>"`)
+/// 5. `skill_index_context` (lightweight index of all available skills)
+/// 6. `skill_context` (full content of explicitly invoked skills)
+/// 7. `subagent_results_context`
+/// 8. `process_results_context`
+/// 9. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -47,6 +48,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         && !dynamic.is_empty()
     {
         parts.push(format!("# Active Rules\n\n{dynamic}"));
+    }
+
+    if let Some(ref skill_index) = context.skill_index_context
+        && !skill_index.is_empty()
+    {
+        parts.push(skill_index.clone());
     }
 
     if let Some(ref skills) = context.skill_context
@@ -98,7 +105,8 @@ pub struct GroupedContextParts {
 
 /// Compose context fields split into stable and volatile groups.
 ///
-/// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`
+/// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`,
+/// `skill_index_context`
 /// **Volatile** (5m cache TTL): `dynamic_rules_context`, `skill_context`,
 /// `subagent_results_context`, `process_results_context`
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
@@ -122,6 +130,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         && !memory.is_empty()
     {
         stable.push(memory.clone());
+    }
+
+    if let Some(ref skill_index) = context.skill_index_context
+        && !skill_index.is_empty()
+    {
+        stable.push(skill_index.clone());
     }
 
     // Environment details: server origin + working directory
@@ -181,6 +195,7 @@ mod tests {
             working_directory: Some("/Users/test/project".into()),
             rules_content: Some("Always use Rust.".into()),
             memory_content: Some("User prefers concise responses.".into()),
+            skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
             skill_context: Some("Available skill: /commit".into()),
             subagent_results_context: None,
             process_results_context: None,
@@ -196,15 +211,16 @@ mod tests {
         let ctx = make_context();
         let parts = compose_context_parts(&ctx);
 
-        assert_eq!(parts.len(), 6);
+        assert_eq!(parts.len(), 7);
         assert_eq!(parts[0], "You are a helpful assistant.");
         assert!(parts[1].starts_with("# Project Rules"));
         assert!(parts[1].contains("Always use Rust."));
         assert_eq!(parts[2], "User prefers concise responses.");
         assert!(parts[3].starts_with("# Active Rules"));
         assert!(parts[3].contains("no console.log"));
-        assert_eq!(parts[4], "Available skill: /commit");
-        assert_eq!(parts[5], "Current working directory: /Users/test/project");
+        assert!(parts[4].contains("# Available Skills"));
+        assert_eq!(parts[5], "Available skill: /commit");
+        assert_eq!(parts[6], "Current working directory: /Users/test/project");
     }
 
     #[test]
@@ -216,6 +232,7 @@ mod tests {
             working_directory: None,
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -235,6 +252,7 @@ mod tests {
             working_directory: None,
             rules_content: Some(String::new()),
             memory_content: Some("memory".into()),
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -255,6 +273,7 @@ mod tests {
             working_directory: None,
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -273,13 +292,14 @@ mod tests {
         let ctx = make_context();
         let grouped = compose_context_parts_grouped(&ctx);
 
-        // Stable: system_prompt, rules_content, memory_content, working_directory
-        assert_eq!(grouped.stable.len(), 4);
+        // Stable: system_prompt, rules_content, memory_content, skill_index, working_directory
+        assert_eq!(grouped.stable.len(), 5);
         assert_eq!(grouped.stable[0], "You are a helpful assistant.");
         assert!(grouped.stable[1].contains("Always use Rust."));
         assert_eq!(grouped.stable[2], "User prefers concise responses.");
+        assert!(grouped.stable[3].contains("# Available Skills"));
         assert_eq!(
-            grouped.stable[3],
+            grouped.stable[4],
             "Current working directory: /Users/test/project"
         );
 
@@ -298,6 +318,7 @@ mod tests {
             working_directory: None,
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -318,6 +339,7 @@ mod tests {
             working_directory: None,
             rules_content: Some("Rules".into()),
             memory_content: None,
+            skill_index_context: None,
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
@@ -357,6 +379,44 @@ mod tests {
     }
 
     #[test]
+    fn skill_index_in_stable_group() {
+        let ctx = Context {
+            skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
+            ..Default::default()
+        };
+        let grouped = compose_context_parts_grouped(&ctx);
+        assert_eq!(grouped.stable.len(), 1);
+        assert!(grouped.stable[0].contains("Available Skills"));
+        assert!(grouped.volatile.is_empty());
+    }
+
+    #[test]
+    fn skill_index_before_skill_context_in_flat() {
+        let ctx = Context {
+            skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
+            skill_context: Some("<skills>full content</skills>".into()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("Available Skills"));
+        assert!(parts[1].contains("full content"));
+    }
+
+    #[test]
+    fn skill_index_empty_string_skipped() {
+        let ctx = Context {
+            skill_index_context: Some(String::new()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert!(parts.is_empty());
+
+        let grouped = compose_context_parts_grouped(&ctx);
+        assert!(grouped.stable.is_empty());
+    }
+
+    #[test]
     fn grouped_only_volatile() {
         let ctx = Context {
             system_prompt: None,
@@ -365,6 +425,7 @@ mod tests {
             working_directory: None,
             rules_content: None,
             memory_content: None,
+            skill_index_context: None,
             skill_context: Some("Skill".into()),
             subagent_results_context: None,
             process_results_context: None,
