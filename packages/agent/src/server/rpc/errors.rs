@@ -14,14 +14,8 @@ pub const METHOD_NOT_FOUND: &str = "METHOD_NOT_FOUND";
 pub const NOT_AVAILABLE: &str = "NOT_AVAILABLE";
 /// Generic not-found.
 pub const NOT_FOUND: &str = "NOT_FOUND";
-/// Operation not valid in current state.
-pub const INVALID_OPERATION: &str = "INVALID_OPERATION";
 /// Session does not exist.
 pub const SESSION_NOT_FOUND: &str = "SESSION_NOT_FOUND";
-/// Session exists but is not active.
-pub const SESSION_NOT_ACTIVE: &str = "SESSION_NOT_ACTIVE";
-/// Concurrent session limit reached.
-pub const MAX_SESSIONS_REACHED: &str = "MAX_SESSIONS_REACHED";
 /// File does not exist.
 pub const FILE_NOT_FOUND: &str = "FILE_NOT_FOUND";
 /// Generic file I/O error.
@@ -30,26 +24,8 @@ pub const FILE_ERROR: &str = "FILE_ERROR";
 pub const FILESYSTEM_ERROR: &str = "FILESYSTEM_ERROR";
 /// Resource already exists.
 pub const ALREADY_EXISTS: &str = "ALREADY_EXISTS";
-/// Path is invalid or unsafe.
-pub const INVALID_PATH: &str = "INVALID_PATH";
-/// Permission denied.
-pub const PERMISSION_DENIED: &str = "PERMISSION_DENIED";
-/// Browser streaming error.
-pub const BROWSER_ERROR: &str = "BROWSER_ERROR";
-/// Skill loading/execution error.
-pub const SKILL_ERROR: &str = "SKILL_ERROR";
-/// Tool result submission failed.
-pub const TOOL_RESULT_FAILED: &str = "TOOL_RESULT_FAILED";
-/// Transcription error.
-pub const TRANSCRIPTION_ERROR: &str = "TRANSCRIPTION_ERROR";
-/// Voice note error.
-pub const VOICE_NOTE_ERROR: &str = "VOICE_NOTE_ERROR";
-/// Message operation error.
-pub const MESSAGE_ERROR: &str = "MESSAGE_ERROR";
 /// Git operation error.
 pub const GIT_ERROR: &str = "GIT_ERROR";
-/// Device registration error.
-pub const REGISTRATION_ERROR: &str = "REGISTRATION_ERROR";
 /// Session is currently processing a prompt from another connection.
 pub const SESSION_BUSY: &str = "SESSION_BUSY";
 

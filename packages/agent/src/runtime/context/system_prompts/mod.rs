@@ -132,18 +132,6 @@ Analyze the provided session transcript and output structured markdown. The firs
 - Do NOT include JSON, code fences, or tool call traces.\n\
 - Keep the whole summary under 400 words.";
 
-/// System prompt for the web content summarizer subagent.
-///
-/// Used by `WebFetch`'s Haiku subagent to answer questions about fetched
-/// web page content.
-pub const WEB_CONTENT_SUMMARIZER_PROMPT: &str = "You are a web content analyzer. Your task is to answer questions about web page content concisely and accurately.
-
-Instructions:
-- Answer based ONLY on the content provided
-- Be concise but thorough
-- If the content doesn't contain the answer, say so clearly
-- Do not make up information not present in the content";
-
 // =============================================================================
 // File-Based System Prompt Loading
 // =============================================================================
@@ -469,12 +457,6 @@ mod tests {
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Completed"));
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Context"));
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("title"));
-    }
-
-    #[test]
-    fn web_content_summarizer_prompt_non_empty() {
-        assert!(!WEB_CONTENT_SUMMARIZER_PROMPT.is_empty());
-        assert!(WEB_CONTENT_SUMMARIZER_PROMPT.contains("web content"));
     }
 
     // ── System prompt builders ───────────────────────────────────────────

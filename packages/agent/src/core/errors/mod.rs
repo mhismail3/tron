@@ -10,10 +10,9 @@
 //! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into
-//! categories. The RPC error types in [`rpc`] provide wire-format error codes.
+//! categories.
 
 pub mod parse;
-pub mod rpc;
 
 use std::collections::HashMap;
 use std::fmt;
