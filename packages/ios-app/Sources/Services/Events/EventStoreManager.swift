@@ -492,12 +492,6 @@ final class EventStoreManager {
         return (combined, true)
     }
 
-    /// Get ChatMessages for a session using the unified transformer.
-    func getChatMessages(sessionId: String) throws -> [ChatMessage] {
-        let (events, _) = try getSessionEvents(sessionId: sessionId)
-        return UnifiedEventTransformer.transformPersistedEvents(events)
-    }
-
     /// Get full reconstructed session state using the unified transformer.
     func getReconstructedState(sessionId: String) throws -> ReconstructedState {
         let (events, presorted) = try getSessionEvents(sessionId: sessionId)

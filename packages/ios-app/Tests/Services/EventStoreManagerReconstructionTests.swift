@@ -281,10 +281,10 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
         XCTAssertEqual(assistantMessages.count, 2, "Should include assistant messages from parent and fork")
     }
 
-    // MARK: - Integration: getChatMessages
+    // MARK: - Integration: getReconstructedState with broken chain
 
     @MainActor
-    func testGetChatMessages_withBrokenChain_returnsAllMessages() async throws {
+    func testGetReconstructedState_withBrokenChain_returnsAllMessages() async throws {
         // The core user-facing test: broken parent chain should NOT truncate chat history
         let events = [
             makeEvent(id: "e1", parentId: nil, sessionId: "s1", type: "session.start", sequence: 1, payload: [:]),
@@ -301,10 +301,10 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
         try database.events.insertBatch(events)
         try database.sessions.insert(makeSession(id: "s1", headEventId: "e5", rootEventId: "e1"))
 
-        let messages = try storeManager.getChatMessages(sessionId: "s1")
+        let state = try storeManager.getReconstructedState(sessionId: "s1")
 
         // Should have all 4 messages despite broken parent chain at e4
-        XCTAssertEqual(messages.count, 4, "All messages should be returned despite broken parent chain")
+        XCTAssertEqual(state.messages.count, 4, "All messages should be returned despite broken parent chain")
     }
 
     // MARK: - Thinking Deduplication
