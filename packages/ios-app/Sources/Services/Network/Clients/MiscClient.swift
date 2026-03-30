@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for miscellaneous RPC methods.
-/// Handles system, skills, worktree, device token, memory, message, sandbox, and log operations.
+/// Handles system, device token, memory, message, and log operations.
 @MainActor
 final class MiscClient {
     private unowned let transport: RPCTransport
@@ -60,136 +60,6 @@ final class MiscClient {
         return try await ws.send(method: "memory.retain", params: params)
     }
 
-    // MARK: - Worktree Methods
-
-    /// Get worktree status for a session
-    func getWorktreeStatus(sessionId: String) async throws -> WorktreeGetStatusResult {
-        let ws = try transport.requireConnection()
-
-        let params = WorktreeGetStatusParams(sessionId: sessionId)
-        return try await ws.send(method: "worktree.getStatus", params: params)
-    }
-
-    /// Commit changes in a session's worktree
-    func commitWorktree(sessionId: String, message: String) async throws -> WorktreeCommitResult {
-        let ws = try transport.requireConnection()
-
-        let params = WorktreeCommitParams(sessionId: sessionId, message: message)
-        let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
-
-        if result.success {
-            logger.info("Committed worktree changes: \(result.commitHash ?? "unknown")", category: .session)
-        }
-
-        return result
-    }
-
-    /// Merge a session's worktree to a target branch
-    func mergeWorktree(
-        sessionId: String,
-        targetBranch: String,
-        strategy: String? = nil
-    ) async throws -> WorktreeMergeResult {
-        let ws = try transport.requireConnection()
-
-        let params = WorktreeMergeParams(
-            sessionId: sessionId,
-            targetBranch: targetBranch,
-            strategy: strategy
-        )
-        let result: WorktreeMergeResult = try await ws.send(method: "worktree.merge", params: params)
-
-        if result.success {
-            logger.info("Merged worktree to \(targetBranch): \(result.mergeCommit ?? "unknown")", category: .session)
-        }
-
-        return result
-    }
-
-    /// List all session branches (active and preserved) for the session's repo
-    func listSessionBranches(sessionId: String) async throws -> [SessionBranchInfo] {
-        let ws = try transport.requireConnection()
-        let params = ListSessionBranchesParams(sessionId: sessionId)
-        let result: SessionBranchListResult = try await ws.send(
-            method: "worktree.listSessionBranches",
-            params: params
-        )
-        return result.branches
-    }
-
-    /// Get committed diff (base..HEAD) for a session
-    func getCommittedDiff(sessionId: String) async throws -> CommittedDiffResult {
-        let ws = try transport.requireConnection()
-        let params = GetCommittedDiffParams(sessionId: sessionId)
-        return try await ws.send(
-            method: "worktree.getCommittedDiff",
-            params: params
-        )
-    }
-
-    /// Delete a single session branch
-    func deleteBranch(sessionId: String, branch: String) async throws -> DeleteBranchResult {
-        let ws = try transport.requireConnection()
-        let params = DeleteBranchParams(sessionId: sessionId, branch: branch)
-        return try await ws.send(method: "worktree.deleteBranch", params: params)
-    }
-
-    /// Prune all inactive session branches
-    func pruneBranches(sessionId: String) async throws -> PruneBranchesResult {
-        let ws = try transport.requireConnection()
-        let params = PruneBranchesParams(sessionId: sessionId)
-        return try await ws.send(method: "worktree.pruneBranches", params: params)
-    }
-
-    // MARK: - Diff Methods
-
-    /// Get diff of all uncommitted changes for a session's working directory
-    func getWorkingDirectoryDiff(sessionId: String) async throws -> WorktreeGetDiffResult {
-        let ws = try transport.requireConnection()
-        let params = WorktreeGetDiffParams(sessionId: sessionId)
-        return try await ws.send(method: "worktree.getDiff", params: params)
-    }
-
-    // MARK: - Skill Methods
-
-    /// List available skills
-    func listSkills(sessionId: String? = nil, source: String? = nil) async throws -> SkillListResponse {
-        let ws = try transport.requireConnection()
-
-        let params = SkillListParams(
-            sessionId: sessionId ?? transport.currentSessionId,
-            source: source
-        )
-        return try await ws.send(method: "skill.list", params: params)
-    }
-
-    /// Get a skill by name
-    func getSkill(name: String, sessionId: String? = nil) async throws -> SkillGetResponse {
-        let ws = try transport.requireConnection()
-
-        let params = SkillGetParams(
-            sessionId: sessionId ?? transport.currentSessionId,
-            name: name
-        )
-        return try await ws.send(method: "skill.get", params: params)
-    }
-
-    /// Refresh skills cache
-    func refreshSkills(sessionId: String? = nil) async throws -> SkillRefreshResponse {
-        let ws = try transport.requireConnection()
-
-        let params = SkillRefreshParams(sessionId: sessionId ?? transport.currentSessionId)
-        return try await ws.send(method: "skill.refresh", params: params)
-    }
-
-    /// Remove a skill from session context
-    func removeSkill(sessionId: String, skillName: String) async throws -> SkillRemoveResponse {
-        let ws = try transport.requireConnection()
-
-        let params = SkillRemoveParams(sessionId: sessionId, skillName: skillName)
-        return try await ws.send(method: "skill.remove", params: params)
-    }
-
     // MARK: - Device Token Methods (Push Notifications)
 
     /// Check if this is a production build (for APNS environment)
@@ -235,58 +105,6 @@ final class MiscClient {
         if result.success {
             logger.info("Device token unregistered", category: .notification)
         }
-    }
-
-    // MARK: - Sandbox Methods
-
-    /// List all tracked containers with live status
-    func listContainers() async throws -> SandboxListResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "sandbox.listContainers",
-            params: EmptyParams()
-        )
-    }
-
-    /// Stop a running container
-    func stopContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "sandbox.stopContainer",
-            params: ContainerActionParams(name: name)
-        )
-    }
-
-    /// Start a stopped container
-    func startContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "sandbox.startContainer",
-            params: ContainerActionParams(name: name)
-        )
-    }
-
-    /// Kill a container (SIGKILL)
-    func killContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "sandbox.killContainer",
-            params: ContainerActionParams(name: name)
-        )
-    }
-
-    /// Remove a container and delete its metadata
-    func removeContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try transport.requireConnection()
-
-        return try await ws.send(
-            method: "sandbox.removeContainer",
-            params: ContainerActionParams(name: name)
-        )
     }
 
     // MARK: - Logs Methods

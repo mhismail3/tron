@@ -2,99 +2,45 @@ import SwiftUI
 
 // MARK: - Argument Extraction Helpers
 
-/// Pure extraction helpers used by CommandToolDetailSheet to parse tool arguments.
-/// Grouped as static methods on an uninhabitable enum to avoid polluting the view.
+/// Argument extraction and summarization for the generic CommandTool detail sheet.
+/// Delegates to `ToolArgumentParser` for standard fields (filePath, command, pattern, etc.)
+/// and provides custom extractors only for domain-specific fields (tasks, automations).
 @available(iOS 26.0, *)
 enum CommandToolArguments {
 
-    /// Unescape JSON string escapes for display
-    static func unescapeJSON(_ str: String) -> String {
-        str.replacingOccurrences(of: "\\/", with: "/")
-           .replacingOccurrences(of: "\\\"", with: "\"")
-           .replacingOccurrences(of: "\\n", with: "\n")
-           .replacingOccurrences(of: "\\t", with: "\t")
-           .replacingOccurrences(of: "\\\\", with: "\\")
-    }
-
-    static func extractFilePath(from args: String) -> String {
-        if let match = args.firstMatch(of: /"file_path"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
-    static func extractPath(from args: String) -> String {
-        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return "."
-    }
-
-    static func extractCommand(from args: String) -> String {
-        if let match = args.firstMatch(of: /"command"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
-    static func extractPattern(from args: String) -> String {
-        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
-    static func extractContent(from args: String) -> String {
-        if let match = args.firstMatch(of: /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
-    static func extractUrl(from args: String) -> String {
-        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
-    static func extractQuery(from args: String) -> String {
-        if let match = args.firstMatch(of: /"query"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
-    }
-
     static func extractTaskDetails(from args: String, fallback: String) -> String {
         var details = ""
-        if let descMatch = args.firstMatch(of: /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            details += "Description: \(unescapeJSON(String(descMatch.1)))\n"
+        if let desc = ToolArgumentParser.string("description", from: args) {
+            details += "Description: \(desc)\n"
         }
-        if let promptMatch = args.firstMatch(of: /"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            details += "Prompt: \(unescapeJSON(String(promptMatch.1)))"
+        if let prompt = ToolArgumentParser.string("prompt", from: args) {
+            details += "Prompt: \(prompt)"
         }
         return details.isEmpty ? fallback : details
     }
 
     static func extractAutomationDetails(from args: String, fallback: String) -> String {
         var details = ""
-        if let action = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
-            details += "Action: \(String(action.1))\n"
+        if let action = ToolArgumentParser.string("action", from: args) {
+            details += "Action: \(action)\n"
         }
-        if let jobId = args.firstMatch(of: /"jobId"\s*:\s*"([^"]+)"/) {
-            details += "Job ID: \(String(jobId.1))\n"
+        if let jobId = ToolArgumentParser.string("jobId", from: args) {
+            details += "Job ID: \(jobId)\n"
         }
-        if let name = args.firstMatch(of: /"name"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            details += "Name: \(unescapeJSON(String(name.1)))\n"
+        if let name = ToolArgumentParser.string("name", from: args) {
+            details += "Name: \(name)\n"
         }
-        if let schedType = args.firstMatch(of: /"schedule"\s*:\s*\{[^}]*"type"\s*:\s*"([^"]+)"/) {
-            details += "Schedule: \(String(schedType.1))\n"
-        }
-        if let payloadType = args.firstMatch(of: /"payload"\s*:\s*\{[^}]*"type"\s*:\s*"([^"]+)"/) {
-            details += "Payload: \(String(payloadType.1))\n"
+        // Schedule and payload are nested objects — extract their type field
+        if let data = args.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let schedule = json["schedule"] as? [String: Any],
+               let schedType = schedule["type"] as? String {
+                details += "Schedule: \(schedType)\n"
+            }
+            if let payload = json["payload"] as? [String: Any],
+               let payloadType = payload["type"] as? String {
+                details += "Payload: \(payloadType)\n"
+            }
         }
         return details.isEmpty ? fallback : details.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -103,19 +49,19 @@ enum CommandToolArguments {
     static func fullSummary(for normalizedName: String, arguments: String) -> String {
         switch normalizedName {
         case "read", "write", "edit":
-            return extractFilePath(from: arguments)
+            return ToolArgumentParser.filePath(from: arguments)
         case "bash":
-            return extractCommand(from: arguments)
+            return ToolArgumentParser.command(from: arguments)
         case "search":
-            let pattern = extractPattern(from: arguments)
-            let path = extractPath(from: arguments)
+            let pattern = ToolArgumentParser.pattern(from: arguments)
+            let path = ToolArgumentParser.path(from: arguments)
             return "Pattern: \"\(pattern)\"\nPath: \(path)"
         case "glob", "find":
-            return extractPattern(from: arguments)
+            return ToolArgumentParser.pattern(from: arguments)
         case "webfetch":
-            return extractUrl(from: arguments)
+            return ToolArgumentParser.url(from: arguments)
         case "websearch":
-            return extractQuery(from: arguments)
+            return ToolArgumentParser.query(from: arguments)
         case "computeruse":
             return ComputerUseSummaryHelper.summary(from: arguments)
         case "manageautomations":
@@ -328,33 +274,33 @@ enum CommandToolResultRouter {
         switch data.normalizedName {
         case "read":
             ReadResultViewer(
-                filePath: CommandToolArguments.extractFilePath(from: data.arguments),
+                filePath: ToolArgumentParser.filePath(from: data.arguments),
                 content: result
             )
         case "write":
             WriteResultViewer(
-                filePath: CommandToolArguments.extractFilePath(from: data.arguments),
-                content: CommandToolArguments.extractContent(from: data.arguments),
+                filePath: ToolArgumentParser.filePath(from: data.arguments),
+                content: ToolArgumentParser.content(from: data.arguments),
                 result: result
             )
         case "edit":
             EditResultViewer(
-                filePath: CommandToolArguments.extractFilePath(from: data.arguments),
+                filePath: ToolArgumentParser.filePath(from: data.arguments),
                 result: result
             )
         case "bash":
             BashResultViewer(
-                command: CommandToolArguments.extractCommand(from: data.arguments),
+                command: ToolArgumentParser.command(from: data.arguments),
                 output: result
             )
         case "search":
             SearchToolViewer(
-                pattern: CommandToolArguments.extractPattern(from: data.arguments),
+                pattern: ToolArgumentParser.pattern(from: data.arguments),
                 result: result
             )
         case "find", "glob":
             FindResultViewer(
-                pattern: CommandToolArguments.extractPattern(from: data.arguments),
+                pattern: ToolArgumentParser.pattern(from: data.arguments),
                 result: result
             )
         case "computeruse":

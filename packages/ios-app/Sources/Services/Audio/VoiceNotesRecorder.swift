@@ -48,7 +48,11 @@ final class VoiceNotesRecorder {
     /// Call this when the recording sheet appears.
     func prepare() async {
         guard await engine.requestPermission() else { return }
-        try? await engine.prepare()
+        do {
+            try await engine.prepare()
+        } catch {
+            logger.warning("Voice notes engine pre-warm failed: \(error)", category: .general)
+        }
     }
 
     // MARK: - Recording Control

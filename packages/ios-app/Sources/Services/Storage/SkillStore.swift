@@ -63,7 +63,7 @@ final class SkillStore {
         error = nil
 
         do {
-            let result = try await rpcClient.misc.listSkills(
+            let result = try await rpcClient.skill.list(
                 sessionId: sessionId,
                 source: source?.rawValue
             )
@@ -87,7 +87,7 @@ final class SkillStore {
         }
 
         do {
-            let result = try await rpcClient.misc.getSkill(name: name, sessionId: sessionId)
+            let result = try await rpcClient.skill.get(name: name, sessionId: sessionId)
             if result.found, let skill = result.skill {
                 return skill
             }
@@ -109,7 +109,7 @@ final class SkillStore {
         error = nil
 
         do {
-            let result = try await rpcClient.misc.refreshSkills(sessionId: sessionId)
+            let result = try await rpcClient.skill.refresh(sessionId: sessionId)
             if result.success {
                 // Reload the skills list after refresh
                 await loadSkills(sessionId: sessionId)

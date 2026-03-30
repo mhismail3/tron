@@ -226,13 +226,13 @@ struct SandboxesDashboardView: View {
             do {
                 switch action {
                 case .stop(let c):
-                    _ = try await rpcClient.misc.stopContainer(name: c.name)
+                    _ = try await rpcClient.sandbox.stopContainer(name: c.name)
                 case .start(let c):
-                    _ = try await rpcClient.misc.startContainer(name: c.name)
+                    _ = try await rpcClient.sandbox.startContainer(name: c.name)
                 case .kill(let c):
-                    _ = try await rpcClient.misc.killContainer(name: c.name)
+                    _ = try await rpcClient.sandbox.killContainer(name: c.name)
                 case .remove(let c):
-                    _ = try await rpcClient.misc.removeContainer(name: c.name)
+                    _ = try await rpcClient.sandbox.removeContainer(name: c.name)
                 }
                 await loadContainers()
             } catch {
@@ -292,7 +292,7 @@ struct SandboxesDashboardView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.misc.listContainers()
+            let result = try await rpcClient.sandbox.listContainers()
             await MainActor.run {
                 containers = result.containers
                 hostIp = result.hostIp

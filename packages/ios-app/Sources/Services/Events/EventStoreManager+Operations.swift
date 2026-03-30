@@ -193,8 +193,12 @@ extension EventStoreManager {
         logger.info("[FORK] Starting fork: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
 
         // Get current session state for logging
-        if let session = try? eventDB.sessions.get(sessionId) {
-            logger.info("[FORK] Source session state: headEventId=\(session.headEventId ?? "nil"), eventCount=\(session.eventCount)", category: .session)
+        do {
+            if let session = try eventDB.sessions.get(sessionId) {
+                logger.info("[FORK] Source session state: headEventId=\(session.headEventId ?? "nil"), eventCount=\(session.eventCount)", category: .session)
+            }
+        } catch {
+            logger.warning("[FORK] Failed to read source session state: \(error)", category: .database)
         }
 
         // Call server with the specific event ID
@@ -230,10 +234,14 @@ extension EventStoreManager {
                     // Verify the fork event's parent is now in DB
                     if let forkEvent = sessionEvents.last {
                         if let parentId = forkEvent.parentId {
-                            if let parentEvent = try? eventDB.events.get(parentId) {
-                                logger.info("[FORK] ✓ Fork event parent found in DB: \(parentEvent.id.prefix(12)), type=\(parentEvent.type)", category: .session)
-                            } else {
-                                logger.warning("[FORK] ✗ Fork event parent NOT in DB: \(parentId)", category: .session)
+                            do {
+                                if let parentEvent = try eventDB.events.get(parentId) {
+                                    logger.info("[FORK] Fork event parent found in DB: \(parentEvent.id.prefix(12)), type=\(parentEvent.type)", category: .session)
+                                } else {
+                                    logger.warning("[FORK] Fork event parent NOT in DB: \(parentId)", category: .session)
+                                }
+                            } catch {
+                                logger.warning("[FORK] Failed to verify fork parent event \(parentId): \(error)", category: .database)
                             }
                         }
                     }
@@ -251,7 +259,13 @@ extension EventStoreManager {
 
         // Create the cached session entry
         // Get source session info from local DB if available, otherwise use fork result
-        let sourceSession = try? eventDB.sessions.get(sessionId)
+        let sourceSession: CachedSession?
+        do {
+            sourceSession = try eventDB.sessions.get(sessionId)
+        } catch {
+            logger.warning("[FORK] Failed to read source session \(sessionId): \(error)", category: .database)
+            sourceSession = nil
+        }
         let now = DateParser.now
         // Use worktree path from fork result (preferred) or fallback to source session
         let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
@@ -291,9 +305,13 @@ extension EventStoreManager {
         try await updateSessionMetadata(sessionId: result.newSessionId)
 
         // Verify the sync worked
-        if let newSession = try? eventDB.sessions.get(result.newSessionId) {
-            let events = try? eventDB.events.getBySession(result.newSessionId)
-            logger.info("[FORK] New session synced: headEventId=\(newSession.headEventId ?? "nil"), eventCount=\(events?.count ?? 0)", category: .session)
+        do {
+            if let newSession = try eventDB.sessions.get(result.newSessionId) {
+                let events = try eventDB.events.getBySession(result.newSessionId)
+                logger.info("[FORK] New session synced: headEventId=\(newSession.headEventId ?? "nil"), eventCount=\(events.count)", category: .session)
+            }
+        } catch {
+            logger.warning("[FORK] Failed to verify forked session sync: \(error)", category: .database)
         }
 
         logger.info("[FORK] Fork complete: \(sessionId) → \(result.newSessionId) from event \(fromEventId ?? "HEAD")", category: .session)

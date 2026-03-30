@@ -94,7 +94,11 @@ extension EventStoreManager {
             setSessionProcessing(sessionId, isProcessing: isNowProcessing)
 
             if wasProcessing && !isNowProcessing {
-                try? await syncSessionEvents(sessionId: sessionId)
+                do {
+                    try await syncSessionEvents(sessionId: sessionId)
+                } catch {
+                    logger.error("Failed to sync events after processing ended for \(sessionId): \(error)", category: .database)
+                }
                 extractDashboardInfoFromEvents(sessionId: sessionId)
             }
         }

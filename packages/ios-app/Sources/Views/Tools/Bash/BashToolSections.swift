@@ -110,55 +110,45 @@ struct BashPtyInputSection: View {
     }
 }
 
-/// Blocked command section with shield icon and safety message.
+/// Blocked command section using shared error classification.
 @available(iOS 26.0, *)
 struct BashBlockedSection: View {
     let result: String?
     let colorScheme: ColorScheme
 
+    private var classification: ErrorClassification {
+        ErrorClassification(
+            icon: "shield.slash.fill",
+            title: "Command Blocked",
+            code: nil,
+            suggestion: "This command matched a safety pattern and was not executed."
+        )
+    }
+
     var body: some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-        let reason = result?
-            .replacingOccurrences(of: "Command blocked for safety: ", with: "")
-            .replacingOccurrences(of: "Command blocked: ", with: "")
-            ?? "This command was blocked by safety rules."
-
-        ToolDetailSection(title: "Blocked", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "shield.slash.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.tronError)
-
-                    Text("Command Blocked")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                Text(reason)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.body)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("This command matched a safety pattern and was not executed.")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.subtle)
-            }
+        ToolClassifiedErrorSection(
+            errorMessage: result ?? "This command was blocked by safety rules.",
+            classification: classification,
+            colorScheme: colorScheme
+        ) {
+            EmptyView()
         }
     }
 }
 
-/// Output lines with line numbers and leading accent border.
+/// Line-numbered output with leading accent border. Used by both completed and streaming output.
 @available(iOS 26.0, *)
-struct BashOutputLinesView: View {
+struct BashLineNumberedOutput: View {
     let lines: [(index: Int, content: String)]
     let lineNumWidth: CGFloat
     let borderColor: Color
     let tint: TintedColors
-    let shouldCollapse: Bool
-    let showAllLines: Bool
-    let hiddenLineCount: Int
-    let onExpand: () -> Void
+    var collapseConfig: CollapseConfig?
+
+    struct CollapseConfig {
+        let hiddenLineCount: Int
+        let onExpand: () -> Void
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -179,14 +169,14 @@ struct BashOutputLinesView: View {
                 .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
             }
 
-            if shouldCollapse && !showAllLines {
+            if let config = collapseConfig, config.hiddenLineCount > 0 {
                 Button {
-                    onExpand()
+                    config.onExpand()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "ellipsis")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        Text("\(hiddenLineCount) more lines")
+                        Text("\(config.hiddenLineCount) more lines")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
                         Image(systemName: "chevron.down")
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
@@ -215,6 +205,31 @@ struct BashOutputLinesView: View {
     }
 }
 
+/// Output lines with line numbers and collapse/expand support.
+@available(iOS 26.0, *)
+struct BashOutputLinesView: View {
+    let lines: [(index: Int, content: String)]
+    let lineNumWidth: CGFloat
+    let borderColor: Color
+    let tint: TintedColors
+    let shouldCollapse: Bool
+    let showAllLines: Bool
+    let hiddenLineCount: Int
+    let onExpand: () -> Void
+
+    var body: some View {
+        BashLineNumberedOutput(
+            lines: lines,
+            lineNumWidth: lineNumWidth,
+            borderColor: borderColor,
+            tint: tint,
+            collapseConfig: (shouldCollapse && !showAllLines)
+                ? .init(hiddenLineCount: hiddenLineCount, onExpand: onExpand)
+                : nil
+        )
+    }
+}
+
 /// Streaming output with progress indicator in header.
 @available(iOS 26.0, *)
 struct BashStreamingOutputView: View {
@@ -224,6 +239,7 @@ struct BashStreamingOutputView: View {
     var body: some View {
         let cleaned = BashOutputHelpers.cleanForDisplay(output)
         let lines = cleaned.components(separatedBy: "\n")
+        let indexedLines = lines.enumerated().map { ($0.offset, $0.element) }
         let lineNumWidth = BashOutputHelpers.lineNumberWidth(lineCount: lines.count)
 
         VStack(alignment: .leading, spacing: 12) {
@@ -239,33 +255,12 @@ struct BashStreamingOutputView: View {
                     .tint(.tronEmerald)
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    HStack(alignment: .top, spacing: 0) {
-                        Text("\(index + 1)")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted.opacity(0.4))
-                            .frame(width: lineNumWidth, alignment: .trailing)
-                            .padding(.leading, 4)
-                            .padding(.trailing, 8)
-
-                        Text(BashOutputHelpers.capLineLength(line))
-                            .font(TronTypography.codeContent)
-                            .foregroundStyle(tint.body)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 3)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronEmerald)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.tronEmerald)
+            BashLineNumberedOutput(
+                lines: indexedLines,
+                lineNumWidth: lineNumWidth,
+                borderColor: .tronEmerald,
+                tint: tint
+            )
         }
     }
 }

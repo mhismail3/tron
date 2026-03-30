@@ -368,7 +368,7 @@ struct BranchDetailView: View {
 
         do {
             let sid = branch.sessionId ?? currentSessionId
-            committedDiff = try await rpcClient.misc.getCommittedDiff(sessionId: sid)
+            committedDiff = try await rpcClient.worktree.getCommittedDiff(sessionId: sid)
         } catch {
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
         }
@@ -384,7 +384,7 @@ struct BranchDetailView: View {
             defer { isDeleting = false }
 
             do {
-                let _ = try await rpcClient.misc.deleteBranch(
+                let _ = try await rpcClient.worktree.deleteBranch(
                     sessionId: branch.sessionId ?? currentSessionId,
                     branch: branch.branch
                 )
@@ -405,7 +405,7 @@ struct BranchDetailView: View {
             defer { isMerging = false }
 
             do {
-                let result = try await rpcClient.misc.mergeWorktree(
+                let result = try await rpcClient.worktree.merge(
                     sessionId: branch.sessionId ?? currentSessionId,
                     targetBranch: targetBranch,
                     strategy: strategy

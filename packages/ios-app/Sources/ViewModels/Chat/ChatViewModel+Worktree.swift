@@ -10,7 +10,7 @@ extension ChatViewModel {
         defer { worktreeState.isLoading = false }
 
         do {
-            let result = try await rpcClient.misc.getWorktreeStatus(sessionId: sessionId)
+            let result = try await rpcClient.worktree.getStatus(sessionId: sessionId)
             worktreeState.status = result
         } catch {
             // Swallow — worktree status is non-critical
@@ -24,7 +24,7 @@ extension ChatViewModel {
         defer { worktreeState.isLoading = false }
 
         do {
-            let result = try await rpcClient.misc.commitWorktree(
+            let result = try await rpcClient.worktree.commit(
                 sessionId: sessionId,
                 message: message
             )
@@ -45,7 +45,7 @@ extension ChatViewModel {
         defer { worktreeState.isLoading = false }
 
         do {
-            let result = try await rpcClient.misc.mergeWorktree(
+            let result = try await rpcClient.worktree.merge(
                 sessionId: sessionId,
                 targetBranch: targetBranch,
                 strategy: strategy

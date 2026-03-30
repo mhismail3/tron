@@ -25,7 +25,10 @@ RPCClient (WebSocket transport)
     ├── ProcessClient    - background processes
     ├── BlobClient       - display tool images
     ├── DisplayClient    - display stream control
-    └── MiscClient       - skills, worktree, device, memory, etc.
+    ├── WorktreeClient   - worktree status, commits, merges, diffs, branches
+    ├── SkillClient      - skill listing, getting, refreshing, removing
+    ├── SandboxClient    - container lifecycle (list, start, stop, kill, remove)
+    └── MiscClient       - system, device tokens, memory, messages, logs
 ```
 
 ## RPC Pattern

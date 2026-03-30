@@ -61,9 +61,21 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var settings: SettingsClient = SettingsClient(transport: self)
 
-    /// Miscellaneous operations client (system, skills, worktree, tasks, device, memory, message)
+    /// Miscellaneous operations client (system, device, memory, message, logs)
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
+
+    /// Worktree operations client (status, commits, merges, diffs, branches)
+    @ObservationIgnored
+    lazy var worktree: WorktreeClient = WorktreeClient(transport: self)
+
+    /// Skill operations client (list, get, refresh, remove)
+    @ObservationIgnored
+    lazy var skill: SkillClient = SkillClient(transport: self)
+
+    /// Sandbox container management client (list, start, stop, kill, remove)
+    @ObservationIgnored
+    lazy var sandbox: SandboxClient = SandboxClient(transport: self)
 
     /// Cron scheduling operations client (automations)
     @ObservationIgnored

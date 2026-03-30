@@ -484,7 +484,7 @@ struct ContextAuditView: View {
         }
 
         do {
-            let result = try await rpcClient.misc.removeSkill(sessionId: sessionId, skillName: skillName)
+            let result = try await rpcClient.skill.remove(sessionId: sessionId, skillName: skillName)
             if result.success {
                 // Background reload to sync state (doesn't show loading)
                 await reloadContextInBackground()

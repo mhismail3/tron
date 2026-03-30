@@ -152,7 +152,11 @@ final class EventStoreManager {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
                 Task {
-                    try? await self.syncSessionEvents(sessionId: sessionId)
+                    do {
+                        try await self.syncSessionEvents(sessionId: sessionId)
+                    } catch {
+                        logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
+                    }
                     self.extractDashboardInfoFromEvents(sessionId: sessionId)
                 }
             }
@@ -229,7 +233,11 @@ final class EventStoreManager {
 
         // Also persist to local DB so the data survives app restarts
         if let session = sessions.first(where: { $0.id == sessionId }) {
-            try? eventDB.sessions.insert(session)
+            do {
+                try eventDB.sessions.insert(session)
+            } catch {
+                logger.error("Failed to persist session update for \(sessionId): \(error)", category: .database)
+            }
         }
     }
 
@@ -276,7 +284,11 @@ final class EventStoreManager {
         sessions.insert(newSession, at: 0)
 
         // Persist to local DB
-        try? eventDB.sessions.insert(newSession)
+        do {
+            try eventDB.sessions.insert(newSession)
+        } catch {
+            logger.error("Failed to persist new session \(sessionId): \(error)", category: .database)
+        }
     }
 
     /// Handle session.archived: remove session from dashboard list
@@ -293,8 +305,12 @@ final class EventStoreManager {
         sessions.removeAll { $0.id == sessionId }
 
         // Remove from local DB
-        try? eventDB.events.deleteBySession(sessionId)
-        try? eventDB.sessions.delete(sessionId)
+        do {
+            try eventDB.events.deleteBySession(sessionId)
+            try eventDB.sessions.delete(sessionId)
+        } catch {
+            logger.error("Failed to clean up archived session \(sessionId) from DB: \(error)", category: .database)
+        }
     }
 
     /// Handle session.unarchived: re-fetch session from server and add to list
@@ -312,8 +328,12 @@ final class EventStoreManager {
         logger.info("Global: session.deleted for \(sessionId)", category: .session)
 
         sessions.removeAll { $0.id == sessionId }
-        try? eventDB.events.deleteBySession(sessionId)
-        try? eventDB.sessions.delete(sessionId)
+        do {
+            try eventDB.events.deleteBySession(sessionId)
+            try eventDB.sessions.delete(sessionId)
+        } catch {
+            logger.error("Failed to clean up deleted session \(sessionId) from DB: \(error)", category: .database)
+        }
     }
 
     // MARK: - State Setters (for extensions)

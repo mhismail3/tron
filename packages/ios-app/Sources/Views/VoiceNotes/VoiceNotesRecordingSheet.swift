@@ -78,7 +78,11 @@ struct VoiceNotesRecordingSheet: View {
         .onAppear {
             Task {
                 await recorder.prepare()
-                try? await recorder.startRecording()
+                do {
+                    try await recorder.startRecording()
+                } catch {
+                    errorMessage = "Failed to start recording: \(error.localizedDescription)"
+                }
             }
         }
         .onDisappear {
@@ -183,7 +187,11 @@ struct VoiceNotesRecordingSheet: View {
     private func handleReRecord() {
         recorder.reset()
         Task {
-            try? await recorder.startRecording()
+            do {
+                try await recorder.startRecording()
+            } catch {
+                errorMessage = "Failed to start recording: \(error.localizedDescription)"
+            }
         }
     }
 

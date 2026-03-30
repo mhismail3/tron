@@ -41,7 +41,11 @@ final class AudioRecorder {
     /// Only call when recording is imminent (e.g. voice notes sheet onAppear).
     func prepare() async {
         guard await requestPermission() else { return }
-        try? await engine.prepare()
+        do {
+            try await engine.prepare()
+        } catch {
+            logger.warning("Audio engine pre-warm failed: \(error)", category: .general)
+        }
     }
 
     // MARK: - Recording

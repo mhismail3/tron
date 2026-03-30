@@ -555,12 +555,12 @@ struct SourceChangesSheet: View {
         expandedFiles = []
         expandedCommittedFiles = []
 
-        async let diffResult = rpcClient.misc.getWorkingDirectoryDiff(sessionId: sessionId)
+        async let diffResult = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
         async let statusResult: WorktreeGetStatusResult? = {
-            try? await rpcClient.misc.getWorktreeStatus(sessionId: sessionId)
+            try? await rpcClient.worktree.getStatus(sessionId: sessionId)
         }()
         async let committedDiffResult: CommittedDiffResult? = {
-            try? await rpcClient.misc.getCommittedDiff(sessionId: sessionId)
+            try? await rpcClient.worktree.getCommittedDiff(sessionId: sessionId)
         }()
 
         do {
@@ -577,7 +577,7 @@ struct SourceChangesSheet: View {
 
     private func loadBranches() async {
         isBranchesLoading = true
-        branches = (try? await rpcClient.misc.listSessionBranches(sessionId: sessionId)) ?? []
+        branches = (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
         isBranchesLoading = false
     }
 
@@ -589,7 +589,7 @@ struct SourceChangesSheet: View {
             defer { isWorktreeLoading = false }
 
             do {
-                let result = try await rpcClient.misc.commitWorktree(
+                let result = try await rpcClient.worktree.commit(
                     sessionId: sessionId,
                     message: "Manual commit from iOS"
                 )
@@ -608,7 +608,7 @@ struct SourceChangesSheet: View {
             defer { isPruning = false }
 
             do {
-                let _ = try await rpcClient.misc.pruneBranches(sessionId: sessionId)
+                let _ = try await rpcClient.worktree.pruneBranches(sessionId: sessionId)
                 await loadBranches()
             } catch {
                 errorMessage = "Prune failed: \(error.localizedDescription)"
@@ -623,7 +623,7 @@ struct SourceChangesSheet: View {
 
             do {
                 let targetBranch = worktreeStatus?.worktree?.baseBranch ?? "main"
-                let mergeResult = try await rpcClient.misc.mergeWorktree(
+                let mergeResult = try await rpcClient.worktree.merge(
                     sessionId: sessionId,
                     targetBranch: targetBranch
                 )
