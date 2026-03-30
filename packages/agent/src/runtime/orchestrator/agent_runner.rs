@@ -181,6 +181,7 @@ mod tests {
                 }),
                 subagent_manager: None,
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                process_manager: None,
             },
             "test-session".into(),
         )
@@ -317,6 +318,7 @@ mod tests {
                 }),
                 subagent_manager: None,
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                process_manager: None,
             },
             "test-session".into(),
         );
@@ -394,6 +396,7 @@ mod tests {
                 }),
                 subagent_manager: None,
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                process_manager: None,
             },
             "test-session".into(),
         );

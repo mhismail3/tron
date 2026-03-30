@@ -50,6 +50,8 @@ pub struct CreateAgentOpts {
         Option<std::sync::Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     /// Compaction trigger configuration (from settings).
     pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
+    /// Optional process manager for background process execution.
+    pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -136,6 +138,7 @@ impl AgentFactory {
                 context_manager,
                 subagent_manager: opts.subagent_manager,
                 compaction_trigger_config: opts.compaction_trigger_config,
+                process_manager: opts.process_manager,
             },
             session_id,
         )
@@ -168,6 +171,7 @@ mod tests {
             pre_activated_rules: vec![],
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            process_manager: None,
         }
     }
 

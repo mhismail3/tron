@@ -57,6 +57,8 @@ pub struct AgentDeps {
     pub subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     /// Compaction trigger configuration (from settings).
     pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
+    /// Optional process manager for background process execution.
+    pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -77,6 +79,8 @@ pub struct TronAgent {
     external_abort_token: bool,
     /// Optional inline event persister (injected by orchestrator).
     persister: Option<Arc<EventPersister>>,
+    /// Optional process manager for background process execution.
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 impl TronAgent {
@@ -99,6 +103,7 @@ impl TronAgent {
             emitter: Arc::new(EventEmitter::new()),
             compaction,
             session_id,
+            process_manager: deps.process_manager,
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -177,6 +182,7 @@ impl TronAgent {
                 health_tracker: self.config.health_tracker.as_ref(),
                 workspace_id: self.config.workspace_id.as_deref(),
                 server_origin: self.config.server_origin.as_deref(),
+                process_manager: self.process_manager.as_ref(),
             })
             .await;
 
@@ -568,6 +574,7 @@ mod tests {
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            process_manager: None,
         }
     }
 
@@ -951,6 +958,7 @@ mod tests {
                 context_manager: test_context_manager("mock-model"),
                 subagent_manager: None,
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                process_manager: None,
             },
             sid.clone(),
         );
@@ -1319,6 +1327,7 @@ mod tests {
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            process_manager: None,
         };
         for tool in tools {
             deps.registry.register(tool);

@@ -36,6 +36,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub subagent_max_depth: u32,
     pub workspace_id: Option<&'a str>,
     pub persister: Option<&'a EventPersister>,
+    pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 #[derive(Default)]
@@ -105,6 +106,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     subagent_depth: params.subagent_depth,
                     subagent_max_depth: params.subagent_max_depth,
                     workspace_id: params.workspace_id,
+                    process_manager: params.process_manager,
                 };
                 async move {
                     let result = tool_executor::execute_tool(

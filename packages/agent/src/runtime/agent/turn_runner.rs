@@ -76,6 +76,8 @@ pub struct TurnParams<'a> {
     pub workspace_id: Option<&'a str>,
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
     pub server_origin: Option<&'a str>,
+    /// Optional process manager for background process execution.
+    pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -102,6 +104,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         health_tracker,
         workspace_id,
         server_origin,
+        process_manager,
     } = params;
     let turn_start = Instant::now();
 
@@ -318,6 +321,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         subagent_max_depth,
         workspace_id,
         persister,
+        process_manager,
     })
     .await;
 
