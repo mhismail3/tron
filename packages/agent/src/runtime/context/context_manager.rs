@@ -553,7 +553,7 @@ impl ContextManager {
     ///
     /// Includes: `system_prompt`, `working_directory`, `rules_content`,
     /// `memory_content`, `dynamic_rules_context`. Callers fill in external
-    /// fields (`messages`, `tools`, `skill_context`, `task_context`,
+    /// fields (`messages`, `tools`, `skill_context`,
     /// `subagent_results_context`, `server_origin`).
     #[must_use]
     pub fn build_base_context(&self) -> crate::core::messages::Context {
@@ -567,10 +567,8 @@ impl ContextManager {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
             server_origin: None,
-            device_context: None,
         }
     }
 
@@ -1413,8 +1411,8 @@ mod tests {
         let cm = ContextManager::new(test_config());
         let ctx = cm.build_base_context();
         assert!(ctx.skill_context.is_none());
-        assert!(ctx.task_context.is_none());
         assert!(ctx.subagent_results_context.is_none());
+        assert!(ctx.process_results_context.is_none());
         assert!(ctx.server_origin.is_none());
     }
 

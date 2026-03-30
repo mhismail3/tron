@@ -46,7 +46,6 @@ impl MethodHandler for PromptHandler {
         let attachments = opt_array(params.as_ref(), "attachments").cloned();
         let raw_skills_json = opt_array(params.as_ref(), "skills").cloned();
         let raw_spells_json = opt_array(params.as_ref(), "spells").cloned();
-        let device_context = opt_string(params.as_ref(), "deviceContext");
         let skills = {
             let tmp = raw_skills_json.clone().map(Value::Array);
             let v = extract_skills(tmp.as_ref());
@@ -96,7 +95,6 @@ impl MethodHandler for PromptHandler {
                 spells,
                 raw_skills_json,
                 raw_spells_json,
-                device_context,
             },
         );
 

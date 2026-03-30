@@ -288,10 +288,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         }
     }
 

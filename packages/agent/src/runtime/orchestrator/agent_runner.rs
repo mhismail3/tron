@@ -238,16 +238,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_with_task_context() {
+    async fn run_agent_with_process_results() {
         let mut agent = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
         let ctx = RunContext {
-            task_context: Some("Active tasks: Fix bug #123".into()),
+            process_results: Some("# Completed Background Processes\n\nProcess done.".into()),
             ..Default::default()
         };
 
-        let result = run_agent(&mut agent, "What tasks?", ctx, &None, &broadcast).await;
+        let result = run_agent(&mut agent, "Check results", ctx, &None, &broadcast).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 

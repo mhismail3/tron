@@ -28,7 +28,6 @@ pub struct PromptRequest {
     pub spells: Option<Vec<String>>,
     pub raw_skills_json: Option<Vec<Value>>,
     pub raw_spells_json: Option<Vec<Value>>,
-    pub device_context: Option<String>,
 }
 
 struct PromptRunPlan {
@@ -195,7 +194,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         spells,
         raw_skills_json,
         raw_spells_json,
-        device_context,
     } = request;
 
     let _ = session_manager.mark_processing(&session_id);
@@ -471,7 +469,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         subagent_results: subagent_results_context,
         process_results: process_results_context,
         user_content_override,
-        device_context,
         ..Default::default()
     };
 

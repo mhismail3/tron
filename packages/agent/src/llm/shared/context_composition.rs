@@ -20,7 +20,7 @@ use crate::core::messages::Context;
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
 /// 5. `skill_context`
 /// 6. `subagent_results_context`
-/// 7. `task_context` (wrapped in `<task-context>` tags)
+/// 7. `process_results_context`
 /// 8. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
@@ -67,13 +67,7 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         parts.push(process.clone());
     }
 
-    if let Some(ref tasks) = context.task_context
-        && !tasks.is_empty()
-    {
-        parts.push(format!("<task-context>\n{tasks}\n</task-context>"));
-    }
-
-    // Environment details: server origin + working directory + device context
+    // Environment details: server origin + working directory
     if let Some(ref origin) = context.server_origin
         && !origin.is_empty()
     {
@@ -84,12 +78,6 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         && !wd.is_empty()
     {
         parts.push(format!("Current working directory: {wd}"));
-    }
-
-    if let Some(ref dc) = context.device_context
-        && !dc.is_empty()
-    {
-        parts.push(dc.clone());
     }
 
     parts
@@ -112,7 +100,7 @@ pub struct GroupedContextParts {
 ///
 /// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`
 /// **Volatile** (5m cache TTL): `dynamic_rules_context`, `skill_context`,
-/// `subagent_results_context`, `task_context`
+/// `subagent_results_context`, `process_results_context`
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     let mut stable = Vec::new();
     let mut volatile = Vec::new();
@@ -174,18 +162,6 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         volatile.push(process.clone());
     }
 
-    if let Some(ref tasks) = context.task_context
-        && !tasks.is_empty()
-    {
-        volatile.push(format!("<task-context>\n{tasks}\n</task-context>"));
-    }
-
-    if let Some(ref dc) = context.device_context
-        && !dc.is_empty()
-    {
-        volatile.push(dc.clone());
-    }
-
     GroupedContextParts { stable, volatile }
 }
 
@@ -208,10 +184,8 @@ mod tests {
             skill_context: Some("Available skill: /commit".into()),
             subagent_results_context: None,
             process_results_context: None,
-            task_context: Some("Task #1: Fix the bug".into()),
             dynamic_rules_context: Some("Rule: no console.log".into()),
             server_origin: None,
-            device_context: None,
         }
     }
 
@@ -222,7 +196,7 @@ mod tests {
         let ctx = make_context();
         let parts = compose_context_parts(&ctx);
 
-        assert_eq!(parts.len(), 7);
+        assert_eq!(parts.len(), 6);
         assert_eq!(parts[0], "You are a helpful assistant.");
         assert!(parts[1].starts_with("# Project Rules"));
         assert!(parts[1].contains("Always use Rust."));
@@ -230,10 +204,7 @@ mod tests {
         assert!(parts[3].starts_with("# Active Rules"));
         assert!(parts[3].contains("no console.log"));
         assert_eq!(parts[4], "Available skill: /commit");
-        assert!(parts[5].starts_with("<task-context>"));
-        assert!(parts[5].contains("Fix the bug"));
-        assert!(parts[5].ends_with("</task-context>"));
-        assert_eq!(parts[6], "Current working directory: /Users/test/project");
+        assert_eq!(parts[5], "Current working directory: /Users/test/project");
     }
 
     #[test]
@@ -248,10 +219,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert!(parts.is_empty());
@@ -269,10 +238,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -291,10 +258,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -318,11 +283,10 @@ mod tests {
             "Current working directory: /Users/test/project"
         );
 
-        // Volatile: dynamic_rules, skill, task (subagent_results is None)
-        assert_eq!(grouped.volatile.len(), 3);
+        // Volatile: dynamic_rules, skill (subagent/process results are None)
+        assert_eq!(grouped.volatile.len(), 2);
         assert!(grouped.volatile[0].contains("no console.log"));
         assert_eq!(grouped.volatile[1], "Available skill: /commit");
-        assert!(grouped.volatile[2].contains("Fix the bug"));
     }
 
     #[test]
@@ -337,10 +301,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());
@@ -359,10 +321,8 @@ mod tests {
             skill_context: None,
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert_eq!(grouped.stable.len(), 2);
@@ -408,10 +368,8 @@ mod tests {
             skill_context: Some("Skill".into()),
             subagent_results_context: None,
             process_results_context: None,
-            task_context: None,
             dynamic_rules_context: None,
             server_origin: None,
-            device_context: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());

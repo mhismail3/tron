@@ -205,9 +205,6 @@ pub struct RunContext {
     /// Subagent results to inject.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_results: Option<String>,
-    /// Task context to inject.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_context: Option<String>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
@@ -218,9 +215,6 @@ pub struct RunContext {
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<crate::core::messages::UserMessageContent>,
-    /// Device context line from iOS app for system prompt injection.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device_context: Option<String>,
     /// Background process results to inject.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_results: Option<String>,
@@ -411,7 +405,7 @@ mod tests {
         let ctx = RunContext::default();
         assert!(ctx.skill_context.is_none());
         assert!(ctx.subagent_results.is_none());
-        assert!(ctx.task_context.is_none());
+        assert!(ctx.process_results.is_none());
         assert!(ctx.reasoning_level.is_none());
         assert!(ctx.dynamic_rules_context.is_none());
     }
@@ -420,7 +414,6 @@ mod tests {
     fn run_context_serde_roundtrip() {
         let ctx = RunContext {
             skill_context: Some("skill ctx".into()),
-            task_context: Some("task ctx".into()),
             reasoning_level: Some(ReasoningLevel::High),
             ..Default::default()
         };

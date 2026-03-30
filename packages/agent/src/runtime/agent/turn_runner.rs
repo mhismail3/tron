@@ -419,15 +419,11 @@ fn build_turn_context(
     context
         .process_results_context
         .clone_from(&run_context.process_results);
-    context.task_context.clone_from(&run_context.task_context);
     context.dynamic_rules_context = run_context
         .dynamic_rules_context
         .clone()
         .or(context.dynamic_rules_context);
     context.server_origin = server_origin.map(String::from);
-    context
-        .device_context
-        .clone_from(&run_context.device_context);
     context
 }
 
