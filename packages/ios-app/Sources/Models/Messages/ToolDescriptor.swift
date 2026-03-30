@@ -37,6 +37,7 @@ enum ToolRegistry {
         "webfetch", "websearch",
         "computeruse",
         "display",
+        "manageprocess",
         "mcpsearch", "mcpcall"
     ]
 
@@ -296,6 +297,16 @@ enum ToolRegistry {
             iconColor: .orange,
             displayName: "Confirm",
             completedDisplayName: "Confirmed",
+            summaryExtractor: { args in
+                ToolArgumentParser.string("action", from: args) ?? ""
+            },
+            viewerFactory: nil
+        ),
+        "manageprocess": ToolDescriptor(
+            icon: "gearshape.2",
+            iconColor: .tronSlate,
+            displayName: "Process",
+            completedDisplayName: "Managed",
             summaryExtractor: { args in
                 ToolArgumentParser.string("action", from: args) ?? ""
             },

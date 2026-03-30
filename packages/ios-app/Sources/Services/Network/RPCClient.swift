@@ -89,6 +89,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var display: DisplayClient = DisplayClient(transport: self)
 
+    /// Process management client (promote, cancel, list, status).
+    @ObservationIgnored
+    lazy var process: ProcessClient = ProcessClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.

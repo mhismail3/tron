@@ -124,6 +124,11 @@ final class EventRegistry: @unchecked Sendable {
         // Display streaming events
         register(DisplayFramePlugin.self)
 
+        // Process management events
+        register(ProcessSpawnedPlugin.self)
+        register(ProcessCompletedPlugin.self)
+        register(ProcessStatusUpdatePlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

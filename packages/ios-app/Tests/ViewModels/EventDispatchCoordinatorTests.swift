@@ -655,6 +655,11 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // Display streaming
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
 
+    // Process management
+    func handleProcessSpawned(_ result: ProcessSpawnedPlugin.Result) {}
+    func handleProcessCompleted(_ result: ProcessCompletedPlugin.Result) {}
+    func handleProcessStatusUpdate(_ result: ProcessStatusUpdatePlugin.Result) {}
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

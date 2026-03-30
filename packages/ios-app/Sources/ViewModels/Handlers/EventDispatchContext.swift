@@ -62,6 +62,12 @@ import Foundation
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
 }
 
+@MainActor protocol ProcessEventHandler: AnyObject {
+    func handleProcessSpawned(_ result: ProcessSpawnedPlugin.Result)
+    func handleProcessCompleted(_ result: ProcessCompletedPlugin.Result)
+    func handleProcessStatusUpdate(_ result: ProcessStatusUpdatePlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -75,5 +81,5 @@ import Foundation
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, DisplayStreamEventHandler,
-    EventDispatchLogger {}
+    ProcessEventHandler, EventDispatchLogger {}
 
