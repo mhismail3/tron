@@ -56,15 +56,14 @@ struct WebFetchToolDetailSheet: View {
     private var contentBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
-                sourceSection
+                WebFetchSourceSection(url: url, domain: domain, source: parsed.source, tint: tint)
                     .padding(.horizontal)
 
                 if parsed.isRawMode {
-                    // Raw HTTP mode: show method + status instead of prompt
-                    rawHttpInfoSection
+                    WebFetchRawHttpInfoSection(method: method, httpStatus: parsed.httpStatus, tint: tint)
                         .padding(.horizontal)
                 } else if !prompt.isEmpty {
-                    promptSection
+                    WebFetchPromptSection(prompt: prompt, tint: tint)
                         .padding(.horizontal)
                 }
 
@@ -78,10 +77,10 @@ struct WebFetchToolDetailSheet: View {
                             .padding(.horizontal)
                     } else if !parsed.answer.isEmpty {
                         if parsed.isRawMode {
-                            rawResponseBodySection
+                            WebFetchRawResponseBodySection(answer: parsed.answer, tint: tint)
                                 .padding(.horizontal)
                         } else {
-                            answerSection
+                            WebFetchAnswerSection(answer: parsed.answer, tint: tint)
                                 .padding(.horizontal)
                         }
                     } else {
@@ -100,55 +99,6 @@ struct WebFetchToolDetailSheet: View {
             }
             .padding(.vertical)
             .frame(maxWidth: .infinity)
-        }
-    }
-
-    // MARK: - Source Section
-
-    private var sourceSection: some View {
-        ToolDetailSection(title: "Source", accent: .tronInfo, tint: tint) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "globe")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                        .foregroundStyle(.tronInfo)
-
-                    if let source = parsed.source, !source.title.isEmpty {
-                        Text(source.title)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(tint.name)
-                            .lineLimit(2)
-                    } else {
-                        Text(domain)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(tint.name)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-                }
-
-                if !url.isEmpty {
-                    Text(url)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(tint.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(3)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - Prompt Section
-
-    private var promptSection: some View {
-        ToolDetailSection(title: "Prompt", accent: .tronInfo, tint: tint) {
-            Text(prompt)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(tint.body)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -172,101 +122,6 @@ struct WebFetchToolDetailSheet: View {
             if isTruncated {
                 ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
-        }
-    }
-
-    // MARK: - Answer Section
-
-    private var answerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Answer")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: parsed.answer, accent: .tronInfo)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                let blocks = MarkdownBlockParser.parse(parsed.answer)
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    MarkdownBlockView(block: block, textColor: tint.body)
-                }
-            }
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .sectionFill(.tronInfo)
-        }
-    }
-
-    // MARK: - Raw HTTP Info Section
-
-    private var rawHttpInfoSection: some View {
-        ToolDetailSection(title: "Request", accent: .tronInfo, tint: tint) {
-            HStack(spacing: 12) {
-                // Method badge
-                Text(method)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(methodColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                // Status code
-                if let status = parsed.httpStatus {
-                    Text("→ \(status)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(statusColor(status))
-                }
-
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var methodColor: Color {
-        switch method {
-        case "POST": return .tronInfo
-        case "PUT", "PATCH": return .tronAmber
-        case "DELETE": return .tronError
-        default: return .tronInfo
-        }
-    }
-
-    private func statusColor(_ status: Int) -> Color {
-        switch status {
-        case 200..<300: return .tronEmerald
-        case 300..<400: return .tronAmber
-        default: return .tronError
-        }
-    }
-
-    // MARK: - Raw Response Body Section
-
-    private var rawResponseBodySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Response")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: parsed.answer, accent: .tronInfo)
-            }
-
-            Text(parsed.answer)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
-                .foregroundStyle(tint.body)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .sectionFill(.tronInfo)
         }
     }
 
@@ -303,128 +158,13 @@ struct WebFetchToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             let streamParsed = WebFetchParsedResult(from: output, arguments: data.arguments)
             if !streamParsed.answer.isEmpty {
-                streamingAnswerSection(streamParsed.answer)
+                WebFetchStreamingAnswerSection(answer: streamParsed.answer, tint: tint)
             } else {
                 ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
             }
         } else {
             ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
         }
-    }
-
-    private func streamingAnswerSection(_ answer: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Answer")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.tronInfo)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                let blocks = MarkdownBlockParser.parse(answer)
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    MarkdownBlockView(block: block, textColor: tint.body)
-                }
-            }
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .sectionFill(.tronInfo)
-        }
-    }
-}
-
-// MARK: - WebFetch Detail Parser
-
-/// Parsing and error classification for WebFetch detail sheet.
-enum WebFetchDetailParser {
-
-    /// Extract just the error message from a result string.
-    static func extractError(from result: String) -> String {
-        if result.hasPrefix("Error:") {
-            return String(result.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let match = result.firstMatch(of: /"error"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return result
-    }
-
-    /// Detect if the result indicates a cached response.
-    static func isCached(_ result: String) -> Bool {
-        result.contains("fromCache") && result.contains("true")
-    }
-
-    /// Classify an error message into a structured type with icon, title, code, suggestion.
-    static func classifyError(_ message: String) -> ErrorClassification {
-        let lower = message.lowercased()
-
-        if lower.contains("404") || lower.contains("not found") {
-            return ErrorClassification(icon: "questionmark.folder", title: "Page Not Found", code: "HTTP 404",
-                    suggestion: "The page may have been moved or deleted. Check the URL.")
-        }
-        if lower.contains("403") || lower.contains("forbidden") {
-            return ErrorClassification(icon: "lock.fill", title: "Access Forbidden", code: "HTTP 403",
-                    suggestion: "The server denied access to this page.")
-        }
-        if lower.contains("401") || lower.contains("unauthorized") {
-            return ErrorClassification(icon: "lock.shield", title: "Unauthorized", code: "HTTP 401",
-                    suggestion: "Authentication is required to access this page.")
-        }
-        if lower.contains("429") || lower.contains("rate limit") {
-            return ErrorClassification(icon: "clock.badge.exclamationmark", title: "Rate Limited", code: "HTTP 429",
-                    suggestion: "Too many requests. Try again in a moment.")
-        }
-        if lower.contains("500") || lower.contains("internal server") {
-            return ErrorClassification(icon: "server.rack", title: "Server Error", code: "HTTP 500",
-                    suggestion: "The remote server encountered an error.")
-        }
-        if lower.contains("timeout") || lower.contains("timed out") {
-            return ErrorClassification(icon: "clock.arrow.circlepath", title: "Request Timed Out", code: nil,
-                    suggestion: "The page took too long to respond. Try again later.")
-        }
-        if lower.contains("dns") || lower.contains("resolve") || lower.contains("no such host") {
-            return ErrorClassification(icon: "wifi.slash", title: "DNS Error", code: nil,
-                    suggestion: "Could not resolve the domain. Check the URL is correct.")
-        }
-        if lower.contains("ssl") || lower.contains("certificate") || lower.contains("tls") {
-            return ErrorClassification(icon: "lock.trianglebadge.exclamationmark", title: "SSL Error", code: nil,
-                    suggestion: "There was a problem with the site's security certificate.")
-        }
-        if lower.contains("redirect") {
-            return ErrorClassification(icon: "arrow.triangle.turn.up.right.diamond", title: "Redirect Detected", code: nil,
-                    suggestion: "The page redirected to a different host. Try fetching the redirect URL.")
-        }
-        if lower.contains("blocked") || lower.contains("denied") {
-            return ErrorClassification(icon: "shield.slash", title: "Domain Blocked", code: nil,
-                    suggestion: "This domain is blocked from being fetched.")
-        }
-
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Fetch Failed", code: nil,
-                suggestion: "An error occurred while fetching the page.")
-    }
-}
-
-// MARK: - WebFetchParsedResult Extensions
-
-extension WebFetchParsedResult {
-    /// Whether the result came from cache. Only applies to summarization mode.
-    /// Uses text heuristic; for structured detection, use `isCachedFromDetails`.
-    var isCached: Bool {
-        guard !isRawMode else { return false }
-        return WebFetchDetailParser.isCached(answer)
-    }
-
-    /// Check cache status from structured details (persisted in tool.result event).
-    static func isCachedFromDetails(_ details: [String: AnyCodable]?) -> Bool {
-        guard let details else { return false }
-        return details["fromCache"]?.value as? Bool == true
     }
 }
 
@@ -483,26 +223,6 @@ extension WebFetchParsedResult {
 }
 
 @available(iOS 26.0, *)
-#Preview("WebFetch - Error Timeout") {
-    WebFetchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_wf3",
-            toolName: "WebFetch",
-            normalizedName: "webfetch",
-            icon: "arrow.down.doc",
-            iconColor: .tronInfo,
-            displayName: "Web Fetch",
-            summary: "slow-site.com",
-            status: .error,
-            durationMs: 30000,
-            arguments: "{\"url\": \"https://slow-site.com/data\", \"prompt\": \"Get the data\"}",
-            result: "Error: Request timed out after 30 seconds",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
 #Preview("WebFetch - Running") {
     WebFetchToolDetailSheet(
         data: CommandToolChipData(
@@ -523,46 +243,6 @@ extension WebFetchParsedResult {
 }
 
 @available(iOS 26.0, *)
-#Preview("WebFetch - Rate Limited") {
-    WebFetchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_wf5",
-            toolName: "WebFetch",
-            normalizedName: "webfetch",
-            icon: "arrow.down.doc",
-            iconColor: .tronInfo,
-            displayName: "Web Fetch",
-            summary: "api.example.com",
-            status: .error,
-            durationMs: 120,
-            arguments: "{\"url\": \"https://api.example.com/data\", \"prompt\": \"Read API docs\"}",
-            result: "Error: Rate limit exceeded (429) - try again later",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("WebFetch - No Prompt") {
-    WebFetchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_wf6",
-            toolName: "WebFetch",
-            normalizedName: "webfetch",
-            icon: "arrow.down.doc",
-            iconColor: .tronInfo,
-            displayName: "Web Fetch",
-            summary: "news.ycombinator.com",
-            status: .success,
-            durationMs: 1800,
-            arguments: "{\"url\": \"https://news.ycombinator.com\"}",
-            result: "The top stories on Hacker News today include discussions about AI safety, a new programming language, and a startup funding announcement.",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
 #Preview("WebFetch - Raw POST") {
     WebFetchToolDetailSheet(
         data: CommandToolChipData(
@@ -577,46 +257,6 @@ extension WebFetchParsedResult {
             durationMs: 450,
             arguments: "{\"url\": \"https://api.example.com/items\", \"method\": \"POST\", \"body\": {\"name\": \"New Item\"}}",
             result: "HTTP 201 https://api.example.com/items\n\n{\"id\": 42, \"name\": \"New Item\", \"created\": true}",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("WebFetch - Raw GET 404") {
-    WebFetchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_wf8",
-            toolName: "WebFetch",
-            normalizedName: "webfetch",
-            icon: "arrow.down.doc",
-            iconColor: .tronInfo,
-            displayName: "Web Fetch",
-            summary: "api.example.com",
-            status: .success,
-            durationMs: 120,
-            arguments: "{\"url\": \"https://api.example.com/missing\", \"rawResponse\": true}",
-            result: "HTTP 404 https://api.example.com/missing\n\n{\"error\": \"not_found\", \"message\": \"Resource does not exist\"}",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("WebFetch - Raw DELETE") {
-    WebFetchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_wf9",
-            toolName: "WebFetch",
-            normalizedName: "webfetch",
-            icon: "arrow.down.doc",
-            iconColor: .tronInfo,
-            displayName: "Web Fetch",
-            summary: "DELETE api.example.com",
-            status: .success,
-            durationMs: 200,
-            arguments: "{\"url\": \"https://api.example.com/items/42\", \"method\": \"DELETE\"}",
-            result: "HTTP 204 https://api.example.com/items/42\n\n",
             isResultTruncated: false
         )
     )

@@ -74,10 +74,10 @@ struct EditToolDetailSheet: View {
                             .padding(.horizontal)
                     }
                     if hasDiff && !diffLines.isEmpty {
-                        diffSection
+                        EditDiffSection(diffLines: diffLines, resultText: data.result, tint: tint)
                             .padding(.horizontal)
                     } else if let result = data.result, !result.isEmpty, successMessage == nil {
-                        fallbackResultSection(result)
+                        EditFallbackResultSection(result: result, tint: tint)
                             .padding(.horizontal)
                     }
                 case .error:
@@ -121,99 +121,6 @@ struct EditToolDetailSheet: View {
 
     private func resultNote(_ result: String) -> some View {
         ToolResultNote(text: result, tint: tint)
-    }
-
-    // MARK: - Diff Section
-
-    private var diffSection: some View {
-        let lineNumWidth = EditDiffParser.lineNumberWidth(for: diffLines)
-        let accentColor: Color = .orange
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Changes")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: data.result ?? "", accent: accentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(diffLines) { line in
-                    switch line.type {
-                    case .separator:
-                        separatorRow
-                    case .context, .addition, .deletion:
-                        diffLineRow(line, lineNumWidth: lineNumWidth)
-                    }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(accentColor)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(accentColor)
-        }
-    }
-
-    private func diffLineRow(_ line: EditDiffLine, lineNumWidth: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            // Line number
-            Text(line.lineNum.map(String.init) ?? "")
-                .font(TronTypography.pill)
-                .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
-                .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.leading, 4)
-                .padding(.trailing, 4)
-
-            // +/- marker
-            Text(DiffFormatting.marker(for: line.type))
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
-                .foregroundStyle(DiffFormatting.markerColor(for: line.type))
-                .frame(width: 14)
-                .padding(.trailing, 4)
-
-            // Content
-            Text(line.content.isEmpty ? " " : line.content)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(tint.body)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DiffFormatting.lineBackground(for: line.type))
-    }
-
-    private var separatorRow: some View {
-        HStack(spacing: 6) {
-            Rectangle()
-                .fill(Color.orange.opacity(0.15))
-                .frame(height: 1)
-            Text("\u{22EF}")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted.opacity(0.4))
-            Rectangle()
-                .fill(Color.orange.opacity(0.15))
-                .frame(height: 1)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-    }
-
-    // MARK: - Fallback Result Section
-
-    private func fallbackResultSection(_ result: String) -> some View {
-        ToolDetailSection(title: "Result", accent: .orange, tint: tint) {
-            Text(result)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(tint.body)
-                .textSelection(.enabled)
-        }
     }
 
     // MARK: - Error Section
@@ -449,66 +356,6 @@ enum EditError {
             durationMs: 18,
             arguments: "{\"file_path\": \"/Users/moose/project/Sources/App.swift\", \"old_string\": \"let name = \\\"MyApp\\\"\", \"new_string\": \"let name = \\\"SuperApp\\\"\"}",
             result: "Successfully replaced 1 occurrence in /Users/moose/project/Sources/App.swift\n\n@@ -8,5 +8,5 @@\n     override func viewDidLoad() {\n         super.viewDidLoad()\n-        let name = \"MyApp\"\n+        let name = \"SuperApp\"\n         setupUI()\n     }",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Edit - Multi-line Change") {
-    EditToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_e2",
-            toolName: "Edit",
-            normalizedName: "edit",
-            icon: "pencil.line",
-            iconColor: .tronEmerald,
-            displayName: "Edit",
-            summary: "config.ts",
-            status: .success,
-            durationMs: 22,
-            arguments: "{\"file_path\": \"/Users/moose/project/src/config.ts\", \"old_string\": \"const port = 3000\\nconst host = 'localhost'\", \"new_string\": \"const port = 8080\\nconst host = '0.0.0.0'\\nconst debug = true\"}",
-            result: "Successfully replaced 1 occurrence in /Users/moose/project/src/config.ts\n\n@@ -1,4 +1,5 @@\n import { Config } from './types'\n-const port = 3000\n-const host = 'localhost'\n+const port = 8080\n+const host = '0.0.0.0'\n+const debug = true\n export default { port, host }",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Edit - Replace All") {
-    EditToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_e3",
-            toolName: "Edit",
-            normalizedName: "edit",
-            icon: "pencil.line",
-            iconColor: .tronEmerald,
-            displayName: "Edit",
-            summary: "utils.py",
-            status: .success,
-            durationMs: 15,
-            arguments: "{\"file_path\": \"/Users/moose/project/utils.py\", \"old_string\": \"print(\", \"new_string\": \"logger.info(\", \"replace_all\": true}",
-            result: "Successfully replaced 3 occurrences in /Users/moose/project/utils.py\n\n@@ -5,3 +5,3 @@\n def process():\n-    print(\"starting\")\n+    logger.info(\"starting\")\n     run()\n@@ -12,3 +12,3 @@\n def cleanup():\n-    print(\"done\")\n+    logger.info(\"done\")\n     reset()",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Edit - Error: String Not Found") {
-    EditToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_e4",
-            toolName: "Edit",
-            normalizedName: "edit",
-            icon: "pencil.line",
-            iconColor: .tronEmerald,
-            displayName: "Edit",
-            summary: "App.swift",
-            status: .error,
-            durationMs: 5,
-            arguments: "{\"file_path\": \"/Users/moose/project/App.swift\", \"old_string\": \"nonexistent text\", \"new_string\": \"replacement\"}",
-            result: "Error: old_string not found in file. The exact string \"nonexistent text\" does not exist in /Users/moose/project/App.swift",
             isResultTruncated: false
         )
     )

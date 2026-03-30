@@ -66,7 +66,6 @@ struct BashToolDetailSheet: View {
     // MARK: - Result Analysis
 
     private var exitCode: Int? {
-        // Prefer structured details over regex
         BashDetailsHelper.exitCode(from: data.details)
             ?? BashOutputHelpers.extractExitCode(from: data.result)
     }
@@ -80,7 +79,6 @@ struct BashToolDetailSheet: View {
         data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
     }
 
-    /// The output text with truncation markers and ANSI codes stripped.
     private var cleanOutput: String {
         let source = data.result ?? data.streamingOutput ?? ""
         return BashOutputHelpers.cleanForDisplay(source)
@@ -95,12 +93,10 @@ struct BashToolDetailSheet: View {
         outputLines.count
     }
 
-    /// Whether the output has enough lines to warrant visual collapsing.
     private var shouldCollapse: Bool {
         outputLineCount > BashOutputHelpers.collapseThreshold
     }
 
-    /// The lines to actually render (may be a subset if collapsed).
     private var displayLines: [(index: Int, content: String)] {
         if shouldCollapse && !showAllLines {
             return BashOutputHelpers.collapsedLines(from: outputLines)
@@ -134,29 +130,28 @@ struct BashToolDetailSheet: View {
     private var contentBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
-                commandSection
+                BashCommandSection(command: command, commandDescription: commandDescription, tint: tint)
                     .padding(.horizontal)
                 statusRow
                     .padding(.horizontal)
 
-                // Phase 2: contextual sections (stdin, env, ptyInput)
                 if let stdin = stdinContent, !stdin.isEmpty {
-                    stdinSection(stdin)
+                    BashStdinSection(content: stdin, tint: tint)
                         .padding(.horizontal)
                 }
                 if let env = envVars, !env.isEmpty {
-                    envSection(env)
+                    BashEnvSection(env: env, tint: tint)
                         .padding(.horizontal)
                 }
                 if let pairs = ptyInputPairs, !pairs.isEmpty {
-                    ptyInputSection(pairs)
+                    BashPtyInputSection(pairs: pairs, tint: tint)
                         .padding(.horizontal)
                 }
 
                 switch data.status {
                 case .success:
                     if outputLines.isEmpty {
-                        emptyOutputSection
+                        ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
                             .padding(.horizontal)
                     } else {
                         outputSection
@@ -164,7 +159,7 @@ struct BashToolDetailSheet: View {
                     }
                 case .error:
                     if isBlocked {
-                        blockedSection
+                        BashBlockedSection(result: data.result, colorScheme: colorScheme)
                             .padding(.horizontal)
                     } else if outputLines.isEmpty {
                         if let result = data.result {
@@ -182,97 +177,6 @@ struct BashToolDetailSheet: View {
             }
             .padding(.vertical)
             .frame(maxWidth: .infinity)
-        }
-    }
-
-    // MARK: - Command Section
-
-    private var commandSection: some View {
-        ToolDetailSection(title: "Command", accent: .tronEmerald, tint: tint, trailing: commandCopyButton) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let desc = commandDescription, !desc.isEmpty {
-                    Text(desc)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(tint.secondary)
-                }
-
-                Text(command)
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(tint.body)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var commandCopyButton: some View {
-        ToolCopyButton(content: command, accent: .tronEmerald)
-    }
-
-    // MARK: - stdin Section
-
-    private func stdinSection(_ content: String) -> some View {
-        ToolDetailSection(title: "stdin", accent: .tronEmerald, tint: tint) {
-            Text(content)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(tint.body)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - Environment Variables Section
-
-    private func envSection(_ env: [String: String]) -> some View {
-        ToolDetailSection(title: "Environment", accent: .tronEmerald, tint: tint) {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(env.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                    HStack(spacing: 4) {
-                        Text(key)
-                            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(tint.heading)
-                        Text("=")
-                            .font(TronTypography.codeContentSM)
-                            .foregroundStyle(tint.subtle)
-                        Text(value)
-                            .font(TronTypography.codeContentSM)
-                            .foregroundStyle(tint.body)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - ptyInput Section
-
-    private func ptyInputSection(_ pairs: [[String: String]]) -> some View {
-        ToolDetailSection(title: "Interactive Prompts", accent: .tronTeal, tint: tint) {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
-                    HStack(spacing: 6) {
-                        Text("wait")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted)
-                        Text(pair["wait"] ?? "")
-                            .font(TronTypography.codeContentSM)
-                            .foregroundStyle(tint.body)
-                        Image(systemName: "arrow.right")
-                            .font(TronTypography.sans(size: TronTypography.sizeSM))
-                            .foregroundStyle(.tronTextMuted)
-                        Text("send")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted)
-                        Text(pair["send"] ?? "")
-                            .font(TronTypography.codeContentSM)
-                            .foregroundStyle(pair["send"] == "[REDACTED]" ? .tronAmber : tint.body)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -326,102 +230,20 @@ struct BashToolDetailSheet: View {
                 ToolCopyButton(content: data.result ?? "", accent: .tronEmerald)
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(displayLines, id: \.index) { index, line in
-                    HStack(alignment: .top, spacing: 0) {
-                        Text("\(index + 1)")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted.opacity(0.4))
-                            .frame(width: lineNumWidth, alignment: .trailing)
-                            .padding(.leading, 4)
-                            .padding(.trailing, 8)
-
-                        Text(BashOutputHelpers.capLineLength(line))
-                            .font(TronTypography.codeContent)
-                            .foregroundStyle(tint.body)
-                            .fixedSize(horizontal: false, vertical: true)
+            BashOutputLinesView(
+                lines: displayLines,
+                lineNumWidth: lineNumWidth,
+                borderColor: borderColor,
+                tint: tint,
+                shouldCollapse: shouldCollapse,
+                showAllLines: showAllLines,
+                hiddenLineCount: hiddenLineCount,
+                onExpand: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAllLines = true
                     }
-                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
                 }
-
-                if shouldCollapse && !showAllLines {
-                    collapsedIndicator
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 3)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(borderColor)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.tronEmerald)
-        }
-    }
-
-    private var collapsedIndicator: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showAllLines = true
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "ellipsis")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                Text("\(hiddenLineCount) more lines")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM))
-            }
-            .foregroundStyle(.tronTextMuted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.tronEmerald.opacity(0.06))
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.top, 4)
-    }
-
-    // MARK: - Empty Output Section
-
-    private var emptyOutputSection: some View {
-        ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
-    }
-
-    // MARK: - Blocked Section
-
-    private var blockedSection: some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-        let reason = data.result?
-            .replacingOccurrences(of: "Command blocked for safety: ", with: "")
-            .replacingOccurrences(of: "Command blocked: ", with: "")
-            ?? "This command was blocked by safety rules."
-
-        return ToolDetailSection(title: "Blocked", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "shield.slash.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.tronError)
-
-                    Text("Command Blocked")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                Text(reason)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.body)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("This command matched a safety pattern and was not executed.")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.subtle)
-            }
+            )
         }
     }
 
@@ -443,81 +265,10 @@ struct BashToolDetailSheet: View {
     @ViewBuilder
     private var runningSection: some View {
         if let output = data.streamingOutput, !output.isEmpty {
-            streamingOutputSection(output)
+            BashStreamingOutputView(output: output, tint: tint)
         } else {
             ToolRunningSpinner(title: "Output", accent: .tronEmerald, tint: tint, actionText: "Running command...")
         }
-    }
-
-    private func streamingOutputSection(_ output: String) -> some View {
-        let cleaned = BashOutputHelpers.cleanForDisplay(output)
-        let lines = cleaned.components(separatedBy: "\n")
-        let lineNumWidth = BashOutputHelpers.lineNumberWidth(lineCount: lines.count)
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Output")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.tronEmerald)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    HStack(alignment: .top, spacing: 0) {
-                        Text("\(index + 1)")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted.opacity(0.4))
-                            .frame(width: lineNumWidth, alignment: .trailing)
-                            .padding(.leading, 4)
-                            .padding(.trailing, 8)
-
-                        Text(BashOutputHelpers.capLineLength(line))
-                            .font(TronTypography.codeContent)
-                            .foregroundStyle(tint.body)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 3)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronEmerald)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.tronEmerald)
-        }
-    }
-}
-
-// MARK: - Bash Error Classifier
-
-enum BashErrorClassifier: ErrorClassifying {
-    static func classify(_ message: String) -> ErrorClassification {
-        if let exitCode = extractExitCode(from: message) {
-            return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Command Failed", code: "EXIT \(exitCode)", suggestion: "The command exited with a non-zero status code.")
-        }
-        if message.contains("timed out") || message.contains("timeout") {
-            return ErrorClassification(icon: "clock.badge.exclamationmark", title: "Command Timed Out", code: nil, suggestion: "The command exceeded its time limit.")
-        }
-        if message.contains("Permission denied") || message.contains("EACCES") {
-            return ErrorClassification(icon: "lock.fill", title: "Permission Denied", code: "EACCES", suggestion: "The process does not have permission to execute this command.")
-        }
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Command Failed", code: nil, suggestion: "An unexpected error occurred while running the command.")
-    }
-
-    private static func extractExitCode(from message: String) -> Int? {
-        let pattern = /exit code (\d+)/
-        guard let match = message.firstMatch(of: pattern) else { return nil }
-        return Int(match.1)
     }
 }
 
@@ -528,95 +279,37 @@ enum BashErrorClassifier: ErrorClassifying {
 #Preview("Bash - Success") {
     BashToolDetailSheet(
         data: CommandToolChipData(
-            id: "call_b1",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "git status --short",
-            status: .success,
-            durationMs: 45,
+            id: "call_b1", toolName: "Bash", normalizedName: "bash", icon: "terminal",
+            iconColor: .tronEmerald, displayName: "Bash", summary: "git status --short",
+            status: .success, durationMs: 45,
             arguments: "{\"command\": \"git status --short\", \"description\": \"Show working tree status\"}",
-            result: " M README.md\n M src/index.ts\nA  packages/new-feature/lib.ts\n?? .env.local",
+            result: " M README.md\n M src/index.ts\nA  packages/new-feature/lib.ts",
             isResultTruncated: false
         )
     )
 }
 
 @available(iOS 26.0, *)
-#Preview("Bash - Multi-line Output") {
+#Preview("Bash - Error") {
     BashToolDetailSheet(
         data: CommandToolChipData(
-            id: "call_b2",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "npm test",
-            status: .success,
-            durationMs: 12500,
-            arguments: "{\"command\": \"npm test\", \"description\": \"Run test suite\"}",
-            result: "> myapp@1.0.0 test\n> vitest run\n\n RUN  v2.1.0\n\n ✓ src/auth.test.ts (4 tests) 120ms\n ✓ src/api.test.ts (8 tests) 340ms\n ✓ src/utils.test.ts (12 tests) 89ms\n ✓ src/db.test.ts (6 tests) 1200ms\n\n Test Files  4 passed (4)\n      Tests  30 passed (30)\n   Start at  10:32:15\n   Duration  2.14s",
+            id: "call_b4", toolName: "Bash", normalizedName: "bash", icon: "terminal",
+            iconColor: .tronEmerald, displayName: "Bash", summary: "cargo build",
+            status: .error, durationMs: 3400,
+            arguments: "{\"command\": \"cargo build\"}",
+            result: "Command failed with exit code 1:\nerror[E0308]: mismatched types",
             isResultTruncated: false
         )
     )
 }
 
 @available(iOS 26.0, *)
-#Preview("Bash - No Output") {
+#Preview("Bash - Blocked") {
     BashToolDetailSheet(
         data: CommandToolChipData(
-            id: "call_b3",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "mkdir -p src/utils",
-            status: .success,
-            durationMs: 8,
-            arguments: "{\"command\": \"mkdir -p src/utils\", \"description\": \"Create utils directory\"}",
-            result: "",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Error with Exit Code") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_b4",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "cargo build",
-            status: .error,
-            durationMs: 3400,
-            arguments: "{\"command\": \"cargo build\", \"description\": \"Build Rust project\"}",
-            result: "Command failed with exit code 1:\nerror[E0308]: mismatched types\n  --> src/main.rs:42:12\n   |\n42 |     return \"hello\";\n   |            ^^^^^^^ expected `i32`, found `&str`\n   |\n   = note: expected type `i32`\n              found type `&str`\n\nerror: aborting due to previous error",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Command Blocked") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_b5",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "rm -rf /",
-            status: .error,
-            durationMs: 1,
+            id: "call_b5", toolName: "Bash", normalizedName: "bash", icon: "terminal",
+            iconColor: .tronEmerald, displayName: "Bash", summary: "rm -rf /",
+            status: .error, durationMs: 1,
             arguments: "{\"command\": \"rm -rf /\"}",
             result: "Command blocked for safety: Potentially destructive command pattern detected",
             isResultTruncated: false
@@ -625,204 +318,15 @@ enum BashErrorClassifier: ErrorClassifying {
 }
 
 @available(iOS 26.0, *)
-#Preview("Bash - Truncated Output") {
+#Preview("Bash - Streaming") {
     BashToolDetailSheet(
         data: CommandToolChipData(
-            id: "call_b6",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "find . -name '*.ts'",
-            status: .success,
-            durationMs: 890,
-            arguments: "{\"command\": \"find . -name '*.ts'\", \"description\": \"Find all TypeScript files\"}",
-            result: "./src/index.ts\n./src/auth.ts\n./src/api.ts\n./src/utils.ts\n./src/types.ts\n./src/config.ts\n./src/db.ts\n./src/routes.ts\n./src/middleware.ts\n./src/validators.ts\n./packages/core/index.ts\n./packages/core/types.ts\n./packages/ui/index.ts\n./packages/ui/Button.ts\n./packages/ui/Modal.ts\n./packages/ui/Theme.ts\n\n\n... [Output truncated for performance]",
-            isResultTruncated: true
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Running") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_b7",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "npm install",
-            status: .running,
-            durationMs: nil,
-            arguments: "{\"command\": \"npm install\", \"description\": \"Install dependencies\"}",
-            result: nil,
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Running with Streaming") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_b8",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "npm install",
-            status: .running,
-            durationMs: nil,
-            arguments: "{\"command\": \"npm install\", \"description\": \"Install dependencies\"}",
-            result: nil,
-            isResultTruncated: false,
-            streamingOutput: "added 142 packages in 3.2s\nresolving dependencies...\nfetching @types/node@20.11.0"
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - No Description") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_b9",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "echo hello",
-            status: .success,
-            durationMs: 3,
-            arguments: "{\"command\": \"echo hello\"}",
-            result: "hello",
-            isResultTruncated: false
-        )
-    )
-}
-
-// MARK: - Phase 2 Previews
-
-@available(iOS 26.0, *)
-#Preview("Bash - zsh Shell") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_1",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "zsh: echo $0",
-            status: .success,
-            durationMs: 12,
-            arguments: "{\"command\": \"echo $0\", \"shell\": \"zsh\"}",
-            result: "zsh",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Interactive PTY") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_2",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "PTY: ssh user@host",
-            status: .success,
-            durationMs: 4500,
-            arguments: "{\"command\": \"ssh user@host\", \"interactive\": true, \"ptyInput\": [{\"wait\": \"password:\", \"send\": \"secret123\"}, {\"wait\": \"continue?\", \"send\": \"yes\"}]}",
-            result: "Last login: Mon Mar 24 10:30:00 2026\nuser@host:~$",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - With Env Vars") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_3",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "echo $FOO",
-            status: .success,
-            durationMs: 8,
-            arguments: "{\"command\": \"echo $FOO\", \"env\": {\"FOO\": \"bar\", \"NODE_ENV\": \"production\", \"DEBUG\": \"true\"}}",
-            result: "bar",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - With stdin") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_4",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "wc -l",
-            status: .success,
-            durationMs: 5,
-            arguments: "{\"command\": \"wc -l\", \"stdin\": \"line1\\nline2\\nline3\"}",
-            result: "       3",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Sandbox Mode") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_5",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "sandbox: ls -la",
-            status: .success,
-            durationMs: 120,
-            arguments: "{\"command\": \"ls -la\", \"sandbox\": true}",
-            result: "total 8\ndrwxr-xr-x  2 user  staff  64 Mar 24 10:00 .\n-rw-r--r--  1 user  staff  12 Mar 24 10:00 test.txt",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Bash - Docker Sandbox") {
-    BashToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_p2_6",
-            toolName: "Bash",
-            normalizedName: "bash",
-            icon: "terminal",
-            iconColor: .tronEmerald,
-            displayName: "Bash",
-            summary: "docker: node -v",
-            status: .success,
-            durationMs: 2300,
-            arguments: "{\"command\": \"node -v\", \"sandbox\": \"docker\"}",
-            result: "v20.11.0",
-            isResultTruncated: false
+            id: "call_b8", toolName: "Bash", normalizedName: "bash", icon: "terminal",
+            iconColor: .tronEmerald, displayName: "Bash", summary: "npm install",
+            status: .running, durationMs: nil,
+            arguments: "{\"command\": \"npm install\"}",
+            result: nil, isResultTruncated: false,
+            streamingOutput: "added 142 packages in 3.2s\nresolving dependencies..."
         )
     )
 }

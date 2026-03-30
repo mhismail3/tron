@@ -55,7 +55,7 @@ struct GlobToolDetailSheet: View {
     private var contentBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
-                patternSection
+                GlobPatternSection(pattern: pattern, searchPath: searchPath, tint: tint)
                     .padding(.horizontal)
                 statusRow
                     .padding(.horizontal)
@@ -66,7 +66,7 @@ struct GlobToolDetailSheet: View {
                         noResultsSection
                             .padding(.horizontal)
                     } else if !parsedFiles.isEmpty {
-                        resultsSection
+                        GlobResultsSection(files: parsedFiles, tint: tint)
                             .padding(.horizontal)
                     } else {
                         noResultsSection
@@ -84,33 +84,6 @@ struct GlobToolDetailSheet: View {
             }
             .padding(.vertical)
             .frame(maxWidth: .infinity)
-        }
-    }
-
-    // MARK: - Pattern Section
-
-    private var patternSection: some View {
-        ToolDetailSection(title: "Pattern", accent: .cyan, tint: tint) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(pattern)
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(tint.body)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if searchPath != "." {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                            .foregroundStyle(tint.subtle)
-                        Text(searchPath)
-                            .font(TronTypography.codeContent)
-                            .foregroundStyle(tint.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -132,86 +105,6 @@ struct GlobToolDetailSheet: View {
                 ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
-    }
-
-    // MARK: - Results Section
-
-    private var resultsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: parsedFiles.map(\.path).joined(separator: "\n"), accent: .cyan)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(parsedFiles.enumerated()), id: \.offset) { _, entry in
-                    fileRow(entry)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.cyan)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.cyan)
-        }
-    }
-
-    private func fileRow(_ entry: GlobResultEntry) -> some View {
-        let ext = entry.fileExtension
-        let langColor = ext.isEmpty ? Color.tronSlate : FileDisplayHelpers.languageColor(for: ext)
-
-        return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: entry.isDirectory ? "folder.fill" : FileDisplayHelpers.fileIcon(for: entry.fileName))
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(entry.isDirectory ? .tronAmber : .cyan)
-                .frame(width: 16, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.fileName)
-                    .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.body)
-                    .lineLimit(1)
-
-                if entry.directoryPath != nil {
-                    Text(entry.displayPath)
-                        .font(TronTypography.codeContentSM)
-                        .foregroundStyle(tint.subtle)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            if let size = entry.size {
-                Text(size)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(tint.subtle)
-            }
-
-            if !ext.isEmpty && !entry.isDirectory {
-                Text(ext.uppercased())
-                    .font(TronTypography.mono(size: 9, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background {
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(langColor.opacity(0.25)), in: Capsule())
-                    }
-            }
-        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - No Results Section
@@ -240,57 +133,13 @@ struct GlobToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             let streaming = GlobResultParser.parse(output)
             if !streaming.isEmpty {
-                streamingResultsSection(streaming)
+                GlobStreamingResultsSection(entries: streaming, tint: tint)
             } else {
                 ToolRunningSpinner(title: "Results", accent: .cyan, tint: tint, actionText: "Searching files...")
             }
         } else {
             ToolRunningSpinner(title: "Results", accent: .cyan, tint: tint, actionText: "Searching files...")
         }
-    }
-
-    private func streamingResultsSection(_ entries: [GlobResultEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.cyan)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                    fileRow(entry)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.cyan)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.cyan)
-        }
-    }
-}
-
-// MARK: - Glob Error Classifier
-
-enum GlobErrorClassifier: ErrorClassifying {
-    static func classify(_ message: String) -> ErrorClassification {
-        if message.contains("Permission denied") || message.contains("EACCES") {
-            return ErrorClassification(icon: "lock.fill", title: "Permission Denied", code: "EACCES", suggestion: "The process does not have permission to search this location.")
-        }
-        if message.contains("No such file") || message.contains("ENOENT") || message.contains("not found") {
-            return ErrorClassification(icon: "questionmark.folder", title: "Path Not Found", code: "ENOENT", suggestion: "Check that the search path exists.")
-        }
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil, suggestion: "An unexpected error occurred during file search.")
     }
 }
 
@@ -400,26 +249,6 @@ struct GlobResultEntry: Equatable {
 }
 
 @available(iOS 26.0, *)
-#Preview("Glob - With Directories") {
-    GlobToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_g2",
-            toolName: "Find",
-            normalizedName: "find",
-            icon: "doc.text.magnifyingglass",
-            iconColor: .cyan,
-            displayName: "Find",
-            summary: "src/**",
-            status: .success,
-            durationMs: 20,
-            arguments: "{\"pattern\": \"src/**\"}",
-            result: "src/components/\nsrc/utils/\nsrc/index.ts\nsrc/config.ts\nsrc/types.ts\nsrc/components/Button.tsx\nsrc/components/Modal.tsx\nsrc/utils/helpers.ts",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
 #Preview("Glob - No Results") {
     GlobToolDetailSheet(
         data: CommandToolChipData(
@@ -434,46 +263,6 @@ struct GlobResultEntry: Equatable {
             durationMs: 12,
             arguments: "{\"pattern\": \"**/*.rb\"}",
             result: "No files found matching: **/*.rb",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Glob - With Sizes") {
-    GlobToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_g4",
-            toolName: "Find",
-            normalizedName: "find",
-            icon: "doc.text.magnifyingglass",
-            iconColor: .cyan,
-            displayName: "Find",
-            summary: "*.ts",
-            status: .success,
-            durationMs: 45,
-            arguments: "{\"pattern\": \"*.ts\", \"path\": \"src\"}",
-            result: "4.5K src/index.ts\n12K src/config.ts\n1.2K src/types.ts\n890B src/utils.ts",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Glob - Truncated") {
-    GlobToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_g5",
-            toolName: "Glob",
-            normalizedName: "glob",
-            icon: "doc.text.magnifyingglass",
-            iconColor: .cyan,
-            displayName: "Glob",
-            summary: "**/*",
-            status: .success,
-            durationMs: 150,
-            arguments: "{\"pattern\": \"**/*\"}",
-            result: "src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n\n[Showing 5 results (limit reached)]",
             isResultTruncated: false
         )
     )
@@ -500,20 +289,20 @@ struct GlobResultEntry: Equatable {
 }
 
 @available(iOS 26.0, *)
-#Preview("Glob - Custom Path") {
+#Preview("Glob - With Sizes") {
     GlobToolDetailSheet(
         data: CommandToolChipData(
-            id: "call_g7",
-            toolName: "Glob",
-            normalizedName: "glob",
+            id: "call_g4",
+            toolName: "Find",
+            normalizedName: "find",
             icon: "doc.text.magnifyingglass",
             iconColor: .cyan,
-            displayName: "Glob",
-            summary: "*.md",
+            displayName: "Find",
+            summary: "*.ts",
             status: .success,
-            durationMs: 18,
-            arguments: "{\"pattern\": \"*.md\", \"path\": \"/Users/moose/Workspace/tron\"}",
-            result: "README.md\nCHANGELOG.md\ndocs/architecture.md\ndocs/development.md",
+            durationMs: 45,
+            arguments: "{\"pattern\": \"*.ts\", \"path\": \"src\"}",
+            result: "4.5K src/index.ts\n12K src/config.ts\n1.2K src/types.ts\n890B src/utils.ts",
             isResultTruncated: false
         )
     )

@@ -70,7 +70,7 @@ struct SearchToolDetailSheet: View {
     private var contentBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
-                querySection
+                SearchQuerySection(pattern: pattern, searchPath: searchPath, fileFilter: fileFilter, tint: tint)
                     .padding(.horizontal)
                 statusRow
                     .padding(.horizontal)
@@ -81,10 +81,10 @@ struct SearchToolDetailSheet: View {
                         noResultsSection
                             .padding(.horizontal)
                     } else if outputMode == "files_with_matches" {
-                        fileListSection
+                        SearchFileListSection(result: data.result, tint: tint)
                             .padding(.horizontal)
                     } else if !parsedResults.isEmpty {
-                        matchesSection
+                        SearchMatchesSection(parsedResults: parsedResults, result: data.result, tint: tint)
                             .padding(.horizontal)
                     } else if let result = data.result, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         rawResultSection(result)
@@ -108,47 +108,6 @@ struct SearchToolDetailSheet: View {
         }
     }
 
-    // MARK: - Query Section
-
-    private var querySection: some View {
-        ToolDetailSection(title: "Query", accent: .purple, tint: tint) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(pattern)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(tint.body)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 12) {
-                    if searchPath != "." {
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                                .foregroundStyle(tint.subtle)
-                            Text(searchPath)
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(tint.secondary)
-                        }
-                    }
-
-                    if let filter = fileFilter {
-                        HStack(spacing: 4) {
-                            Image(systemName: "line.3.horizontal.decrease")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                                .foregroundStyle(tint.subtle)
-                            Text(filter)
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(tint.secondary)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     // MARK: - Status Row
 
     private var statusRow: some View {
@@ -163,151 +122,6 @@ struct SearchToolDetailSheet: View {
                 ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
-    }
-
-    // MARK: - Matches Section (grouped by file)
-
-    private var matchesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: data.result ?? "", accent: .purple)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(parsedResults.enumerated()), id: \.offset) { groupIdx, group in
-                    if groupIdx > 0 {
-                        Divider()
-                            .background(Color.purple.opacity(0.1))
-                    }
-                    fileGroupView(group)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.purple)
-        }
-    }
-
-    private func fileGroupView(_ group: SearchFileGroup) -> some View {
-        let fileName = (group.filePath as NSString).lastPathComponent
-        let lineNumWidth = SearchResultParser.lineNumberWidth(for: group.matches)
-
-        return VStack(alignment: .leading, spacing: 0) {
-            // File header
-            HStack(spacing: 6) {
-                Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                    .foregroundStyle(.purple)
-
-                Text(group.filePath)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(tint.secondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 4)
-
-                Text("\(group.matches.count)")
-                    .font(TronTypography.mono(size: 9, weight: .medium))
-                    .foregroundStyle(.purple)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background {
-                        Capsule()
-                            .fill(Color.purple.opacity(0.12))
-                    }
-            }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 8)
-
-            // Match lines
-            ForEach(Array(group.matches.enumerated()), id: \.offset) { _, match in
-                matchLineView(match, lineNumWidth: lineNumWidth)
-            }
-        }
-    }
-
-    private func matchLineView(_ match: SearchMatch, lineNumWidth: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            if let lineNum = match.lineNumber {
-                Text("\(lineNum)")
-                    .font(TronTypography.pill)
-                    .foregroundStyle(.tronTextMuted.opacity(0.4))
-                    .frame(width: lineNumWidth, alignment: .trailing)
-                    .padding(.leading, 8)
-                    .padding(.trailing, 6)
-            }
-
-            Text(match.content.isEmpty ? " " : match.content)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(tint.body)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - File List Section (files_with_matches mode)
-
-    private var fileListSection: some View {
-        let files = (data.result ?? "").components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("[") && !$0.hasPrefix("No ") }
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Files")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ToolCopyButton(content: files.joined(separator: "\n"), accent: .purple)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(files.enumerated()), id: \.offset) { _, file in
-                    fileListRow(file)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.purple)
-        }
-    }
-
-    private func fileListRow(_ path: String) -> some View {
-        let fileName = (path as NSString).lastPathComponent
-
-        return HStack(spacing: 8) {
-            Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.purple)
-                .frame(width: 16, alignment: .center)
-
-            Text(path)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(tint.body)
-                .lineLimit(1)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Raw Result Section (fallback for unrecognized formats)
@@ -373,64 +187,13 @@ struct SearchToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             let streaming = SearchResultParser.parse(output)
             if !streaming.isEmpty {
-                streamingMatchesSection(streaming)
+                SearchStreamingMatchesSection(groups: streaming, tint: tint)
             } else {
                 ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
             }
         } else {
             ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
         }
-    }
-
-    private func streamingMatchesSection(_ groups: [SearchFileGroup]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.purple)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(groups.enumerated()), id: \.offset) { groupIdx, group in
-                    if groupIdx > 0 {
-                        Divider()
-                            .background(Color.purple.opacity(0.1))
-                    }
-                    fileGroupView(group)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
-            .sectionFill(.purple)
-        }
-    }
-}
-
-// MARK: - Search Error Classifier
-
-enum SearchErrorClassifier: ErrorClassifying {
-    static func classify(_ message: String) -> ErrorClassification {
-        if message.contains("Invalid regex") || message.contains("invalid pattern") || message.contains("unterminated") {
-            return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Invalid Pattern", code: nil, suggestion: "Check the regex pattern syntax.")
-        }
-        if message.contains("Permission denied") || message.contains("EACCES") {
-            return ErrorClassification(icon: "lock.fill", title: "Permission Denied", code: "EACCES", suggestion: "The process does not have permission to search this location.")
-        }
-        if message.contains("No such file") || message.contains("ENOENT") || message.contains("not found") {
-            return ErrorClassification(icon: "questionmark.folder", title: "Path Not Found", code: "ENOENT", suggestion: "Check that the search path exists.")
-        }
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil, suggestion: "An unexpected error occurred during search.")
     }
 }
 
@@ -458,26 +221,6 @@ enum SearchErrorClassifier: ErrorClassifying {
 }
 
 @available(iOS 26.0, *)
-#Preview("Search - Single File") {
-    SearchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_s2",
-            toolName: "Search",
-            normalizedName: "search",
-            icon: "magnifyingglass",
-            iconColor: .purple,
-            displayName: "File Search",
-            summary: "\"import\"",
-            status: .success,
-            durationMs: 45,
-            arguments: "{\"pattern\": \"import.*SwiftUI\"}",
-            result: "Sources/App.swift:1: import SwiftUI\nSources/ContentView.swift:1: import SwiftUI\nSources/SettingsView.swift:1: import SwiftUI",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
 #Preview("Search - No Results") {
     SearchToolDetailSheet(
         data: CommandToolChipData(
@@ -492,46 +235,6 @@ enum SearchErrorClassifier: ErrorClassifying {
             durationMs: 30,
             arguments: "{\"pattern\": \"nonexistent_function\"}",
             result: "No matches found for pattern: nonexistent_function",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Search - With File Filter") {
-    SearchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_s4",
-            toolName: "Search",
-            normalizedName: "search",
-            icon: "magnifyingglass",
-            iconColor: .purple,
-            displayName: "File Search",
-            summary: "\"class\" in src",
-            status: .success,
-            durationMs: 85,
-            arguments: "{\"pattern\": \"class\", \"path\": \"src\", \"glob\": \"*.swift\"}",
-            result: "src/Models/User.swift:5: class User {\nsrc/Models/Post.swift:3: class Post {\nsrc/ViewModels/LoginVM.swift:8: class LoginViewModel: ObservableObject {",
-            isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Search - Files Only Mode") {
-    SearchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_s5",
-            toolName: "Search",
-            normalizedName: "search",
-            icon: "magnifyingglass",
-            iconColor: .purple,
-            displayName: "File Search",
-            summary: "\"TODO\"",
-            status: .success,
-            durationMs: 60,
-            arguments: "{\"pattern\": \"TODO\", \"output_mode\": \"files_with_matches\"}",
-            result: "src/api/routes.ts\nsrc/auth/login.ts\nsrc/utils/helpers.ts\nsrc/config/settings.ts",
             isResultTruncated: false
         )
     )
@@ -573,26 +276,6 @@ enum SearchErrorClassifier: ErrorClassifying {
             arguments: "{\"pattern\": \"[invalid\"}",
             result: "Invalid regex pattern: [invalid - unterminated character class",
             isResultTruncated: false
-        )
-    )
-}
-
-@available(iOS 26.0, *)
-#Preview("Search - Truncated") {
-    SearchToolDetailSheet(
-        data: CommandToolChipData(
-            id: "call_s8",
-            toolName: "Search",
-            normalizedName: "search",
-            icon: "magnifyingglass",
-            iconColor: .purple,
-            displayName: "File Search",
-            summary: "\"const\"",
-            status: .success,
-            durationMs: 200,
-            arguments: "{\"pattern\": \"const\"}",
-            result: "src/index.ts:1: const app = express()\nsrc/index.ts:5: const port = 3000\nsrc/config.ts:1: const config = {\n\n[Showing 3 results (limit reached)]",
-            isResultTruncated: true
         )
     )
 }

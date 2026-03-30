@@ -94,22 +94,7 @@ final class ConnectionCoordinator {
             context.logInfo("Session resumed successfully")
         } catch {
             context.logError("Failed to resume session: \(error.localizedDescription)")
-
-            // Check if session doesn't exist on server - signal to dismiss
-            let isNotFound: Bool
-            if let rpcError = error as? RPCError {
-                isNotFound = rpcError.errorCode == .sessionNotFound
-            } else {
-                // Fallback: string matching for non-RPC errors
-                let errorString = error.localizedDescription.lowercased()
-                isNotFound = errorString.contains("not found") || errorString.contains("does not exist")
-            }
-            if isNotFound {
-                context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
-                context.shouldDismiss = true
-                context.showError("Session not found on server")
-            }
-            // Don't show error alert for connection failures - the reconnection UI handles that
+            handleSessionResumeFailure(error, context: context)
             return
         }
 
@@ -153,19 +138,7 @@ final class ConnectionCoordinator {
             context.logInfo("Session re-resumed on new connection")
         } catch {
             context.logError("Failed to re-resume session: \(error)")
-
-            let isNotFound: Bool
-            if let rpcError = error as? RPCError {
-                isNotFound = rpcError.errorCode == .sessionNotFound
-            } else {
-                let errorString = error.localizedDescription.lowercased()
-                isNotFound = errorString.contains("not found") || errorString.contains("does not exist")
-            }
-            if isNotFound {
-                context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
-                context.shouldDismiss = true
-                context.showError("Session not found on server")
-            }
+            handleSessionResumeFailure(error, context: context)
             return
         }
 
@@ -228,6 +201,25 @@ final class ConnectionCoordinator {
         } catch {
             context.isCatchingUp = false
             context.logWarning("Failed to check agent state: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Session Resume Error Handling
+
+    /// Shared error handler for session resume failures in both connect and reconnect paths.
+    /// Detects session-not-found errors and sets shouldDismiss to navigate away.
+    private func handleSessionResumeFailure(_ error: Error, context: ConnectionContext) {
+        let isNotFound: Bool
+        if let rpcError = error as? RPCError {
+            isNotFound = rpcError.errorCode == .sessionNotFound
+        } else {
+            let errorString = error.localizedDescription.lowercased()
+            isNotFound = errorString.contains("not found") || errorString.contains("does not exist")
+        }
+        if isNotFound {
+            context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
+            context.shouldDismiss = true
+            context.showError("Session not found on server")
         }
     }
 
