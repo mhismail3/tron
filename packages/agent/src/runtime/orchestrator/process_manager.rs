@@ -26,6 +26,11 @@ use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use tracing::debug;
+
+use crate::core::events::{BaseEvent, TronEvent};
+use crate::events::{EventStore, EventType};
+use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
     ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult, ProcessInfo,
@@ -58,17 +63,41 @@ struct TrackedProcess {
 /// Centralized manager for deterministic tool processes.
 pub struct ProcessManager {
     processes: DashMap<String, Arc<TrackedProcess>>,
+    /// Event emitter for broadcasting process lifecycle events.
+    broadcast: Option<Arc<EventEmitter>>,
+    /// Event store for persisting process result notifications.
+    event_store: Option<Arc<EventStore>>,
 }
 
 impl ProcessManager {
+    /// Create a bare ProcessManager (for tests).
     pub fn new() -> Self {
         Self {
             processes: DashMap::new(),
+            broadcast: None,
+            event_store: None,
+        }
+    }
+
+    /// Create a fully-wired ProcessManager with event emission and persistence.
+    pub fn with_deps(broadcast: Arc<EventEmitter>, event_store: Arc<EventStore>) -> Self {
+        Self {
+            processes: DashMap::new(),
+            broadcast: Some(broadcast),
+            event_store: Some(event_store),
         }
     }
 
     fn generate_id() -> String {
         format!("proc-{}", Uuid::now_v7())
+    }
+
+    fn kind_string(kind: &crate::tools::traits::ProcessKind) -> String {
+        match kind {
+            crate::tools::traits::ProcessKind::Shell => "shell".into(),
+            crate::tools::traits::ProcessKind::DisplayStream => "display_stream".into(),
+            crate::tools::traits::ProcessKind::ToolOperation => "tool_operation".into(),
+        }
     }
 
     fn state_string(state: &ProcessState) -> String {
@@ -115,9 +144,23 @@ impl ProcessManagerOps for ProcessManager {
 
         let _ = self.processes.insert(process_id.clone(), tracker.clone());
 
+        // Emit ProcessSpawned event.
+        if let Some(ref broadcast) = self.broadcast {
+            let _ = broadcast.emit(TronEvent::ProcessSpawned {
+                base: BaseEvent::now(session_id),
+                process_id: process_id.clone(),
+                label: tracker.config.label.clone(),
+                kind: Self::kind_string(&tracker.config.kind),
+                background,
+                tool_call_id: tool_call_id.to_owned(),
+            });
+        }
+
         // Spawn the actual work as a tokio task.
         let task_tracker = tracker.clone();
         let task_cancel = cancel.clone();
+        let broadcast_for_completion = self.broadcast.clone();
+        let event_store_for_completion = self.event_store.clone();
         let _handle = tokio::spawn(async move {
             // Run the future, but also listen for cancellation.
             let result = tokio::select! {
@@ -146,8 +189,70 @@ impl ProcessManagerOps for ProcessManager {
                 ProcessState::Completed
             };
 
+            let success = matches!(new_state, ProcessState::Completed);
             *task_tracker.state.lock() = new_state;
-            *task_tracker.result.lock() = Some(result);
+            *task_tracker.result.lock() = Some(result.clone());
+
+            // Emit ProcessCompleted event.
+            let completed_at = chrono::Utc::now().to_rfc3339();
+            if let Some(ref broadcast) = broadcast_for_completion {
+                let _ = broadcast.emit(TronEvent::ProcessCompleted {
+                    base: BaseEvent::now(&task_tracker.session_id),
+                    parent_session_id: task_tracker.session_id.clone(),
+                    process_id: task_tracker.process_id.clone(),
+                    label: task_tracker.config.label.clone(),
+                    success,
+                    exit_code: result.exit_code,
+                    duration: result.duration_ms,
+                    result_summary: if result.output.len() > 200 {
+                        format!("{}...", &result.output[..200])
+                    } else {
+                        result.output.clone()
+                    },
+                    blob_id: result.blob_id.clone(),
+                    completed_at: completed_at.clone(),
+                });
+            }
+
+            // Persist notification.process_result for RunContext injection.
+            if let Some(ref store) = event_store_for_completion {
+                let output_for_context = if result.output.len() > 4000 {
+                    Some(format!("{}...", &result.output[..4000]))
+                } else if result.output.is_empty() {
+                    None
+                } else {
+                    Some(result.output.clone())
+                };
+
+                let _ = store.append(&crate::events::AppendOptions {
+                    session_id: &task_tracker.session_id,
+                    event_type: EventType::NotificationProcessResult,
+                    payload: serde_json::json!({
+                        "parentSessionId": task_tracker.session_id,
+                        "processId": task_tracker.process_id,
+                        "label": task_tracker.config.label,
+                        "resultSummary": if result.output.len() > 200 {
+                            format!("{}...", &result.output[..200])
+                        } else {
+                            result.output.clone()
+                        },
+                        "success": success,
+                        "exitCode": result.exit_code,
+                        "duration": result.duration_ms as i64,
+                        "completedAt": completed_at,
+                        "blobId": result.blob_id,
+                        "output": output_for_context,
+                    }),
+                    parent_id: None,
+                });
+                debug!(
+                    process_id = %task_tracker.process_id,
+                    label = %task_tracker.config.label,
+                    success,
+                    "persisted process result notification"
+                );
+            }
+
             task_tracker.done.notify_waiters();
         });
 

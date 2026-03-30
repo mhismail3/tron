@@ -133,6 +133,8 @@ struct ToolRegistryConfig {
     computer_use_settings: tron::settings::ComputerUseSettings,
     /// Broadcast sender for Display tool streaming (DisplayFrame events).
     display_event_tx: Option<tokio::sync::broadcast::Sender<tron::core::events::TronEvent>>,
+    /// Process manager for ManageProcess tool.
+    process_manager: Option<Arc<dyn tron::tools::traits::ProcessManagerOps>>,
     /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
     mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
     /// `McpCall` meta-tool (calls a tool on an MCP server).
@@ -244,6 +246,13 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     ));
 
     // Subagent tools: registered separately via SubagentManager (see main)
+
+    // 13: ManageProcess (list, check, cancel background processes)
+    if let Some(ref pm) = config.process_manager {
+        registry.register(Arc::new(
+            tron::tools::system::manage_process::ManageProcessTool::new(pm.clone()),
+        ));
+    }
 
     // MCP meta-tools (McpSearch + McpCall replace individual tool registration)
     if let Some(ref tool) = config.mcp_search {
@@ -485,6 +494,14 @@ async fn main() -> Result<()> {
     };
 
     // Tool registry config (shared resources for per-session tool factories)
+    // Centralized process manager for background tool execution.
+    let process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps> = Arc::new(
+        tron::runtime::orchestrator::process_manager::ProcessManager::with_deps(
+            orchestrator.broadcast().clone(),
+            event_store.clone(),
+        ),
+    );
+
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         brave_api_key,
@@ -495,6 +512,7 @@ async fn main() -> Result<()> {
         // Use the orchestrator's broadcast sender so DisplayFrame events
         // flow through the same channel the EventBridge listens to.
         display_event_tx: Some(orchestrator.broadcast().sender()),
+        process_manager: Some(process_manager.clone()),
         mcp_search,
         mcp_call,
     });
@@ -696,7 +714,7 @@ async fn main() -> Result<()> {
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router,
         display_stream_registry: None,
-        process_manager: None,
+        process_manager: Some(process_manager.clone()),
     };
 
     // Method registry
@@ -979,6 +997,9 @@ async fn main() -> Result<()> {
         cron_sched_handle,
         cron_watcher_handle,
     ];
+
+    // Cancel all managed background processes before shutdown.
+    process_manager.cancel_all();
 
     // Graceful shutdown with 30s timeout
     server
@@ -1419,6 +1440,7 @@ mod tests {
             sandbox_settings: tron::settings::BashSandboxSettings::default(),
             computer_use_settings: tron::settings::ComputerUseSettings::default(),
             display_event_tx: None,
+            process_manager: None,
             mcp_search: None,
             mcp_call: None,
         }

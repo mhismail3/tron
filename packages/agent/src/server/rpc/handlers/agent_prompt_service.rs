@@ -46,6 +46,7 @@ struct PromptRunPlan {
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -141,6 +142,7 @@ pub fn spawn_prompt_run(
         subagent_manager: ctx.subagent_manager.clone(),
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
+        process_manager: ctx.process_manager.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -174,6 +176,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         subagent_manager,
         shutdown_token,
         worktree_coordinator,
+        process_manager,
         server_origin,
         run_id,
         model,
@@ -414,7 +417,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             pre_activated_rules,
             subagent_manager: subagent_manager.clone(),
             compaction_trigger_config: compactor_settings.into(),
-            process_manager: None, // TODO: wire from RpcContext when ProcessManager is on Orchestrator
+            process_manager: process_manager.clone(),
         },
     );
 

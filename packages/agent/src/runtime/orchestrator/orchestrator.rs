@@ -264,6 +264,7 @@ impl Orchestrator {
         // Cancel all pending tool calls
         self.tool_tracker.lock().cancel_all();
 
+
         // List all active sessions and end them
         let sessions = self
             .session_manager
