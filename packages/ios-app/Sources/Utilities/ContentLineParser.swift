@@ -12,17 +12,23 @@ struct ContentLineParser {
     /// Parse content, stripping server-side line number prefixes
     /// Handles patterns: "123→content", "  123\tcontent", "123:content"
     static func parse(_ content: String) -> [ParsedLine] {
-        content.components(separatedBy: "\n").enumerated().map { index, line in
+        let rawLines = content.components(separatedBy: "\n")
+        var result: [ParsedLine] = []
+        var lastLineNum = 0
+
+        for (index, line) in rawLines.enumerated() {
             // Match server-side line number prefixes (from Read tool output)
             if let match = line.firstMatch(of: /^\s*(\d+)[→\t:](.*)/) {
-                return ParsedLine(
-                    id: index,
-                    lineNum: Int(match.1) ?? (index + 1),
-                    content: String(match.2)
-                )
+                let num = Int(match.1) ?? (lastLineNum + 1)
+                lastLineNum = num
+                result.append(ParsedLine(id: index, lineNum: num, content: String(match.2)))
+            } else {
+                // No server-side prefix — continue from previous line number
+                lastLineNum += 1
+                result.append(ParsedLine(id: index, lineNum: lastLineNum, content: line))
             }
-            // No server-side prefix - use sequential numbering
-            return ParsedLine(id: index, lineNum: index + 1, content: line)
         }
+
+        return result
     }
 }
