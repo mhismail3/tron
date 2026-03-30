@@ -50,8 +50,6 @@ pub struct DisplayTool {
     blob_store: Option<Arc<dyn crate::tools::traits::BlobStore>>,
     /// Broadcast sender for emitting DisplayFrame events during streaming.
     event_tx: Option<tokio::sync::broadcast::Sender<crate::core::events::TronEvent>>,
-    /// Registry of active streams (shared with RPC handler for on-demand cancellation).
-    stream_registry: crate::tools::ui::display_stream::ActiveStreamRegistry,
 }
 
 impl DisplayTool {
@@ -60,7 +58,6 @@ impl DisplayTool {
         Self {
             blob_store,
             event_tx: None,
-            stream_registry: crate::tools::ui::display_stream::ActiveStreamRegistry::new(),
         }
     }
 
@@ -71,16 +68,6 @@ impl DisplayTool {
         tx: tokio::sync::broadcast::Sender<crate::core::events::TronEvent>,
     ) -> Self {
         self.event_tx = Some(tx);
-        self
-    }
-
-    /// Set the active stream registry (shared with the RPC layer).
-    #[must_use]
-    pub fn with_stream_registry(
-        mut self,
-        registry: crate::tools::ui::display_stream::ActiveStreamRegistry,
-    ) -> Self {
-        self.stream_registry = registry;
         self
     }
 }
@@ -174,7 +161,7 @@ impl TronTool for DisplayTool {
         let result = match content_type.as_str() {
             "image" => self.handle_image(&params).await,
             "images" => self.handle_images(&params).await,
-            "stream" if action == "stop" => self.handle_stop_stream(&params).await,
+            "stream" if action == "stop" => self.handle_stop_stream(&params, _ctx).await,
             "stream" => self.handle_stream(&params, _ctx).await,
             other => Ok(error_result(format!(
                 "Unsupported content type: '{other}'. Supported: image, images, stream."
@@ -297,6 +284,22 @@ impl DisplayTool {
             }
         };
 
+        let pm = match ctx.process_manager.as_ref() {
+            Some(pm) => pm.clone(),
+            None => {
+                return Ok(error_result(
+                    "Streaming not available (process manager not configured).",
+                ))
+            }
+        };
+
+        // Check for duplicate streams.
+        if pm.find_by_label(&ctx.session_id, "display_stream:").is_some() {
+            return Ok(error_result(
+                "A display stream is already active. Stop it first with Display(type=\"stream\", action=\"stop\", streamId=\"...\").",
+            ));
+        }
+
         let config = crate::tools::ui::display_stream::StreamConfig {
             interval: std::time::Duration::from_millis(
                 crate::tools::ui::display_stream::DEFAULT_INTERVAL_MS,
@@ -306,15 +309,11 @@ impl DisplayTool {
             tool_call_id: ctx.tool_call_id.clone(),
         };
 
-        // Per-stream cancellation token: cancelled by stop calls or session abort.
-        let stream_cancel = ctx.cancellation.child_token();
-        self.stream_registry.insert(&stream_id, stream_cancel.clone());
-        let registry = self.stream_registry.clone();
-        let sid = stream_id.clone();
-
-        // Spawn the frame producer as a detached background task.
         let blob_store = self.blob_store.clone();
-        tokio::spawn(async move {
+        let stream_cancel = ctx.cancellation.child_token();
+
+        let task: std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> = Box::pin(async move {
+            let start = std::time::Instant::now();
             let last_frame_data =
                 crate::tools::ui::display_stream::screen_capture_loop(
                     event_tx, config, stream_cancel,
@@ -322,17 +321,45 @@ impl DisplayTool {
                 .await;
 
             // Save last frame to blob storage for the static fallback.
+            let mut blob_id = None;
             if let (Some(data), Some(store)) = (last_frame_data, blob_store) {
                 match store.store(&data, "image/jpeg").await {
-                    Ok(id) => tracing::debug!(blob_id = %id, "Saved last stream frame to blob"),
+                    Ok(id) => {
+                        tracing::debug!(blob_id = %id, "Saved last stream frame to blob");
+                        blob_id = Some(id);
+                    }
                     Err(e) => tracing::warn!(error = %e, "Failed to save last stream frame"),
                 }
             }
 
-            registry.remove(&sid);
+            crate::tools::traits::ManagedProcessResult {
+                process_id: String::new(),
+                output: "Stream ended".into(),
+                exit_code: None,
+                duration_ms: start.elapsed().as_millis() as u64,
+                timed_out: false,
+                cancelled: false,
+                blob_id,
+            }
         });
 
-        // Return immediately — the agent can continue with its next tool call.
+        let pm_config = crate::tools::traits::ManagedProcessConfig {
+            label: format!("display_stream:{stream_id}"),
+            kind: crate::tools::traits::ProcessKind::DisplayStream,
+            timeout_ms: None,
+            sandbox: false,
+        };
+
+        let handle = pm
+            .spawn_managed(
+                &ctx.session_id,
+                &ctx.tool_call_id,
+                pm_config,
+                task,
+                true, // always background
+            )
+            .await?;
+
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
                 crate::core::content::ToolResultContent::text(format!(
@@ -343,6 +370,7 @@ impl DisplayTool {
             ]),
             details: Some(json!({
                 "streamId": stream_id,
+                "processId": handle.process_id,
                 "streaming": true,
             })),
             is_error: None,
@@ -350,17 +378,25 @@ impl DisplayTool {
         })
     }
 
-    /// Handle `stream` + `action: "stop"` — cancel an active stream.
+    /// Handle `stream` + `action: "stop"` — cancel an active stream via ProcessManager.
     async fn handle_stop_stream(
         &self,
         params: &Value,
+        ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         let stream_id = match get_optional_string(params, "streamId") {
             Some(s) => s,
             None => return Ok(error_result("Missing 'streamId' parameter for stream stop.")),
         };
 
-        if self.stream_registry.cancel(&stream_id) {
+        let pm = match ctx.process_manager.as_ref() {
+            Some(pm) => pm,
+            None => return Ok(error_result("Process manager not available.")),
+        };
+
+        let label = format!("display_stream:{stream_id}");
+        if let Some(process_id) = pm.find_by_label(&ctx.session_id, &label) {
+            pm.cancel_process(&process_id)?;
             Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
@@ -369,6 +405,7 @@ impl DisplayTool {
                 ]),
                 details: Some(json!({
                     "streamId": stream_id,
+                    "processId": process_id,
                     "streaming": false,
                 })),
                 is_error: None,
@@ -697,24 +734,31 @@ mod tests {
         assert_eq!(r.is_error, Some(true));
     }
 
+    fn make_stream_ctx() -> ToolContext {
+        let mut ctx = make_ctx();
+        let pm = std::sync::Arc::new(
+            crate::runtime::orchestrator::process_manager::ProcessManager::new(),
+        );
+        ctx.process_manager = Some(pm);
+        ctx
+    }
+
     #[tokio::test]
     async fn stream_stop_cancels_active_stream() {
         let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
-        let registry = crate::tools::ui::display_stream::ActiveStreamRegistry::new();
-        let tool = DisplayTool::new(None)
-            .with_event_tx(tx)
-            .with_stream_registry(registry.clone());
+        let tool = DisplayTool::new(None).with_event_tx(tx);
+        let ctx = make_stream_ctx();
 
         // Start a stream
         let r = tool
-            .execute(json!({"type": "stream", "streamId": "stop-test"}), &make_ctx())
+            .execute(json!({"type": "stream", "streamId": "stop-test"}), &ctx)
             .await
             .unwrap();
         assert!(r.is_error.is_none());
 
         // Stop it
         let r = tool
-            .execute(json!({"type": "stream", "action": "stop", "streamId": "stop-test"}), &make_ctx())
+            .execute(json!({"type": "stream", "action": "stop", "streamId": "stop-test"}), &ctx)
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -726,8 +770,9 @@ mod tests {
     #[tokio::test]
     async fn stream_stop_nonexistent_returns_error() {
         let tool = DisplayTool::new(None);
+        let ctx = make_stream_ctx();
         let r = tool
-            .execute(json!({"type": "stream", "action": "stop", "streamId": "nope"}), &make_ctx())
+            .execute(json!({"type": "stream", "action": "stop", "streamId": "nope"}), &ctx)
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -736,8 +781,20 @@ mod tests {
     #[tokio::test]
     async fn stream_stop_missing_id() {
         let tool = DisplayTool::new(None);
+        let ctx = make_stream_ctx();
         let r = tool
-            .execute(json!({"type": "stream", "action": "stop"}), &make_ctx())
+            .execute(json!({"type": "stream", "action": "stop"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn stream_no_process_manager_returns_error() {
+        let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
+        let tool = DisplayTool::new(None).with_event_tx(tx);
+        let r = tool
+            .execute(json!({"type": "stream", "streamId": "s1"}), &make_ctx())
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -747,9 +804,10 @@ mod tests {
     async fn stream_returns_immediately() {
         let (tx, _rx) = tokio::sync::broadcast::channel::<crate::core::events::TronEvent>(64);
         let tool = DisplayTool::new(None).with_event_tx(tx);
+        let ctx = make_stream_ctx();
 
         let r = tool
-            .execute(json!({"type": "stream", "streamId": "test-stream"}), &make_ctx())
+            .execute(json!({"type": "stream", "streamId": "test-stream"}), &ctx)
             .await
             .unwrap();
 
