@@ -51,6 +51,8 @@ final class ChatViewModel {
     var showStreamSheet = false
     /// Whether the stream sheet has been auto-opened (prevents re-opening on dismiss).
     var hasAutoOpenedStream = false
+    /// Stream ID that was explicitly stopped (frames ignored until cleared).
+    var stoppedStreamId: String?
     /// Whether a display stream is currently active (frames arriving).
     var isStreamActive: Bool { activeStreamId != nil }
 

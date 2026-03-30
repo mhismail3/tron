@@ -8,6 +8,11 @@ extension ChatViewModel: DisplayStreamEventHandler {
     // MARK: - Handler
 
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {
+        // Ignore frames for a stream we've stopped.
+        if let stopped = stoppedStreamId, stopped == result.streamId {
+            return
+        }
+
         let isNewStream = (activeStreamId == nil)
         activeStreamId = result.streamId
         streamFrameImage = result.image
@@ -27,15 +32,17 @@ extension ChatViewModel: DisplayStreamEventHandler {
     /// can still show the last frame after the stream is over.
     func endDisplayStream() {
         activeStreamId = nil
-        // Keep streamFrameImage as the last frame for post-stream viewing.
-        // Keep streamToolCallId so tool chip taps can still open the sheet.
-        // Don't dismiss the sheet — let the user see the final frame.
     }
 
     /// Stop the active display stream via RPC and clean up active state.
     /// Keeps the last frame for post-stream viewing.
     func stopDisplayStream() {
         guard let streamId = activeStreamId else { return }
+
+        // Mark this stream as stopped so incoming frames are ignored
+        // even if the server takes a moment to actually stop the producer.
+        stoppedStreamId = streamId
+        activeStreamId = nil
 
         launchBackground { [weak self] in
             guard let self else { return }
@@ -46,13 +53,12 @@ extension ChatViewModel: DisplayStreamEventHandler {
                 self.logWarning("Failed to stop display stream: \(error)")
             }
         }
-
-        activeStreamId = nil
     }
 
     /// Clear all stream state (e.g., on session change or disconnect).
     func clearDisplayStreamState() {
         activeStreamId = nil
+        stoppedStreamId = nil
         streamFrameImage = nil
         streamToolCallId = nil
         showStreamSheet = false
