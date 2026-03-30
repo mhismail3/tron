@@ -83,6 +83,11 @@ extension ChatView {
                             .renderingMode(.template)
                     }
                 }
+                if viewModel.processState.hasActiveProcesses {
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.processes.rawValue) } label: {
+                        Label("Processes (\(viewModel.processState.activeCount))", systemImage: "gearshape.arrow.triangle.2.circlepath")
+                    }
+                }
                 Divider()
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue) } label: {
                     Label("Settings", systemImage: "gearshape")

@@ -280,6 +280,9 @@ struct BashToolDetailSheet: View {
 
     private var statusRow: some View {
         ToolStatusRow(status: data.status, durationMs: nil) {
+            if BashDetailsHelper.isBackground(from: data.arguments) {
+                ToolInfoPill(icon: "arrow.trianglehead.clockwise", label: "Background", color: .tronAmber)
+            }
             if let code = exitCode, code != 0 {
                 ToolInfoPill(icon: "xmark.circle", label: "Exit \(code)", color: .tronError)
             }

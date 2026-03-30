@@ -82,6 +82,15 @@ struct ChatView: View {
                 onStop: { viewModel.stopDisplayStream() }
             )
         }
+        .sheet(isPresented: $viewModel.showProcessSheet) {
+            ProcessListSheet(
+                processState: viewModel.processState,
+                onCancel: { processId in viewModel.cancelProcess(processId) },
+                onClose: { viewModel.showProcessSheet = false }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -112,6 +121,7 @@ struct ChatView: View {
             case .context: sheetCoordinator.showContextAudit()
             case .settings: sheetCoordinator.showSettings()
             case .changes: sheetCoordinator.showSourceChanges()
+            case .processes: viewModel.showProcessSheet = true
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
@@ -700,7 +710,7 @@ struct ChatView: View {
 // Workaround: Post notification, handle via onReceive
 
 enum ChatMenuAction: String, CaseIterable {
-    case history, context, settings, changes
+    case history, context, settings, changes, processes
 }
 
 extension Notification.Name {

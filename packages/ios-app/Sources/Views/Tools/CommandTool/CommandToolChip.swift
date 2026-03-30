@@ -18,6 +18,18 @@ struct CommandToolChip: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(statusColor)
 
+                if isBackground {
+                    Text("BG")
+                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .bold))
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(statusColor.opacity(0.2))
+                        )
+                }
+
                 if !data.summary.isEmpty {
                     Text(data.summary)
                         .font(TronTypography.codeCaption)
@@ -67,6 +79,10 @@ struct CommandToolChip: View {
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
         }
+    }
+
+    private var isBackground: Bool {
+        BashDetailsHelper.isBackground(from: data.arguments)
     }
 
     private var statusColor: Color {

@@ -86,6 +86,10 @@ final class ChatViewModel {
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)
     let subagentState = SubagentState()
+    /// Process state (tracking background processes for process list UI)
+    let processState = ProcessState()
+    /// Whether the process list sheet is presented
+    var showProcessSheet = false
     /// Thinking state (for extended thinking display)
     let thinkingState = ThinkingState()
     /// Input bar state (text, attachments, skills, reasoning level)
@@ -288,6 +292,7 @@ final class ChatViewModel {
                 self.memoryRetainInProgressMessageId = nil
                 self.runningToolCount = 0
                 self.clearDisplayStreamState()
+                self.clearProcessState()
             }
         })
 

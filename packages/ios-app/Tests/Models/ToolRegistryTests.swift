@@ -71,6 +71,21 @@ struct ToolRegistryTests {
         #expect(d.displayName == "Web Search")
     }
 
+    @Test("ManageProcess tool has correct icon and display name")
+    func testManageProcessDescriptor() {
+        let d = ToolRegistry.descriptor(for: "manageprocess")
+        #expect(d.icon == "gearshape.2")
+        #expect(d.displayName == "Process")
+        #expect(d.completedDisplayName == "Managed")
+    }
+
+    @Test("ManageProcess summary extracts action")
+    func testManageProcessSummary() {
+        let d = ToolRegistry.descriptor(for: "manageprocess")
+        let summary = d.summaryExtractor("{\"action\": \"list\"}")
+        #expect(summary == "list")
+    }
+
     @Test("Unknown tool gets default descriptor")
     func testUnknownDescriptor() {
         let d = ToolRegistry.descriptor(for: "unknowntool")
@@ -188,7 +203,7 @@ struct ToolRegistryTests {
 
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch", "computeruse", "display", "mcpsearch", "mcpcall"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch", "computeruse", "display", "manageprocess", "mcpsearch", "mcpcall"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 
@@ -210,7 +225,7 @@ struct ToolRegistryTests {
 
     @Test("Command tools have viewer factories")
     func testViewerFactories() {
-        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch", "computeruse"] {
+        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch", "computeruse", "manageprocess"] {
             let d = ToolRegistry.descriptor(for: name)
             #expect(d.viewerFactory != nil, "Expected viewer factory for \(name)")
         }

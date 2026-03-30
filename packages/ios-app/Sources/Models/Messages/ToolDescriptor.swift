@@ -310,7 +310,13 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 ToolArgumentParser.string("action", from: args) ?? ""
             },
-            viewerFactory: nil
+            viewerFactory: { tool, isExpanded in
+                AnyView(ManageProcessResultViewer(
+                    action: ToolArgumentParser.string("action", from: tool.arguments) ?? "",
+                    result: tool.result ?? "",
+                    isExpanded: isExpanded
+                ))
+            }
         ),
     ]
 
