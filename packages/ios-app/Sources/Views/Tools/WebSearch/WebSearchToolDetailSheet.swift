@@ -167,24 +167,23 @@ struct WebSearchToolDetailSheet: View {
                 ToolCopyButton(content: data.result ?? "", accent: .tronInfo)
             }
 
-            HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
+                    if index > 0 {
+                        Divider()
+                            .background(Color.tronInfo.opacity(0.08))
+                            .padding(.horizontal, 8)
+                    }
+                    searchResultRow(result, index: index + 1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(Color.tronInfo)
                     .frame(width: 3)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
-                        if index > 0 {
-                            Divider()
-                                .background(Color.tronInfo.opacity(0.08))
-                                .padding(.horizontal, 8)
-                        }
-                        searchResultRow(result, index: index + 1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
             }
+            .padding(14)
             .sectionFill(.tronInfo)
         }
     }
@@ -285,24 +284,23 @@ struct WebSearchToolDetailSheet: View {
                     .tint(.tronInfo)
             }
 
-            HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
+                    if index > 0 {
+                        Divider()
+                            .background(Color.tronInfo.opacity(0.08))
+                            .padding(.horizontal, 8)
+                    }
+                    searchResultRow(result, index: index + 1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(Color.tronInfo)
                     .frame(width: 3)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
-                        if index > 0 {
-                            Divider()
-                                .background(Color.tronInfo.opacity(0.08))
-                                .padding(.horizontal, 8)
-                        }
-                        searchResultRow(result, index: index + 1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
             }
+            .padding(14)
             .sectionFill(.tronInfo)
         }
     }

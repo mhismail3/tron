@@ -81,6 +81,9 @@ struct ChatSheetContent: View {
         case .thinkingDetail(let content):
             ThinkingDetailSheet(content: content)
 
+        case .waitForAgentsDetail(let data):
+            WaitForAgentsDetailSheet(data: data)
+
         case .commandToolDetail(let data):
             commandToolDetailSheet(fallback: data)
 

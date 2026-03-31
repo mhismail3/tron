@@ -288,6 +288,7 @@
 		7127CD7F5CB602A8E4D1E18D /* ActionButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB574CA5B16F48033D035C7 /* ActionButtons.swift */; };
 		71E144A3E1DE3DD31DB0D823 /* ProcessListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECCB5B117F7362AA7E635BD6 /* ProcessListSheet.swift */; };
 		727CC604729DB3BDE50FF947 /* ComputerUseResultViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F4A52977CF8BB43D3877A1 /* ComputerUseResultViewer.swift */; };
+		72BDBDF15BF43C0182F138C5 /* WaitForAgentsDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DE45DF2051B02A48966772D /* WaitForAgentsDetailSheet.swift */; };
 		7330CAC5FFCFC7BE68398C54 /* ModelNameFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 431C5DB5DD75AB68A2AAD821 /* ModelNameFormatterTests.swift */; };
 		744A044BE10A98AA47B75DFA /* SubagentStatusPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA41CF3D8205850F82C6EFA6 /* SubagentStatusPlugin.swift */; };
 		7468D763F93087DFAE9DB984 /* ThinkingContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D4057C20D31DB761BB86A2 /* ThinkingContentView.swift */; };
@@ -967,6 +968,7 @@
 		7D2D2FAA96E6A3AB87B00C27 /* EventStoreManager+Operations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Operations.swift"; sourceTree = "<group>"; };
 		7DD7ABC63EF493ECE449BDA1 /* SessionHistoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistoryViewModel.swift; sourceTree = "<group>"; };
 		7DE22EED97900699A9FF75DF /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		7DE45DF2051B02A48966772D /* WaitForAgentsDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitForAgentsDetailSheet.swift; sourceTree = "<group>"; };
 		7E1F25607746D9A795896094 /* DisplayToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayToolDetailSheet.swift; sourceTree = "<group>"; };
 		7F3184BA596501A715C760BC /* ChatViewModel+EventDispatchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+EventDispatchContext.swift"; sourceTree = "<group>"; };
 		807975221F0E551E74F21B8D /* DecodedImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodedImageView.swift; sourceTree = "<group>"; };
@@ -1611,6 +1613,7 @@
 				CB98000DFDD7BD8FA48B164A /* SubagentResultNotificationView.swift */,
 				95A57FFB0CA4967AA9029825 /* SubagentStatBadge.swift */,
 				FD1BE5A5CFA90E4C1B372A48 /* WaitForAgentsChip.swift */,
+				7DE45DF2051B02A48966772D /* WaitForAgentsDetailSheet.swift */,
 			);
 			path = Subagents;
 			sourceTree = "<group>";
@@ -3573,6 +3576,7 @@
 				2D878817DEB65DEC1D074D04 /* VoiceNotesRecorder.swift in Sources */,
 				C50CDAA5F61602584826F54D /* VoiceNotesRecordingSheet.swift in Sources */,
 				61BECA4968C647E450F3CAAF /* WaitForAgentsChip.swift in Sources */,
+				72BDBDF15BF43C0182F138C5 /* WaitForAgentsDetailSheet.swift in Sources */,
 				D1209116CCAE12E56D2D726F /* WaitForAgentsTypes.swift in Sources */,
 				111E2ECFD315D692BEA93CFD /* WebFetchErrorClassifier.swift in Sources */,
 				2B7016E6FA9BF50D4E4AF898 /* WebFetchResultViewer.swift in Sources */,
