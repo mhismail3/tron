@@ -149,8 +149,8 @@ extension ChatViewModel {
             // Populate SubagentState from reconstructed subagent results
             // This enables tap handlers on reconstructed subagent result chips to work
             for result in state.subagentResults {
-                let data = SubagentToolData(
-                    toolCallId: result.subagentSessionId, // Use sessionId as fallback
+                var data = SubagentToolData(
+                    toolCallId: result.subagentSessionId,
                     subagentSessionId: result.subagentSessionId,
                     task: result.task,
                     model: nil,
@@ -162,6 +162,8 @@ extension ChatViewModel {
                     error: result.success ? nil : "Failed",
                     tokenUsage: result.tokenUsage
                 )
+                // These survived reconstruction filtering — they're genuinely pending
+                data.resultDeliveryStatus = .pending
                 subagentState.populateFromReconstruction(data)
             }
 

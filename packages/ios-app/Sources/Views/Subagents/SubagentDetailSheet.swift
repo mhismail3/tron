@@ -74,21 +74,14 @@ struct SubagentDetailSheet: View {
                         Button {
                             onSendResults?(data)
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 4) {
                                 Text("Send")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                                 Image(systemName: "paperplane.fill")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule()
-                                    .fill(data.status == .completed ? Color.tronSuccess : Color.tronError)
-                            )
+                            .foregroundStyle(.tronEmerald)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
