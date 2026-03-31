@@ -323,10 +323,11 @@ private struct ProviderCard: View {
                                 .foregroundStyle(provider.color)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
+                                .background(provider.color.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .disabled(hasActiveOAuth)
-                            .sectionFill(provider.color, cornerRadius: 8, subtle: true)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .buttonStyle(.plain)
                         }
 
                         Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { showAddApiKey.toggle() } } label: {
@@ -339,9 +340,10 @@ private struct ProviderCard: View {
                             .foregroundStyle(provider.color)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
+                            .background(provider.color.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
-                        .sectionFill(provider.color, cornerRadius: 8, subtle: true)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .buttonStyle(.plain)
 
                         Spacer()
                     }
