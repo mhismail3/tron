@@ -148,6 +148,11 @@ final class SubagentState {
         }
     }
 
+    /// Mark results for auto-injection when agent becomes idle
+    func markQueued(subagentSessionId: String) {
+        updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .queued }
+    }
+
     /// Mark results as requiring user action (called when event received while parent idle)
     func markResultsPending(subagentSessionId: String) {
         updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .pending }
@@ -161,6 +166,26 @@ final class SubagentState {
     /// Mark results as dismissed without sending
     func markResultsDismissed(subagentSessionId: String) {
         updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .dismissed }
+    }
+
+    /// Get the next subagent queued for auto-injection (nil if none)
+    func popNextQueued() -> SubagentToolData? {
+        guard let entry = subagents.first(where: { $0.value.resultDeliveryStatus == .queued }) else {
+            return nil
+        }
+        return entry.value
+    }
+
+    /// Dismiss all queued results (server restart, disconnect, user sent different message)
+    func dismissAllQueued() {
+        for sessionId in subagents.keys where subagents[sessionId]?.resultDeliveryStatus == .queued {
+            updateAndSync(sessionId) { $0.resultDeliveryStatus = .dismissed }
+        }
+    }
+
+    /// Whether any results are queued for auto-injection
+    var hasQueuedResults: Bool {
+        subagents.values.contains { $0.resultDeliveryStatus == .queued }
     }
 
     // MARK: - UI Actions

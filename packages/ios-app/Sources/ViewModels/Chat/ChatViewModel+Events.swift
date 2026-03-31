@@ -156,8 +156,7 @@ extension ChatViewModel {
             guard let self, !Task.isCancelled else { return }
             if self.agentPhase == .postProcessing {
                 self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
-                self.agentPhase = .idle
-                self.drainMessageQueue()
+                self.transitionToIdle()
             }
         }
     }
@@ -165,9 +164,26 @@ extension ChatViewModel {
     func handleAgentReady() {
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
-        agentPhase = .idle
+        transitionToIdle()
         logInfo("Agent ready - post-processing complete")
+    }
+
+    // MARK: - Idle Transition
+
+    /// Centralized idle transition. Drains queued messages, then auto-injects
+    /// any subagent results that arrived during the active turn.
+    private func transitionToIdle() {
+        agentPhase = .idle
         drainMessageQueue()
+        injectNextQueuedSubagentResult()
+    }
+
+    /// Send the next queued subagent result to the agent.
+    /// Only injects one at a time — subsequent results inject when
+    /// the resulting turn completes and triggers another transitionToIdle().
+    private func injectNextQueuedSubagentResult() {
+        guard let subagent = subagentState.popNextQueued() else { return }
+        sendSubagentResults(subagent)
     }
 
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
@@ -178,6 +194,7 @@ extension ChatViewModel {
         if agentPhase != .idle {
             agentPhase = .idle
         }
+        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -275,6 +292,7 @@ extension ChatViewModel {
         streamingManager.reset()
 
         agentPhase = .idle
+        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -320,6 +338,7 @@ extension ChatViewModel {
         streamingManager.reset()
 
         agentPhase = .idle
+        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -499,24 +518,28 @@ extension ChatViewModel {
         logger.info("Subagent result available: sessionId=\(result.subagentSessionId), success=\(result.success), task=\(result.task.prefix(50))", category: .chat)
 
         // Blocking subagents deliver results directly via tool result — no notification needed.
-        // Server no longer emits these, but guard for backward compat / race conditions.
         if let subagent = subagentState.getSubagent(sessionId: result.subagentSessionId),
            subagent.blocking {
             logger.debug("Skipping notification for blocking subagent: \(result.subagentSessionId)", category: .chat)
             return
         }
 
-        // Mark as pending user action
+        // Agent is active — queue for auto-injection when turn ends
+        if agentPhase != .idle {
+            subagentState.markQueued(subagentSessionId: result.subagentSessionId)
+            logger.info("Subagent results queued for auto-inject: \(result.subagentSessionId)", category: .chat)
+            return
+        }
+
+        // Agent is idle — show notification for manual review
         subagentState.markResultsPending(subagentSessionId: result.subagentSessionId)
         logger.debug("Marked subagent results as pending: \(result.subagentSessionId)", category: .chat)
 
-        // Get subagent data for task preview
         guard let subagent = subagentState.getSubagent(sessionId: result.subagentSessionId) else {
             logger.warning("Subagent data not found for result available event: \(result.subagentSessionId) - notification will not be shown", category: .chat)
             return
         }
 
-        // Add notification message to chat
         let notification = ChatMessage(
             role: .system,
             content: .systemEvent(.subagentResultAvailable(

@@ -34,14 +34,16 @@ enum SubagentStatus: String, Codable, Equatable {
     }
 }
 
-/// Tracks whether completed results need user action
-/// Used for non-blocking subagents that complete while the parent is idle
+/// Tracks how completed subagent results are delivered to the parent agent.
+/// Used for non-blocking subagents only (blocking subagents deliver via tool result).
 enum SubagentResultDeliveryStatus: String, Codable, Equatable {
-    /// Parent was processing when subagent completed (results auto-injected)
+    /// Blocking subagent — delivery handled via tool result, not this status
     case notApplicable
-    /// Completed while parent idle, awaiting user action to send results
+    /// Completed during active turn, will auto-inject when agent becomes idle
+    case queued
+    /// Completed while parent idle, notification shown, awaiting user action
     case pending
-    /// User sent results to agent
+    /// Results delivered to agent
     case sent
     /// User dismissed without sending
     case dismissed

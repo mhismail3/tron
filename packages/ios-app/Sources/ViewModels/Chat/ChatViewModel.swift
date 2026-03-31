@@ -303,6 +303,7 @@ final class ChatViewModel {
                 if self.agentPhase != .idle {
                     self.agentPhase = .idle
                 }
+                self.subagentState.dismissAllQueued()
                 self.streamingManager.reset()
                 self.isCompacting = false
                 self.compactionInProgressMessageId = nil
