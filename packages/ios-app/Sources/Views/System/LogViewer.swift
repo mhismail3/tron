@@ -9,23 +9,13 @@ struct LogViewer: View {
     @State private var isExporting = false
     @State private var exportSuccess = false
     @State private var copySuccess = false
-    @State private var exportResult: String?
-    @State private var selectedLevel: LogLevel = .verbose
+    @State private var selectedLevel: LogLevel = .info
     @State private var selectedCategory: LogCategory?
-    @State private var autoScroll = true
-    @State private var searchText = ""
-    @State private var sheetDetent: PresentationDetent = .large
-    @State private var entryLimit: Int? = nil  // nil means no limit
-
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Filters
                 filterBar
-
-                // Log list
                 logList
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -33,13 +23,9 @@ struct LogViewer: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if #available(iOS 26.0, *) {
-                        Button(role: .close) {
-                            dismiss()
-                        }
+                        Button(role: .close) { dismiss() }
                     } else {
-                        Button("Close", systemImage: "xmark") {
-                            dismiss()
-                        }
+                        Button("Close", systemImage: "xmark") { dismiss() }
                     }
                 }
 
@@ -50,20 +36,28 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        exportLogsToServer()
-                    } label: {
+                    Button { refreshLogs() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button { exportLogsToServer() } label: {
                         Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
                             .contentTransition(.symbolEffect(.replace.downUp))
                     }
                     .disabled(isExporting)
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        copyLogsToClipboard()
-                    } label: {
+                    Button { copyLogsToClipboard() } label: {
                         Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
                             .contentTransition(.symbolEffect(.replace.downUp))
                     }
                 }
@@ -71,14 +65,8 @@ struct LogViewer: View {
             .sensoryFeedback(.success, trigger: exportSuccess)
             .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
-            .onReceive(timer) { _ in
-                if autoScroll {
-                    refreshLogs()
-                }
-            }
         }
-        .presentationDetents([.medium, .large], selection: $sheetDetent)
-        .presentationSizing(.page)
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
     }
@@ -86,7 +74,7 @@ struct LogViewer: View {
     // MARK: - Filter Bar
 
     private var filterBar: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             // Level picker
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -101,8 +89,7 @@ struct LogViewer: View {
                         }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 10)
             }
 
             // Category picker
@@ -128,56 +115,15 @@ struct LogViewer: View {
                         }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 10)
             }
 
-            // Entry limit picker
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    FilterChip(
-                        title: "All",
-                        isSelected: entryLimit == nil,
-                        color: .tronEmerald
-                    ) {
-                        entryLimit = nil
-                    }
-
-                    ForEach([50, 100, 250, 500], id: \.self) { limit in
-                        FilterChip(
-                            title: "Last \(limit)",
-                            isSelected: entryLimit == limit,
-                            color: .tronEmerald
-                        ) {
-                            entryLimit = limit
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 3)
-            }
-
-            // Auto-refresh toggle and entry count
-            HStack(spacing: 8) {
-                Toggle(isOn: $autoScroll) {
-                    EmptyView()
-                }
-                .toggleStyle(SwitchToggleStyle(tint: .tronEmerald))
-                .labelsHidden()
-                .fixedSize()
-
-                Text("Auto-refresh")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.gray)
-
-                Spacer()
-
-                Text("\(filteredLogs.count) entries")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.gray)
-            }
-            .padding(.horizontal)
-            .padding(.top, 4)
+            // Entry count
+            Text("\(filteredLogs.count) entries")
+                .font(.system(.caption, design: .monospaced, weight: .bold))
+                .foregroundStyle(.tronTextMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
         }
         .padding(.vertical, 8)
     }
@@ -185,47 +131,24 @@ struct LogViewer: View {
     // MARK: - Log List
 
     private var logList: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(filteredLogs.enumerated()), id: \.offset) { index, entry in
-                        LogRow(entry: entry)
-                            .id(index)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-            }
-            .onChange(of: logs.count) { _, _ in
-                if autoScroll {
-                    withAnimation {
-                        proxy.scrollTo(filteredLogs.count - 1, anchor: .bottom)
-                    }
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(filteredLogs.enumerated()), id: \.offset) { _, entry in
+                    LogRow(entry: entry)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
         }
     }
 
     private var filteredLogs: [(Date, LogCategory, LogLevel, String)] {
-        var result = logs.filter { entry in
-            if !searchText.isEmpty {
-                return entry.3.localizedCaseInsensitiveContains(searchText)
-            }
-            return true
-        }
-
-        // Apply entry limit if set
-        if let limit = entryLimit {
-            result = Array(result.suffix(limit))
-        }
-
-        return result
+        logs
     }
 
     // MARK: - Helpers
 
     private func refreshLogs() {
-        // Each category maintains its own buffer of 250 entries, so we can request more
         logs = logger.getRecentLogs(count: 1000, level: selectedLevel, category: selectedCategory)
     }
 
@@ -253,15 +176,11 @@ struct LogViewer: View {
         guard !isExporting else { return }
 
         isExporting = true
-        exportResult = nil
-
-        // Show checkmark immediately for snappy feedback
         exportSuccess = true
 
         Task {
             defer { isExporting = false }
 
-            // Get ALL logs (not just filtered) for complete export
             let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
 
             let entries = allLogs.map { entry in
@@ -279,10 +198,8 @@ struct LogViewer: View {
                 logger.info("Ingested \(result.inserted) of \(entries.count) log entries into server", category: .general)
             } catch {
                 logger.error("Failed to ingest logs to server: \(error.localizedDescription)", category: .general)
-                exportResult = "Error: \(error.localizedDescription)"
             }
 
-            // Reset checkmark after brief delay
             try? await Task.sleep(for: .seconds(0.6))
             exportSuccess = false
         }
@@ -327,18 +244,14 @@ struct FilterChip: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(TronTypography.caption)
-                .fontWeight(isSelected ? .semibold : .regular)
-                .padding(.horizontal, 12)
+                .font(.system(.caption, design: .monospaced, weight: isSelected ? .semibold : .regular))
+                .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(isSelected ? color.opacity(0.3) : Color.tronSurfaceElevated)
-                .foregroundStyle(isSelected ? color : .gray)
+                .foregroundStyle(isSelected ? color : .tronTextSecondary)
+                .background(isSelected ? color.opacity(0.15) : Color.tronEmerald.opacity(0.06))
                 .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? color : Color.clear, lineWidth: 1)
-                )
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -353,19 +266,17 @@ struct LogRow: View {
     private var message: String { entry.3 }
 
     var body: some View {
-        // Use Text concatenation so continuation lines wrap to leading edge
-        // instead of being indented to align with message start
         (Text(formatTime(date))
-            .font(TronTypography.pill)
+            .font(.system(.caption2, design: .monospaced))
             .foregroundColor(.gray)
-        + Text(" ● ")
-            .font(TronTypography.mono(size: TronTypography.sizeXS))
+        + Text(" \u{25CF} ")
+            .font(.system(size: 6, design: .monospaced))
             .foregroundColor(levelColor)
         + Text("[\(category.rawValue)] ")
-            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+            .font(.system(.caption, design: .monospaced))
             .foregroundColor(categoryColor)
         + Text(message)
-            .font(TronTypography.codeCaption)
+            .font(.system(.caption, design: .monospaced))
             .foregroundColor(levelColor))
         .lineLimit(nil)
         .fixedSize(horizontal: false, vertical: true)
