@@ -131,7 +131,7 @@ type TokenResponse = crate::llm::auth::OAuthTokenRefreshResponse;
 /// Refresh OAuth tokens using the `refresh_token` grant.
 ///
 /// Returns new tokens on success. The caller is responsible for persisting
-/// the new tokens (e.g., via `crate::llm::auth::save_provider_oauth_tokens`).
+/// the new tokens (e.g., via `crate::llm::auth::storage::save_account_oauth_tokens`).
 #[instrument(skip_all)]
 async fn refresh_tokens(
     refresh_token: &str,

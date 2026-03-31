@@ -405,20 +405,20 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save API key to auth.json
-        crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-file-key").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-file-key").unwrap();
         let cfg = default_config();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "sk-file-key");
 
-        // Save OAuth tokens too — OAuth takes priority over API key
+        // Save OAuth tokens too — OAuth takes priority over API key (accounts before api_keys in fallback)
         let tokens = OAuthTokens {
             access_token: "oauth-tok".to_string(),
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
@@ -431,7 +431,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-123").unwrap();
         let cfg = default_config();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -461,7 +461,7 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000, // 1 hour from now
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
 
         let cfg = default_config();
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -481,10 +481,10 @@ mod tests {
             refresh_token: "old-ref".to_string(),
             expires_at: 0, // long expired
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &expired_tokens)
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &expired_tokens)
             .unwrap();
         // Also save an API key (should NOT be used as fallback)
-        crate::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-should-not-use")
+        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-should-not-use")
             .unwrap();
 
         let cfg = default_config();

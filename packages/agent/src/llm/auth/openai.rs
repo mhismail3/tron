@@ -424,10 +424,10 @@ mod tests {
         assert!(url.starts_with("https://auth.openai.com/oauth/authorize?"));
     }
 
-    // ─── load_server_auth: legacy oauth ─────────────────────────────────
+    // ─── load_server_auth ────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn load_server_auth_legacy_oauth_from_file() {
+    async fn load_server_auth_oauth_from_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
@@ -436,7 +436,7 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "test", &tokens).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
@@ -449,7 +449,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-file-key").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, PROVIDER_KEY, "(default)", "sk-file-key").unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
@@ -475,7 +475,7 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "test", &tokens).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
@@ -533,34 +533,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_accounts_take_priority_over_legacy_oauth() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        // Save legacy oauth tokens
-        let legacy = OAuthTokens {
-            access_token: "legacy-tok".to_string(),
-            refresh_token: "ref-legacy".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &legacy).unwrap();
-
-        // Save account tokens (should take priority)
-        let account = OAuthTokens {
-            access_token: "account-tok".to_string(),
-            refresh_token: "ref-account".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "main", &account)
-            .unwrap();
-
-        let result = load_server_auth(&path).await.unwrap();
-        let auth = result.unwrap();
-        assert!(auth.is_oauth());
-        assert_eq!(auth.token(), "account-tok");
-    }
-
-    #[tokio::test]
     async fn load_server_auth_oauth_failure_does_not_fallback_to_api_key() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
@@ -574,7 +546,7 @@ mod tests {
         crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "test", &expired)
             .unwrap();
         // Also save an API key (should NOT be used as fallback)
-        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-should-not-use")
+        crate::llm::auth::storage::save_named_api_key(&path, PROVIDER_KEY, "(default)", "sk-should-not-use")
             .unwrap();
 
         let result = load_server_auth(&path).await;

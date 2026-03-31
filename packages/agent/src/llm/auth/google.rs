@@ -268,32 +268,27 @@ pub async fn load_server_auth(
 
 /// Load server auth using a shared HTTP client for token refresh.
 ///
-/// Google uses its own credential resolution since it returns [`GoogleAuth`]
-/// with endpoint/project metadata, not just [`ServerAuth`]. The
-/// `credential_override` parameter is accepted for interface consistency
-/// and will be used when Google migrates to the new `accounts[]`/`api_keys[]`
-/// pattern.
+/// Uses [`super::resolve_credential`] to determine which credential to use:
+/// 1. `credential_override` (session pinning)
+/// 2. `active_credential` (user selection)
+/// 3. Fallback: `accounts[0]` → `api_keys[0]`
 #[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
-    _credential_override: Option<&super::types::ActiveCredential>,
+    credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // Google uses GoogleProviderAuth which flattens ProviderAuth.
-    // For now, use the existing direct field access until Google migrates
-    // to the accounts[]/api_keys[] pattern.
     let gpa = super::storage::get_google_provider_auth(auth_path);
+    let Some(ref gpa) = gpa else {
+        return Ok(None);
+    };
 
-    // 1. OAuth: check accounts[0] first, then legacy oauth field
-    if let Some(ref gpa) = gpa {
-        let oauth = gpa
-            .base
-            .accounts
-            .as_ref()
-            .and_then(|a| a.first())
-            .map(|a| &a.oauth);
+    let Some(resolved) = super::resolve_credential(&gpa.base, credential_override) else {
+        return Ok(None);
+    };
 
-        if let Some(oauth) = oauth {
+    match resolved {
+        super::ResolvedCredential::OAuthAccount(acct) => {
             let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
             let cfg = get_config(endpoint);
 
@@ -306,61 +301,38 @@ pub async fn load_server_auth_with_client(
                 ..cfg
             };
 
-            match maybe_refresh_tokens(oauth, &cfg_with_creds, client).await {
+            match maybe_refresh_tokens(&acct.oauth, &cfg_with_creds, client).await {
                 Ok((tokens, refreshed)) => {
                     if refreshed {
                         tracing::info!("persisting refreshed Google tokens");
-                        // Write to the account if it came from accounts[], otherwise legacy field
-                        if let Some(acct_label) = gpa.base.accounts.as_ref()
-                            .and_then(|a| a.first())
-                            .map(|a| a.label.as_str())
-                        {
-                            let _ = super::storage::save_account_oauth_tokens(
-                                auth_path, "google", acct_label, &tokens,
-                            );
-                        } else {
-                            let mut updated_gpa = gpa.clone();
-                            updated_gpa.base.oauth = Some(tokens.clone());
-                            let _ =
-                                super::storage::save_google_provider_auth(auth_path, &updated_gpa);
-                        }
+                        let _ = super::storage::save_account_oauth_tokens(
+                            auth_path, "google", &acct.label, &tokens,
+                        );
                     }
-                    return Ok(Some(GoogleAuth {
+                    Ok(Some(GoogleAuth {
                         auth: ServerAuth::from_oauth(&tokens),
                         endpoint: Some(endpoint),
                         api_endpoint: Some(cfg_with_creds.api_endpoint),
                         api_version: Some(cfg_with_creds.api_version),
                         project_id: gpa.project_id.clone(),
-                    }));
+                    }))
                 }
                 Err(e) => {
                     tracing::warn!("Google OAuth refresh failed: {e}");
+                    Err(e)
                 }
             }
         }
-    }
-
-    // 2. API key: check api_keys[0] first, then legacy api_key field
-    if let Some(gpa) = &gpa {
-        let key = gpa
-            .base
-            .api_keys
-            .as_ref()
-            .and_then(|k| k.first())
-            .map(|k| k.key.as_str());
-
-        if let Some(key) = key {
-            return Ok(Some(GoogleAuth {
-                auth: ServerAuth::from_api_key(key),
+        super::ResolvedCredential::ApiKey(key) => {
+            Ok(Some(GoogleAuth {
+                auth: ServerAuth::from_api_key(&key.key),
                 endpoint: None,
                 api_endpoint: None,
                 api_version: None,
                 project_id: None,
-            }));
+            }))
         }
     }
-
-    Ok(None)
 }
 
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.

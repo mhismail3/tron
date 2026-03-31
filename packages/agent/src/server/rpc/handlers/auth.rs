@@ -15,7 +15,8 @@ use crate::llm::auth::storage::{
     save_named_api_key,
 };
 use crate::llm::auth::types::{
-    ActiveCredential, GoogleOAuthEndpoint, OAuthTokens, ProviderAuth, ServiceAuth,
+    AccountEntry, ActiveCredential, ApiKeyEntry, GoogleOAuthEndpoint, OAuthTokens, ProviderAuth,
+    ServiceAuth,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
@@ -63,28 +64,20 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 .as_ref()
                 .and_then(crate::llm::auth::types::AuthStorage::get_google_auth);
 
-            // Also load migrated base ProviderAuth for consistent array-based fields
-            let migrated_base = crate::llm::auth::storage::get_provider_auth(auth_path, "google");
-
             let mut info = serde_json::Map::new();
             if let Some(ref g) = google {
-                let base = migrated_base.as_ref().unwrap_or(&g.base);
+                let base = &g.base;
 
-                // Derive hasApiKey from api_keys[] (post-migration)
+                // Derive hasApiKey from api_keys[]
                 let has_api_keys = base.api_keys.as_ref().is_some_and(|k| !k.is_empty());
-                // Fall back to legacy for Google (may not have been migrated via get_provider_auth
-                // since Google uses get_google_provider_auth which doesn't run migration)
-                let has_key = has_api_keys || g.base.api_key.is_some();
-                let _ = info.insert("hasApiKey".into(), json!(has_key));
+                let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
                 if let Some(first_key) = base.api_keys.as_ref().and_then(|k| k.first()) {
                     let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
-                } else if let Some(ref key) = g.base.api_key {
-                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
                 }
 
                 // Derive hasOAuth from accounts[]
                 let has_accounts = base.accounts.as_ref().is_some_and(|a| !a.is_empty());
-                let _ = info.insert("hasOAuth".into(), json!(has_accounts || g.base.oauth.is_some()));
+                let _ = info.insert("hasOAuth".into(), json!(has_accounts));
 
                 // Google-specific fields
                 if let Some(ref ep) = g.endpoint {
@@ -147,12 +140,12 @@ fn build_masked_state(auth_path: &Path) -> Value {
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
-            // Use get_provider_auth (runs migration) instead of raw storage
+            // Load provider auth from storage
             let pa = crate::llm::auth::storage::get_provider_auth(auth_path, provider);
 
             let mut info = serde_json::Map::new();
             if let Some(ref pa) = pa {
-                // Derive hasApiKey from api_keys[] (post-migration)
+                // Derive hasApiKey from api_keys[]
                 let has_api_keys = pa.api_keys.as_ref().is_some_and(|k| !k.is_empty());
                 let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
                 // Backward compat: apiKeyHint from first named key
@@ -717,14 +710,11 @@ fn update_standard_provider(
     })?;
 
     // Handle API key: present string = set, null = clear, absent = preserve
-    // If apiKeyLabel is present, stores as named key in api_keys[].
-    // Otherwise, stores as legacy api_key (will be migrated on next read).
     if let Some(api_key_val) = params.get("apiKey") {
         if api_key_val.is_null() {
-            // Clear all API keys (both legacy and named)
+            // Clear all API keys
             let mut storage = load_auth_storage(auth_path).unwrap_or_default();
             if let Some(mut pa) = storage.get_provider_auth(provider) {
-                pa.api_key = None;
                 pa.api_keys = None;
                 // Clear active if it pointed to an API key
                 if matches!(pa.active_credential, Some(ActiveCredential::ApiKey { .. })) {
@@ -752,10 +742,9 @@ fn update_standard_provider(
     // Handle OAuth tokens
     if let Some(oauth) = params.get("oauth") {
         if oauth.is_null() {
-            // Clear all OAuth (both legacy and accounts)
+            // Clear all OAuth accounts
             let mut storage = load_auth_storage(auth_path).unwrap_or_default();
             if let Some(mut pa) = storage.get_provider_auth(provider) {
-                pa.oauth = None;
                 pa.accounts = None;
                 if matches!(pa.active_credential, Some(ActiveCredential::OAuth { .. })) {
                     pa.active_credential = None;
@@ -795,9 +784,12 @@ fn update_google_provider(
     // API key
     if let Some(api_key_val) = params.get("apiKey") {
         if api_key_val.is_null() {
-            google.base.api_key = None;
+            google.base.api_keys = None;
         } else if let Some(key) = api_key_val.as_str() {
-            google.base.api_key = Some(key.to_string());
+            google.base.api_keys = Some(vec![ApiKeyEntry {
+                label: "(default)".to_string(),
+                key: key.to_string(),
+            }]);
         }
     }
 
@@ -848,10 +840,13 @@ fn update_google_provider(
     // OAuth
     if let Some(oauth) = params.get("oauth") {
         if oauth.is_null() {
-            google.base.oauth = None;
+            google.base.accounts = None;
         } else {
             let tokens = parse_oauth_tokens(oauth)?;
-            google.base.oauth = Some(tokens);
+            google.base.accounts = Some(vec![AccountEntry {
+                label: "(default)".to_string(),
+                oauth: tokens,
+            }]);
         }
     }
 
@@ -1163,11 +1158,8 @@ mod tests {
         let hint = result["providers"]["anthropic"]["apiKeyHint"].as_str().unwrap();
         assert!(hint.contains("..."));
 
-        // Verify on disk (migration moves legacy api_key → api_keys[])
+        // Verify on disk
         let pa = crate::llm::auth::storage::get_provider_auth(&ctx.auth_path, "anthropic").unwrap();
-        // Legacy field is cleared after migration
-        assert!(pa.api_key.is_none());
-        // Key is now in api_keys[] under "(default)" label
         let api_keys = pa.api_keys.unwrap();
         assert_eq!(api_keys[0].key, "sk-ant-api03-newkey123456789");
     }

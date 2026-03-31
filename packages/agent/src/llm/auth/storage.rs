@@ -68,22 +68,8 @@ pub fn save_auth_storage(path: &Path, storage: &mut AuthStorage) -> Result<(), A
 }
 
 /// Get provider auth from storage file.
-///
-/// Runs legacy migration: if the provider has `oauth` or `api_key` fields,
-/// they are moved to `accounts[]`/`api_keys[]` and persisted back to disk.
 pub fn get_provider_auth(path: &Path, provider: &str) -> Option<ProviderAuth> {
-    let mut storage = load_auth_storage(path)?;
-    let mut pa = storage.get_provider_auth(provider)?;
-
-    if pa.migrate_legacy() {
-        tracing::info!(provider, "migrated legacy auth fields to new arrays");
-        storage.set_provider_auth(provider, &pa);
-        if let Err(e) = save_auth_storage(path, &mut storage) {
-            tracing::warn!(provider, error = %e, "failed to persist legacy migration");
-        }
-    }
-
-    Some(pa)
+    load_auth_storage(path)?.get_provider_auth(provider)
 }
 
 /// Get Google provider auth from storage file.
@@ -101,30 +87,6 @@ pub fn get_service_api_keys(path: &Path, service: &str) -> Vec<String> {
     load_auth_storage(path)
         .map(|s| s.get_service_api_keys(service))
         .unwrap_or_default()
-}
-
-/// Save OAuth tokens for a provider.
-///
-/// Loads existing storage, patches the provider's OAuth tokens, and saves.
-pub fn save_provider_oauth_tokens(
-    path: &Path,
-    provider: &str,
-    tokens: &OAuthTokens,
-) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
-    let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
-    pa.oauth = Some(tokens.clone());
-    storage.set_provider_auth(provider, &pa);
-    save_auth_storage(path, &mut storage)
-}
-
-/// Save an API key for a provider.
-pub fn save_provider_api_key(path: &Path, provider: &str, api_key: &str) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
-    let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
-    pa.api_key = Some(api_key.to_string());
-    storage.set_provider_auth(provider, &pa);
-    save_auth_storage(path, &mut storage)
 }
 
 /// Save OAuth tokens for a named account.
@@ -479,18 +441,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
 
-        let mut storage = AuthStorage::new();
-        let pa = ProviderAuth {
-            api_key: Some("sk-123".to_string()),
-            ..Default::default()
-        };
-        storage.set_provider_auth("anthropic", &pa);
-        save_auth_storage(&path, &mut storage).unwrap();
+        save_named_api_key(&path, "anthropic", "(default)", "sk-123").unwrap();
 
         let loaded = load_auth_storage(&path).unwrap();
         assert_eq!(loaded.version, 1);
         let restored = loaded.get_provider_auth("anthropic").unwrap();
-        assert_eq!(restored.api_key.as_deref(), Some("sk-123"));
+        assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
     }
 
     #[test]
@@ -515,28 +471,20 @@ mod tests {
     }
 
     #[test]
-    fn save_provider_oauth_tokens_patches() {
+    fn save_account_and_api_key_roundtrip() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
 
-        // Save API key first (legacy path)
-        save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
-
-        // Then add OAuth tokens (legacy path)
+        save_named_api_key(&path, "anthropic", "work", "sk-123").unwrap();
         let tokens = make_tokens();
-        save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        save_account_oauth_tokens(&path, "anthropic", "main", &tokens).unwrap();
 
-        // get_provider_auth runs migration: legacy fields moved to arrays
         let pa = get_provider_auth(&path, "anthropic").unwrap();
-        // Legacy fields should be cleared after migration
-        assert!(pa.api_key.is_none(), "legacy api_key should be migrated away");
-        assert!(pa.oauth.is_none(), "legacy oauth should be migrated away");
-        // Data should be in the new arrays
         let api_keys = pa.api_keys.unwrap();
-        assert_eq!(api_keys[0].label, "(default)");
+        assert_eq!(api_keys[0].label, "work");
         assert_eq!(api_keys[0].key, "sk-123");
         let accounts = pa.accounts.unwrap();
-        assert_eq!(accounts[0].label, "(migrated)");
+        assert_eq!(accounts[0].label, "main");
         assert_eq!(accounts[0].oauth.access_token, "tok");
     }
 
@@ -598,8 +546,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
 
-        save_provider_api_key(&path, "anthropic", "sk-a").unwrap();
-        save_provider_api_key(&path, "openai", "sk-o").unwrap();
+        save_named_api_key(&path, "anthropic", "(default)", "sk-a").unwrap();
+        save_named_api_key(&path, "openai", "(default)", "sk-o").unwrap();
 
         clear_provider_auth(&path, "anthropic").unwrap();
 

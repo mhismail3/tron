@@ -1179,7 +1179,7 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
 
         // load_server_auth should find the OAuth tokens
         let config = tron::llm::auth::anthropic::default_config();
@@ -1196,14 +1196,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Save both OAuth and API key
-        tron::llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-api-key").unwrap();
+        // Save both OAuth account and API key
+        tron::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-api-key").unwrap();
         let tokens = tron::llm::auth::OAuthTokens {
             access_token: "sk-ant-oat-primary".to_string(),
             refresh_token: "ref".to_string(),
             expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
 
         // OAuth takes priority
         let config = tron::llm::auth::anthropic::default_config();
@@ -1250,9 +1250,10 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
-        tron::llm::auth::storage::save_provider_oauth_tokens(
+        tron::llm::auth::storage::save_account_oauth_tokens(
             &path,
             tron::llm::auth::openai::PROVIDER_KEY,
+            "test",
             &tokens,
         )
         .unwrap();

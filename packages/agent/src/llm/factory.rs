@@ -632,7 +632,7 @@ mod tests {
             refresh_token: "old-ref".into(),
             expires_at: 0, // long expired
         };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &expired_tokens)
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &expired_tokens)
             .unwrap();
 
         let settings = crate::settings::TronSettings::default();
