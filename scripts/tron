@@ -21,7 +21,7 @@
 #   auto-deploy     Remote auto-deploy watcher (install|uninstall|status|pause|resume|logs)
 #
 # Auth:
-#   login           Authenticate with Claude (--label for multi-account)
+#   login           Authenticate with a provider (--label for multi-account)
 #
 # Logs:
 #   logs            Query database logs (use -h for options)
@@ -861,7 +861,7 @@ cmd_install() {
     echo "  CLI:     $BIN_DIR/tron"
     echo ""
     echo "  Next steps:"
-    echo "    tron login       # Authenticate with Claude"
+    echo "    tron login       # Authenticate with a provider"
     echo "    tron dev         # Start dev server"
     echo "    tron status      # Check service status"
     echo ""
@@ -1013,7 +1013,7 @@ EOF
     echo "  Project path:   $PROJECT_DIR"
     echo ""
     echo "  Next steps:"
-    echo "    tron login       # Authenticate with Claude"
+    echo "    tron login       # Authenticate with a provider"
     echo "    tron dev         # Start server in foreground"
     echo "    tron install     # Install as launchd service"
     echo ""
@@ -1421,7 +1421,7 @@ cmd_help() {
     echo "  restart         Restart service"
     echo "  status          Show service status"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
-    echo "  login           Authenticate with Claude (--label <name> for multi-account)"
+    echo "  login           Authenticate with a provider (--label <name> for multi-account)"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""

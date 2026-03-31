@@ -1,16 +1,28 @@
 //! `OpenAI` OAuth implementation.
 //!
-//! Handles token refresh and server auth loading for `OpenAI` (Codex) API.
+//! Handles OAuth authorization, token exchange, refresh, and server auth loading
+//! for the `OpenAI` (Codex) API.
+//!
+//! Uses PKCE (S256) like Anthropic, with a localhost redirect URI
+//! (`http://localhost:1455/auth/callback`) for the callback.
 
 use super::errors::AuthError;
-#[allow(unused_imports)] // now_ms used in tests
-use super::types::{OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
+use super::types::{OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
 /// `OpenAI` token endpoint URL.
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 
+/// `OpenAI` OAuth authorization URL.
+const AUTH_URL: &str = "https://auth.openai.com/oauth/authorize";
+
 /// Default `OpenAI` OAuth client ID.
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+/// `OpenAI` OAuth redirect URI (localhost callback server).
+const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+
+/// Default `OpenAI` OAuth scopes.
+const SCOPES: &[&str] = &["openid", "profile", "email", "offline_access"];
 
 /// Provider key in `auth.json` for `OpenAI` Codex.
 ///
@@ -19,6 +31,90 @@ pub const PROVIDER_KEY: &str = "openai-codex";
 
 /// Token expiry buffer in seconds.
 const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 300;
+
+/// Default `OpenAI` OAuth settings.
+pub fn default_config() -> OAuthConfig {
+    OAuthConfig {
+        auth_url: AUTH_URL.to_string(),
+        token_url: TOKEN_URL.to_string(),
+        redirect_uri: REDIRECT_URI.to_string(),
+        client_id: CLIENT_ID.to_string(),
+        client_secret: None,
+        scopes: SCOPES.iter().map(|s| (*s).to_string()).collect(),
+        token_expiry_buffer_seconds: TOKEN_EXPIRY_BUFFER_SECONDS,
+    }
+}
+
+/// Build the authorization URL for browser redirect.
+pub fn get_authorization_url(config: &OAuthConfig, challenge: &str) -> String {
+    get_authorization_url_with_state(config, challenge, None)
+}
+
+/// Build the authorization URL with PKCE challenge and optional `state` parameter.
+pub fn get_authorization_url_with_state(
+    config: &OAuthConfig,
+    challenge: &str,
+    state: Option<&str>,
+) -> String {
+    let mut url = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256",
+        config.auth_url,
+        super::urlencoded(&config.client_id),
+        super::urlencoded(&config.redirect_uri),
+        super::urlencoded(&config.scopes.join(" ")),
+        super::urlencoded(challenge),
+    );
+    if let Some(s) = state {
+        url.push_str("&state=");
+        url.push_str(&super::urlencoded(s));
+    }
+    url
+}
+
+/// Exchange an authorization code for tokens.
+#[tracing::instrument(skip_all)]
+pub async fn exchange_code_for_tokens(
+    config: &OAuthConfig,
+    code: &str,
+    verifier: &str,
+) -> Result<OAuthTokens, AuthError> {
+    exchange_code_for_tokens_with_client(config, code, verifier, super::shared_auth_client()).await
+}
+
+/// Exchange an authorization code for tokens using a shared HTTP client.
+#[tracing::instrument(skip_all)]
+pub async fn exchange_code_for_tokens_with_client(
+    config: &OAuthConfig,
+    code: &str,
+    verifier: &str,
+    client: &reqwest::Client,
+) -> Result<OAuthTokens, AuthError> {
+    let body = serde_json::json!({
+        "grant_type": "authorization_code",
+        "client_id": config.client_id,
+        "code": code,
+        "redirect_uri": config.redirect_uri,
+        "code_verifier": verifier,
+    });
+
+    let resp = client.post(&config.token_url).json(&body).send().await?;
+
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AuthError::OAuth {
+            status,
+            message: text,
+        });
+    }
+
+    let data: TokenResponse = resp.json().await?;
+    Ok(OAuthTokens {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token.unwrap_or_default(),
+        expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
+    })
+}
 
 /// Refresh an `OpenAI` OAuth token.
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
@@ -62,8 +158,11 @@ pub async fn refresh_token_with_client(
 /// Load server auth from auth storage.
 ///
 /// Priority:
-/// 1. OAuth tokens from `auth.json` (provider key: `openai-codex`)
-/// 2. API key from `auth.json`
+/// 1. OAuth tokens from `accounts[0]` (named accounts)
+/// 2. OAuth tokens from legacy `oauth` field
+/// 3. API key from `auth.json`
+///
+/// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
@@ -81,57 +180,188 @@ pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY);
+    let Some(pa) = super::storage::get_provider_auth(auth_path, PROVIDER_KEY) else {
+        return Ok(None);
+    };
 
-    // 1. OAuth tokens
-    if let Some(ref pa) = pa
-        && let Some(oauth) = &pa.oauth
+    // 1. OAuth tokens (accounts[0] takes precedence over legacy `oauth`)
+    if let Some(accounts) = &pa.accounts
+        && let Some(acct) = accounts.first()
     {
-        match maybe_refresh_tokens(oauth, client).await {
-            Ok((tokens, refreshed)) => {
-                if refreshed {
-                    tracing::info!("persisting refreshed OpenAI tokens");
-                    let _ = super::storage::save_provider_oauth_tokens(
-                        auth_path,
-                        PROVIDER_KEY,
-                        &tokens,
-                    );
-                }
-                return Ok(Some(ServerAuth::from_oauth(&tokens)));
-            }
-            Err(e) => {
-                tracing::warn!("`OpenAI` OAuth refresh failed: {e}");
-            }
-        }
+        let (tokens, _refreshed) = maybe_refresh_tokens(
+            auth_path,
+            Some(&acct.label),
+            &acct.oauth,
+            client,
+        )
+        .await?;
+        return Ok(Some(ServerAuth::from_oauth(&tokens)));
     }
 
-    // 2. API key from auth.json
-    if let Some(pa) = &pa
-        && let Some(key) = &pa.api_key
-    {
+    // 2. Legacy oauth field
+    if let Some(oauth) = &pa.oauth {
+        let (tokens, _refreshed) =
+            maybe_refresh_tokens(auth_path, None, oauth, client).await?;
+        return Ok(Some(ServerAuth::from_oauth(&tokens)));
+    }
+
+    // 3. API key from auth.json
+    if let Some(key) = &pa.api_key {
         return Ok(Some(ServerAuth::from_api_key(key)));
     }
 
     Ok(None)
 }
 
+/// Read the current tokens for a specific account (or legacy oauth) from auth.json.
+fn read_tokens_from_disk(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
+) -> Option<OAuthTokens> {
+    let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)?;
+    if let Some(label) = account_label {
+        pa.accounts?
+            .into_iter()
+            .find(|a| a.label == label)
+            .map(|a| a.oauth)
+    } else {
+        pa.oauth
+    }
+}
+
+/// Save refreshed tokens back to auth.json.
+fn persist_tokens(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
+    tokens: &OAuthTokens,
+) {
+    let result = if let Some(label) = account_label {
+        tracing::info!(account = label, "persisting refreshed OpenAI account tokens");
+        super::storage::save_account_oauth_tokens(auth_path, PROVIDER_KEY, label, tokens)
+    } else {
+        tracing::info!("persisting refreshed OpenAI provider tokens");
+        super::storage::save_provider_oauth_tokens(auth_path, PROVIDER_KEY, tokens)
+    };
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "failed to persist refreshed OpenAI tokens");
+    }
+}
+
+/// Check if a refresh failure indicates the refresh token was already consumed.
+///
+/// HTTP 400 with `invalid_grant` means the single-use refresh token was used
+/// by another process/server between our read and our refresh attempt.
+fn is_stale_token_error(e: &AuthError) -> bool {
+    matches!(e, AuthError::OAuth { status: 400, message } if message.contains("invalid_grant"))
+}
+
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
+///
+/// Serializes concurrent refresh attempts with both a process-local lock
+/// (for async tasks) and a file-level advisory lock (for multiple processes).
+/// Re-reads from disk after acquiring the file lock in case another process
+/// refreshed while we waited. On stale-token errors (HTTP 400 `invalid_grant`),
+/// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
+    auth_path: &std::path::Path,
+    account_label: Option<&str>,
     tokens: &OAuthTokens,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex as TokioMutex;
+
+    static REFRESH_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
+    let buffer_ms = TOKEN_EXPIRY_BUFFER_SECONDS * 1000;
+    if now_ms() + buffer_ms < tokens.expires_at {
+        return Ok((tokens.clone(), false));
+    }
+
+    // Serialize concurrent refresh attempts within this process
+    let lock = REFRESH_LOCK.get_or_init(|| TokioMutex::new(()));
+    let _guard = lock.lock().await;
+
+    // Re-check expiry after acquiring process lock
+    if now_ms() + buffer_ms < tokens.expires_at {
+        return Ok((tokens.clone(), false));
+    }
+
+    // Acquire file lock (cross-process safety)
+    let _file_lock = super::storage::acquire_auth_file_lock(auth_path)
+        .map_err(AuthError::Io)?;
+
+    // Re-read from disk — another process may have refreshed while we waited.
+    let disk_tokens = read_tokens_from_disk(auth_path, account_label);
+    if let Some(ref dt) = disk_tokens
+        && now_ms() + buffer_ms < dt.expires_at
+    {
+        return Ok((dt.clone(), true));
+    }
+    let effective_tokens = disk_tokens.unwrap_or_else(|| tokens.clone());
+
     let client = client.clone();
-    super::refresh::maybe_refresh(
-        tokens,
-        TOKEN_EXPIRY_BUFFER_SECONDS,
-        "openai",
-        |refresh_tok| {
-            let client = client.clone();
-            let refresh_tok = refresh_tok.to_owned();
-            async move { refresh_token_with_client(&refresh_tok, &client).await }
-        },
-    )
-    .await
+    let auth_path = auth_path.to_path_buf();
+    let account_label_owned = account_label.map(std::string::ToString::to_string);
+
+    let do_refresh = |tok: &OAuthTokens| {
+        let client = client.clone();
+        let tok = tok.clone();
+        async move {
+            super::refresh::maybe_refresh(
+                &tok,
+                TOKEN_EXPIRY_BUFFER_SECONDS,
+                "openai",
+                |refresh_tok| {
+                    let client = client.clone();
+                    let refresh_tok = refresh_tok.to_owned();
+                    async move {
+                        refresh_token_with_client(&refresh_tok, &client).await
+                    }
+                },
+            )
+            .await
+        }
+    };
+
+    match do_refresh(&effective_tokens).await {
+        Ok((new_tokens, true)) => {
+            persist_tokens(
+                &auth_path,
+                account_label_owned.as_deref(),
+                &new_tokens,
+            );
+            Ok((new_tokens, true))
+        }
+        Ok(not_refreshed) => Ok(not_refreshed),
+        Err(e) if is_stale_token_error(&e) => {
+            tracing::info!("OpenAI refresh token consumed by another process, re-reading auth.json");
+
+            let retry_tokens = read_tokens_from_disk(&auth_path, account_label_owned.as_deref());
+            match retry_tokens {
+                Some(rt) if now_ms() + buffer_ms < rt.expires_at => {
+                    Ok((rt, true))
+                }
+                Some(rt) => {
+                    tracing::info!("retrying OpenAI refresh with updated token from disk");
+                    match do_refresh(&rt).await {
+                        Ok((new_tokens, true)) => {
+                            persist_tokens(
+                                &auth_path,
+                                account_label_owned.as_deref(),
+                                &new_tokens,
+                            );
+                            Ok((new_tokens, true))
+                        }
+                        Ok(not_refreshed) => Ok(not_refreshed),
+                        Err(retry_err) => Err(retry_err),
+                    }
+                }
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// `OpenAI` token endpoint response.
@@ -152,20 +382,61 @@ mod tests {
         assert_eq!(PROVIDER_KEY, "openai-codex");
     }
 
-    #[tokio::test]
-    async fn load_server_auth_only_reads_from_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
+    // ─── default_config tests ───────────────────────────────────────────
 
-        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-file-key").unwrap();
-
-        let result = load_server_auth(&path).await.unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.token(), "sk-file-key");
+    #[test]
+    fn default_config_values() {
+        let cfg = default_config();
+        assert!(cfg.auth_url.contains("auth.openai.com"));
+        assert!(cfg.token_url.contains("auth.openai.com"));
+        assert_eq!(cfg.client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
+        assert!(cfg.client_secret.is_none());
+        assert!(cfg.scopes.contains(&"openid".to_string()));
+        assert!(cfg.scopes.contains(&"profile".to_string()));
+        assert!(cfg.scopes.contains(&"email".to_string()));
+        assert!(cfg.scopes.contains(&"offline_access".to_string()));
+        assert_eq!(cfg.token_expiry_buffer_seconds, 300);
     }
 
+    // ─── authorization URL tests ────────────────────────────────────────
+
+    #[test]
+    fn authorization_url_contains_required_params() {
+        let cfg = default_config();
+        let url = get_authorization_url(&cfg, "challenge123");
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains(&cfg.client_id));
+        assert!(url.contains("redirect_uri="));
+        assert!(url.contains("scope="));
+        assert!(url.contains("code_challenge=challenge123"));
+        assert!(url.contains("code_challenge_method=S256"));
+    }
+
+    #[test]
+    fn authorization_url_with_state() {
+        let cfg = default_config();
+        let url = get_authorization_url_with_state(&cfg, "challenge", Some("my-state-123"));
+        assert!(url.contains("state=my-state-123"));
+    }
+
+    #[test]
+    fn authorization_url_without_state() {
+        let cfg = default_config();
+        let url = get_authorization_url_with_state(&cfg, "challenge", None);
+        assert!(!url.contains("state="));
+    }
+
+    #[test]
+    fn authorization_url_starts_with_auth_endpoint() {
+        let cfg = default_config();
+        let url = get_authorization_url(&cfg, "challenge");
+        assert!(url.starts_with("https://auth.openai.com/oauth/authorize?"));
+    }
+
+    // ─── load_server_auth: legacy oauth ─────────────────────────────────
+
     #[tokio::test]
-    async fn load_server_auth_oauth_from_file_only() {
+    async fn load_server_auth_legacy_oauth_from_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
@@ -219,5 +490,218 @@ mod tests {
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-openai-tok");
+    }
+
+    // ─── load_server_auth: accounts support ─────────────────────────────
+
+    #[tokio::test]
+    async fn load_server_auth_uses_first_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens1 = OAuthTokens {
+            access_token: "work-tok".to_string(),
+            refresh_token: "ref1".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens2 = OAuthTokens {
+            access_token: "personal-tok".to_string(),
+            refresh_token: "ref2".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "work", &tokens1)
+            .unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "personal", &tokens2)
+            .unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert!(auth.is_oauth());
+        assert_eq!(auth.token(), "work-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_single_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "tok-alice".to_string(),
+            refresh_token: "ref-alice".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, PROVIDER_KEY, "alice", &tokens,
+        )
+        .unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert!(auth.is_oauth());
+        assert_eq!(auth.token(), "tok-alice");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_accounts_take_priority_over_legacy_oauth() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Save legacy oauth tokens
+        let legacy = OAuthTokens {
+            access_token: "legacy-tok".to_string(),
+            refresh_token: "ref-legacy".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &legacy).unwrap();
+
+        // Save account tokens (should take priority)
+        let account = OAuthTokens {
+            access_token: "account-tok".to_string(),
+            refresh_token: "ref-account".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "main", &account)
+            .unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert!(auth.is_oauth());
+        assert_eq!(auth.token(), "account-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_oauth_failure_does_not_fallback_to_api_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Save expired OAuth account (will fail to refresh without network)
+        let expired = OAuthTokens {
+            access_token: "expired-tok".to_string(),
+            refresh_token: "old-ref".to_string(),
+            expires_at: 0, // long expired
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "test", &expired)
+            .unwrap();
+        // Also save an API key (should NOT be used as fallback)
+        crate::llm::auth::storage::save_provider_api_key(&path, PROVIDER_KEY, "sk-should-not-use")
+            .unwrap();
+
+        let result = load_server_auth(&path).await;
+
+        // Should return Err (OAuth refresh failed), NOT Ok(Some(ApiKey))
+        assert!(
+            result.is_err(),
+            "expected Err when OAuth refresh fails, got: {result:?}"
+        );
+    }
+
+    // ─── read_tokens_from_disk ──────────────────────────────────────────
+
+    #[test]
+    fn read_tokens_from_disk_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "disk-tok".to_string(),
+            refresh_token: "disk-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, PROVIDER_KEY, "user@host", &tokens,
+        )
+        .unwrap();
+
+        let loaded = read_tokens_from_disk(&path, Some("user@host")).unwrap();
+        assert_eq!(loaded.access_token, "disk-tok");
+
+        assert!(read_tokens_from_disk(&path, Some("nonexistent")).is_none());
+    }
+
+    #[test]
+    fn read_tokens_from_disk_legacy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "legacy-tok".to_string(),
+            refresh_token: "legacy-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens)
+            .unwrap();
+
+        let loaded = read_tokens_from_disk(&path, None).unwrap();
+        assert_eq!(loaded.access_token, "legacy-tok");
+    }
+
+    // ─── stale token detection ──────────────────────────────────────────
+
+    #[test]
+    fn stale_token_error_detected() {
+        let err = AuthError::OAuth {
+            status: 400,
+            message: r#"{"error":"invalid_grant"}"#.to_string(),
+        };
+        assert!(is_stale_token_error(&err));
+    }
+
+    #[test]
+    fn non_stale_errors_not_detected() {
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 400,
+            message: "bad_request".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 401,
+            message: "invalid_grant".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 503,
+            message: "server_error".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::Io(std::io::Error::other(
+            "test",
+        ))));
+    }
+
+    // ─── maybe_refresh_tokens with disk re-read ─────────────────────────
+
+    #[tokio::test]
+    async fn maybe_refresh_uses_disk_tokens_after_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Write expired tokens initially
+        let expired = OAuthTokens {
+            access_token: "expired-tok".to_string(),
+            refresh_token: "old-ref".to_string(),
+            expires_at: 0,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, PROVIDER_KEY, "user@host", &expired,
+        )
+        .unwrap();
+
+        // Simulate another process having refreshed: write fresh tokens to disk
+        let fresh = OAuthTokens {
+            access_token: "fresh-tok".to_string(),
+            refresh_token: "new-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path, PROVIDER_KEY, "user@host", &fresh,
+        )
+        .unwrap();
+
+        let client = reqwest::Client::new();
+        let (tokens, refreshed) =
+            maybe_refresh_tokens(&path, Some("user@host"), &expired, &client)
+                .await
+                .unwrap();
+
+        // Should return the fresh tokens from disk without making HTTP call
+        assert!(refreshed);
+        assert_eq!(tokens.access_token, "fresh-tok");
     }
 }

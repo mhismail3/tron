@@ -41,7 +41,7 @@ struct ProvidersSettingsPage: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var expandedProvider: String?
-    @State private var showOAuthLogin = false
+    @State private var oauthProvider: OAuthProvider?
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
@@ -74,8 +74,8 @@ struct ProvidersSettingsPage: View {
                 }
             }
         }
-        .sheet(isPresented: $showOAuthLogin) {
-            OAuthLoginSheet()
+        .sheet(item: $oauthProvider) { provider in
+            OAuthLoginSheet(provider: provider)
         }
         .task { await loadAuthState() }
         .onChange(of: dependencies.authVersion) {
@@ -153,7 +153,7 @@ struct ProvidersSettingsPage: View {
                     onRenameAccount: { oldLabel, newLabel in
                         await renameAccount(provider: provider.id, oldLabel: oldLabel, newLabel: newLabel)
                     },
-                    onOAuthLogin: { showOAuthLogin = true }
+                    onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) }
                 )
             }
         } label: {
@@ -361,7 +361,7 @@ private struct StandardProviderForm: View {
                 }
             },
             onClear: { Task { await onClear() } },
-            onOAuthLogin: providerId == "anthropic" ? onOAuthLogin : nil
+            onOAuthLogin: (providerId == "anthropic" || providerId == "openai-codex") ? onOAuthLogin : nil
         )
     }
 

@@ -313,15 +313,18 @@ impl MethodHandler for ClearAuthHandler {
 
 /// In-memory state for a pending OAuth flow.
 pub struct PendingOAuthFlow {
-    /// PKCE code verifier for this flow.
+    /// PKCE code verifier (Anthropic) or random state (OpenAI) for this flow.
     pub verifier: String,
-    /// OAuth provider name (e.g., "anthropic").
+    /// OAuth provider name (e.g., "anthropic", "openai-codex").
     pub provider: String,
     /// When this flow was initiated.
     pub created_at: std::time::Instant,
 }
 
-/// Begin an OAuth flow: generate PKCE, return auth URL + flow ID.
+/// Providers that support OAuth login.
+const OAUTH_PROVIDERS: &[&str] = &["anthropic", "openai-codex"];
+
+/// Begin an OAuth flow: generate PKCE (Anthropic) or state (OpenAI), return auth URL + flow ID.
 pub struct OAuthBeginHandler;
 
 #[async_trait]
@@ -329,19 +332,36 @@ impl MethodHandler for OAuthBeginHandler {
     #[instrument(skip(self, ctx), fields(method = "auth.oauthBegin"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let provider = require_string_param(params.as_ref(), "provider")?;
-        if provider != "anthropic" {
-            return Err(RpcError::InvalidParams {
-                message: "OAuth login is only supported for anthropic".into(),
-            });
-        }
 
-        let pair = crate::llm::auth::pkce::generate_pkce();
-        let config = crate::llm::auth::anthropic::default_config();
+        let (auth_url, verifier_or_state) = match provider.as_str() {
+            "anthropic" => {
+                let pair = crate::llm::auth::pkce::generate_pkce();
+                let config = crate::llm::auth::anthropic::default_config();
+                // Use verifier as state (matches tron login CLI behavior)
+                let url = crate::llm::auth::anthropic::get_authorization_url_with_state(
+                    &config, &pair.challenge, Some(&pair.verifier),
+                );
+                (url, pair.verifier)
+            }
+            "openai-codex" => {
+                let pair = crate::llm::auth::pkce::generate_pkce();
+                let config = crate::llm::auth::openai::default_config();
+                let url = crate::llm::auth::openai::get_authorization_url_with_state(
+                    &config, &pair.challenge, Some(&pair.verifier),
+                );
+                (url, pair.verifier)
+            }
+            _ => {
+                return Err(RpcError::InvalidParams {
+                    message: format!(
+                        "OAuth login supported for: {}. Got: {provider}",
+                        OAUTH_PROVIDERS.join(", "),
+                    ),
+                });
+            }
+        };
+
         let flow_id = uuid::Uuid::now_v7().to_string();
-        // Use verifier as state (matches tron login CLI behavior)
-        let auth_url = crate::llm::auth::anthropic::get_authorization_url_with_state(
-            &config, &pair.challenge, Some(&pair.verifier),
-        );
 
         let mut flows = ctx.oauth_flows.lock().await;
 
@@ -351,7 +371,7 @@ impl MethodHandler for OAuthBeginHandler {
         let _ = flows.insert(
             flow_id.clone(),
             PendingOAuthFlow {
-                verifier: pair.verifier,
+                verifier: verifier_or_state,
                 provider,
                 created_at: std::time::Instant::now(),
             },
@@ -391,19 +411,36 @@ impl MethodHandler for OAuthCompleteHandler {
             });
         }
 
-        // Exchange code for tokens (HTTP call to Anthropic)
-        // Pass verifier as state (matches tron login CLI behavior)
-        let config = crate::llm::auth::anthropic::default_config();
-        let tokens = crate::llm::auth::anthropic::exchange_code_for_tokens(
-            &config, &code, &flow.verifier, Some(&flow.verifier),
-        )
-        .await
+        // Exchange code for tokens (provider-specific)
+        let tokens = match flow.provider.as_str() {
+            "anthropic" => {
+                let config = crate::llm::auth::anthropic::default_config();
+                // Pass verifier as state (matches tron login CLI behavior)
+                crate::llm::auth::anthropic::exchange_code_for_tokens(
+                    &config, &code, &flow.verifier, Some(&flow.verifier),
+                )
+                .await
+            }
+            "openai-codex" => {
+                let config = crate::llm::auth::openai::default_config();
+                crate::llm::auth::openai::exchange_code_for_tokens(
+                    &config, &code, &flow.verifier,
+                )
+                .await
+            }
+            _ => {
+                return Err(RpcError::InvalidParams {
+                    message: format!("Unsupported OAuth provider: {}", flow.provider),
+                });
+            }
+        }
         .map_err(|e| RpcError::Internal {
             message: format!("Token exchange failed: {e}"),
         })?;
 
-        // Save tokens to auth.json
+        // Save tokens to auth.json (under the correct provider key)
         let auth_path = ctx.auth_path.clone();
+        let provider_key = flow.provider.clone();
         let label_clone = label.clone();
         let tokens_clone = tokens.clone();
         let masked_state = ctx
@@ -414,7 +451,7 @@ impl MethodHandler for OAuthCompleteHandler {
 
                 crate::llm::auth::storage::save_account_oauth_tokens(
                     &auth_path,
-                    "anthropic",
+                    &provider_key,
                     &label_clone,
                     &tokens_clone,
                 )
@@ -1237,12 +1274,12 @@ mod tests {
     async fn oauth_begin_invalid_provider_returns_error() {
         let (ctx, _dir) = make_ctx_with_temp_auth();
         let err = OAuthBeginHandler
-            .handle(Some(json!({"provider": "openai"})), &ctx)
+            .handle(Some(json!({"provider": "unknown-provider"})), &ctx)
             .await
             .unwrap_err();
 
         assert_eq!(err.code(), "INVALID_PARAMS");
-        assert!(err.to_string().contains("only supported for anthropic"));
+        assert!(err.to_string().contains("OAuth login supported for"));
     }
 
     #[tokio::test]
@@ -1470,5 +1507,102 @@ mod tests {
 
         let flows = ctx.oauth_flows.lock().await;
         assert!(!flows.contains_key(flow_id));
+    }
+
+    // ── auth.oauthBegin (OpenAI) ──
+
+    #[tokio::test]
+    async fn oauth_begin_openai_returns_flow_id_and_auth_url() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result["flowId"].as_str().is_some());
+        assert!(!result["flowId"].as_str().unwrap().is_empty());
+        assert!(result["authUrl"].as_str().is_some());
+        assert!(!result["authUrl"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_openai_auth_url_contains_openai_endpoint() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("auth.openai.com"), "URL should use OpenAI auth endpoint");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_openai_auth_url_has_pkce() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("code_challenge="), "OpenAI should use PKCE code_challenge");
+        assert!(url.contains("code_challenge_method=S256"), "OpenAI should use S256");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_openai_auth_url_contains_state() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("state="), "OpenAI auth URL must contain state parameter");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_openai_auth_url_contains_required_params() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("client_id="));
+        assert!(url.contains("redirect_uri="));
+        assert!(url.contains("scope="));
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_openai_stores_correct_provider_in_flow() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "openai-codex"})), &ctx)
+            .await
+            .unwrap();
+
+        let flow_id = result["flowId"].as_str().unwrap();
+        let flows = ctx.oauth_flows.lock().await;
+        assert!(flows.contains_key(flow_id));
+        assert_eq!(flows[flow_id].provider, "openai-codex");
+    }
+
+    #[tokio::test]
+    async fn oauth_begin_anthropic_still_returns_pkce() {
+        // Regression: ensure Anthropic flows still use PKCE after multi-provider change
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = OAuthBeginHandler
+            .handle(Some(json!({"provider": "anthropic"})), &ctx)
+            .await
+            .unwrap();
+
+        let url = result["authUrl"].as_str().unwrap();
+        assert!(url.contains("claude.ai"), "Anthropic URL should use claude.ai");
+        assert!(url.contains("code_challenge="), "Anthropic should use PKCE");
+        assert!(url.contains("code_challenge_method=S256"), "Anthropic should use S256");
     }
 }

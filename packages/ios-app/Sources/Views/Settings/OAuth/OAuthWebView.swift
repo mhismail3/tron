@@ -33,10 +33,21 @@ struct OAuthWebView: UIViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            guard let url = navigationAction.request.url,
-                  url.host == "console.anthropic.com",
-                  url.path.contains("/oauth/code/callback")
-            else {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Anthropic: console.anthropic.com/oauth/code/callback
+            let isAnthropicCallback = url.host == "console.anthropic.com"
+                && url.path.contains("/oauth/code/callback")
+
+            // OpenAI: localhost:1455/auth/callback
+            let isOpenAICallback = url.host == "localhost"
+                && url.port == 1455
+                && url.path == "/auth/callback"
+
+            guard isAnthropicCallback || isOpenAICallback else {
                 decisionHandler(.allow)
                 return
             }

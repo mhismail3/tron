@@ -52,7 +52,7 @@ cmd_help() {
     echo "  stop            Stop service"
     echo "  restart         Restart service"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
-    echo "  login           Authenticate with Claude (--label <name> for multi-account)"
+    echo "  login           Authenticate with a provider (--provider, --label for options)"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""

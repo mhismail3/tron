@@ -1,6 +1,29 @@
 import SwiftUI
 
+// MARK: - OAuth Provider
+
+struct OAuthProvider: Identifiable {
+    let id: String
+    let displayName: String
+    let accentColor: Color
+
+    static let anthropic = OAuthProvider(id: "anthropic", displayName: "Anthropic", accentColor: .tronCoral)
+    static let openai = OAuthProvider(id: "openai-codex", displayName: "OpenAI", accentColor: .tronSlate)
+
+    static func from(_ providerId: String) -> OAuthProvider? {
+        switch providerId {
+        case "anthropic": return .anthropic
+        case "openai-codex": return .openai
+        default: return nil
+        }
+    }
+}
+
+// MARK: - OAuth Login Sheet
+
 struct OAuthLoginSheet: View {
+    let provider: OAuthProvider
+
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
 
@@ -44,9 +67,9 @@ struct OAuthLoginSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Sign in to Anthropic")
+                    Text("Sign in to \(provider.displayName)")
                         .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(provider.accentColor)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -99,7 +122,7 @@ struct OAuthLoginSheet: View {
                     .frame(minWidth: 120)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
+            .tint(provider.accentColor)
             .disabled(accountLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             Spacer()
@@ -120,10 +143,10 @@ struct OAuthLoginSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(provider.accentColor)
             Text("Signed in")
                 .font(TronTypography.headline)
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(provider.accentColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -167,7 +190,7 @@ struct OAuthLoginSheet: View {
                         .font(TronTypography.buttonSM)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.tronEmerald)
+                .tint(provider.accentColor)
                 .disabled(manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
@@ -192,7 +215,7 @@ struct OAuthLoginSheet: View {
                     .font(TronTypography.button)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
+            .tint(provider.accentColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -201,7 +224,7 @@ struct OAuthLoginSheet: View {
 
     private func beginOAuthFlow() async {
         do {
-            let response = try await rpcClient.auth.oauthBegin(provider: "anthropic")
+            let response = try await rpcClient.auth.oauthBegin(provider: provider.id)
             guard let url = URL(string: response.authUrl) else {
                 flowState = .error("Invalid authorization URL")
                 return
