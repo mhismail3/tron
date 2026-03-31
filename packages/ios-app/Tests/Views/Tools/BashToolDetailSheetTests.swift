@@ -81,6 +81,50 @@ struct BashOutputHelpersTests {
         #expect(result == "line 1\nline 2")
     }
 
+    // MARK: - Trailing Newline Trimming
+
+    @Test("cleanForDisplay trims single trailing newline")
+    func testCleanTrimsTrailingNewline() {
+        let result = BashOutputHelpers.cleanForDisplay("hello\n")
+        #expect(result == "hello")
+    }
+
+    @Test("cleanForDisplay trims multiple trailing newlines")
+    func testCleanTrimsMultipleTrailingNewlines() {
+        let result = BashOutputHelpers.cleanForDisplay("hello\n\n\n")
+        #expect(result == "hello")
+    }
+
+    @Test("cleanForDisplay preserves internal blank lines")
+    func testCleanPreservesInternalBlanks() {
+        let result = BashOutputHelpers.cleanForDisplay("hello\n\nworld\n")
+        #expect(result == "hello\n\nworld")
+    }
+
+    @Test("cleanForDisplay no-ops when no trailing newline")
+    func testCleanNoTrailingNewline() {
+        let result = BashOutputHelpers.cleanForDisplay("hello\nworld")
+        #expect(result == "hello\nworld")
+    }
+
+    @Test("cleanForDisplay handles only-newlines string")
+    func testCleanOnlyNewlines() {
+        let result = BashOutputHelpers.cleanForDisplay("\n\n\n")
+        #expect(result == "")
+    }
+
+    @Test("cleanForDisplay preserves leading newlines")
+    func testCleanPreservesLeadingNewlines() {
+        let result = BashOutputHelpers.cleanForDisplay("\nhello\n")
+        #expect(result == "\nhello")
+    }
+
+    @Test("cleanForDisplay trims CRLF")
+    func testCleanTrimsCRLF() {
+        let result = BashOutputHelpers.cleanForDisplay("hello\r\n")
+        #expect(result == "hello")
+    }
+
     // MARK: - Line Length Capping
 
     @Test("Caps long lines at max length")

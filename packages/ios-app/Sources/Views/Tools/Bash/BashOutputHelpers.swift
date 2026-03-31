@@ -39,10 +39,12 @@ enum BashOutputHelpers {
         return result
     }
 
-    /// Full cleaning pipeline: strip truncation markers, ANSI codes.
+    /// Full cleaning pipeline: strip truncation markers, ANSI codes, trailing newlines.
     static func cleanForDisplay(_ text: String) -> String {
-        let stripped = stripTruncationMarker(text)
-        return stripAnsiCodes(stripped)
+        var stripped = stripTruncationMarker(text)
+        stripped = stripAnsiCodes(stripped)
+        while stripped.last?.isNewline == true { stripped.removeLast() }
+        return stripped
     }
 
     /// Cap a line's display length, preserving the full text for copy operations.

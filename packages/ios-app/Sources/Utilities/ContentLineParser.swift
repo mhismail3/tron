@@ -12,7 +12,9 @@ struct ContentLineParser {
     /// Parse content, stripping server-side line number prefixes
     /// Handles patterns: "123→content", "  123\tcontent", "123:content"
     static func parse(_ content: String) -> [ParsedLine] {
-        let rawLines = content.components(separatedBy: "\n")
+        var trimmed = content
+        while trimmed.last?.isNewline == true { trimmed.removeLast() }
+        let rawLines = trimmed.components(separatedBy: "\n")
         var result: [ParsedLine] = []
         var lastLineNum = 0
 

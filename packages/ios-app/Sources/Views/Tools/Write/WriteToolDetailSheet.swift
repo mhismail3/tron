@@ -23,7 +23,9 @@ struct WriteToolDetailSheet: View {
     }
 
     private var contentLines: [String] {
-        writtenContent.components(separatedBy: "\n")
+        var text = writtenContent
+        while text.last?.isNewline == true { text.removeLast() }
+        return text.components(separatedBy: "\n")
     }
 
     private var lineCount: Int {

@@ -86,4 +86,38 @@ struct ContentLineParserTests {
         #expect(lines[0].lineNum == 42)
         #expect(lines[1].lineNum == 43)
     }
+
+    // MARK: - Trailing Newline Handling
+
+    @Test("Trailing newline does not create phantom line")
+    func trailingNewlineIgnored() {
+        let input = "   1\timport UIKit\n   2\tclass Foo {}\n"
+        let lines = ContentLineParser.parse(input)
+        #expect(lines.count == 2)
+        #expect(lines[0].content == "import UIKit")
+        #expect(lines[1].content == "class Foo {}")
+    }
+
+    @Test("Multiple trailing newlines do not create phantom lines")
+    func multipleTrailingNewlines() {
+        let input = "line one\nline two\n\n\n"
+        let lines = ContentLineParser.parse(input)
+        #expect(lines.count == 2)
+    }
+
+    @Test("Trailing newline with unprefixed content")
+    func trailingNewlineUnprefixed() {
+        let input = "hello\nworld\n"
+        let lines = ContentLineParser.parse(input)
+        #expect(lines.count == 2)
+        #expect(lines[1].content == "world")
+    }
+
+    @Test("Internal blank lines preserved with trailing trim")
+    func internalBlanksPreserved() {
+        let input = "   1\tfoo\n   2\t\n   3\tbar\n"
+        let lines = ContentLineParser.parse(input)
+        #expect(lines.count == 3)
+        #expect(lines[1].content == "")
+    }
 }
