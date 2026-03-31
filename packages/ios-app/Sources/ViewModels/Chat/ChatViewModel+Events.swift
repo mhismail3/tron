@@ -2,6 +2,16 @@ import Foundation
 import UIKit
 import SwiftUI
 
+// MARK: - Context Protocol Conformances
+
+extension ChatViewModel: CompactionContext, MemoryContext {
+    func refreshContextInBackground() {
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
+        }
+    }
+}
+
 // MARK: - Event Handlers
 
 extension ChatViewModel {
@@ -179,119 +189,19 @@ extension ChatViewModel {
     }
 
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
-        logger.info("Compaction started (reason: \(pluginResult.reason))", category: .events)
-
-        // Block the send button while compaction runs
-        isCompacting = true
-
-        // Finalize any current streaming before adding notification
-        flushPendingTextUpdates()
-        finalizeStreamingMessage()
-
-        // Add spinning "Compacting..." pill to chat
-        let inProgressMessage = ChatMessage.compactionInProgress(reason: pluginResult.reason)
-        appendToMessages(inProgressMessage)
-        compactionInProgressMessageId = inProgressMessage.id
+        compactionCoordinator.handleCompactionStarted(pluginResult, context: self)
     }
 
     func handleCompaction(_ pluginResult: CompactionPlugin.Result) {
-        let tokensSaved = pluginResult.tokensBefore - pluginResult.tokensAfter
-        logger.info("Context compacted: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (saved \(tokensSaved), reason: \(pluginResult.reason))", category: .events)
-
-        // Clear compaction blocking state
-        isCompacting = false
-
-        // Finalize any current streaming before adding notification
-        flushPendingTextUpdates()
-        finalizeStreamingMessage()
-
-        // Update context tracking — prefer estimatedContextTokens (total context including
-        // system prompt, tools, rules) over tokensAfter (messages-only) for accurate pill display
-        let postCompactionTokens = pluginResult.estimatedContextTokens ?? pluginResult.tokensAfter
-        contextState.lastTurnInputTokens = postCompactionTokens
-        logger.debug("Updated lastTurnInputTokens to \(postCompactionTokens) after compaction", category: .events)
-
-        // Mutate content in-place to keep the same message identity → smooth animation
-        if let inProgressId = compactionInProgressMessageId,
-           let index = messageIndex.index(for: inProgressId) {
-            withAnimation(.smooth(duration: 0.35)) {
-                messages[index].content = .compaction(
-                    tokensBefore: pluginResult.tokensBefore,
-                    tokensAfter: pluginResult.tokensAfter,
-                    reason: pluginResult.reason,
-                    summary: pluginResult.summary,
-                    preservedTurns: pluginResult.preservedTurns,
-                    summarizedTurns: pluginResult.summarizedTurns
-                )
-            }
-            compactionInProgressMessageId = nil
-        } else {
-            // No in-progress pill found (e.g. reconstruction) — just append
-            let compactionMessage = ChatMessage.compaction(
-                tokensBefore: pluginResult.tokensBefore,
-                tokensAfter: pluginResult.tokensAfter,
-                reason: pluginResult.reason,
-                summary: pluginResult.summary,
-                preservedTurns: pluginResult.preservedTurns,
-                summarizedTurns: pluginResult.summarizedTurns
-            )
-            appendToMessages(compactionMessage)
-        }
-
-        // Refresh context from server to ensure context limit is also current
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
-
-        // Compaction finished — if queue was waiting, drain now
-        drainMessageQueue()
+        compactionCoordinator.handleCompaction(pluginResult, context: self)
     }
 
     func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
-        logger.info("Memory retain started", category: .events)
-        isRetaining = true
-
-        flushPendingTextUpdates()
-        finalizeStreamingMessage()
-
-        // Add spinning "Retaining memory..." pill to chat
-        let inProgressMessage = ChatMessage.memoryRetainInProgress()
-        appendToMessages(inProgressMessage)
-        memoryRetainInProgressMessageId = inProgressMessage.id
+        memoryCoordinator.handleMemoryUpdating(pluginResult, context: self)
     }
 
     func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
-        isRetaining = false
-
-        flushPendingTextUpdates()
-        finalizeStreamingMessage()
-
-        if let title = pluginResult.title {
-            logger.info("Memory retained: \(title)", category: .events)
-
-            // Mutate content in-place to keep the same message identity → smooth animation
-            if let inProgressId = memoryRetainInProgressMessageId,
-               let index = messageIndex.index(for: inProgressId) {
-                withAnimation(.smooth(duration: 0.35)) {
-                    messages[index].content = .memoryRetained(title: title, summary: pluginResult.summary)
-                }
-                memoryRetainInProgressMessageId = nil
-            } else {
-                appendToMessages(ChatMessage.memoryRetained(title: title, summary: pluginResult.summary))
-            }
-        } else {
-            logger.info("Memory retain: nothing new", category: .events)
-
-            if let inProgressId = memoryRetainInProgressMessageId,
-               let index = messageIndex.index(for: inProgressId) {
-                withAnimation(.smooth(duration: 0.35)) {
-                    messages[index].content = .memoryRetainedNothingNew
-                }
-                memoryRetainInProgressMessageId = nil
-            } else {
-                appendToMessages(ChatMessage.memoryRetainedNothingNew())
-            }
-        }
+        memoryCoordinator.handleMemoryUpdated(pluginResult, context: self)
     }
 
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {

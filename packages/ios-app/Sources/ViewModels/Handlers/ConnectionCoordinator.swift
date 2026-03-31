@@ -165,8 +165,10 @@ final class ConnectionCoordinator {
             if agentState.isRunning {
                 context.logInfo("Agent is currently running - setting up streaming state for in-progress session")
 
-                // Suppress real-time events during catch-up to prevent duplicates
+                // Suppress real-time events during catch-up to prevent duplicates.
+                // defer guarantees reset even if an intermediate async call throws.
                 context.isCatchingUp = true
+                defer { context.isCatchingUp = false }
 
                 // Clean up stale streaming state from previous connection
                 context.cleanUpStreamingState()
@@ -190,9 +192,6 @@ final class ConnectionCoordinator {
 
                 // Remove the catching-up notification now that content has been processed.
                 context.removeCatchingUpMessage()
-
-                // Re-enable real-time events now that catch-up is complete
-                context.isCatchingUp = false
 
                 context.logInfo("Processed catch-up content for in-progress turn")
             } else {

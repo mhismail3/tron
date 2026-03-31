@@ -37,6 +37,9 @@ extension ChatViewModel: FeatureContext {
 - `ToolEventCoordinator` - Handles tool start/end events
 - `TurnLifecycleCoordinator` - Manages turn state transitions
 - `MessagingCoordinator` - Sends messages and handles responses
+- `CompactionCoordinator` - Handles context compaction start/complete pill transitions
+- `MemoryCoordinator` - Handles memory retention start/complete pill transitions
+- `ConnectionCoordinator` - Manages session connection, reconnection, and catch-up
 
 ## Event Dispatch
 

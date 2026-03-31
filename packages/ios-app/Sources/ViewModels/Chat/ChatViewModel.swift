@@ -198,6 +198,10 @@ final class ChatViewModel {
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates event dispatch - routes plugin events to handlers
     let eventDispatchCoordinator = EventDispatchCoordinator()
+    /// Coordinates compaction event handling (start/complete pill transitions)
+    let compactionCoordinator = CompactionCoordinator()
+    /// Coordinates memory retention event handling (start/complete pill transitions)
+    let memoryCoordinator = MemoryCoordinator()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     var currentToolMessages: [UUID: ChatMessage] = [:]
