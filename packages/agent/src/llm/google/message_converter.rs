@@ -186,7 +186,10 @@ fn convert_user_content(content: &UserMessageContent) -> Vec<GeminiPart> {
                     },
                 }),
                 UserContent::Document {
-                    data, mime_type, ..
+                    data,
+                    mime_type,
+                    extracted_text,
+                    ..
                 } => {
                     if mime_type == "application/pdf" {
                         Some(GeminiPart::InlineData {
@@ -195,8 +198,14 @@ fn convert_user_content(content: &UserMessageContent) -> Vec<GeminiPart> {
                                 data: data.clone(),
                             },
                         })
+                    } else if let Some(text) = extracted_text {
+                        Some(GeminiPart::Text {
+                            text: text.clone(),
+                            thought: None,
+                            thought_signature: None,
+                        })
                     } else {
-                        None // Unsupported document type
+                        None
                     }
                 }
             })
@@ -433,6 +442,7 @@ mod tests {
                 data: "pdfdata".into(),
                 mime_type: "application/pdf".into(),
                 file_name: None,
+                extracted_text: None,
             }]),
             timestamp: None,
         }]);

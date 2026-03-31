@@ -199,6 +199,7 @@ struct GlassAttachmentButton: View {
     let hasSkillsAvailable: Bool
     let buttonSize: CGFloat
     let skillStore: SkillStore?
+    let attachmentCapability: AttachmentCapability
 
     // Sheet bindings passed from parent
     @Binding var showCamera: Bool
@@ -230,12 +231,14 @@ struct GlassAttachmentButton: View {
             .overlay {
                 // Invisible Menu overlay handles interaction only
                 Menu {
-                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
-                        Label("Take Photo", systemImage: "camera")
-                    }
+                    if attachmentCapability.supportsImages {
+                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
+                            Label("Take Photo", systemImage: "camera")
+                        }
 
-                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
-                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
+                            Label("Photo Library", systemImage: "photo.on.rectangle")
+                        }
                     }
 
                     Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {

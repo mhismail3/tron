@@ -170,10 +170,13 @@ pub fn build_user_content_override(
                         mime_type: mime.to_owned(),
                     });
                 } else {
+                    let extracted_text =
+                        crate::core::document_extractor::extract_text(data, mime);
                     blocks.push(crate::core::content::UserContent::Document {
                         data: data.to_owned(),
                         mime_type: mime.to_owned(),
                         file_name,
+                        extracted_text,
                     });
                 }
             }

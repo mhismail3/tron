@@ -452,6 +452,7 @@ impl OpenAIModelInfo {
             "maxOutput": self.max_output,
             "supportsThinking": false,
             "supportsImages": self.supports_images,
+            "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "cacheReadCostPerMillion": self.cache_read_cost_per_million,

@@ -159,19 +159,28 @@ extension ChatViewModel {
                 continue
             }
 
-            // Compress the image (same as camera photos)
-            guard let result = await ImageCompressor.compress(uiImage) else {
-                logger.warning("Failed to compress library image", category: .chat)
+            // Process image with provider-aware limits, preserving format
+            let detectedMime = ImageProcessor.detectMimeType(from: data)
+            let limits = await MainActor.run {
+                self.modelPickerState.currentModelInfo(current: self.currentModel)?.providerImageLimits ?? .default
+            }
+            guard let result = await ImageProcessor.process(
+                originalData: data,
+                mimeType: detectedMime,
+                limits: limits
+            ) else {
+                logger.warning("Failed to process library image", category: .chat)
                 continue
             }
 
-            // Create unified Attachment (same model as camera photos)
             let attachment = Attachment(
                 type: .image,
                 data: result.data,
                 mimeType: result.mimeType,
                 fileName: nil,
-                originalSize: data.count
+                originalSize: data.count,
+                wasConverted: result.wasConverted,
+                originalMimeType: result.wasConverted ? detectedMime : nil
             )
 
             await MainActor.run {

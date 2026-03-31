@@ -510,6 +510,7 @@ mod tests {
             data: "pdfdata".into(),
             mime_type: "application/pdf".into(),
             file_name: Some("report.pdf".into()),
+            extracted_text: None,
         }]);
         let param = convert_user_message(&content);
         assert_eq!(param.content[0]["type"], "document");

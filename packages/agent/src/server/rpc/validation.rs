@@ -11,6 +11,9 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 /// Maximum JSON nesting depth for incoming RPC payloads.
 pub const MAX_JSON_DEPTH: usize = 128;
 
+/// Maximum decoded size per attachment (50 MB — covers the largest provider limit).
+pub const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
+
 /// Validate that a string parameter does not exceed `max_len` bytes.
 pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<(), RpcError> {
     if value.len() > max_len {
@@ -52,6 +55,22 @@ pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Resul
     measure_depth(value, 0, max_depth).map_err(|()| RpcError::InvalidParams {
         message: format!("JSON nesting depth exceeds maximum of {max_depth}"),
     })
+}
+
+/// Validate that a base64-encoded attachment does not exceed [`MAX_ATTACHMENT_BYTES`] decoded.
+pub fn validate_attachment_size(base64_data: &str) -> Result<(), RpcError> {
+    // base64 encodes 3 bytes into 4 chars; approximate decoded size.
+    let decoded_size = base64_data.len() * 3 / 4;
+    if decoded_size > MAX_ATTACHMENT_BYTES {
+        return Err(RpcError::InvalidParams {
+            message: format!(
+                "Attachment exceeds maximum size of {}MB (got ~{}MB)",
+                MAX_ATTACHMENT_BYTES / (1024 * 1024),
+                decoded_size / (1024 * 1024),
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Sanitize an error message for client consumption.
@@ -209,5 +228,38 @@ mod tests {
         assert!(validate_json_depth(&serde_json::json!(42), MAX_JSON_DEPTH).is_ok());
         assert!(validate_json_depth(&serde_json::json!("hello"), MAX_JSON_DEPTH).is_ok());
         assert!(validate_json_depth(&serde_json::json!(true), MAX_JSON_DEPTH).is_ok());
+    }
+
+    // ── Attachment size validation tests ────────────────────────────
+
+    #[test]
+    fn attachment_under_limit_passes() {
+        // ~1 MB of base64 ≈ 750 KB decoded
+        let data = "A".repeat(1_000_000);
+        assert!(validate_attachment_size(&data).is_ok());
+    }
+
+    #[test]
+    fn attachment_empty_passes() {
+        assert!(validate_attachment_size("").is_ok());
+    }
+
+    #[test]
+    fn attachment_over_limit_fails() {
+        // 70 MB of base64 ≈ 52.5 MB decoded → over 50 MB limit
+        let data = "A".repeat(70 * 1024 * 1024);
+        let result = validate_attachment_size(&data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("50MB"));
+    }
+
+    #[test]
+    fn attachment_at_limit_passes() {
+        // Exactly 50 MB decoded ≈ 66.67 MB base64
+        // Use slightly under to account for rounding
+        let data = "A".repeat(66 * 1024 * 1024);
+        assert!(validate_attachment_size(&data).is_ok());
     }
 }

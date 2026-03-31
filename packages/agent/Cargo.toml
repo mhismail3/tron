@@ -82,6 +82,10 @@ rustix = { version = "1.1", features = ["fs"] }
 scraper = "0.22"
 html2text = "0.14"
 
+# Image conversion (Display tool: SVG/BMP/TIFF → PNG for iOS)
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
+resvg = "0.44"
+
 # Concurrency
 parking_lot = "0.12"
 dashmap = "6"

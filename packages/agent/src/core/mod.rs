@@ -28,6 +28,8 @@ pub mod constants;
 pub mod paths;
 #[path = "protocol/content.rs"]
 pub mod content;
+#[path = "protocol/document_extractor.rs"]
+pub mod document_extractor;
 pub mod errors;
 #[path = "protocol/events.rs"]
 pub mod events;

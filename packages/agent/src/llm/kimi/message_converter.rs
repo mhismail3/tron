@@ -203,9 +203,16 @@ fn convert_user_block(block: &UserContent, supports_images: bool) -> Option<Valu
                 "image_url": {"url": data_uri}
             }))
         }
-        UserContent::Document { file_name, .. } => {
+        UserContent::Document {
+            file_name,
+            extracted_text,
+            ..
+        } => {
             let name = file_name.as_deref().unwrap_or("document");
-            Some(json!({"type": "text", "text": format!("[Document: {name}]")}))
+            match extracted_text {
+                Some(text) => Some(json!({"type": "text", "text": format!("--- Document: {name} ---\n{text}")})),
+                None => Some(json!({"type": "text", "text": format!("[Document: {name} \u{2014} content not available for this model]")})),
+            }
         }
     }
 }
@@ -536,6 +543,7 @@ mod tests {
                 data: "base64data".into(),
                 mime_type: "text/plain".into(),
                 file_name: Some("file.rs".into()),
+                extracted_text: None,
             }]),
             timestamp: None,
         }];

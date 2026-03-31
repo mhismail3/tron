@@ -103,6 +103,35 @@ pub fn model_supports_images(model_id: &str) -> bool {
     true
 }
 
+/// Level of document support for a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentSupport {
+    /// Full document support (PDF, text, JSON, etc.) — Anthropic.
+    Full,
+    /// PDF-only support — Google Gemini.
+    PdfOnly,
+    /// No native document support — content must be extracted as text.
+    None,
+}
+
+/// Check what level of document support a model has.
+///
+/// Anthropic models natively handle PDFs and other documents.
+/// Gemini models handle PDFs only (other doc types silently dropped).
+/// OpenAI, Kimi, and MiniMax have no native document reading.
+/// Unknown models default to `None`.
+pub fn model_supports_documents(model_id: &str) -> DocumentSupport {
+    let bare = strip_provider_prefix(model_id);
+    if get_claude_model(bare).is_some() {
+        return DocumentSupport::Full;
+    }
+    if get_gemini_model(bare).is_some() {
+        return DocumentSupport::PdfOnly;
+    }
+    // OpenAI, Kimi, MiniMax: no native document support.
+    DocumentSupport::None
+}
+
 /// Get the context window size (in tokens) for a model.
 ///
 /// Looks up the provider-specific model registry (authoritative source of truth).
@@ -502,6 +531,72 @@ mod tests {
     fn context_window_kimi() {
         assert_eq!(model_context_window(KIMI_K2_5), 262_144);
         assert_eq!(model_context_window(MOONSHOT_V1_8K), 8_192);
+    }
+
+    // ── model_supports_documents ─────────────────────────────────────────
+
+    #[test]
+    fn claude_models_full_document_support() {
+        assert_eq!(
+            model_supports_documents(CLAUDE_OPUS_4_6),
+            DocumentSupport::Full
+        );
+        assert_eq!(
+            model_supports_documents(CLAUDE_HAIKU_4_5),
+            DocumentSupport::Full
+        );
+    }
+
+    #[test]
+    fn gemini_models_pdf_only() {
+        assert_eq!(
+            model_supports_documents(GEMINI_2_5_FLASH),
+            DocumentSupport::PdfOnly
+        );
+    }
+
+    #[test]
+    fn openai_models_no_document_support() {
+        assert_eq!(
+            model_supports_documents(GPT_5_3_CODEX),
+            DocumentSupport::None
+        );
+    }
+
+    #[test]
+    fn kimi_models_no_document_support() {
+        assert_eq!(
+            model_supports_documents(KIMI_K2_5),
+            DocumentSupport::None
+        );
+    }
+
+    #[test]
+    fn minimax_models_no_document_support() {
+        assert_eq!(
+            model_supports_documents(MINIMAX_M2_5),
+            DocumentSupport::None
+        );
+    }
+
+    #[test]
+    fn unknown_model_documents_defaults_to_none() {
+        assert_eq!(
+            model_supports_documents("unknown-model"),
+            DocumentSupport::None
+        );
+    }
+
+    #[test]
+    fn prefixed_model_document_support() {
+        assert_eq!(
+            model_supports_documents("anthropic/claude-opus-4-6"),
+            DocumentSupport::Full
+        );
+        assert_eq!(
+            model_supports_documents("google/gemini-2.5-flash"),
+            DocumentSupport::PdfOnly
+        );
     }
 
     // ── all_model_ids ────────────────────────────────────────────────────

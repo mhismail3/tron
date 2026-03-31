@@ -80,6 +80,9 @@ pub struct KimiModelInfo {
     pub is_legacy: bool,
 }
 
+// Note: Kimi K2.5 supports vision (supports_images: true), while older
+// models (K2-0905, Moonshot series) do not. The iOS AttachmentCapability
+// system checks each model's supports_images flag individually.
 static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     let _ = m.insert(
@@ -295,6 +298,7 @@ impl KimiModelInfo {
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
+            "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "tier": if self.is_legacy { "legacy" } else { "flagship" },

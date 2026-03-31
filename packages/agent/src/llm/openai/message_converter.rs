@@ -219,11 +219,17 @@ fn convert_user_message(content: &UserMessageContent, input: &mut Vec<ResponsesI
                     UserContent::Document {
                         mime_type,
                         file_name,
+                        extracted_text,
                         ..
                     } => {
                         let name = file_name.as_deref().unwrap_or("unnamed");
-                        MessageContent::InputText {
-                            text: format!("[Document: {name} ({mime_type})]"),
+                        match extracted_text {
+                            Some(text) => MessageContent::InputText {
+                                text: format!("--- Document: {name} ---\n{text}"),
+                            },
+                            None => MessageContent::InputText {
+                                text: format!("[Document: {name} ({mime_type}) \u{2014} content not available for this model]"),
+                            },
                         }
                     }
                 })
@@ -440,6 +446,7 @@ mod tests {
                 data: "pdfdata".into(),
                 mime_type: "application/pdf".into(),
                 file_name: Some("doc.pdf".into()),
+                extracted_text: None,
             }]),
             timestamp: None,
         }];
@@ -448,7 +455,8 @@ mod tests {
         if let ResponsesInputItem::Message { content, .. } = &result[0] {
             match &content[0] {
                 MessageContent::InputText { text } => {
-                    assert_eq!(text, "[Document: doc.pdf (application/pdf)]");
+                    assert!(text.contains("doc.pdf"));
+                    assert!(text.contains("content not available"));
                 }
                 _ => panic!("expected InputText"),
             }

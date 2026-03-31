@@ -576,6 +576,7 @@ mod tests {
             data: "a".repeat(100),
             mime_type: "application/pdf".into(),
             file_name: None,
+            extracted_text: None,
         };
         assert_eq!(estimate_user_content_chars(&block), 100);
     }

@@ -30,6 +30,10 @@ struct Attachment: Identifiable, Equatable {
     let mimeType: String
     let fileName: String?
     let originalSize: Int
+    /// Whether the image was converted from its original format (e.g., GIF → JPEG).
+    let wasConverted: Bool
+    /// The original MIME type before conversion, if conversion occurred.
+    let originalMimeType: String?
 
     // MARK: - Computed Properties
 
@@ -76,7 +80,9 @@ struct Attachment: Identifiable, Equatable {
         data: Data,
         mimeType: String,
         fileName: String?,
-        originalSize: Int? = nil
+        originalSize: Int? = nil,
+        wasConverted: Bool = false,
+        originalMimeType: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -84,6 +90,8 @@ struct Attachment: Identifiable, Equatable {
         self.mimeType = mimeType
         self.fileName = fileName
         self.originalSize = originalSize ?? data.count
+        self.wasConverted = wasConverted
+        self.originalMimeType = originalMimeType
     }
 
     /// Convenience initializer that auto-detects type from MIME
@@ -91,18 +99,39 @@ struct Attachment: Identifiable, Equatable {
         data: Data,
         mimeType: String,
         fileName: String? = nil,
-        originalSize: Int? = nil
+        originalSize: Int? = nil,
+        wasConverted: Bool = false,
+        originalMimeType: String? = nil
     ) -> Attachment {
         return Attachment(
             type: AttachmentType.from(mimeType: mimeType),
             data: data,
             mimeType: mimeType,
             fileName: fileName,
-            originalSize: originalSize
+            originalSize: originalSize,
+            wasConverted: wasConverted,
+            originalMimeType: originalMimeType
         )
     }
 
     // MARK: - Equatable
+
+    /// Whether this attachment is compatible with the given capability.
+    func isCompatible(with capability: AttachmentCapability) -> Bool {
+        switch type {
+        case .image: return capability.supportsImages
+        case .pdf: return capability.supportsPdfContent
+        case .document: return true // text files always supported via extraction
+        }
+    }
+
+    /// Subtle warning text when content won't be fully readable.
+    func warningText(for capability: AttachmentCapability) -> String? {
+        if type == .pdf && !capability.supportsPdfContent {
+            return "PDF content not readable by this model"
+        }
+        return nil
+    }
 
     static func == (lhs: Attachment, rhs: Attachment) -> Bool {
         return lhs.id == rhs.id &&

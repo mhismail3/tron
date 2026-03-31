@@ -42,6 +42,15 @@ final class InputBarState {
         selectedSpells = []
     }
 
+    /// Remove attachments incompatible with the given capability.
+    /// Returns count of removed attachments.
+    @discardableResult
+    func removeIncompatibleAttachments(for capability: AttachmentCapability) -> Int {
+        let before = attachments.count
+        attachments.removeAll { !$0.isCompatible(with: capability) }
+        return before - attachments.count
+    }
+
     // MARK: - Computed Properties
 
     /// Whether there is any content to send
@@ -92,6 +101,16 @@ struct InputBarConfig {
     // MARK: - Misc
     let animationCoordinator: AnimationCoordinator?
     let readOnly: Bool
+
+    // MARK: - Attachment Limits
+    /// Provider-specific image processing limits derived from current model.
+    var providerImageLimits: ProviderImageLimits {
+        currentModelInfo?.providerImageLimits ?? .default
+    }
+    /// Attachment capability derived from current model.
+    var attachmentCapability: AttachmentCapability {
+        AttachmentCapability.from(model: currentModelInfo)
+    }
 
     // MARK: - Message Queue
     /// Queued messages waiting to be sent when the agent becomes ready.

@@ -80,6 +80,13 @@ pub enum UserContent {
         /// Optional file name.
         #[serde(rename = "fileName", skip_serializing_if = "Option::is_none")]
         file_name: Option<String>,
+        /// Extracted text content for providers that can't read binary documents.
+        #[serde(
+            rename = "extractedText",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        extracted_text: Option<String>,
     },
 }
 
@@ -402,6 +409,7 @@ mod tests {
             data: "docdata".into(),
             mime_type: "application/pdf".into(),
             file_name: None,
+            extracted_text: None,
         };
         assert!(!uc.is_text());
     }

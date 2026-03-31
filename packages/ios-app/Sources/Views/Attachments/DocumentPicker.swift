@@ -4,22 +4,33 @@ import UniformTypeIdentifiers
 /// UIViewControllerRepresentable wrapper for UIDocumentPickerViewController
 struct DocumentPicker: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
+    let capability: AttachmentCapability
     let onDocumentPicked: (URL, String, String?) -> Void  // URL, mimeType, fileName
+    let onSizeExceeded: ((Int, Int) -> Void)?  // actualSize, maxSize
 
-    /// Supported document types
-    static let supportedTypes: [UTType] = [
-        .pdf,
-        .image,
-        .png,
-        .jpeg,
-        .gif,
-        .webP,
-        .plainText,
-        .json
-    ]
+    init(
+        capability: AttachmentCapability = .default,
+        onDocumentPicked: @escaping (URL, String, String?) -> Void,
+        onSizeExceeded: ((Int, Int) -> Void)? = nil
+    ) {
+        self.capability = capability
+        self.onDocumentPicked = onDocumentPicked
+        self.onSizeExceeded = onSizeExceeded
+    }
+
+    /// Supported document types filtered by provider capability.
+    static func supportedTypes(for capability: AttachmentCapability) -> [UTType] {
+        var types: [UTType] = [.plainText, .json]  // always supported via text extraction
+        if capability.supportsPdfContent { types.append(.pdf) }
+        if capability.supportsImages {
+            types += [.image, .png, .jpeg, .gif, .webP]
+        }
+        return types
+    }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: Self.supportedTypes)
+        let types = Self.supportedTypes(for: capability)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
         return picker
@@ -52,10 +63,18 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
             defer { url.stopAccessingSecurityScopedResource() }
 
-            // Determine MIME type from UTI
+            // Check file size before loading into memory
             let mimeType = mimeTypeForURL(url)
-            let fileName = url.lastPathComponent
+            let isImage = mimeType.hasPrefix("image/")
+            let maxBytes = isImage ? parent.capability.maxImageBytes : parent.capability.maxDocumentBytes
+            if maxBytes > 0, let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let fileSize = attrs[.size] as? Int, fileSize > maxBytes {
+                parent.onSizeExceeded?(fileSize, maxBytes)
+                parent.dismiss()
+                return
+            }
 
+            let fileName = url.lastPathComponent
             parent.onDocumentPicked(url, mimeType, fileName)
             parent.dismiss()
         }

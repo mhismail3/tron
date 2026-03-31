@@ -20,6 +20,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let maxOutputTokens: Int?
     let supportsThinking: Bool?
     let supportsImages: Bool?
+    /// Whether this model supports document inputs (PDFs, etc.)
+    let supportsDocuments: Bool?
     let tier: String?
     let isLegacy: Bool?
     /// Whether this model is deprecated and should not be selectable
@@ -58,7 +60,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, provider, contextWindow, maxOutputTokens
-        case supportsThinking, supportsImages, tier, isLegacy
+        case supportsThinking, supportsImages, supportsDocuments, tier, isLegacy
         case isDeprecated, deprecationDate
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case thinkingLevel, supportedThinkingLevels
@@ -76,6 +78,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         maxOutputTokens: Int? = nil,
         supportsThinking: Bool? = nil,
         supportsImages: Bool? = nil,
+        supportsDocuments: Bool? = nil,
         tier: String? = nil,
         isLegacy: Bool? = nil,
         isDeprecated: Bool? = nil,
@@ -101,6 +104,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.maxOutputTokens = maxOutputTokens
         self.supportsThinking = supportsThinking
         self.supportsImages = supportsImages
+        self.supportsDocuments = supportsDocuments
         self.tier = tier
         self.isLegacy = isLegacy
         self.isDeprecated = isDeprecated
@@ -214,6 +218,15 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Gemini tier (pro, flash, flash-lite) — uses server-provided tier field
     var geminiTier: String? {
         isGemini ? tier : nil
+    }
+
+    /// Provider-specific image processing limits.
+    var providerImageLimits: ProviderImageLimits {
+        if isAnthropic { return .anthropic }
+        if isCodex { return .openai }
+        if isGemini { return .gemini }
+        if isKimi { return .kimi }
+        return .default
     }
 }
 

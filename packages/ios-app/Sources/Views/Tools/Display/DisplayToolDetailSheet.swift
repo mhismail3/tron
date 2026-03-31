@@ -38,6 +38,10 @@ struct DisplayToolDetailSheet: View {
         }
     }
 
+    private var conversionNote: String? {
+        data.details?["conversionNote"]?.value as? String
+    }
+
     private var streamId: String? {
         if let s = data.details?["streamId"]?.value as? String { return s }
         return ToolArgumentParser.string("streamId", from: data.arguments)
@@ -111,7 +115,14 @@ struct DisplayToolDetailSheet: View {
     private var imageSection: some View {
         if let blobId = imageBlobId {
             ToolDetailSection(title: "Image", tint: tint) {
-                BlobImageView(blobId: blobId)
+                VStack(spacing: 4) {
+                    BlobImageView(blobId: blobId)
+                    if let note = conversionNote {
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         } else {
             ToolEmptyState(title: "Image", icon: "photo", message: "No image data available", accent: .tronIndigo, tint: tint)

@@ -244,6 +244,7 @@ impl MiniMaxModelInfo {
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
+            "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "tier": "flagship",

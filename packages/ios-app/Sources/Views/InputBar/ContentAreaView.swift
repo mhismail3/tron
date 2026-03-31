@@ -8,6 +8,7 @@ struct ContentAreaView: View {
     let selectedSkills: [Skill]
     let selectedSpells: [Skill]
     let attachments: [Attachment]
+    let attachmentCapability: AttachmentCapability
     let onSkillRemove: ((Skill) -> Void)?
     let onSkillDetailTap: ((Skill) -> Void)?
     let onSpellRemove: ((Skill) -> Void)?
@@ -52,7 +53,7 @@ struct ContentAreaView: View {
 
             // Attachments after (will wrap to rows above skills/spells)
             ForEach(attachments) { attachment in
-                AttachmentBubble(attachment: attachment) {
+                AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
                     onRemoveAttachment(attachment)
                 }
                 .transition(.asymmetric(
@@ -98,13 +99,14 @@ struct SkillChipsRowInline: View {
 /// Attachments displayed inline in a horizontal scroll view
 struct AttachmentsRowInline: View {
     let attachments: [Attachment]
+    let attachmentCapability: AttachmentCapability
     let onRemove: (Attachment) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachments) { attachment in
-                    AttachmentBubble(attachment: attachment) {
+                    AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
                         onRemove(attachment)
                     }
                 }
@@ -119,13 +121,14 @@ struct AttachmentsRowInline: View {
 
 struct AttachmentsRow: View {
     let attachments: [Attachment]
+    let attachmentCapability: AttachmentCapability
     let onRemove: (Attachment) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachments) { attachment in
-                    AttachmentBubble(attachment: attachment) {
+                    AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
                         onRemove(attachment)
                     }
                 }

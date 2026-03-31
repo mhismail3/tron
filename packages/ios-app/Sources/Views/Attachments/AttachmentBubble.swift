@@ -4,6 +4,7 @@ import SwiftUI
 /// Sized to fit 2 attachments per row
 struct AttachmentBubble: View {
     let attachment: Attachment
+    let capability: AttachmentCapability
     let onRemove: () -> Void
 
     var body: some View {
@@ -18,9 +19,16 @@ struct AttachmentBubble: View {
                     .lineLimit(1)
                     .foregroundStyle(.primary)
 
-                Text(attachment.formattedSize)
-                    .font(TronTypography.pill)
-                    .foregroundStyle(.secondary)
+                if let warning = attachment.warningText(for: capability) {
+                    Text(warning)
+                        .font(TronTypography.pill)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                } else {
+                    Text(attachment.formattedSize)
+                        .font(TronTypography.pill)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: 60, alignment: .leading)
 

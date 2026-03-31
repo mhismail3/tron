@@ -32,6 +32,74 @@ const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 
 const SUPPORTED_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff"];
 
+/// Result of format conversion for iOS display.
+struct ConvertedImage {
+    data: Vec<u8>,
+    mime: String,
+    conversion_note: Option<String>,
+    original_format: Option<String>,
+}
+
+/// Convert formats that iOS `UIImage` cannot render to PNG.
+fn convert_for_ios(data: Vec<u8>, mime: &str) -> Result<ConvertedImage, ToolError> {
+    match mime {
+        "image/svg+xml" => {
+            let png_data = rasterize_svg(&data)?;
+            Ok(ConvertedImage {
+                data: png_data,
+                mime: "image/png".into(),
+                conversion_note: Some("Converted from SVG for display".into()),
+                original_format: Some("image/svg+xml".into()),
+            })
+        }
+        "image/bmp" | "image/tiff" => {
+            let img = image::load_from_memory(&data).map_err(|e| ToolError::Validation {
+                message: format!("Failed to decode {mime}: {e}"),
+            })?;
+            let mut png_data = Vec::new();
+            img.write_to(
+                &mut std::io::Cursor::new(&mut png_data),
+                image::ImageFormat::Png,
+            )
+            .map_err(|e| ToolError::Validation {
+                message: format!("Failed to encode PNG: {e}"),
+            })?;
+            let label = if mime == "image/bmp" { "BMP" } else { "TIFF" };
+            Ok(ConvertedImage {
+                data: png_data,
+                mime: "image/png".into(),
+                conversion_note: Some(format!("Converted from {label} for display")),
+                original_format: Some(mime.into()),
+            })
+        }
+        _ => Ok(ConvertedImage {
+            data,
+            mime: mime.into(),
+            conversion_note: None,
+            original_format: None,
+        }),
+    }
+}
+
+/// Rasterize SVG data to PNG.
+fn rasterize_svg(svg_data: &[u8]) -> Result<Vec<u8>, ToolError> {
+    let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
+        .map_err(|e| ToolError::Validation {
+            message: format!("Invalid SVG: {e}"),
+        })?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| ToolError::Validation {
+            message: "Failed to create pixmap for SVG".into(),
+        })?;
+    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+    pixmap
+        .encode_png()
+        .map_err(|e| ToolError::Validation {
+            message: format!("Failed to encode SVG as PNG: {e}"),
+        })
+}
+
 /// Map a file extension to its MIME type.
 fn mime_for_ext(ext: &str) -> &'static str {
     match ext {
@@ -215,8 +283,23 @@ impl DisplayTool {
             ));
         };
 
-        let size = image_bytes.len();
-        let blob_id = self.store_blob(&image_bytes, &mime).await?;
+        // Convert formats iOS can't render (SVG, BMP, TIFF) to PNG.
+        let converted = convert_for_ios(image_bytes, &mime)?;
+
+        let size = converted.data.len();
+        let blob_id = self.store_blob(&converted.data, &converted.mime).await?;
+
+        let mut details = json!({
+            "blobId": blob_id,
+            "mimeType": converted.mime,
+            "sizeBytes": size,
+        });
+        if let Some(note) = &converted.conversion_note {
+            details["conversionNote"] = json!(note);
+        }
+        if let Some(original) = &converted.original_format {
+            details["originalFormat"] = json!(original);
+        }
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![
@@ -224,11 +307,7 @@ impl DisplayTool {
                     "Displaying image ({size} bytes)"
                 )),
             ]),
-            details: Some(json!({
-                "blobId": blob_id,
-                "mimeType": mime,
-                "sizeBytes": size,
-            })),
+            details: Some(details),
             is_error: None,
             stop_turn: None,
         })
@@ -249,8 +328,16 @@ impl DisplayTool {
         let mut images_data: Vec<Value> = Vec::with_capacity(paths.len());
         for path in &paths {
             let (bytes, mime) = self.read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
-            let blob_id = self.store_blob(&bytes, mime).await?;
-            images_data.push(json!({"blobId": blob_id, "mimeType": mime, "path": path}));
+            let converted = convert_for_ios(bytes, mime)?;
+            let blob_id = self.store_blob(&converted.data, &converted.mime).await?;
+            let mut entry = json!({"blobId": blob_id, "mimeType": converted.mime, "path": path});
+            if let Some(note) = &converted.conversion_note {
+                entry["conversionNote"] = json!(note);
+            }
+            if let Some(original) = &converted.original_format {
+                entry["originalFormat"] = json!(original);
+            }
+            images_data.push(entry);
         }
 
         Ok(TronToolResult {

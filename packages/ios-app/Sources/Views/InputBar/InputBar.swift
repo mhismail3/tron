@@ -146,6 +146,7 @@ struct InputBar: View {
                         hasSkillsAvailable: hasSkillsAvailable,
                         buttonSize: actionButtonSize,
                         skillStore: config.skillStore,
+                        attachmentCapability: config.attachmentCapability,
                         showCamera: $showCamera,
                         showingImagePicker: $showingImagePicker,
                         showFilePicker: $showFilePicker,
@@ -263,13 +264,21 @@ struct InputBar: View {
         .sheet(isPresented: $showCamera) {
             CameraCaptureSheet { capturedImage in
                 Task {
-                    if let result = await ImageCompressor.compress(capturedImage) {
+                    // Camera always produces JPEG
+                    let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
+                    let limits = config.providerImageLimits
+                    if let result = await ImageProcessor.process(
+                        originalData: jpegData,
+                        mimeType: "image/jpeg",
+                        limits: limits
+                    ) {
                         let attachment = Attachment(
                             type: .image,
                             data: result.data,
                             mimeType: result.mimeType,
                             fileName: nil,
-                            originalSize: Int(capturedImage.jpegData(compressionQuality: 1.0)?.count ?? 0)
+                            originalSize: jpegData.count,
+                            wasConverted: result.wasConverted
                         )
                         await MainActor.run {
                             actions.onAddAttachment(attachment)
@@ -279,21 +288,29 @@ struct InputBar: View {
             }
         }
         .sheet(isPresented: $showFilePicker) {
-            DocumentPicker { url, mimeType, fileName in
-                do {
-                    let data = try Data(contentsOf: url)
-                    let type = AttachmentType.from(mimeType: mimeType)
-                    let attachment = Attachment(
-                        type: type,
-                        data: data,
-                        mimeType: mimeType,
-                        fileName: fileName
-                    )
-                    actions.onAddAttachment(attachment)
-                } catch {
-                    logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
+            DocumentPicker(
+                capability: config.attachmentCapability,
+                onDocumentPicked: { url, mimeType, fileName in
+                    do {
+                        let data = try Data(contentsOf: url)
+                        let type = AttachmentType.from(mimeType: mimeType)
+                        let attachment = Attachment(
+                            type: type,
+                            data: data,
+                            mimeType: mimeType,
+                            fileName: fileName
+                        )
+                        actions.onAddAttachment(attachment)
+                    } catch {
+                        logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
+                    }
+                },
+                onSizeExceeded: { actualSize, maxSize in
+                    let actualMB = actualSize / (1024 * 1024)
+                    let maxMB = maxSize / (1024 * 1024)
+                    logger.warning("File too large: \(actualMB)MB exceeds \(maxMB)MB limit", category: .chat)
                 }
-            }
+            )
         }
         .photosPicker(
             isPresented: $showingImagePicker,
@@ -342,6 +359,7 @@ struct InputBar: View {
                     selectedSkills: state.selectedSkills,
                     selectedSpells: state.selectedSpells,
                     attachments: state.attachments,
+                    attachmentCapability: config.attachmentCapability,
                     onSkillRemove: { skill in
                         removeSelectedMention(skill, style: .skill)
                     },

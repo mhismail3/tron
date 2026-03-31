@@ -44,6 +44,22 @@ impl MethodHandler for PromptHandler {
         let reasoning_level = opt_string(params.as_ref(), "reasoningLevel");
         let images = opt_array(params.as_ref(), "images").cloned();
         let attachments = opt_array(params.as_ref(), "attachments").cloned();
+
+        // Validate attachment sizes before processing.
+        if let Some(ref imgs) = images {
+            for img in imgs {
+                if let Some(data) = img.get("data").and_then(|v| v.as_str()) {
+                    crate::server::rpc::validation::validate_attachment_size(data)?;
+                }
+            }
+        }
+        if let Some(ref atts) = attachments {
+            for att in atts {
+                if let Some(data) = att.get("data").and_then(|v| v.as_str()) {
+                    crate::server::rpc::validation::validate_attachment_size(data)?;
+                }
+            }
+        }
         let raw_skills_json = opt_array(params.as_ref(), "skills").cloned();
         let raw_spells_json = opt_array(params.as_ref(), "spells").cloned();
         let skills = {
