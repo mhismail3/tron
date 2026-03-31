@@ -258,13 +258,26 @@ private struct SectionFillModifier: ViewModifier {
         }
     }
 
+    private var glassOpacity: Double {
+        subtle ? 0.12 : 0.2
+    }
+
     func body(content: Content) -> some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(color.opacity(opacity))
-            }
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(iOS 26.0, *) {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(
+                    .regular.tint(color.opacity(glassOpacity)).interactive(),
+                    in: shape
+                )
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    shape.fill(color.opacity(opacity))
+                }
+        }
     }
 }
 

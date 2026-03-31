@@ -21,75 +21,81 @@ struct ConnectionSettingsPage: View {
                 VStack(spacing: 16) {
                     // Presets
                     if !settingsState.connectionPresets.isEmpty {
-                        Text("Presets")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.tronTextSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Presets")
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronTextSecondary)
+                                .padding(.bottom, 8)
 
-                        ForEach(settingsState.connectionPresets) { preset in
-                            presetRow(preset)
+                            VStack(spacing: 8) {
+                                ForEach(settingsState.connectionPresets) { preset in
+                                    presetRow(preset)
+                                }
+                            }
                         }
                     }
 
                     // Server
-                    Text("Server")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Server")
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .foregroundStyle(.tronTextSecondary)
+                            .padding(.bottom, 8)
 
-                    VStack(spacing: 0) {
-                        HStack {
-                            Image(systemName: "globe")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronEmerald)
-                                .frame(width: 18)
-                            Text("Host")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            Spacer()
-                            TextField("localhost", text: $serverHost)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody))
-                                .multilineTextAlignment(.trailing)
-                                .textContentType(.URL)
-                                .autocapitalization(.none)
-                                .autocorrectionDisabled()
-                                .focused($focusedField, equals: .host)
-                                .onSubmit { onHostSubmit() }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 14)
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedField = .host }
+                        VStack(spacing: 0) {
+                            HStack {
+                                Image(systemName: "globe")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                                    .frame(width: 18)
+                                Text("Host")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                Spacer()
+                                TextField("localhost", text: $serverHost)
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                    .multilineTextAlignment(.trailing)
+                                    .textContentType(.URL)
+                                    .autocapitalization(.none)
+                                    .autocorrectionDisabled()
+                                    .focused($focusedField, equals: .host)
+                                    .onSubmit { onHostSubmit() }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                            .onTapGesture { focusedField = .host }
 
-                        Divider()
-                            .padding(.leading, 38)
+                            Divider()
+                                .padding(.leading, 38)
 
-                        HStack {
-                            Image(systemName: "number")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronEmerald)
-                                .frame(width: 18)
-                            Text("Port")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            Spacer()
-                            TextField("9847", text: $serverPort)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody))
-                                .multilineTextAlignment(.trailing)
-                                .keyboardType(.numberPad)
-                                .focused($focusedField, equals: .port)
-                                .frame(width: 100)
-                                .onChange(of: serverPort) { _, newValue in
-                                    if !newValue.isEmpty {
-                                        onPortChange(newValue)
+                            HStack {
+                                Image(systemName: "number")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                                    .frame(width: 18)
+                                Text("Port")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                Spacer()
+                                TextField("9847", text: $serverPort)
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                    .multilineTextAlignment(.trailing)
+                                    .keyboardType(.numberPad)
+                                    .focused($focusedField, equals: .port)
+                                    .frame(width: 100)
+                                    .onChange(of: serverPort) { _, newValue in
+                                        if !newValue.isEmpty {
+                                            onPortChange(newValue)
+                                        }
                                     }
-                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                            .onTapGesture { focusedField = .port }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 14)
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedField = .port }
+                        .sectionFill(.tronEmerald)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                    .sectionFill(.tronEmerald)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -139,7 +145,7 @@ struct ConnectionSettingsPage: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronEmerald.opacity(0.6))
         }
-        .padding(12)
+        .padding(10)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -147,12 +153,6 @@ struct ConnectionSettingsPage: View {
             }
         }
         .sectionFill(.tronEmerald)
-        .overlay {
-            if selected {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.tronEmerald.opacity(0.5), lineWidth: 1)
-            }
-        }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
