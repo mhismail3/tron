@@ -156,7 +156,8 @@ extension ChatViewModel {
             guard let self, !Task.isCancelled else { return }
             if self.agentPhase == .postProcessing {
                 self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
-                self.transitionToIdle()
+                self.agentPhase = .idle
+                self.drainMessageQueue()
             }
         }
     }
@@ -164,26 +165,9 @@ extension ChatViewModel {
     func handleAgentReady() {
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
-        transitionToIdle()
-        logInfo("Agent ready - post-processing complete")
-    }
-
-    // MARK: - Idle Transition
-
-    /// Centralized idle transition. Drains queued messages, then auto-injects
-    /// any subagent results that arrived during the active turn.
-    private func transitionToIdle() {
         agentPhase = .idle
+        logInfo("Agent ready - post-processing complete")
         drainMessageQueue()
-        injectNextQueuedSubagentResult()
-    }
-
-    /// Send the next queued subagent result to the agent.
-    /// Only injects one at a time — subsequent results inject when
-    /// the resulting turn completes and triggers another transitionToIdle().
-    private func injectNextQueuedSubagentResult() {
-        guard let subagent = subagentState.popNextQueued() else { return }
-        sendSubagentResults(subagent)
     }
 
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
@@ -194,7 +178,6 @@ extension ChatViewModel {
         if agentPhase != .idle {
             agentPhase = .idle
         }
-        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -292,7 +275,6 @@ extension ChatViewModel {
         streamingManager.reset()
 
         agentPhase = .idle
-        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -338,7 +320,6 @@ extension ChatViewModel {
         streamingManager.reset()
 
         agentPhase = .idle
-        subagentState.dismissAllQueued()
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
@@ -524,10 +505,10 @@ extension ChatViewModel {
             return
         }
 
-        // Agent is active — queue for auto-injection when turn ends
+        // Agent is active — backend delivers results via system prompt injection,
+        // so no iOS-side action needed. Just skip the notification.
         if agentPhase != .idle {
-            subagentState.markQueued(subagentSessionId: result.subagentSessionId)
-            logger.info("Subagent results queued for auto-inject: \(result.subagentSessionId)", category: .chat)
+            logger.info("Subagent completed during active turn, backend handles delivery: \(result.subagentSessionId)", category: .chat)
             return
         }
 

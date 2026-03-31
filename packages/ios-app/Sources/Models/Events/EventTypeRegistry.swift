@@ -83,6 +83,7 @@ enum PersistedEventType: String, CaseIterable {
     case subagentSpawned = "subagent.spawned"
     case subagentCompleted = "subagent.completed"
     case subagentFailed = "subagent.failed"
+    case subagentResultsConsumed = "subagent.results_consumed"
 
     // Turn events
     case turnFailed = "turn.failed"
@@ -198,6 +199,7 @@ enum PersistedEventType: String, CaseIterable {
         case .subagentSpawned: return "Subagent spawned"
         case .subagentCompleted: return "Subagent completed"
         case .subagentFailed: return "Subagent failed"
+        case .subagentResultsConsumed: return "Subagent results consumed"
         case .turnFailed: return "Turn failed"
         case .memoryRetained: return "Memory retained"
         }

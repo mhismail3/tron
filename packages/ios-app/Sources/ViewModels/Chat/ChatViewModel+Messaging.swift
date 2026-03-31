@@ -83,8 +83,6 @@ extension ChatViewModel: MessagingContext {
             }
             logger.info("Dismissed \(pendingIds.count) pending subagent result(s) - user sent different message", category: .chat)
         }
-
-        subagentState.dismissAllQueued()
     }
 }
 

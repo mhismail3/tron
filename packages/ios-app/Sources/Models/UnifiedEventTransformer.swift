@@ -59,9 +59,13 @@ struct UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = EventSorter.sortBySequence(events)
 
-        // Build maps for tool calls and results
+        // Build maps for tool calls, results, and subagent notification filtering
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        // Collect consumed notification IDs from subagent.results_consumed events
+        var consumedSubagentEventIds: Set<String> = []
+        // Track the last turn_end sequence to filter stale notifications
+        var lastTurnEndSequence: Int = -1
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
                let payload = ToolCallPayload(from: event.payload) {
@@ -70,6 +74,17 @@ struct UnifiedEventTransformer {
             if event.type == PersistedEventType.toolResult.rawValue,
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
+            }
+            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
+               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
+                for id in ids {
+                    if let s = id as? String {
+                        consumedSubagentEventIds.insert(s)
+                    }
+                }
+            }
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                lastTurnEndSequence = max(lastTurnEndSequence, event.sequence)
             }
         }
 
@@ -82,6 +97,15 @@ struct UnifiedEventTransformer {
                event.type == PersistedEventType.toolResult.rawValue ||
                event.type == PersistedEventType.streamThinkingComplete.rawValue {
                 continue
+            }
+
+            // Skip subagent result notifications that were already delivered:
+            // 1. Explicitly consumed by the backend (subagent.results_consumed references this event)
+            // 2. Agent continued processing after the notification (results were available to it)
+            if event.type == PersistedEventType.notificationSubagentResult.rawValue {
+                if consumedSubagentEventIds.contains(event.id) || event.sequence < lastTurnEndSequence {
+                    continue
+                }
             }
 
             // message.assistant: process content blocks in order (preserves interleaving)
@@ -240,10 +264,12 @@ extension UnifiedEventTransformer {
         // would incorrectly interleave parent and forked events
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // PASS 1: Collect deleted event IDs, config state, and tool maps
+        // PASS 1: Collect deleted event IDs, config state, tool maps, and subagent consumption info
         var deletedEventIds = Set<String>()
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        var consumedSubagentEventIds: Set<String> = []
+        var lastTurnEndSequence: Int = -1
 
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
@@ -262,11 +288,25 @@ extension UnifiedEventTransformer {
                 let payload = ReasoningLevelPayload(from: event.payload)
                 state.reasoningLevel = payload.newLevel
             }
+            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
+               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
+                for id in ids {
+                    if let s = id as? String { consumedSubagentEventIds.insert(s) }
+                }
+            }
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                lastTurnEndSequence = max(lastTurnEndSequence, event.sequence)
+            }
         }
 
-        // PASS 2: Build messages, skipping deleted ones
+        // PASS 2: Build messages, skipping deleted and consumed events
         for event in sorted {
             if deletedEventIds.contains(event.id) {
+                continue
+            }
+            // Skip subagent result notifications already delivered by the backend
+            if event.type == PersistedEventType.notificationSubagentResult.rawValue,
+               consumedSubagentEventIds.contains(event.id) || event.sequence < lastTurnEndSequence {
                 continue
             }
             guard let eventType = PersistedEventType(rawValue: event.type) else { continue }

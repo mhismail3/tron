@@ -36,11 +36,13 @@ enum SubagentStatus: String, Codable, Equatable {
 
 /// Tracks how completed subagent results are delivered to the parent agent.
 /// Used for non-blocking subagents only (blocking subagents deliver via tool result).
+///
+/// When a non-blocking subagent completes during an active turn, the backend
+/// delivers results via system prompt injection — no iOS-side action needed.
+/// This status only tracks the notification flow for results arriving while idle.
 enum SubagentResultDeliveryStatus: String, Codable, Equatable {
-    /// Blocking subagent — delivery handled via tool result, not this status
+    /// Blocking subagent or results delivered by backend — no user action needed
     case notApplicable
-    /// Completed during active turn, will auto-inject when agent becomes idle
-    case queued
     /// Completed while parent idle, notification shown, awaiting user action
     case pending
     /// Results delivered to agent

@@ -162,7 +162,6 @@ final class SubagentStateTests: XCTestCase {
 
     func testAllMarkMethods_syncSelectedSubagent() {
         for (method, expected): ((String) -> Void, SubagentResultDeliveryStatus) in [
-            (sut.markQueued, .queued),
             (sut.markResultsPending, .pending),
             (sut.markResultsSent, .sent),
             (sut.markResultsDismissed, .dismissed)
@@ -468,99 +467,4 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertLessThanOrEqual(events.count, 500, "Events should be capped at maxEventsPerSubagent")
     }
 
-    // MARK: - 2: Queued Result Delivery
-
-    func testMarkQueued_setsResultDeliveryStatus() {
-        spawnDefault()
-        sut.markQueued(subagentSessionId: "sub-1")
-        XCTAssertEqual(sut.subagents["sub-1"]?.resultDeliveryStatus, .queued)
-    }
-
-    func testMarkQueued_syncsSelectedSubagent() {
-        spawnDefault()
-        sut.showDetails(for: "sub-1")
-        sut.markQueued(subagentSessionId: "sub-1")
-        XCTAssertEqual(sut.selectedSubagent?.resultDeliveryStatus, .queued)
-    }
-
-    func testPopNextQueued_returnsQueuedSubagent() {
-        spawnDefault()
-        sut.markQueued(subagentSessionId: "sub-1")
-
-        let result = sut.popNextQueued()
-        XCTAssertEqual(result?.subagentSessionId, "sub-1")
-    }
-
-    func testPopNextQueued_returnsNil_whenNoneQueued() {
-        spawnDefault()
-        XCTAssertNil(sut.popNextQueued())
-    }
-
-    func testPopNextQueued_doesNotReturnPendingOrSent() {
-        spawnDefault(toolCallId: "tc-1", sessionId: "sub-1")
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2")
-        sut.markResultsPending(subagentSessionId: "sub-1")
-        sut.markResultsSent(subagentSessionId: "sub-2")
-
-        XCTAssertNil(sut.popNextQueued())
-    }
-
-    func testHasQueuedResults_trueWhenQueued() {
-        spawnDefault()
-        sut.markQueued(subagentSessionId: "sub-1")
-        XCTAssertTrue(sut.hasQueuedResults)
-    }
-
-    func testHasQueuedResults_falseWhenEmpty() {
-        XCTAssertFalse(sut.hasQueuedResults)
-    }
-
-    func testHasQueuedResults_falseWhenOnlyPending() {
-        spawnDefault()
-        sut.markResultsPending(subagentSessionId: "sub-1")
-        XCTAssertFalse(sut.hasQueuedResults)
-    }
-
-    func testDismissAllQueued_setsStatusToDismissed() {
-        spawnDefault(toolCallId: "tc-1", sessionId: "sub-1")
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2")
-        sut.markQueued(subagentSessionId: "sub-1")
-        sut.markQueued(subagentSessionId: "sub-2")
-
-        sut.dismissAllQueued()
-
-        XCTAssertEqual(sut.subagents["sub-1"]?.resultDeliveryStatus, .dismissed)
-        XCTAssertEqual(sut.subagents["sub-2"]?.resultDeliveryStatus, .dismissed)
-    }
-
-    func testDismissAllQueued_doesNotAffectPending() {
-        spawnDefault(toolCallId: "tc-1", sessionId: "sub-1")
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2")
-        sut.markResultsPending(subagentSessionId: "sub-1")
-        sut.markQueued(subagentSessionId: "sub-2")
-
-        sut.dismissAllQueued()
-
-        XCTAssertEqual(sut.subagents["sub-1"]?.resultDeliveryStatus, .pending)
-        XCTAssertEqual(sut.subagents["sub-2"]?.resultDeliveryStatus, .dismissed)
-    }
-
-    func testDismissAllQueued_noOp_whenNoneQueued() {
-        spawnDefault()
-        sut.markResultsPending(subagentSessionId: "sub-1")
-
-        sut.dismissAllQueued()
-
-        XCTAssertEqual(sut.subagents["sub-1"]?.resultDeliveryStatus, .pending)
-    }
-
-    func testClearAll_clearsQueuedState() {
-        spawnDefault()
-        sut.markQueued(subagentSessionId: "sub-1")
-
-        sut.clearAll()
-
-        XCTAssertFalse(sut.hasQueuedResults)
-        XCTAssertTrue(sut.subagents.isEmpty)
-    }
 }

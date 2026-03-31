@@ -683,20 +683,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         )
     }
 
-    func test_subagentResultAvailable_duringProcessing_queuesForAutoInject() {
-        // Given - agent is processing
-        spawnNonBlockingSubagent()
-        viewModel.agentPhase = .processing
-
-        // When
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
-
-        // Then
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .queued)
-    }
-
-    func test_subagentResultAvailable_duringProcessing_doesNotAppendNotification() {
-        // Given
+    func test_subagentResultAvailable_duringProcessing_skipsNotification() {
+        // Given - agent is processing (backend handles delivery via system prompt)
         spawnNonBlockingSubagent()
         viewModel.agentPhase = .processing
         let initialCount = viewModel.messages.count
@@ -704,20 +692,23 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // When
         viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
 
-        // Then - no notification message added
+        // Then - no notification, status unchanged (backend delivers results)
         XCTAssertEqual(viewModel.messages.count, initialCount)
+        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .notApplicable)
     }
 
-    func test_subagentResultAvailable_duringPostProcessing_queuesForAutoInject() {
+    func test_subagentResultAvailable_duringPostProcessing_skipsNotification() {
         // Given
         spawnNonBlockingSubagent()
         viewModel.agentPhase = .postProcessing
+        let initialCount = viewModel.messages.count
 
         // When
         viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
 
-        // Then
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .queued)
+        // Then - no notification, backend handles delivery
+        XCTAssertEqual(viewModel.messages.count, initialCount)
+        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .notApplicable)
     }
 
     func test_subagentResultAvailable_whenIdle_showsNotification() {
@@ -768,112 +759,16 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.count, initialCount)
     }
 
-    // MARK: - Auto-Inject on Turn End
+    // MARK: - Agent Ready (no auto-inject)
 
-    func test_agentReady_withQueuedResult_sendsResults() {
-        // Given - subagent result queued during processing
-        spawnNonBlockingSubagent()
-        viewModel.agentPhase = .processing
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .queued)
-
-        // When - agent finishes turn
-        viewModel.agentPhase = .postProcessing
-        viewModel.handleAgentReady()
-
-        // Then - results sent (status changes to .sent, agent starts processing)
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .sent)
-    }
-
-    func test_agentReady_withMultipleQueued_sendsOnlyFirst() {
-        // Given - two subagents queued
-        spawnNonBlockingSubagent(sessionId: "sub-1", task: "Task 1")
-        spawnNonBlockingSubagent(sessionId: "sub-2", task: "Task 2")
-        viewModel.agentPhase = .processing
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(sessionId: "sub-1"))
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(sessionId: "sub-2"))
-
-        // When
-        viewModel.agentPhase = .postProcessing
-        viewModel.handleAgentReady()
-
-        // Then - one sent, one still queued (will inject next turn)
-        let statuses = ["sub-1", "sub-2"].map { viewModel.subagentState.subagents[$0]?.resultDeliveryStatus }
-        let sentCount = statuses.filter { $0 == .sent }.count
-        let queuedCount = statuses.filter { $0 == .queued }.count
-        XCTAssertEqual(sentCount, 1)
-        XCTAssertEqual(queuedCount, 1)
-    }
-
-    func test_agentReady_withNoQueued_doesNotSend() {
-        // Given - no queued results
-        viewModel.agentPhase = .postProcessing
-        let initialCount = viewModel.messages.count
-
-        // When
-        viewModel.handleAgentReady()
-
-        // Then - no new messages (besides possible queue drain)
-        XCTAssertEqual(viewModel.agentPhase, .idle)
-        XCTAssertEqual(viewModel.messages.count, initialCount)
-    }
-
-    // MARK: - Cleanup Paths
-
-    func test_dismissPendingSubagentResults_alsoDismissesQueued() {
+    func test_agentReady_setsIdlePhase() {
         // Given
-        spawnNonBlockingSubagent(sessionId: "sub-1")
-        spawnNonBlockingSubagent(sessionId: "sub-2")
-        viewModel.subagentState.markQueued(subagentSessionId: "sub-1")
-        viewModel.subagentState.markResultsPending(subagentSessionId: "sub-2")
+        viewModel.agentPhase = .postProcessing
 
         // When
-        viewModel.dismissPendingSubagentResults()
-
-        // Then - both dismissed
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-1"]?.resultDeliveryStatus, .dismissed)
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-2"]?.resultDeliveryStatus, .dismissed)
-    }
-
-    func test_serverRestart_dismissesQueued() {
-        // Given
-        spawnNonBlockingSubagent()
-        viewModel.subagentState.markQueued(subagentSessionId: "sub-nb")
-        viewModel.agentPhase = .processing
-
-        // When
-        let result = ServerRestartingPlugin.Result(
-            reason: "update",
-            commit: "abc123",
-            restartExpectedMs: 5000
-        )
-        viewModel.handleServerRestarting(result)
+        viewModel.handleAgentReady()
 
         // Then
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .dismissed)
         XCTAssertEqual(viewModel.agentPhase, .idle)
-    }
-
-    func test_agentError_dismissesQueued() {
-        // Given
-        spawnNonBlockingSubagent()
-        viewModel.subagentState.markQueued(subagentSessionId: "sub-nb")
-        viewModel.agentPhase = .processing
-
-        // When
-        viewModel.handleProviderError(ErrorPlugin.Result(
-            code: "rate_limit",
-            message: "Rate limit exceeded",
-            provider: nil,
-            category: nil,
-            suggestion: nil,
-            retryable: false,
-            statusCode: nil,
-            errorType: nil,
-            model: nil
-        ))
-
-        // Then
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .dismissed)
     }
 }
