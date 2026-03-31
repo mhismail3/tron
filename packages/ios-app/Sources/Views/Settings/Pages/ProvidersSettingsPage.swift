@@ -69,10 +69,7 @@ struct ProvidersSettingsPage: View {
         .sheet(item: $oauthProvider) { provider in
             OAuthLoginSheet(provider: provider)
         }
-        .task { await loadAuthState() }
-        .onChange(of: dependencies.authVersion) {
-            Task { await loadAuthState() }
-        }
+        .task(id: dependencies.authVersion) { await loadAuthState() }
         .alert("Error", isPresented: .constant(error != nil)) {
             Button("OK") { error = nil }
         } message: {

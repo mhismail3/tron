@@ -5,7 +5,6 @@ struct MCPServersPage: View {
     @Environment(\.dependencies) var dependencies
 
     @State private var servers: [MCPServerStatus] = []
-    @State private var isLoading = false
     @State private var loadError: String?
     @State private var showAddSheet = false
     @State private var actionInProgress: String?
@@ -18,79 +17,63 @@ struct MCPServersPage: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if isLoading && servers.isEmpty {
-                    Section {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                                .tint(.tronEmerald)
-                            Spacer()
-                        }
-                        .listRowBackground(Color.clear)
-                    }
-                } else if let error = loadError, servers.isEmpty {
-                    Section {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                } else if servers.isEmpty {
-                    Section {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if servers.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "server.rack")
-                                .font(.title2)
+                                .font(.system(size: 32))
                                 .foregroundStyle(.tronTextMuted)
                             Text("No MCP servers configured")
-                                .font(TronTypography.subheadline)
+                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                                 .foregroundStyle(.tronTextMuted)
                             Text("Add an MCP server to extend the agent with external tools.")
-                                .font(TronTypography.caption2)
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .listRowBackground(Color.clear)
-                    }
-                } else {
-                    ForEach(servers) { server in
-                        Section {
-                            MCPServerRow(
+                        .padding(.vertical, 40)
+                    } else {
+                        HStack {
+                            Text("Servers")
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronTextSecondary)
+                            if !servers.isEmpty {
+                                Text("\(servers.count)")
+                                    .font(TronTypography.pillValue)
+                                    .countBadge(.tronEmerald)
+                            }
+                            Spacer()
+                        }
+
+                        ForEach(servers) { server in
+                            MCPServerCard(
                                 server: server,
                                 isExpanded: expandedServer == server.name,
                                 actionInProgress: actionInProgress,
+                                tools: toolsByServer[server.name],
+                                toolsLoading: toolsLoading == server.name,
+                                expandedTool: $expandedTool,
                                 onTap: { toggleExpansion(server) },
                                 onToggle: { toggleServer(server) },
                                 onRestart: { restartServer(server.name) },
                                 onRemove: { removeServer(server.name) }
                             )
-
-                            if expandedServer == server.name {
-                                MCPToolListSection(
-                                    tools: toolsByServer[server.name],
-                                    isLoading: toolsLoading == server.name,
-                                    expandedTool: $expandedTool
-                                )
-                            }
-                        } header: {
-                            if server.id == servers.first?.id {
-                                HStack {
-                                    Text("Servers")
-                                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                                    Spacer()
-                                    Text("\(servers.count)")
-                                        .font(TronTypography.caption2)
-                                        .foregroundStyle(.tronTextMuted)
-                                }
-                            }
                         }
                     }
-                }
-            }
-            .listStyle(.insetGrouped)
 
-            .environment(\.defaultMinListRowHeight, 40)
+                    if let error = loadError {
+                        Text(error)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronError)
+                            .padding(.horizontal, 4)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -115,7 +98,6 @@ struct MCPServersPage: View {
                 }
             }
             .task { await loadStatus() }
-            .refreshable { await loadStatus() }
             .sheet(isPresented: $showAddSheet) {
                 AddMCPServerSheet(onAdd: { params in
                     await addServer(params)
@@ -132,18 +114,16 @@ struct MCPServersPage: View {
     // MARK: - Actions
 
     private func loadStatus() async {
-        isLoading = true
         loadError = nil
         do {
             servers = try await rpcClient.mcp.status()
         } catch {
             loadError = error.localizedDescription
         }
-        isLoading = false
     }
 
     private func toggleExpansion(_ server: MCPServerStatus) {
-        withAnimation {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             expandedTool = nil
             if expandedServer == server.name {
                 expandedServer = nil
@@ -231,178 +211,165 @@ struct MCPServersPage: View {
     }
 }
 
-// MARK: - Server Row
+// MARK: - Server Card
 
-private struct MCPServerRow: View {
+private struct MCPServerCard: View {
     let server: MCPServerStatus
     let isExpanded: Bool
     let actionInProgress: String?
+    let tools: [MCPToolInfo]?
+    let toolsLoading: Bool
+    @Binding var expandedTool: String?
     let onTap: () -> Void
     let onToggle: () -> Void
     let onRestart: () -> Void
     let onRemove: () -> Void
 
-    private var isActioning: Bool {
-        actionInProgress == server.name
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(healthColor)
-                .frame(width: 8, height: 8)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(server.name)
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronTextPrimary)
-                HStack(spacing: 6) {
-                    Text(server.health.rawValue)
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(healthColor)
-                    if server.toolCount > 0 {
-                        Text("\(server.toolCount)")
-                            .font(TronTypography.pillValue)
-                            .countBadge(.tronEmerald)
-                    }
-                    if let error = server.lastError {
-                        Text("· \(error)")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.red.opacity(0.8))
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Spacer()
-
-            if isActioning {
-                ProgressView()
-                    .tint(.tronEmerald)
-                    .scaleEffect(0.7)
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
-
-                Menu {
-                    if server.isConnected {
-                        Button { onRestart() } label: {
-                            Label("Restart", systemImage: "arrow.clockwise")
-                        }
-                        Button { onToggle() } label: {
-                            Label("Disable", systemImage: "pause.circle")
-                        }
-                    } else {
-                        Button { onToggle() } label: {
-                            Label("Enable", systemImage: "play.circle")
-                        }
-                    }
-                    Divider()
-                    Button(role: .destructive) { onRemove() } label: {
-                        Label("Remove", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle.fill")
-                        .font(.body)
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
-    }
+    private var isActioning: Bool { actionInProgress == server.name }
 
     private var healthColor: Color {
         switch server.health {
-        case .healthy: .green
-        case .degraded: .orange
-        case .failed: .red.opacity(0.7)
+        case .healthy: .tronSuccess
+        case .degraded: .tronAmber
+        case .failed: .tronError
         }
     }
-}
-
-// MARK: - Tool List Section
-
-private struct MCPToolListSection: View {
-    let tools: [MCPToolInfo]?
-    let isLoading: Bool
-    @Binding var expandedTool: String?
 
     var body: some View {
-        if isLoading {
-            HStack {
-                Spacer()
-                ProgressView()
-                    .tint(.tronEmerald)
-                    .scaleEffect(0.7)
-                Text("Loading tools...")
-                    .font(TronTypography.caption2)
-                    .foregroundStyle(.tronTextMuted)
-                Spacer()
-            }
-            .padding(.vertical, 4)
-        } else if let tools, !tools.isEmpty {
-            ForEach(tools) { tool in
-                // Tool header row — always one list row
-                MCPToolHeaderRow(
-                    tool: tool,
-                    isExpanded: expandedTool == tool.id,
-                    onTap: {
-                        withAnimation {
-                            expandedTool = expandedTool == tool.id ? nil : tool.id
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(healthColor)
+                    .frame(width: 8, height: 8)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.name)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronEmerald)
+                    HStack(spacing: 6) {
+                        Text(server.health.rawValue)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(healthColor)
+                        if server.toolCount > 0 {
+                            Text("\(server.toolCount)")
+                                .font(TronTypography.pillValue)
+                                .countBadge(.tronEmerald)
+                        }
+                        if let error = server.lastError {
+                            Text(error)
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronError)
+                                .lineLimit(1)
                         }
                     }
-                )
+                }
 
-                // Param rows — required first, then optional
-                if expandedTool == tool.id {
-                    let sorted = tool.params.sorted { $0.required && !$1.required }
-                    ForEach(sorted) { param in
-                        MCPParamRow(param: param)
+                Spacer()
+
+                if isActioning {
+                    ProgressView()
+                        .tint(.tronEmerald)
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+
+                    Menu {
+                        if server.isConnected {
+                            Button { onRestart() } label: {
+                                Label("Restart", systemImage: "arrow.clockwise")
+                            }
+                            Button { onToggle() } label: {
+                                Label("Disable", systemImage: "pause.circle")
+                            }
+                        } else {
+                            Button { onToggle() } label: {
+                                Label("Enable", systemImage: "play.circle")
+                            }
+                        }
+                        Divider()
+                        Button(role: .destructive) { onRemove() } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronEmerald)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
                     }
                 }
             }
-        } else if tools != nil {
-            Text("No tools discovered")
-                .font(TronTypography.caption2)
-                .foregroundStyle(.tronTextMuted)
-                .padding(.vertical, 4)
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { onTap() }
+
+            // Expanded: tools
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    if toolsLoading {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .tint(.tronEmerald)
+                                .scaleEffect(0.6)
+                            Text("Loading tools...")
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                    } else if let tools, !tools.isEmpty {
+                        ForEach(tools) { tool in
+                            MCPToolRow(
+                                tool: tool,
+                                isExpanded: expandedTool == tool.id,
+                                onTap: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        expandedTool = expandedTool == tool.id ? nil : tool.id
+                                    }
+                                }
+                            )
+                        }
+                    } else if tools != nil {
+                        Text("No tools discovered")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
         }
+        .clipped()
+        .sectionFill(.tronEmerald)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-// MARK: - Tool Header Row (single list row, fixed height)
+// MARK: - Tool Row
 
-private struct MCPToolHeaderRow: View {
+private struct MCPToolRow: View {
     let tool: MCPToolInfo
     let isExpanded: Bool
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "wrench.and.screwdriver")
-                    .font(.caption2)
-                    .foregroundStyle(.tronEmerald.opacity(0.7))
-                    .frame(width: 16)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 14)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tool.tool)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(.tronTextPrimary)
-                    if !tool.description.isEmpty {
-                        Text(tool.description)
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.tronTextMuted)
-                            .lineLimit(isExpanded ? nil : 2)
-                    }
-                }
+                Text(tool.tool)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
@@ -412,51 +379,72 @@ private struct MCPToolHeaderRow: View {
                         .countBadge(.tronSlate)
                 }
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.tronTextMuted.opacity(0.5))
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isExpanded)
             }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture { onTap() }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !tool.description.isEmpty {
+                        Text(tool.description)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .padding(.horizontal, 8)
+                    }
+
+                    let sorted = tool.params.sorted { $0.required && !$1.required }
+                    ForEach(sorted) { param in
+                        MCPParamRow(param: param)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, 6)
+            }
         }
-        .buttonStyle(.plain)
+        .clipped()
+        .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
-// MARK: - Param Row (single list row, fixed height)
+// MARK: - Param Row
 
 private struct MCPParamRow: View {
     let param: MCPToolParam
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Text(param.name)
-                    .font(TronTypography.caption2.monospaced())
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextPrimary)
                 Text(param.paramType)
-                    .font(TronTypography.caption2)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
                 if param.required {
                     Text("required")
-                        .font(.system(size: 9))
+                        .font(TronTypography.mono(size: TronTypography.sizeXS))
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
-                        .background(.tronEmerald.opacity(0.1))
+                        .background(Color.tronEmerald.opacity(0.1))
                         .clipShape(Capsule())
                 }
             }
             if !param.description.isEmpty {
                 Text(param.description)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tronTextMuted.opacity(0.7))
+                    .font(TronTypography.mono(size: TronTypography.sizeXS))
+                    .foregroundStyle(.tronTextMuted)
             }
         }
-        .padding(.leading, 40)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 
@@ -472,6 +460,10 @@ private struct AddMCPServerSheet: View {
 
     let onAdd: (MCPAddServerParams) async -> Void
 
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case name, command, args }
+
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty &&
         !command.trimmingCharacters(in: .whitespaces).isEmpty
@@ -479,38 +471,97 @@ private struct AddMCPServerSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    TextField("Server name", text: $name)
-                        .font(TronTypography.subheadline)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    TextField("Command (e.g. npx, uvx)", text: $command)
-                        .font(TronTypography.subheadline)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    TextField("Arguments (space-separated)", text: $argsText)
-                        .font(TronTypography.subheadline)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                } header: {
+            ScrollView {
+                VStack(spacing: 16) {
                     Text("Server Configuration")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                } footer: {
-                    Text("Example: command \"npx\", args \"-y chrome-devtools-mcp@latest\"")
-                        .font(TronTypography.caption2)
-                }
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let error = addError {
-                    Section {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.red.opacity(0.8))
+                    VStack(spacing: 0) {
+                        HStack {
+                            Image(systemName: "server.rack")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text("Name")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            TextField("Server name", text: $name)
+                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .name)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                        .onTapGesture { focusedField = .name }
+
+                        Divider().padding(.leading, 38)
+
+                        HStack {
+                            Image(systemName: "terminal")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text("Command")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            TextField("npx, uvx", text: $command)
+                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .command)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                        .onTapGesture { focusedField = .command }
+
+                        Divider().padding(.leading, 38)
+
+                        HStack {
+                            Image(systemName: "text.word.spacing")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text("Args")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            TextField("space-separated", text: $argsText)
+                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .args)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                        .onTapGesture { focusedField = .args }
+                    }
+                    .sectionFill(.tronEmerald)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Text("Example: command \"npx\", args \"-y chrome-devtools-mcp@latest\"")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.horizontal, 4)
+
+                    if let error = addError {
+                        Text(error)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronError)
+                            .padding(.horizontal, 4)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
-            .listStyle(.insetGrouped)
-
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
