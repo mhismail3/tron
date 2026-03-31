@@ -206,15 +206,30 @@ fn convert_user_content(content: &UserContent) -> Value {
             }
         }),
         UserContent::Document {
-            data, mime_type, ..
-        } => json!({
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": mime_type,
-                "data": data,
+            data,
+            mime_type,
+            file_name,
+            extracted_text,
+        } => {
+            // Anthropic document blocks only accept application/pdf.
+            // For text-based files, inline the extracted text instead.
+            if mime_type == "application/pdf" {
+                json!({
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": data,
+                    }
+                })
+            } else if let Some(text) = extracted_text {
+                let name = file_name.as_deref().unwrap_or("unnamed");
+                json!({"type": "text", "text": format!("--- Document: {name} ---\n{text}")})
+            } else {
+                let name = file_name.as_deref().unwrap_or("unnamed");
+                json!({"type": "text", "text": format!("[Document: {name} ({mime_type})]")})
             }
-        }),
+        }
     }
 }
 
