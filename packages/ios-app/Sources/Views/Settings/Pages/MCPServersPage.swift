@@ -246,7 +246,7 @@ private struct MCPServerCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(server.name)
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTextPrimary)
                     HStack(spacing: 6) {
                         Text(server.health.rawValue)
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
