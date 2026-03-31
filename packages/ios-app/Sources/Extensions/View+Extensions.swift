@@ -127,16 +127,14 @@ private struct AdaptivePresentationModifier: ViewModifier {
     @State private var selectedDetent: PresentationDetent = .medium
     @Environment(\.colorScheme) private var colorScheme
 
+    private var needsOpaqueBackground: Bool {
+        selectedDetent == .large && colorScheme == .light
+    }
+
     func body(content: Content) -> some View {
-        if selectedDetent == .large && colorScheme == .light {
-            content
-                .presentationDetents(detents, selection: $selectedDetent)
-                .presentationSizing(.largeForm)
-                .presentationBackground(Color.tronBackground)
-        } else {
-            content
-                .presentationDetents(detents, selection: $selectedDetent)
-                .presentationSizing(.largeForm)
-        }
+        content
+            .presentationDetents(detents, selection: $selectedDetent)
+            .presentationSizing(.largeForm)
+            .presentationBackground(needsOpaqueBackground ? Color.tronBackground : .clear)
     }
 }
