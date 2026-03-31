@@ -65,138 +65,17 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var settingsContent: some View {
-        settingsList
-            .sheet(isPresented: $showContextPage) {
-                ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
+        ScrollView {
+            VStack(spacing: 16) {
+                categoriesCard
+                notificationsCard
+                dangerZoneCard
+                footerView
             }
-            .sheet(isPresented: $showProvidersPage) {
-                ProvidersSettingsPage()
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
-            }
-            .sheet(isPresented: $showAppearancePage) {
-                if #available(iOS 26.0, *) {
-                    AppearanceSettingsPage()
-                        .adaptivePresentationDetents([.medium, .large])
-                        .presentationDragIndicator(.hidden)
-                }
-            }
-            .sheet(isPresented: $showMCPServersPage) {
-                MCPServersPage()
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
-            }
-            .task {
-                await settingsState.load(using: rpcClient)
-                await settingsState.loadModels(using: rpcClient)
-            }
-            .onChange(of: dependencies.serverSettingsVersion) {
-                Task {
-                    await settingsState.reload(using: rpcClient)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showLogViewer = true } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Settings")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
-            .alert("Reset Settings?", isPresented: $showingResetAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) { resetToDefaults() }
-            } message: {
-                Text("This will reset all settings to their default values.")
-            }
-            .alert("Reset Chat?", isPresented: $showResetChatConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) { resetChatSession() }
-            } message: {
-                Text("This will archive the current chat and start a fresh one.")
-            }
-            .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Archive All", role: .destructive) { archiveAllSessions() }
-            } message: {
-                Text({
-                    let count = eventStoreManager.sessions.filter { !$0.isChat }.count
-                    return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
-                }())
-            }
-    }
-
-    @ViewBuilder
-    private var settingsList: some View {
-        List {
-            // Category links
-            Section {
-                Button { showConnectionPage = true } label: {
-                    settingsRow("network", "Connection", "Server, accounts")
-                }
-                Button { showProvidersPage = true } label: {
-                    settingsRow("key.horizontal", "Providers", "API keys, OAuth tokens")
-                }
-                Button { showSessionPage = true } label: {
-                    settingsRow("bolt", "Session", "Workspace, model, limits")
-                }
-                Button { showContextPage = true } label: {
-                    settingsRow("brain", "Context", "Compaction, memory, rules")
-                }
-                Button { showMCPServersPage = true } label: {
-                    settingsRow("server.rack", "MCP Servers", "External tool servers")
-                }
-                if #available(iOS 26.0, *) {
-                    Button { showAppearancePage = true } label: {
-                        settingsRow("paintbrush", "Appearance", "Theme, font, indicators")
-                    }
-                }
-            }
-
-            // Inline notifications toggle
-            NotificationsSection(autoMarkRead: $autoMarkRead)
-
-            // Danger zone
-            DangerZoneSection(
-                hasChatSession: eventStoreManager.chatSession != nil,
-                hasActiveSessions: eventStoreManager.sessions.contains { !$0.isChat },
-                isArchivingAll: isArchivingAll,
-                onResetChat: { showResetChatConfirmation = true },
-                onArchiveAll: { showArchiveAllConfirmation = true },
-                onResetSettings: { showingResetAlert = true }
-            )
-
-            // Footer
-            Section {
-                EmptyView()
-            } footer: {
-                VStack(spacing: 4) {
-                    Text("Built by Moose 🫎 · v0.1.0")
-                        .font(TronTypography.caption2)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 16)
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 40)
         }
-        .listStyle(.insetGrouped)
-        .environment(\.defaultMinListRowHeight, 40)
         .sheet(isPresented: $showLogViewer) {
             LogViewer()
         }
@@ -226,24 +105,274 @@ struct SettingsView: View {
             .adaptivePresentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
+        .sheet(isPresented: $showContextPage) {
+            ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showProvidersPage) {
+            ProvidersSettingsPage()
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showAppearancePage) {
+            if #available(iOS 26.0, *) {
+                AppearanceSettingsPage()
+                    .adaptivePresentationDetents([.medium, .large])
+                    .presentationDragIndicator(.hidden)
+            }
+        }
+        .sheet(isPresented: $showMCPServersPage) {
+            MCPServersPage()
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+        }
+        .task {
+            await settingsState.load(using: rpcClient)
+            await settingsState.loadModels(using: rpcClient)
+        }
+        .onChange(of: dependencies.serverSettingsVersion) {
+            Task {
+                await settingsState.reload(using: rpcClient)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showLogViewer = true } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+            ToolbarItem(placement: .principal) {
+                Text("Settings")
+                    .font(TronTypography.button)
+                    .foregroundStyle(.tronEmerald)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { dismiss() } label: {
+                    Image(systemName: "checkmark")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+        }
+        .alert("Reset Settings?", isPresented: $showingResetAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { resetToDefaults() }
+        } message: {
+            Text("This will reset all settings to their default values.")
+        }
+        .alert("Reset Chat?", isPresented: $showResetChatConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { resetChatSession() }
+        } message: {
+            Text("This will archive the current chat and start a fresh one.")
+        }
+        .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Archive All", role: .destructive) { archiveAllSessions() }
+        } message: {
+            Text({
+                let count = eventStoreManager.sessions.filter { !$0.isChat }.count
+                return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
+            }())
+        }
     }
 
-    // MARK: - Row Helper
+    // MARK: - Categories Card
 
-    private func settingsRow(_ icon: String, _ title: String, _ subtitle: String) -> some View {
-        Label {
+    private var categoriesCard: some View {
+        VStack(spacing: 0) {
+            categoryRow(icon: "network", label: "Connection", subtitle: "Server, accounts") {
+                showConnectionPage = true
+            }
+
+            Divider().padding(.leading, 38)
+
+            categoryRow(icon: "key.horizontal", label: "Providers", subtitle: "API keys, OAuth tokens") {
+                showProvidersPage = true
+            }
+
+            Divider().padding(.leading, 38)
+
+            categoryRow(icon: "bolt", label: "Session", subtitle: "Workspace, model, limits") {
+                showSessionPage = true
+            }
+
+            Divider().padding(.leading, 38)
+
+            categoryRow(icon: "brain", label: "Context", subtitle: "Compaction, memory, rules") {
+                showContextPage = true
+            }
+
+            Divider().padding(.leading, 38)
+
+            categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "External tool servers") {
+                showMCPServersPage = true
+            }
+
+            if #available(iOS 26.0, *) {
+                Divider().padding(.leading, 38)
+
+                categoryRow(icon: "paintbrush", label: "Appearance", subtitle: "Theme, font, indicators") {
+                    showAppearancePage = true
+                }
+            }
+        }
+        .sectionFill(.tronEmerald)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func categoryRow(icon: String, label: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 18)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(TronTypography.subheadline)
+                Text(label)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                 Text(subtitle)
-                    .font(TronTypography.caption2)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
-        } icon: {
-            Image(systemName: icon)
-                .foregroundStyle(.tronEmerald)
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture { action() }
+    }
+
+    // MARK: - Notifications Card
+
+    private var notificationsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Notifications")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.bottom, 8)
+
+            HStack {
+                Image(systemName: "bell.badge")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 18)
+                Text("Auto-mark as read")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                Spacer()
+                Toggle("", isOn: $autoMarkRead)
+                    .labelsHidden()
+                    .tint(.tronEmerald)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Automatically mark notifications as read when opened.")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: - Danger Zone Card
+
+    private var dangerZoneCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Danger Zone")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronError)
+                .padding(.bottom, 8)
+
+            VStack(spacing: 0) {
+                dangerRow(
+                    icon: "arrow.counterclockwise",
+                    label: "Reset Chat Session",
+                    disabled: eventStoreManager.chatSession == nil
+                ) {
+                    showResetChatConfirmation = true
+                }
+
+                Divider().padding(.leading, 38)
+
+                HStack {
+                    Image(systemName: "archivebox")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronError)
+                        .frame(width: 18)
+                    Text("Archive All Sessions")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronError)
+                    Spacer()
+                    if isArchivingAll {
+                        ProgressView()
+                            .tint(.tronError)
+                            .scaleEffect(0.7)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .opacity(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll ? 0.4 : 1)
+                .onTapGesture {
+                    guard eventStoreManager.sessions.contains(where: { !$0.isChat }), !isArchivingAll else { return }
+                    showArchiveAllConfirmation = true
+                }
+
+                Divider().padding(.leading, 38)
+
+                dangerRow(
+                    icon: "arrow.trianglehead.counterclockwise",
+                    label: "Reset All Settings",
+                    disabled: false
+                ) {
+                    showingResetAlert = true
+                }
+            }
+            .sectionFill(.tronError)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private func dangerRow(icon: String, label: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronError)
+                .frame(width: 18)
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronError)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .opacity(disabled ? 0.4 : 1)
+        .onTapGesture { if !disabled { action() } }
+    }
+
+    // MARK: - Footer
+
+    private var footerView: some View {
+        Text("Built by Moose \u{1FACE} \u{00B7} v0.1.0")
+            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+            .foregroundStyle(.tronTextMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 16)
     }
 
     // MARK: - Computed Properties
