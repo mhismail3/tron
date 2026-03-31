@@ -83,7 +83,7 @@ enum SystemEvent: Equatable, Hashable {
         case .subagentResultAvailable(_, let taskPreview, let success):
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
         case .providerError(let data):
-            let label = ErrorCategoryDisplay.label(for: data.category)
+            let label = ErrorCategoryDisplay.label(for: data.category, provider: data.provider)
             return "\(label): \(data.message)"
         case .memoryRetainInProgress:
             return "Retaining memory..."

@@ -482,7 +482,7 @@ struct ProviderErrorNotificationView: View {
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.red)
 
-                Text(ErrorCategoryDisplay.label(for: data.category))
+                Text(ErrorCategoryDisplay.label(for: data.category, provider: data.provider))
                     .font(TronTypography.filePath)
                     .foregroundStyle(.red.opacity(0.9))
 
@@ -503,17 +503,33 @@ struct ProviderErrorNotificationView: View {
 // MARK: - Error Category Display
 
 enum ErrorCategoryDisplay {
-    static func label(for category: String) -> String {
-        switch category {
-        case "authentication": return "Auth Error"
-        case "authorization": return "Access Denied"
-        case "rate_limit": return "Rate Limited"
-        case "network": return "Network Error"
-        case "server": return "Server Error"
-        case "invalid_request": return "Invalid Request"
-        case "quota": return "Quota Exceeded"
-        default: return "Error"
+    static func providerDisplayName(for provider: String) -> String {
+        switch provider.lowercased() {
+        case "anthropic": return "Anthropic"
+        case "openai-codex", "openai": return "OpenAI"
+        case "google": return "Google"
+        case "minimax": return "MiniMax"
+        case "kimi": return "Kimi"
+        default: return provider.capitalized
         }
+    }
+
+    static func label(for category: String, provider: String? = nil) -> String {
+        let base: String
+        switch category {
+        case "authentication": base = "Auth Error"
+        case "authorization": base = "Access Denied"
+        case "rate_limit": base = "Rate Limited"
+        case "network": base = "Network Error"
+        case "server": base = "Server Error"
+        case "invalid_request": base = "Invalid Request"
+        case "quota": base = "Quota Exceeded"
+        default: base = "Error"
+        }
+        if let provider, !provider.isEmpty, provider != "unknown" {
+            return "\(providerDisplayName(for: provider)) \(base)"
+        }
+        return base
     }
 
     static func icon(for category: String) -> String {

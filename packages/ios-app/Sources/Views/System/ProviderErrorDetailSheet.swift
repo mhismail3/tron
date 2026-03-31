@@ -14,6 +14,10 @@ struct ProviderErrorDetailSheet: View {
                     infoBadges
                         .padding(.horizontal)
 
+                    if !data.provider.isEmpty && data.provider != "unknown" {
+                        sourceExplanation
+                    }
+
                     messageSection
                         .padding(.horizontal)
                 }
@@ -23,7 +27,7 @@ struct ProviderErrorDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(ErrorCategoryDisplay.label(for: data.category))
+                    Text(ErrorCategoryDisplay.label(for: data.category, provider: data.provider))
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.red)
                 }
@@ -31,6 +35,21 @@ struct ProviderErrorDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.red)
+    }
+
+    // MARK: - Source Explanation
+
+    private var sourceExplanation: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextMuted)
+
+            Text("This error came from the \(ErrorCategoryDisplay.providerDisplayName(for: data.provider)) API, not from Tron.")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .padding(.horizontal)
     }
 
     // MARK: - Info Badges

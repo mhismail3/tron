@@ -236,7 +236,7 @@ fn patterns() -> &'static [ErrorPattern] {
             check: |s| s.contains("overloaded"),
             category: ErrorCategory::Server,
             message: "API is overloaded",
-            suggestion: Some("Try again in a moment"),
+            suggestion: Some("The provider's API is temporarily overloaded — try again in a moment"),
             is_retryable: true,
         },
         // Invalid request
@@ -627,5 +627,19 @@ mod tests {
             parse_error("INVALID X-API-KEY HEADER").category,
             ErrorCategory::Authentication
         );
+    }
+
+    #[test]
+    fn parse_overloaded_suggestion_mentions_provider() {
+        let parsed = parse_error("API is overloaded, please retry");
+        assert_eq!(parsed.category, ErrorCategory::Server);
+        assert!(parsed.is_retryable);
+        assert!(parsed.suggestion.as_deref().unwrap().contains("provider"));
+    }
+
+    #[test]
+    fn format_overloaded_error_includes_provider_attribution() {
+        let formatted = format_error("overloaded");
+        assert!(formatted.contains("provider"));
     }
 }
