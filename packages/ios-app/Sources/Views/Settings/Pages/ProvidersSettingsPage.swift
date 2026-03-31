@@ -35,7 +35,6 @@ private struct ProviderInfo: Identifiable {
 
 struct ProvidersSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
-    @Environment(\.dismiss) private var dismiss
 
     @State private var authState: AuthState?
     @State private var error: String?
@@ -45,26 +44,8 @@ struct ProvidersSettingsPage: View {
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                providersVStack
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Providers")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
+        SettingsPageContainer(title: "Providers") {
+            providersContent
         }
         .sheet(item: $oauthProvider) { provider in
             OAuthLoginSheet(provider: provider)
@@ -79,13 +60,10 @@ struct ProvidersSettingsPage: View {
 
     // MARK: - Content
 
-    private var providersVStack: some View {
-        VStack(spacing: 16) {
+    @ViewBuilder
+    private var providersContent: some View {
                 // LLM Providers section
-                Text("LLM Providers")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSectionHeader(title: "LLM Providers")
 
                 ForEach(ProviderInfo.llmProviders) { provider in
                     ProviderCard(
@@ -110,10 +88,7 @@ struct ProvidersSettingsPage: View {
                 }
 
                 // Services section
-                Text("Services")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSectionHeader(title: "Services")
                     .padding(.top, 8)
 
                 ForEach(ProviderInfo.services) { service in
@@ -130,10 +105,6 @@ struct ProvidersSettingsPage: View {
                         onClear: { await clearService(service.id) }
                     )
                 }
-            }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 40)
     }
 
     // MARK: - Actions

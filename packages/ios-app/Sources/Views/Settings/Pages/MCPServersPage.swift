@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct MCPServersPage: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
 
     @State private var servers: [MCPServerStatus] = []
@@ -16,98 +15,74 @@ struct MCPServersPage: View {
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if servers.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "server.rack")
-                                .font(.system(size: 32))
-                                .foregroundStyle(.tronTextMuted)
-                            Text("No MCP servers configured")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
-                            Text("Add an MCP server to extend the agent with external tools.")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextMuted)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
-                    } else {
-                        HStack {
-                            Text("Servers")
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                                .foregroundStyle(.tronTextSecondary)
-                            if !servers.isEmpty {
-                                Text("\(servers.count)")
-                                    .font(TronTypography.pillValue)
-                                    .countBadge(.tronEmerald)
-                            }
-                            Spacer()
-                        }
+        SettingsPageContainer(title: "MCP Servers") {
+            Button { showAddSheet = true } label: {
+                Image(systemName: "plus")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(.tronEmerald)
+            }
+        } content: {
+            if servers.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tronTextMuted)
+                    Text("No MCP servers configured")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                    Text("Add an MCP server to extend the agent with external tools.")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+            } else {
+                HStack {
+                    Text("Servers")
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                    if !servers.isEmpty {
+                        Text("\(servers.count)")
+                            .font(TronTypography.pillValue)
+                            .countBadge(.tronEmerald)
+                    }
+                    Spacer()
+                }
 
-                        ForEach(servers) { server in
-                            MCPServerCard(
-                                server: server,
-                                isExpanded: expandedServer == server.name,
-                                actionInProgress: actionInProgress,
-                                tools: toolsByServer[server.name],
-                                toolsLoading: toolsLoading == server.name,
-                                expandedTool: $expandedTool,
-                                onTap: { toggleExpansion(server) },
-                                onToggle: { toggleServer(server) },
-                                onRestart: { restartServer(server.name) },
-                                onRemove: { removeServer(server.name) }
-                            )
-                        }
-                    }
+                ForEach(servers) { server in
+                    MCPServerCard(
+                        server: server,
+                        isExpanded: expandedServer == server.name,
+                        actionInProgress: actionInProgress,
+                        tools: toolsByServer[server.name],
+                        toolsLoading: toolsLoading == server.name,
+                        expandedTool: $expandedTool,
+                        onTap: { toggleExpansion(server) },
+                        onToggle: { toggleServer(server) },
+                        onRestart: { restartServer(server.name) },
+                        onRemove: { removeServer(server.name) }
+                    )
+                }
+            }
 
-                    if let error = loadError {
-                        Text(error)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronError)
-                            .padding(.horizontal, 4)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
+            if let error = loadError {
+                Text(error)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronError)
+                    .padding(.horizontal, 4)
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showAddSheet = true } label: {
-                        Image(systemName: "plus")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("MCP Servers")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
-            .task { await loadStatus() }
-            .sheet(isPresented: $showAddSheet) {
-                AddMCPServerSheet(onAdd: { params in
-                    await addServer(params)
-                })
-                .adaptivePresentationDetents([.medium])
-                .presentationDragIndicator(.hidden)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
-                Task { await loadStatus() }
-            }
+        }
+        .task { await loadStatus() }
+        .sheet(isPresented: $showAddSheet) {
+            AddMCPServerSheet(onAdd: { params in
+                await addServer(params)
+            })
+            .adaptivePresentationDetents([.medium])
+            .presentationDragIndicator(.hidden)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
+            Task { await loadStatus() }
         }
     }
 
@@ -473,12 +448,9 @@ private struct AddMCPServerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    Text("Server Configuration")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    SettingsSectionHeader(title: "Server Configuration")
 
-                    VStack(spacing: 0) {
+                    SettingsCard {
                         HStack {
                             Image(systemName: "server.rack")
                                 .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -499,7 +471,7 @@ private struct AddMCPServerSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture { focusedField = .name }
 
-                        Divider().padding(.leading, 38)
+                        SettingsRowDivider()
 
                         HStack {
                             Image(systemName: "terminal")
@@ -521,7 +493,7 @@ private struct AddMCPServerSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture { focusedField = .command }
 
-                        Divider().padding(.leading, 38)
+                        SettingsRowDivider()
 
                         HStack {
                             Image(systemName: "text.word.spacing")
@@ -543,13 +515,8 @@ private struct AddMCPServerSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture { focusedField = .args }
                     }
-                    .sectionFill(.tronEmerald)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                    Text("Example: command \"npx\", args \"-y chrome-devtools-mcp@latest\"")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.horizontal, 4)
+                    SettingsCaption(text: "Example: command \"npx\", args \"-y chrome-devtools-mcp@latest\"")
 
                     if let error = addError {
                         Text(error)

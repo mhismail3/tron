@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SessionSettingsPage: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
     let settingsState: SettingsState
     @Binding var confirmArchive: Bool
@@ -47,92 +46,69 @@ struct SessionSettingsPage: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Quick Session
-                    if #available(iOS 26.0, *) {
-                        quickSessionCard
+        SettingsPageContainer(title: "Session") {
+            // Quick Session
+            if #available(iOS 26.0, *) {
+                quickSessionCard
+            }
+
+            // Chat
+            chatCard
+
+            // Git Isolation
+            gitIsolationCard
+
+            // Session Management
+            sessionManagementCard
+        }
+        .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
+            WorkspaceSelector(
+                rpcClient: rpcClient,
+                selectedPath: Binding(
+                    get: { settingsState.quickSessionWorkspace },
+                    set: { newValue in
+                        settingsState.quickSessionWorkspace = newValue
+                        dependencies.quickSessionWorkspace = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
+                        }
                     }
-
-                    // Chat
-                    chatCard
-
-                    // Git Isolation
-                    gitIsolationCard
-
-                    // Session Management
-                    sessionManagementCard
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Session")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
+                )
+            )
+        }
+        .sheet(isPresented: $showChatWorkspaceSelector) {
+            WorkspaceSelector(
+                rpcClient: rpcClient,
+                selectedPath: Binding(
+                    get: { settingsState.chatWorkspace },
+                    set: { newValue in
+                        let previousValue = settingsState.chatWorkspace
+                        settingsState.chatWorkspace = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
+                        }
+                        if newValue != previousValue {
+                            Task {
+                                _ = try? await rpcClient.session.resetChat()
+                                await eventStoreManager.refreshSessionList()
+                            }
+                        }
                     }
-                }
-            }
-            .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
-                WorkspaceSelector(
-                    rpcClient: rpcClient,
-                    selectedPath: Binding(
-                        get: { settingsState.quickSessionWorkspace },
-                        set: { newValue in
-                            settingsState.quickSessionWorkspace = newValue
-                            dependencies.quickSessionWorkspace = newValue
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
-                            }
-                        }
-                    )
                 )
-            }
-            .sheet(isPresented: $showChatWorkspaceSelector) {
-                WorkspaceSelector(
-                    rpcClient: rpcClient,
-                    selectedPath: Binding(
-                        get: { settingsState.chatWorkspace },
-                        set: { newValue in
-                            let previousValue = settingsState.chatWorkspace
-                            settingsState.chatWorkspace = newValue
-                            updateServerSetting {
-                                ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
-                            }
-                            if newValue != previousValue {
-                                Task {
-                                    _ = try? await rpcClient.session.resetChat()
-                                    await eventStoreManager.refreshSessionList()
-                                }
-                            }
+            )
+        }
+        .sheet(isPresented: $showModelPicker) {
+            if #available(iOS 26.0, *) {
+                ModelPickerSheet(
+                    models: settingsState.availableModels,
+                    currentModelId: defaultModelValue,
+                    onSelect: { model in
+                        defaultModelBinding.wrappedValue = model.id
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(defaultModel: model.id))
                         }
-                    )
+                    }
                 )
-            }
-            .sheet(isPresented: $showModelPicker) {
-                if #available(iOS 26.0, *) {
-                    ModelPickerSheet(
-                        models: settingsState.availableModels,
-                        currentModelId: defaultModelValue,
-                        onSelect: { model in
-                            defaultModelBinding.wrappedValue = model.id
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(defaultModel: model.id))
-                            }
-                        }
-                    )
-                }
             }
         }
     }
@@ -142,12 +118,9 @@ struct SessionSettingsPage: View {
     @available(iOS 26.0, *)
     private var quickSessionCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Quick Session")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Quick Session")
 
-            VStack(spacing: 0) {
+            SettingsCard {
                 settingsRow(
                     icon: "folder",
                     label: "Workspace",
@@ -155,7 +128,7 @@ struct SessionSettingsPage: View {
                     action: { showQuickSessionWorkspaceSelector = true }
                 )
 
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
                 settingsRow(
                     icon: "cpu",
@@ -164,14 +137,8 @@ struct SessionSettingsPage: View {
                     action: { showModelPicker = true }
                 )
             }
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text("Long-press the + button to instantly start a session with these defaults.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Long-press the + button to instantly start a session with these defaults.")
         }
     }
 
@@ -179,27 +146,20 @@ struct SessionSettingsPage: View {
 
     private var chatCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Chat")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Chat")
 
-            settingsRow(
-                icon: "folder",
-                label: "Workspace",
-                value: settingsState.displayChatWorkspace.isEmpty
-                    ? "Default"
-                    : settingsState.displayChatWorkspace,
-                action: { showChatWorkspaceSelector = true }
-            )
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            SettingsCard {
+                settingsRow(
+                    icon: "folder",
+                    label: "Workspace",
+                    value: settingsState.displayChatWorkspace.isEmpty
+                        ? "Default"
+                        : settingsState.displayChatWorkspace,
+                    action: { showChatWorkspaceSelector = true }
+                )
+            }
 
-            Text("Changing the workspace will archive the current chat and start a fresh one.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Changing the workspace will archive the current chat and start a fresh one.")
         }
     }
 
@@ -207,31 +167,24 @@ struct SessionSettingsPage: View {
 
     private var gitIsolationCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Git Isolation")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Git Isolation")
 
-            HStack {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Isolation Mode")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
-                isolationToggle
+            SettingsCard {
+                HStack {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Isolation Mode")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    isolationToggle
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 14)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text(isolationDescription)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: isolationDescription)
         }
     }
 
@@ -269,21 +222,11 @@ struct SessionSettingsPage: View {
 
     private var sessionManagementCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Session Management")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Session Management")
 
-            VStack(spacing: 0) {
+            SettingsCard {
                 // Max Sessions
-                HStack {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Max Sessions")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
+                SettingsRow(icon: "square.stack.3d.up", label: "Max Sessions") {
                     Text("\(settingsState.maxConcurrentSessions)")
                         .font(TronTypography.mono(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
@@ -294,25 +237,16 @@ struct SessionSettingsPage: View {
                         range: 1...50
                     )
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
                 .onChange(of: settingsState.maxConcurrentSessions) { _, newValue in
                     updateServerSetting {
                         ServerSettingsUpdate(server: .init(maxConcurrentSessions: newValue))
                     }
                 }
 
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
                 // Cache TTL
-                HStack {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Cache TTL")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
+                SettingsRow(icon: "clock.arrow.circlepath", label: "Cache TTL") {
                     Text(cacheTtlDisplayText)
                         .font(TronTypography.mono(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
@@ -324,38 +258,25 @@ struct SessionSettingsPage: View {
                         step: 300
                     )
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
                 .onChange(of: settingsState.cacheTtlSecs) { _, newValue in
                     updateServerSetting {
                         ServerSettingsUpdate(session: .init(cacheTtlSecs: newValue))
                     }
                 }
 
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
                 // Confirm archive toggle
-                HStack {
-                    Image(systemName: "questionmark.circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Confirm archiving")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
+                SettingsRow(icon: "questionmark.circle", label: "Confirm archiving") {
                     Toggle("", isOn: $confirmArchive)
                         .labelsHidden()
                         .tint(.tronEmerald)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
             }
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
-    // MARK: - Shared Row
+    // MARK: - Shared Row (chevron navigation rows)
 
     private func settingsRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
         HStack {

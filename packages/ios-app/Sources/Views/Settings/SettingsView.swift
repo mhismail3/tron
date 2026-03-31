@@ -53,28 +53,17 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            settingsContent
-        }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
-    }
-
-    // MARK: - Body Helpers (split to avoid type-check timeout)
-
-    @ViewBuilder
-    private var settingsContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                categoriesCard
-                notificationsCard
-                dangerZoneCard
-                footerView
+        SettingsPageContainer(title: "Settings") {
+            Button { showLogViewer = true } label: {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(.tronEmerald)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 40)
+        } content: {
+            categoriesCard
+            notificationsCard
+            dangerZoneCard
+            footerView
         }
         .sheet(isPresented: $showLogViewer) {
             LogViewer()
@@ -136,29 +125,6 @@ struct SettingsView: View {
                 await settingsState.reload(using: rpcClient)
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { showLogViewer = true } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Settings")
-                    .font(TronTypography.button)
-                    .foregroundStyle(.tronEmerald)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: {
-                    Image(systemName: "checkmark")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
-        }
         .alert("Reset Settings?", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { resetToDefaults() }
@@ -180,50 +146,51 @@ struct SettingsView: View {
                 return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
             }())
         }
+        .adaptivePresentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronEmerald)
     }
 
     // MARK: - Categories Card
 
     private var categoriesCard: some View {
-        VStack(spacing: 0) {
+        SettingsCard {
             categoryRow(icon: "network", label: "Connection", subtitle: "Server, accounts") {
                 showConnectionPage = true
             }
 
-            Divider().padding(.leading, 38)
+            SettingsRowDivider()
 
             categoryRow(icon: "key.horizontal", label: "Providers", subtitle: "API keys, OAuth tokens") {
                 showProvidersPage = true
             }
 
-            Divider().padding(.leading, 38)
+            SettingsRowDivider()
 
             categoryRow(icon: "bolt", label: "Session", subtitle: "Workspace, model, limits") {
                 showSessionPage = true
             }
 
-            Divider().padding(.leading, 38)
+            SettingsRowDivider()
 
             categoryRow(icon: "brain", label: "Context", subtitle: "Compaction, memory, rules") {
                 showContextPage = true
             }
 
-            Divider().padding(.leading, 38)
+            SettingsRowDivider()
 
             categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "External tool servers") {
                 showMCPServersPage = true
             }
 
             if #available(iOS 26.0, *) {
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
                 categoryRow(icon: "paintbrush", label: "Appearance", subtitle: "Theme, font, indicators") {
                     showAppearancePage = true
                 }
             }
         }
-        .sectionFill(.tronEmerald)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func categoryRow(icon: String, label: String, subtitle: String, action: @escaping () -> Void) -> some View {
@@ -258,33 +225,17 @@ struct SettingsView: View {
 
     private var notificationsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Notifications")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Notifications")
 
-            HStack {
-                Image(systemName: "bell.badge")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Auto-mark as read")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
-                Toggle("", isOn: $autoMarkRead)
-                    .labelsHidden()
-                    .tint(.tronEmerald)
+            SettingsCard {
+                SettingsRow(icon: "bell.badge", label: "Auto-mark as read") {
+                    Toggle("", isOn: $autoMarkRead)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text("Automatically mark notifications as read when opened.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Automatically mark notifications as read when opened.")
         }
     }
 
@@ -292,21 +243,20 @@ struct SettingsView: View {
 
     private var dangerZoneCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Danger Zone")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronError)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Danger Zone", color: .tronError)
 
-            VStack(spacing: 0) {
-                dangerRow(
-                    icon: "arrow.counterclockwise",
-                    label: "Reset Chat Session",
-                    disabled: eventStoreManager.chatSession == nil
-                ) {
+            SettingsCard(accent: .tronError) {
+                SettingsRow(icon: "arrow.counterclockwise", label: "Reset Chat Session", accentColor: .tronError, labelColor: .tronError) {
+                    EmptyView()
+                }
+                .opacity(eventStoreManager.chatSession == nil ? 0.4 : 1)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .onTapGesture {
+                    guard eventStoreManager.chatSession != nil else { return }
                     showResetChatConfirmation = true
                 }
 
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
                 HStack {
                     Image(systemName: "archivebox")
@@ -332,37 +282,17 @@ struct SettingsView: View {
                     showArchiveAllConfirmation = true
                 }
 
-                Divider().padding(.leading, 38)
+                SettingsRowDivider()
 
-                dangerRow(
-                    icon: "arrow.trianglehead.counterclockwise",
-                    label: "Reset All Settings",
-                    disabled: false
-                ) {
+                SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
+                    EmptyView()
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .onTapGesture {
                     showingResetAlert = true
                 }
             }
-            .sectionFill(.tronError)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-    }
-
-    private func dangerRow(icon: String, label: String, disabled: Bool, action: @escaping () -> Void) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronError)
-                .frame(width: 18)
-            Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronError)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .opacity(disabled ? 0.4 : 1)
-        .onTapGesture { if !disabled { action() } }
     }
 
     // MARK: - Footer

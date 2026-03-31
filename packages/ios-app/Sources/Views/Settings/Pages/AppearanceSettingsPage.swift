@@ -2,38 +2,14 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct AppearanceSettingsPage: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var appearanceSettings = AppearanceSettings.shared
     @State private var fontSettings = FontSettings.shared
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    themeCard
-                    fontCard
-                    thinkingIndicatorCard
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Appearance")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
+        SettingsPageContainer(title: "Appearance") {
+            themeCard
+            fontCard
+            thinkingIndicatorCard
         }
     }
 
@@ -41,31 +17,24 @@ struct AppearanceSettingsPage: View {
 
     private var themeCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Theme")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Theme")
 
-            HStack {
-                Image(systemName: appearanceSettings.mode.icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Color Mode")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
-                themeToggle
+            SettingsCard {
+                HStack {
+                    Image(systemName: appearanceSettings.mode.icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Color Mode")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    themeToggle
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 14)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text("Auto follows your system appearance setting.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Auto follows your system appearance setting.")
         }
     }
 
@@ -99,12 +68,9 @@ struct AppearanceSettingsPage: View {
 
     private var fontCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Font")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Font")
 
-            VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
                 // Preview + info row
                 HStack(spacing: 12) {
                     Text("Aa")
@@ -154,14 +120,8 @@ struct AppearanceSettingsPage: View {
                     }
                 }
             }
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text("Code and file paths always use Recursive mono.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Code and file paths always use Recursive mono.")
         }
     }
 
@@ -237,12 +197,9 @@ struct AppearanceSettingsPage: View {
 
     private var thinkingIndicatorCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Thinking Indicator")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Thinking Indicator")
 
-            VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
                 // Current indicator preview
                 HStack(spacing: 12) {
                     Image(systemName: appearanceSettings.thinkingIndicatorStyle.icon)
@@ -278,14 +235,8 @@ struct AppearanceSettingsPage: View {
                     .padding(.vertical, 10)
                 }
             }
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Text("Animation shown while the model is thinking.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Animation shown while the model is thinking.")
         }
     }
 

@@ -1,46 +1,15 @@
 import SwiftUI
 
 struct ContextSettingsPage: View {
-    @Environment(\.dismiss) private var dismiss
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Threshold
-                    thresholdCard
-
-                    // Keep Recent Turns
-                    keepRecentCard
-
-                    // Max Preserved
-                    maxPreservedCard
-
-                    // Rules
-                    rulesCard
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Context")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
+        SettingsPageContainer(title: "Context") {
+            thresholdCard
+            keepRecentCard
+            maxPreservedCard
+            rulesCard
         }
     }
 
@@ -48,10 +17,7 @@ struct ContextSettingsPage: View {
 
     private var thresholdCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Compaction Threshold")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Compaction Threshold")
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -86,11 +52,7 @@ struct ContextSettingsPage: View {
                 }
             }
 
-            Text("Context usage % that triggers compaction. Lower values compact sooner.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Context usage % that triggers compaction. Lower values compact sooner.")
         }
     }
 
@@ -98,44 +60,28 @@ struct ContextSettingsPage: View {
 
     private var keepRecentCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Recent Turns")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Recent Turns")
 
-            HStack {
-                Image(systemName: "arrow.counterclockwise.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Keep Recent Turns")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
-                Text("\(settingsState.preserveRecentCount)")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .monospacedDigit()
-                    .frame(minWidth: 20)
-                TronStepper(
-                    value: Bindable(settingsState).preserveRecentCount,
-                    range: 0...10
-                )
+            SettingsCard {
+                SettingsRow(icon: "arrow.counterclockwise.circle", label: "Keep Recent Turns") {
+                    Text("\(settingsState.preserveRecentCount)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 20)
+                    TronStepper(
+                        value: Bindable(settingsState).preserveRecentCount,
+                        range: 0...10
+                    )
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onChange(of: settingsState.preserveRecentCount) { _, newValue in
                 updateServerSetting {
                     ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
                 }
             }
 
-            Text("Turns kept verbatim after compaction. The rest is summarized.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Turns kept verbatim after compaction. The rest is summarized.")
         }
     }
 
@@ -143,10 +89,7 @@ struct ContextSettingsPage: View {
 
     private var maxPreservedCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Max Preserved Context")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Max Preserved Context")
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -181,11 +124,7 @@ struct ContextSettingsPage: View {
                 }
             }
 
-            Text("Maximum % of context window that preserved turns can consume.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Maximum % of context window that preserved turns can consume.")
         }
     }
 
@@ -193,38 +132,22 @@ struct ContextSettingsPage: View {
 
     private var rulesCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Rules")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.bottom, 8)
+            SettingsSectionHeader(title: "Rules")
 
-            HStack {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Discover standalone rules")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
-                Toggle("", isOn: Bindable(settingsState).rulesDiscoverStandaloneFiles)
-                    .labelsHidden()
-                    .tint(.tronEmerald)
+            SettingsCard {
+                SettingsRow(icon: "doc.text.magnifyingglass", label: "Discover standalone rules") {
+                    Toggle("", isOn: Bindable(settingsState).rulesDiscoverStandaloneFiles)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onChange(of: settingsState.rulesDiscoverStandaloneFiles) { _, newValue in
                 updateServerSetting {
                     ServerSettingsUpdate(context: .init(rules: .init(discoverStandaloneFiles: newValue)))
                 }
             }
 
-            Text("Discover rules files outside .claude/ directories.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 6)
-                .padding(.horizontal, 4)
+            SettingsCaption(text: "Discover rules files outside .claude/ directories.")
         }
     }
 }
