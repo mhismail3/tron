@@ -165,7 +165,7 @@ struct WebFetchRawResponseBodySection: View {
             }
 
             Text(answer)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
