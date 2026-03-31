@@ -14,8 +14,8 @@ struct NotifyAppChip: View {
             HStack(spacing: 6) {
                 statusIcon
 
-                Text("Notified User")
-                    .font(TronTypography.filePath)
+                Text("Notification sent")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
 

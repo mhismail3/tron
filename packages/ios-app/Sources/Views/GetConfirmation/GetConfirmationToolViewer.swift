@@ -16,7 +16,7 @@ struct GetConfirmationToolViewer: View {
                 statusIcon
 
                 Text(statusText)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
@@ -34,21 +34,10 @@ struct GetConfirmationToolViewer: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(tintColor.opacity(0.35)),
-                        in: .capsule
-                    )
-            }
-            .overlay(
-                Capsule()
-                    .strokeBorder(tintColor.opacity(0.4), lineWidth: 0.5)
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .chipStyle(tintColor)
         .disabled(data.status == .superseded || data.status == .generating)
         .opacity(data.status == .superseded ? 0.6 : 1.0)
     }

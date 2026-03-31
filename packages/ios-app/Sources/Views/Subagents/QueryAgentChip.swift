@@ -19,7 +19,7 @@ struct QueryAgentChip: View {
                     .foregroundStyle(data.status.color)
 
                 Text(statusText)
-                    .font(TronTypography.filePath)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
 

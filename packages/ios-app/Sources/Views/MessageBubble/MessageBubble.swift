@@ -187,6 +187,7 @@ struct MessageBubble: View {
 
 struct AnsweredQuestionsChipView: View {
     let questionCount: Int
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 8) {
@@ -200,7 +201,7 @@ struct AnsweredQuestionsChipView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.tronSurface.opacity(0.6))
+        .background(Color.tronSurface.opacity(colorScheme == .light ? 0.85 : 0.6))
         .clipShape(Capsule())
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -210,6 +211,7 @@ struct AnsweredQuestionsChipView: View {
 
 struct ConfirmedActionChipView: View {
     let approved: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 8) {
@@ -223,7 +225,7 @@ struct ConfirmedActionChipView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.tronSurface.opacity(0.6))
+        .background(Color.tronSurface.opacity(colorScheme == .light ? 0.85 : 0.6))
         .clipShape(Capsule())
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
