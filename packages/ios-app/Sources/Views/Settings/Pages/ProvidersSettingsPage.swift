@@ -554,17 +554,32 @@ private struct GoogleProviderFields: View {
                     .autocorrectionDisabled()
             }
 
-            Picker(selection: $selectedEndpoint) {
-                ForEach(endpoints, id: \.self) { ep in
-                    Text(ep == "cloud-code-assist" ? "Cloud Code Assist" : "Antigravity")
-                        .tag(ep)
-                }
-            } label: {
+            HStack {
                 Text("Endpoint")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        selectedEndpoint = selectedEndpoint == "antigravity"
+                            ? "cloud-code-assist" : "antigravity"
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(selectedEndpoint == "cloud-code-assist"
+                             ? "Cloud Code Assist" : "Antigravity")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                    }
+                    .foregroundStyle(.tronCyan)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
-            .pickerStyle(.menu)
 
             HStack {
                 Text("Project ID")
