@@ -23,8 +23,25 @@ pub fn worker_script() -> PathBuf {
 }
 
 /// Find a system Python 3 binary. Tries versioned names first for determinism.
+///
+/// Checks absolute Homebrew paths before falling back to `which`, because
+/// launchd runs the server with a restricted PATH that excludes /opt/homebrew/bin.
+/// Python 3.9 (macOS system default) has no pip and cannot install packages.
 pub fn find_system_python() -> Result<PathBuf, TranscriptionError> {
-    // Prefer specific versions that parakeet-mlx is known to work with
+    // Prefer specific versions that parakeet-mlx is known to work with (3.11+).
+    // Check absolute Homebrew paths first — `which` won't find them under launchd.
+    let homebrew_prefix = "/opt/homebrew/bin";
+    let versioned = ["python3.12", "python3.11", "python3.13", "python3.14"];
+
+    for name in versioned {
+        let abs = PathBuf::from(format!("{homebrew_prefix}/{name}"));
+        if abs.exists() {
+            debug!("found homebrew python: {}", abs.display());
+            return Ok(abs);
+        }
+    }
+
+    // Fall back to PATH-based discovery (works in dev environments).
     let candidates = [
         "python3.12",
         "python3.11",
@@ -39,14 +56,20 @@ pub fn find_system_python() -> Result<PathBuf, TranscriptionError> {
         {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
+                // Skip the macOS system Python 3.9 — it has no pip.
+                let p = PathBuf::from(&path);
+                if p.starts_with("/usr/bin") {
+                    debug!("skipping system python (no pip): {path}");
+                    continue;
+                }
                 debug!("found system python: {path}");
-                return Ok(PathBuf::from(path));
+                return Ok(p);
             }
         }
     }
 
     Err(TranscriptionError::Setup(
-        "Python 3 not found. Install Python 3.11+ for transcription.".into(),
+        "Python 3.11+ not found. Install via: brew install python@3.11".into(),
     ))
 }
 
