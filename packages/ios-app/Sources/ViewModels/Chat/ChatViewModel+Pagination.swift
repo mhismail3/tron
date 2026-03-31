@@ -216,6 +216,10 @@ extension ChatViewModel {
                     )
                     subagentData.blocking = spawn.blocking
 
+                    // Preserve resultDeliveryStatus if already set from subagentResults
+                    if let existing = subagentState.getSubagent(sessionId: sessionId) {
+                        subagentData.resultDeliveryStatus = existing.resultDeliveryStatus
+                    }
                     allReconstructedMessages[i].content = .subagent(subagentData)
                     subagentState.populateFromReconstruction(subagentData)
                 }
