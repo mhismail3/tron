@@ -760,15 +760,15 @@ SENTINEL
     fi
 
     # Regenerate auto-deploy plist if installed (keeps paths in sync).
-    # This MUST happen after the service is started — if auto-deploy invoked
-    # this deploy, `launchctl unload` kills the calling process. Doing it last
-    # ensures the service is already running before we risk that.
+    # When auto-deploy invoked this deploy, IT is the launchd job — so
+    # `launchctl unload` kills this process. We write the new plist first,
+    # then background the unload+load so the reload happens even if this
+    # process is terminated by the unload.
     if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
         print_status "Updating auto-deploy plist..."
         create_auto_deploy_plist
-        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
-        launchctl load "$AUTO_DEPLOY_PLIST_PATH"
-        print_success "Auto-deploy plist updated"
+        (launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null; launchctl load "$AUTO_DEPLOY_PLIST_PATH") &
+        disown 2>/dev/null
     fi
 
     echo ""
