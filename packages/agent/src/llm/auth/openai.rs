@@ -7,7 +7,7 @@
 //! (`http://localhost:1455/auth/callback`) for the callback.
 
 use super::errors::AuthError;
-use super::types::{OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
+use super::types::{ActiveCredential, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
 /// `OpenAI` token endpoint URL.
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -157,92 +157,83 @@ pub async fn refresh_token_with_client(
 
 /// Load server auth from auth storage.
 ///
-/// Priority:
-/// 1. OAuth tokens from `accounts[0]` (named accounts)
-/// 2. OAuth tokens from legacy `oauth` field
-/// 3. API key from `auth.json`
+/// Uses [`super::resolve_credential`] to determine which credential to use:
+/// 1. `credential_override` (session pinning)
+/// 2. `active_credential` (user selection)
+/// 3. Fallback: `accounts[0]` → `api_keys[0]`
 ///
 /// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(
-        auth_path,
-        super::shared_auth_client(),
-    )
-    .await
+    load_server_auth_with_credential(auth_path, None).await
+}
+
+/// Load server auth with an optional credential override (for session pinning).
+#[tracing::instrument(skip_all, fields(provider = "openai"))]
+pub async fn load_server_auth_with_credential(
+    auth_path: &std::path::Path,
+    credential_override: Option<&ActiveCredential>,
+) -> Result<Option<ServerAuth>, AuthError> {
+    load_server_auth_with_client(auth_path, credential_override, super::shared_auth_client())
+        .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
 #[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
+    credential_override: Option<&ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
     let Some(pa) = super::storage::get_provider_auth(auth_path, PROVIDER_KEY) else {
         return Ok(None);
     };
 
-    // 1. OAuth tokens (accounts[0] takes precedence over legacy `oauth`)
-    if let Some(accounts) = &pa.accounts
-        && let Some(acct) = accounts.first()
-    {
-        let (tokens, _refreshed) = maybe_refresh_tokens(
-            auth_path,
-            Some(&acct.label),
-            &acct.oauth,
-            client,
-        )
-        .await?;
-        return Ok(Some(ServerAuth::from_oauth(&tokens)));
-    }
+    let Some(resolved) = super::resolve_credential(&pa, credential_override) else {
+        return Ok(None);
+    };
 
-    // 2. Legacy oauth field
-    if let Some(oauth) = &pa.oauth {
-        let (tokens, _refreshed) =
-            maybe_refresh_tokens(auth_path, None, oauth, client).await?;
-        return Ok(Some(ServerAuth::from_oauth(&tokens)));
+    match resolved {
+        super::ResolvedCredential::OAuthAccount(acct) => {
+            let (tokens, _refreshed) = maybe_refresh_tokens(
+                auth_path,
+                &acct.label,
+                &acct.oauth,
+                client,
+            )
+            .await?;
+            Ok(Some(ServerAuth::from_oauth(&tokens)))
+        }
+        super::ResolvedCredential::ApiKey(key) => {
+            Ok(Some(ServerAuth::from_api_key(&key.key)))
+        }
     }
-
-    // 3. API key from auth.json
-    if let Some(key) = &pa.api_key {
-        return Ok(Some(ServerAuth::from_api_key(key)));
-    }
-
-    Ok(None)
 }
 
-/// Read the current tokens for a specific account (or legacy oauth) from auth.json.
+/// Read the current tokens for a specific account from auth.json.
 fn read_tokens_from_disk(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
 ) -> Option<OAuthTokens> {
     let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)?;
-    if let Some(label) = account_label {
-        pa.accounts?
-            .into_iter()
-            .find(|a| a.label == label)
-            .map(|a| a.oauth)
-    } else {
-        pa.oauth
-    }
+    pa.accounts?
+        .into_iter()
+        .find(|a| a.label == account_label)
+        .map(|a| a.oauth)
 }
 
 /// Save refreshed tokens back to auth.json.
 fn persist_tokens(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
     tokens: &OAuthTokens,
 ) {
-    let result = if let Some(label) = account_label {
-        tracing::info!(account = label, "persisting refreshed OpenAI account tokens");
-        super::storage::save_account_oauth_tokens(auth_path, PROVIDER_KEY, label, tokens)
-    } else {
-        tracing::info!("persisting refreshed OpenAI provider tokens");
-        super::storage::save_provider_oauth_tokens(auth_path, PROVIDER_KEY, tokens)
-    };
-    if let Err(e) = result {
+    tracing::info!(account = account_label, "persisting refreshed OpenAI account tokens");
+    if let Err(e) =
+        super::storage::save_account_oauth_tokens(auth_path, PROVIDER_KEY, account_label, tokens)
+    {
         tracing::warn!(error = %e, "failed to persist refreshed OpenAI tokens");
     }
 }
@@ -264,7 +255,7 @@ fn is_stale_token_error(e: &AuthError) -> bool {
 /// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
     tokens: &OAuthTokens,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
@@ -302,7 +293,7 @@ async fn maybe_refresh_tokens(
 
     let client = client.clone();
     let auth_path = auth_path.to_path_buf();
-    let account_label_owned = account_label.map(std::string::ToString::to_string);
+    let account_label_owned = account_label.to_string();
 
     let do_refresh = |tok: &OAuthTokens| {
         let client = client.clone();
@@ -328,7 +319,7 @@ async fn maybe_refresh_tokens(
         Ok((new_tokens, true)) => {
             persist_tokens(
                 &auth_path,
-                account_label_owned.as_deref(),
+                &account_label_owned,
                 &new_tokens,
             );
             Ok((new_tokens, true))
@@ -337,7 +328,7 @@ async fn maybe_refresh_tokens(
         Err(e) if is_stale_token_error(&e) => {
             tracing::info!("OpenAI refresh token consumed by another process, re-reading auth.json");
 
-            let retry_tokens = read_tokens_from_disk(&auth_path, account_label_owned.as_deref());
+            let retry_tokens = read_tokens_from_disk(&auth_path, &account_label_owned);
             match retry_tokens {
                 Some(rt) if now_ms() + buffer_ms < rt.expires_at => {
                     Ok((rt, true))
@@ -348,7 +339,7 @@ async fn maybe_refresh_tokens(
                         Ok((new_tokens, true)) => {
                             persist_tokens(
                                 &auth_path,
-                                account_label_owned.as_deref(),
+                                &account_label_owned,
                                 &new_tokens,
                             );
                             Ok((new_tokens, true))
@@ -612,27 +603,10 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = read_tokens_from_disk(&path, Some("user@host")).unwrap();
+        let loaded = read_tokens_from_disk(&path, "user@host").unwrap();
         assert_eq!(loaded.access_token, "disk-tok");
 
-        assert!(read_tokens_from_disk(&path, Some("nonexistent")).is_none());
-    }
-
-    #[test]
-    fn read_tokens_from_disk_legacy() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens = OAuthTokens {
-            access_token: "legacy-tok".to_string(),
-            refresh_token: "legacy-ref".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, PROVIDER_KEY, &tokens)
-            .unwrap();
-
-        let loaded = read_tokens_from_disk(&path, None).unwrap();
-        assert_eq!(loaded.access_token, "legacy-tok");
+        assert!(read_tokens_from_disk(&path, "nonexistent").is_none());
     }
 
     // ─── stale token detection ──────────────────────────────────────────
@@ -696,12 +670,160 @@ mod tests {
 
         let client = reqwest::Client::new();
         let (tokens, refreshed) =
-            maybe_refresh_tokens(&path, Some("user@host"), &expired, &client)
+            maybe_refresh_tokens(&path, "user@host", &expired, &client)
                 .await
                 .unwrap();
 
         // Should return the fresh tokens from disk without making HTTP call
         assert!(refreshed);
         assert_eq!(tokens.access_token, "fresh-tok");
+    }
+
+    // ─── active_credential selection ────────────────────────────────────
+
+    #[tokio::test]
+    async fn load_server_auth_active_credential_selects_specific_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens1 = OAuthTokens {
+            access_token: "first-tok".to_string(),
+            refresh_token: "ref1".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens2 = OAuthTokens {
+            access_token: "second-tok".to_string(),
+            refresh_token: "ref2".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "first", &tokens1).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "second", &tokens2).unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &path,
+            PROVIDER_KEY,
+            &ActiveCredential::OAuth { label: "second".to_string() },
+        ).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "second-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_active_credential_selects_api_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "oauth-tok".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "main", &tokens).unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, PROVIDER_KEY, "work", "sk-work-key").unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &path,
+            PROVIDER_KEY,
+            &ActiveCredential::ApiKey { label: "work".to_string() },
+        ).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert!(!auth.is_oauth());
+        assert_eq!(auth.token(), "sk-work-key");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_deleted_active_falls_back_to_first() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "remaining-tok".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "remaining", &tokens).unwrap();
+
+        // Set active to a non-existent account (simulates deletion without clearing active)
+        // Manually write the active_credential since set_active_credential validates
+        let mut storage = crate::llm::auth::storage::load_auth_storage(&path).unwrap();
+        let mut pa = storage.get_provider_auth(PROVIDER_KEY).unwrap();
+        pa.active_credential = Some(ActiveCredential::OAuth { label: "deleted".to_string() });
+        storage.set_provider_auth(PROVIDER_KEY, &pa);
+        crate::llm::auth::storage::save_auth_storage(&path, &mut storage).unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "remaining-tok");
+    }
+
+    // ─── credential_override (session pinning) ──────────────────────────
+
+    #[tokio::test]
+    async fn load_server_auth_override_beats_active() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens1 = OAuthTokens {
+            access_token: "active-tok".to_string(),
+            refresh_token: "ref1".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        let tokens2 = OAuthTokens {
+            access_token: "pinned-tok".to_string(),
+            refresh_token: "ref2".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "active-acct", &tokens1).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "pinned-acct", &tokens2).unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &path,
+            PROVIDER_KEY,
+            &ActiveCredential::OAuth { label: "active-acct".to_string() },
+        ).unwrap();
+
+        // Override should beat the active credential
+        let override_cred = ActiveCredential::OAuth { label: "pinned-acct".to_string() };
+        let result = load_server_auth_with_credential(&path, Some(&override_cred)).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "pinned-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_override_deleted_falls_to_active() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "active-tok".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, PROVIDER_KEY, "active-acct", &tokens).unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &path,
+            PROVIDER_KEY,
+            &ActiveCredential::OAuth { label: "active-acct".to_string() },
+        ).unwrap();
+
+        // Override points to a deleted credential
+        let override_cred = ActiveCredential::OAuth { label: "deleted".to_string() };
+        let result = load_server_auth_with_credential(&path, Some(&override_cred)).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "active-tok");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_no_active_no_override_uses_first() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        crate::llm::auth::storage::save_named_api_key(&path, PROVIDER_KEY, "key1", "sk-first").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, PROVIDER_KEY, "key2", "sk-second").unwrap();
+
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.token(), "sk-first");
     }
 }

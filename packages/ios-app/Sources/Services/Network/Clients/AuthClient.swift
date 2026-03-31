@@ -70,4 +70,42 @@ final class AuthClient {
             params: RenameAccountParams(provider: provider, oldLabel: oldLabel, newLabel: newLabel)
         )
     }
+
+    // MARK: - Multi-Credential Management
+
+    /// Set the active credential for a provider.
+    func setActive(provider: String, credential: ActiveCredentialParam) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.setActive",
+            params: SetActiveParams(provider: provider, credential: credential)
+        )
+    }
+
+    /// Remove an OAuth account by label.
+    func removeAccount(provider: String, label: String) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.removeAccount",
+            params: RemoveAccountParams(provider: provider, label: label)
+        )
+    }
+
+    /// Remove a named API key by label.
+    func removeApiKey(provider: String, label: String) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.removeApiKey",
+            params: RemoveApiKeyParams(provider: provider, label: label)
+        )
+    }
+
+    /// Add a named API key for a provider.
+    func addNamedApiKey(provider: String, label: String, key: String) async throws -> AuthState {
+        let ws = try transport.requireConnection()
+        return try await ws.send(
+            method: "auth.update",
+            params: AddNamedApiKeyParams(provider: provider, apiKey: key, apiKeyLabel: label)
+        )
+    }
 }

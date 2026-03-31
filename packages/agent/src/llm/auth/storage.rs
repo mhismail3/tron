@@ -5,7 +5,10 @@
 use std::path::{Path, PathBuf};
 
 use super::errors::AuthError;
-use super::types::{AuthStorage, GoogleProviderAuth, OAuthTokens, ProviderAuth, ServiceAuth};
+use super::types::{
+    ActiveCredential, ApiKeyEntry, AuthStorage, GoogleProviderAuth, OAuthTokens, ProviderAuth,
+    ServiceAuth,
+};
 
 /// Default auth file name.
 const AUTH_FILE_NAME: &str = "auth.json";
@@ -65,8 +68,22 @@ pub fn save_auth_storage(path: &Path, storage: &mut AuthStorage) -> Result<(), A
 }
 
 /// Get provider auth from storage file.
+///
+/// Runs legacy migration: if the provider has `oauth` or `api_key` fields,
+/// they are moved to `accounts[]`/`api_keys[]` and persisted back to disk.
 pub fn get_provider_auth(path: &Path, provider: &str) -> Option<ProviderAuth> {
-    load_auth_storage(path)?.get_provider_auth(provider)
+    let mut storage = load_auth_storage(path)?;
+    let mut pa = storage.get_provider_auth(provider)?;
+
+    if pa.migrate_legacy() {
+        tracing::info!(provider, "migrated legacy auth fields to new arrays");
+        storage.set_provider_auth(provider, &pa);
+        if let Err(e) = save_auth_storage(path, &mut storage) {
+            tracing::warn!(provider, error = %e, "failed to persist legacy migration");
+        }
+    }
+
+    Some(pa)
 }
 
 /// Get Google provider auth from storage file.
@@ -135,6 +152,8 @@ pub fn save_account_oauth_tokens(
 }
 
 /// Rename an account label for a provider.
+///
+/// Also updates `active_credential` if it pointed to the old label.
 pub fn rename_account(
     path: &Path,
     provider: &str,
@@ -154,6 +173,17 @@ pub fn rename_account(
         )));
     }
 
+    // Update active_credential if it pointed to the old label
+    if pa.active_credential
+        == Some(ActiveCredential::OAuth {
+            label: old_label.to_string(),
+        })
+    {
+        pa.active_credential = Some(ActiveCredential::OAuth {
+            label: new_label.to_string(),
+        });
+    }
+
     storage.set_provider_auth(provider, &pa);
     save_auth_storage(path, &mut storage)
 }
@@ -166,6 +196,162 @@ pub fn get_account_labels(path: &Path, provider: &str) -> Vec<String> {
     pa.accounts
         .map(|accts| accts.iter().map(|a| a.label.clone()).collect())
         .unwrap_or_default()
+}
+
+/// Save a named API key for a provider.
+///
+/// If an entry with the same label exists, updates the key. Otherwise appends.
+pub fn save_named_api_key(
+    path: &Path,
+    provider: &str,
+    label: &str,
+    key: &str,
+) -> Result<(), AuthError> {
+    if label.is_empty() {
+        return Err(AuthError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "API key label cannot be empty",
+        )));
+    }
+
+    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
+
+    let api_keys = pa.api_keys.get_or_insert_with(Vec::new);
+    if let Some(existing) = api_keys.iter_mut().find(|k| k.label == label) {
+        existing.key = key.to_string();
+    } else {
+        api_keys.push(ApiKeyEntry {
+            label: label.to_string(),
+            key: key.to_string(),
+        });
+    }
+
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
+/// Remove a named API key by label.
+///
+/// If the removed key was the active credential, clears `active_credential`.
+pub fn remove_named_api_key(path: &Path, provider: &str, label: &str) -> Result<(), AuthError> {
+    let Some(mut storage) = load_auth_storage(path) else {
+        return Ok(());
+    };
+    let Some(mut pa) = storage.get_provider_auth(provider) else {
+        return Ok(());
+    };
+
+    if let Some(ref mut api_keys) = pa.api_keys {
+        let before = api_keys.len();
+        api_keys.retain(|k| k.label != label);
+        if api_keys.len() < before {
+            // Check if active_credential pointed to this key
+            if pa.active_credential
+                == Some(ActiveCredential::ApiKey {
+                    label: label.to_string(),
+                })
+            {
+                pa.active_credential = None;
+            }
+        }
+    }
+
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
+/// Remove an OAuth account by label.
+///
+/// If the removed account was the active credential, clears `active_credential`.
+pub fn remove_account(path: &Path, provider: &str, label: &str) -> Result<(), AuthError> {
+    let Some(mut storage) = load_auth_storage(path) else {
+        return Ok(());
+    };
+    let Some(mut pa) = storage.get_provider_auth(provider) else {
+        return Ok(());
+    };
+
+    if let Some(ref mut accounts) = pa.accounts {
+        let before = accounts.len();
+        accounts.retain(|a| a.label != label);
+        if accounts.len() < before {
+            // Clear active_credential if it pointed to the removed account
+            if pa.active_credential
+                == Some(ActiveCredential::OAuth {
+                    label: label.to_string(),
+                })
+            {
+                pa.active_credential = None;
+            }
+        }
+    }
+
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
+/// Set the active credential for a provider.
+///
+/// Validates that the referenced credential exists. Returns error if not found.
+pub fn set_active_credential(
+    path: &Path,
+    provider: &str,
+    credential: &ActiveCredential,
+) -> Result<(), AuthError> {
+    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
+
+    // Validate the credential exists
+    match credential {
+        ActiveCredential::OAuth { label } => {
+            let exists = pa
+                .accounts
+                .as_ref()
+                .is_some_and(|accts| accts.iter().any(|a| a.label == *label));
+            if !exists {
+                return Err(AuthError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("OAuth account '{label}' not found for provider '{provider}'"),
+                )));
+            }
+        }
+        ActiveCredential::ApiKey { label } => {
+            let exists = pa
+                .api_keys
+                .as_ref()
+                .is_some_and(|keys| keys.iter().any(|k| k.label == *label));
+            if !exists {
+                return Err(AuthError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("API key '{label}' not found for provider '{provider}'"),
+                )));
+            }
+        }
+    }
+
+    pa.active_credential = Some(credential.clone());
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
+/// Clear the active credential for a provider (falls back to default priority).
+pub fn clear_active_credential(path: &Path, provider: &str) -> Result<(), AuthError> {
+    let Some(mut storage) = load_auth_storage(path) else {
+        return Ok(());
+    };
+    let Some(mut pa) = storage.get_provider_auth(provider) else {
+        return Ok(());
+    };
+
+    pa.active_credential = None;
+    storage.set_provider_auth(provider, &pa);
+    save_auth_storage(path, &mut storage)
+}
+
+/// Get the active credential for a provider.
+pub fn get_active_credential(path: &Path, provider: &str) -> Option<ActiveCredential> {
+    get_provider_auth(path, provider)?.active_credential
 }
 
 /// Save Google-specific provider auth.
@@ -333,17 +519,25 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
 
-        // Save API key first
+        // Save API key first (legacy path)
         save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
 
-        // Then add OAuth tokens
+        // Then add OAuth tokens (legacy path)
         let tokens = make_tokens();
         save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
-        // Both should be present
+        // get_provider_auth runs migration: legacy fields moved to arrays
         let pa = get_provider_auth(&path, "anthropic").unwrap();
-        assert_eq!(pa.api_key.as_deref(), Some("sk-123"));
-        assert_eq!(pa.oauth.unwrap().access_token, "tok");
+        // Legacy fields should be cleared after migration
+        assert!(pa.api_key.is_none(), "legacy api_key should be migrated away");
+        assert!(pa.oauth.is_none(), "legacy oauth should be migrated away");
+        // Data should be in the new arrays
+        let api_keys = pa.api_keys.unwrap();
+        assert_eq!(api_keys[0].label, "(default)");
+        assert_eq!(api_keys[0].key, "sk-123");
+        let accounts = pa.accounts.unwrap();
+        assert_eq!(accounts[0].label, "(migrated)");
+        assert_eq!(accounts[0].oauth.access_token, "tok");
     }
 
     #[test]
@@ -493,6 +687,395 @@ mod tests {
         // Now it should succeed
         let ret = unsafe { libc::flock(lock_file2.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         assert_eq!(ret, 0, "lock should succeed after first lock dropped");
+    }
+
+    // ── Named API keys ──
+
+    #[test]
+    fn save_named_api_key_creates_new() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-work-123").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].label, "work");
+        assert_eq!(keys[0].key, "sk-work-123");
+    }
+
+    #[test]
+    fn save_named_api_key_updates_existing() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-old").unwrap();
+        save_named_api_key(&path, "anthropic", "work", "sk-new").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key, "sk-new");
+    }
+
+    #[test]
+    fn save_named_api_key_multiple_labels() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        save_named_api_key(&path, "anthropic", "personal", "sk-p").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn save_named_api_key_empty_label_errors() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        let result = save_named_api_key(&path, "anthropic", "", "sk-123");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remove_named_api_key_removes() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        save_named_api_key(&path, "anthropic", "personal", "sk-p").unwrap();
+
+        remove_named_api_key(&path, "anthropic", "work").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].label, "personal");
+    }
+
+    #[test]
+    fn remove_named_api_key_nonexistent_noop() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        remove_named_api_key(&path, "anthropic", "nonexistent").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert_eq!(pa.api_keys.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remove_named_api_key_clears_active_if_pointing_to_removed() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::ApiKey {
+                label: "work".to_string(),
+            },
+        )
+        .unwrap();
+
+        remove_named_api_key(&path, "anthropic", "work").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert!(pa.active_credential.is_none());
+    }
+
+    #[test]
+    fn remove_named_api_key_preserves_active_if_pointing_elsewhere() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        save_named_api_key(&path, "anthropic", "personal", "sk-p").unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::ApiKey {
+                label: "personal".to_string(),
+            },
+        )
+        .unwrap();
+
+        remove_named_api_key(&path, "anthropic", "work").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert_eq!(
+            pa.active_credential,
+            Some(ActiveCredential::ApiKey {
+                label: "personal".to_string()
+            })
+        );
+    }
+
+    // ── Remove account ──
+
+    #[test]
+    fn remove_account_removes() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "acct1", &make_tokens()).unwrap();
+        save_account_oauth_tokens(&path, "anthropic", "acct2", &make_tokens()).unwrap();
+
+        remove_account(&path, "anthropic", "acct1").unwrap();
+
+        let labels = get_account_labels(&path, "anthropic");
+        assert_eq!(labels, vec!["acct2"]);
+    }
+
+    #[test]
+    fn remove_account_clears_active_if_pointing_to_removed() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        remove_account(&path, "anthropic", "main").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert!(pa.active_credential.is_none());
+    }
+
+    #[test]
+    fn remove_account_preserves_active_if_pointing_elsewhere() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "acct1", &make_tokens()).unwrap();
+        save_account_oauth_tokens(&path, "anthropic", "acct2", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "acct2".to_string(),
+            },
+        )
+        .unwrap();
+
+        remove_account(&path, "anthropic", "acct1").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert_eq!(
+            pa.active_credential,
+            Some(ActiveCredential::OAuth {
+                label: "acct2".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn rename_account_updates_active_credential() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "old-name", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "old-name".to_string(),
+            },
+        )
+        .unwrap();
+
+        rename_account(&path, "anthropic", "old-name", "new-name").unwrap();
+
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert_eq!(
+            pa.active_credential,
+            Some(ActiveCredential::OAuth {
+                label: "new-name".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn rename_account_preserves_active_if_different_account() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "acct1", &make_tokens()).unwrap();
+        save_account_oauth_tokens(&path, "anthropic", "acct2", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "acct2".to_string(),
+            },
+        )
+        .unwrap();
+
+        rename_account(&path, "anthropic", "acct1", "renamed").unwrap();
+
+        // acct2 should still be active
+        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        assert_eq!(
+            pa.active_credential,
+            Some(ActiveCredential::OAuth {
+                label: "acct2".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn remove_account_nonexistent_noop() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
+        remove_account(&path, "anthropic", "nonexistent").unwrap();
+
+        assert_eq!(get_account_labels(&path, "anthropic"), vec!["main"]);
+    }
+
+    // ── Active credential ──
+
+    #[test]
+    fn set_active_credential_oauth() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let active = get_active_credential(&path, "anthropic").unwrap();
+        assert_eq!(
+            active,
+            ActiveCredential::OAuth {
+                label: "main".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn set_active_credential_api_key() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::ApiKey {
+                label: "work".to_string(),
+            },
+        )
+        .unwrap();
+
+        let active = get_active_credential(&path, "anthropic").unwrap();
+        assert_eq!(
+            active,
+            ActiveCredential::ApiKey {
+                label: "work".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn set_active_credential_nonexistent_oauth_errors() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        let result = set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "nonexistent".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn set_active_credential_nonexistent_api_key_errors() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        let result = set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::ApiKey {
+                label: "nonexistent".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn set_active_credential_oauth_but_no_accounts_errors() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        // Only an API key, no accounts
+        save_named_api_key(&path, "anthropic", "key1", "sk-x").unwrap();
+        let result = set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "main".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn clear_active_credential_works() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
+        set_active_credential(
+            &path,
+            "anthropic",
+            &ActiveCredential::OAuth {
+                label: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        clear_active_credential(&path, "anthropic").unwrap();
+        assert!(get_active_credential(&path, "anthropic").is_none());
+    }
+
+    #[test]
+    fn clear_active_credential_noop_missing_provider() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        assert!(clear_active_credential(&path, "anthropic").is_ok());
+    }
+
+    #[test]
+    fn get_active_credential_none_when_not_set() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
+        assert!(get_active_credential(&path, "anthropic").is_none());
     }
 
     #[cfg(unix)]

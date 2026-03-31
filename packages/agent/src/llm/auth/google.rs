@@ -260,68 +260,104 @@ pub async fn load_server_auth(
 ) -> Result<Option<GoogleAuth>, AuthError> {
     load_server_auth_with_client(
         auth_path,
+        None,
         super::shared_auth_client(),
     )
     .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
+///
+/// Google uses its own credential resolution since it returns [`GoogleAuth`]
+/// with endpoint/project metadata, not just [`ServerAuth`]. The
+/// `credential_override` parameter is accepted for interface consistency
+/// and will be used when Google migrates to the new `accounts[]`/`api_keys[]`
+/// pattern.
 #[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
+    _credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // 1. OAuth from auth.json
+    // Google uses GoogleProviderAuth which flattens ProviderAuth.
+    // For now, use the existing direct field access until Google migrates
+    // to the accounts[]/api_keys[] pattern.
     let gpa = super::storage::get_google_provider_auth(auth_path);
-    if let Some(ref gpa) = gpa
-        && let Some(oauth) = &gpa.base.oauth
-    {
-        let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
-        let cfg = get_config(endpoint);
 
-        // Use stored client credentials for refresh
-        let cfg_with_creds = GoogleOAuthConfig {
-            oauth: OAuthConfig {
-                client_id: gpa.client_id.clone().unwrap_or(cfg.oauth.client_id),
-                client_secret: gpa.client_secret.clone().or(cfg.oauth.client_secret),
-                ..cfg.oauth
-            },
-            ..cfg
-        };
+    // 1. OAuth: check accounts[0] first, then legacy oauth field
+    if let Some(ref gpa) = gpa {
+        let oauth = gpa
+            .base
+            .accounts
+            .as_ref()
+            .and_then(|a| a.first())
+            .map(|a| &a.oauth);
 
-        match maybe_refresh_tokens(oauth, &cfg_with_creds, client).await {
-            Ok((tokens, refreshed)) => {
-                if refreshed {
-                    tracing::info!("persisting refreshed Google tokens");
-                    let mut updated_gpa = gpa.clone();
-                    updated_gpa.base.oauth = Some(tokens.clone());
-                    let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
+        if let Some(oauth) = oauth {
+            let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
+            let cfg = get_config(endpoint);
+
+            let cfg_with_creds = GoogleOAuthConfig {
+                oauth: OAuthConfig {
+                    client_id: gpa.client_id.clone().unwrap_or(cfg.oauth.client_id),
+                    client_secret: gpa.client_secret.clone().or(cfg.oauth.client_secret),
+                    ..cfg.oauth
+                },
+                ..cfg
+            };
+
+            match maybe_refresh_tokens(oauth, &cfg_with_creds, client).await {
+                Ok((tokens, refreshed)) => {
+                    if refreshed {
+                        tracing::info!("persisting refreshed Google tokens");
+                        // Write to the account if it came from accounts[], otherwise legacy field
+                        if let Some(acct_label) = gpa.base.accounts.as_ref()
+                            .and_then(|a| a.first())
+                            .map(|a| a.label.as_str())
+                        {
+                            let _ = super::storage::save_account_oauth_tokens(
+                                auth_path, "google", acct_label, &tokens,
+                            );
+                        } else {
+                            let mut updated_gpa = gpa.clone();
+                            updated_gpa.base.oauth = Some(tokens.clone());
+                            let _ =
+                                super::storage::save_google_provider_auth(auth_path, &updated_gpa);
+                        }
+                    }
+                    return Ok(Some(GoogleAuth {
+                        auth: ServerAuth::from_oauth(&tokens),
+                        endpoint: Some(endpoint),
+                        api_endpoint: Some(cfg_with_creds.api_endpoint),
+                        api_version: Some(cfg_with_creds.api_version),
+                        project_id: gpa.project_id.clone(),
+                    }));
                 }
-                return Ok(Some(GoogleAuth {
-                    auth: ServerAuth::from_oauth(&tokens),
-                    endpoint: Some(endpoint),
-                    api_endpoint: Some(cfg_with_creds.api_endpoint),
-                    api_version: Some(cfg_with_creds.api_version),
-                    project_id: gpa.project_id.clone(),
-                }));
-            }
-            Err(e) => {
-                tracing::warn!("Google OAuth refresh failed: {e}");
+                Err(e) => {
+                    tracing::warn!("Google OAuth refresh failed: {e}");
+                }
             }
         }
     }
 
-    // 2. API key from auth.json
-    if let Some(gpa) = &gpa
-        && let Some(key) = &gpa.base.api_key
-    {
-        return Ok(Some(GoogleAuth {
-            auth: ServerAuth::from_api_key(key),
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: None,
-        }));
+    // 2. API key: check api_keys[0] first, then legacy api_key field
+    if let Some(gpa) = &gpa {
+        let key = gpa
+            .base
+            .api_keys
+            .as_ref()
+            .and_then(|k| k.first())
+            .map(|k| k.key.as_str());
+
+        if let Some(key) = key {
+            return Ok(Some(GoogleAuth {
+                auth: ServerAuth::from_api_key(key),
+                endpoint: None,
+                api_endpoint: None,
+                api_version: None,
+                project_id: None,
+            }));
+        }
     }
 
     Ok(None)
@@ -505,10 +541,8 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Save API key to file and verify it loads
-        let mut gpa = GoogleProviderAuth::default();
-        gpa.base.api_key = Some("file-api-key".to_string());
-        crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+        // Save API key via named key path
+        crate::llm::auth::storage::save_named_api_key(&path, "google", "(test)", "file-api-key").unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
@@ -520,18 +554,18 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let gpa = GoogleProviderAuth {
-            base: crate::llm::auth::types::ProviderAuth {
-                oauth: Some(OAuthTokens {
-                    access_token: "ya29.file-oauth".to_string(),
-                    refresh_token: "ref".to_string(),
-                    expires_at: now_ms() + 3_600_000,
-                }),
-                ..Default::default()
-            },
-            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
-            ..Default::default()
+        // Save OAuth tokens via account path
+        let tokens = OAuthTokens {
+            access_token: "ya29.file-oauth".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
         };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+
+        // Also set Google-specific metadata
+        let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap_or_default();
+        gpa.endpoint = Some(GoogleOAuthEndpoint::Antigravity);
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
@@ -554,18 +588,18 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        let gpa = GoogleProviderAuth {
-            base: crate::llm::auth::types::ProviderAuth {
-                oauth: Some(OAuthTokens {
-                    access_token: "ya29.fresh".to_string(),
-                    refresh_token: "ref".to_string(),
-                    expires_at: now_ms() + 3_600_000,
-                }),
-                ..Default::default()
-            },
-            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
-            ..Default::default()
+        // Save OAuth tokens via account path
+        let tokens = OAuthTokens {
+            access_token: "ya29.fresh".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
         };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+
+        // Set Google-specific metadata
+        let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap_or_default();
+        gpa.endpoint = Some(GoogleOAuthEndpoint::Antigravity);
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();

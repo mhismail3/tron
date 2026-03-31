@@ -1270,18 +1270,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        let gpa = tron::llm::auth::GoogleProviderAuth {
-            base: tron::llm::auth::ProviderAuth {
-                oauth: Some(tron::llm::auth::OAuthTokens {
-                    access_token: "ya29.google-tok".to_string(),
-                    refresh_token: "ref".to_string(),
-                    expires_at: tron::llm::auth::now_ms() + 3_600_000,
-                }),
-                ..Default::default()
-            },
-            endpoint: Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity),
-            ..Default::default()
+        // Save OAuth tokens via account path
+        let tokens = tron::llm::auth::OAuthTokens {
+            access_token: "ya29.google-tok".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: tron::llm::auth::now_ms() + 3_600_000,
         };
+        tron::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+
+        // Set Google-specific metadata
+        let mut gpa = tron::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap_or_default();
+        gpa.endpoint = Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity);
         tron::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
         let result = tron::llm::auth::google::load_server_auth(&path)

@@ -131,6 +131,9 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("auth.oauthBegin", auth::OAuthBeginHandler);
     registry.register("auth.oauthComplete", auth::OAuthCompleteHandler);
     registry.register("auth.renameAccount", auth::RenameAccountHandler);
+    registry.register("auth.setActive", auth::SetActiveCredentialHandler);
+    registry.register("auth.removeAccount", auth::RemoveAccountHandler);
+    registry.register("auth.removeApiKey", auth::RemoveApiKeyHandler);
 
     // Tool
     registry.register("tool.result", tool::ToolResultHandler);
@@ -511,8 +514,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            120,
-            "expected 120 methods, got {}",
+            123,
+            "expected 123 methods, got {}",
             reg.methods().len()
         );
     }

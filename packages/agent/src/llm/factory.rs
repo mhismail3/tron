@@ -91,7 +91,11 @@ impl DefaultProviderFactory {
 
     // ── Per-provider construction ────────────────────────────────────
 
-    async fn create_anthropic(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+    async fn create_anthropic_with_credential(
+        &self,
+        model: &str,
+        credential_override: Option<&crate::llm::auth::ActiveCredential>,
+    ) -> Result<Arc<dyn Provider>, ProviderError> {
         let mut oauth_config = crate::llm::auth::anthropic::default_config();
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
@@ -100,6 +104,7 @@ impl DefaultProviderFactory {
         let server_auth = match crate::llm::auth::anthropic::load_server_auth_with_client(
             &self.auth_path,
             &oauth_config,
+            credential_override,
             &self.http_client,
         )
         .await
@@ -177,9 +182,14 @@ impl DefaultProviderFactory {
         ))
     }
 
-    async fn create_openai(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+    async fn create_openai_with_credential(
+        &self,
+        model: &str,
+        credential_override: Option<&crate::llm::auth::ActiveCredential>,
+    ) -> Result<Arc<dyn Provider>, ProviderError> {
         let server_auth = match crate::llm::auth::openai::load_server_auth_with_client(
             &self.auth_path,
+            credential_override,
             &self.http_client,
         )
         .await
@@ -232,9 +242,14 @@ impl DefaultProviderFactory {
         ))
     }
 
-    async fn create_google(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+    async fn create_google_with_credential(
+        &self,
+        model: &str,
+        credential_override: Option<&crate::llm::auth::ActiveCredential>,
+    ) -> Result<Arc<dyn Provider>, ProviderError> {
         let google_auth = match crate::llm::auth::google::load_server_auth_with_client(
             &self.auth_path,
+            credential_override,
             &self.http_client,
         )
         .await
@@ -307,7 +322,7 @@ impl DefaultProviderFactory {
         let api_key = if let Some(pa) =
             crate::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
         {
-            if let Some(key) = pa.api_key {
+            if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
                 info!("using MiniMax API key from auth.json");
                 key
             } else {
@@ -350,7 +365,7 @@ impl DefaultProviderFactory {
         let api_key = if let Some(pa) =
             crate::llm::auth::storage::get_provider_auth(&self.auth_path, "kimi")
         {
-            if let Some(key) = pa.api_key {
+            if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
                 info!("using Kimi API key from auth.json");
                 key
             } else {
@@ -390,31 +405,48 @@ impl DefaultProviderFactory {
     }
 }
 
-#[async_trait]
-impl ProviderFactory for DefaultProviderFactory {
-    async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+impl DefaultProviderFactory {
+    /// Create a provider for the given model with an optional credential override.
+    ///
+    /// Used by [`CredentialPinnedProviderFactory`] for session auth isolation.
+    async fn create_for_model_with_credential(
+        &self,
+        model: &str,
+        credential_override: Option<&crate::llm::auth::ActiveCredential>,
+    ) -> Result<Arc<dyn Provider>, ProviderError> {
         use crate::core::messages::Provider as ProviderKind;
 
         let bare_model = strip_provider_prefix(model);
-        // INVARIANT: unknown model/provider → fail-fast with typed error.
-        // No silent fallback or default provider substitution.
         let provider_type =
             detect_provider_from_model(model).ok_or_else(|| ProviderError::UnsupportedModel {
                 model: model.to_string(),
             })?;
 
+        // Only pass credential_override to providers that support it.
+        // MiniMax/Kimi use simple API keys without credential selection.
         match provider_type {
-            ProviderKind::Anthropic => self.create_anthropic(bare_model).await,
-            ProviderKind::OpenAi | ProviderKind::OpenAiCodex => {
-                self.create_openai(bare_model).await
+            ProviderKind::Anthropic => {
+                self.create_anthropic_with_credential(bare_model, credential_override).await
             }
-            ProviderKind::Google => self.create_google(bare_model).await,
+            ProviderKind::OpenAi | ProviderKind::OpenAiCodex => {
+                self.create_openai_with_credential(bare_model, credential_override).await
+            }
+            ProviderKind::Google => {
+                self.create_google_with_credential(bare_model, credential_override).await
+            }
             ProviderKind::MiniMax => self.create_minimax(bare_model),
             ProviderKind::Kimi => self.create_kimi(bare_model),
             ProviderKind::Unknown => Err(ProviderError::UnsupportedModel {
                 model: bare_model.to_string(),
             }),
         }
+    }
+}
+
+#[async_trait]
+impl ProviderFactory for DefaultProviderFactory {
+    async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+        self.create_for_model_with_credential(model, None).await
     }
 }
 

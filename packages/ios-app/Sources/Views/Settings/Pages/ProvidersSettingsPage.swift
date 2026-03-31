@@ -7,21 +7,21 @@ private struct ProviderInfo: Identifiable {
     let displayName: String
     let assetIcon: String
     let color: Color
+    let supportsOAuth: Bool
 
     static let llmProviders: [ProviderInfo] = [
-        ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral),
-        ProviderInfo(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", color: .tronSlate),
-        ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan),
-        ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose),
-        ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo),
+        ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral, supportsOAuth: true),
+        ProviderInfo(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", color: .tronSlate, supportsOAuth: true),
+        ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan, supportsOAuth: false),
+        ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose, supportsOAuth: false),
+        ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
     ]
 
     static let services: [ProviderInfo] = [
-        ProviderInfo(id: "brave", displayName: "Brave Search", assetIcon: "", color: .tronAmber),
-        ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber),
+        ProviderInfo(id: "brave", displayName: "Brave Search", assetIcon: "", color: .tronAmber, supportsOAuth: false),
+        ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber, supportsOAuth: false),
     ]
 
-    /// Service icons use SF Symbols since they don't have asset icons
     var serviceSystemIcon: String {
         switch id {
         case "brave": return "magnifyingglass"
@@ -38,7 +38,6 @@ struct ProvidersSettingsPage: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var authState: AuthState?
-    @State private var isLoading = true
     @State private var error: String?
     @State private var expandedProvider: String?
     @State private var oauthProvider: OAuthProvider?
@@ -47,15 +46,8 @@ struct ProvidersSettingsPage: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if rpcClient.connectionState != .connected {
-                    disconnectedView
-                } else {
-                    providersList
-                }
+            ScrollView {
+                providersVStack
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -88,123 +80,63 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    // MARK: - Subviews
+    // MARK: - Content
 
-    private var disconnectedView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "network.slash")
-                .font(.system(size: 32))
-                .foregroundStyle(.tronTextSecondary)
-            Text("Connect to server to manage providers")
-                .font(TronTypography.body)
-                .foregroundStyle(.tronTextSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var providersList: some View {
-        List {
-            Section {
-                ForEach(ProviderInfo.llmProviders) { provider in
-                    providerRow(provider)
-                }
-            } header: {
+    private var providersVStack: some View {
+        VStack(spacing: 16) {
+                // LLM Providers section
                 Text("LLM Providers")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
-            }
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            Section {
-                ForEach(ProviderInfo.services) { service in
-                    serviceRow(service)
+                ForEach(ProviderInfo.llmProviders) { provider in
+                    ProviderCard(
+                        provider: provider,
+                        providerAuth: authState?.providers[provider.id],
+                        isExpanded: expandedProvider == provider.id,
+                        onToggle: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                expandedProvider = expandedProvider == provider.id ? nil : provider.id
+                            }
+                        },
+                        onSetActive: { credential in await setActive(provider: provider.id, credential: credential) },
+                        onRemoveAccount: { label in await removeAccount(provider: provider.id, label: label) },
+                        onRemoveApiKey: { label in await removeApiKey(provider: provider.id, label: label) },
+                        onAddApiKey: { label, key in await addApiKey(provider: provider.id, label: label, key: key) },
+                        onRenameAccount: { oldLabel, newLabel in
+                            await renameAccount(provider: provider.id, oldLabel: oldLabel, newLabel: newLabel)
+                        },
+                        onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) },
+                        onClear: { await clearProvider(provider.id) }
+                    )
                 }
-            } header: {
+
+                // Services section
                 Text("Services")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+
+                ForEach(ProviderInfo.services) { service in
+                    ServiceCard(
+                        service: service,
+                        serviceAuth: authState?.services[service.id],
+                        isExpanded: expandedProvider == service.id,
+                        onToggle: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                expandedProvider = expandedProvider == service.id ? nil : service.id
+                            }
+                        },
+                        onSave: { params in await saveProvider(params) },
+                        onClear: { await clearService(service.id) }
+                    )
+                }
             }
-        }
-        .listStyle(.insetGrouped)
-    }
-
-    // MARK: - Provider Row
-
-    private func providerRow(_ provider: ProviderInfo) -> some View {
-        let info = authState?.providers[provider.id]
-        let hasAccounts = !(info?.accounts?.isEmpty ?? true)
-        let isConfigured = info?.hasApiKey == true || info?.hasOAuth == true || hasAccounts
-
-        return DisclosureGroup(
-            isExpanded: Binding(
-                get: { expandedProvider == provider.id },
-                set: { expandedProvider = $0 ? provider.id : nil }
-            )
-        ) {
-            if provider.id == "google" {
-                GoogleProviderForm(
-                    providerInfo: info,
-                    onSave: { params in await saveProvider(params) },
-                    onClear: { await clearProvider(provider.id) }
-                )
-            } else {
-                StandardProviderForm(
-                    providerId: provider.id,
-                    providerInfo: info,
-                    onSave: { params in await saveProvider(params) },
-                    onClear: { await clearProvider(provider.id) },
-                    onRenameAccount: { oldLabel, newLabel in
-                        await renameAccount(provider: provider.id, oldLabel: oldLabel, newLabel: newLabel)
-                    },
-                    onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) }
-                )
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(provider.assetIcon)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(provider.color)
-                    .frame(width: 16, height: 16)
-                Text(provider.displayName)
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(isConfigured ? .tronSuccess : .tronTextSecondary.opacity(0.3))
-            }
-        }
-    }
-
-    // MARK: - Service Row
-
-    private func serviceRow(_ service: ProviderInfo) -> some View {
-        let info = authState?.services[service.id]
-        let isConfigured = info?.hasApiKey == true
-
-        return DisclosureGroup(
-            isExpanded: Binding(
-                get: { expandedProvider == service.id },
-                set: { expandedProvider = $0 ? service.id : nil }
-            )
-        ) {
-            ServiceForm(
-                serviceId: service.id,
-                serviceInfo: info,
-                onSave: { params in await saveProvider(params) },
-                onClear: { await clearService(service.id) }
-            )
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: service.serviceSystemIcon)
-                    .font(.system(size: 13))
-                    .foregroundStyle(service.color)
-                    .frame(width: 16, height: 16)
-                Text(service.displayName)
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(isConfigured ? .tronSuccess : .tronTextSecondary.opacity(0.3))
-            }
-        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 40)
     }
 
     // MARK: - Actions
@@ -212,9 +144,49 @@ struct ProvidersSettingsPage: View {
     private func loadAuthState() async {
         do {
             authState = try await rpcClient.auth.get()
-            isLoading = false
         } catch {
-            isLoading = false
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func setActive(provider: String, credential: ActiveCredentialParam) async {
+        do {
+            authState = try await rpcClient.auth.setActive(provider: provider, credential: credential)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func removeAccount(provider: String, label: String) async {
+        do {
+            authState = try await rpcClient.auth.removeAccount(provider: provider, label: label)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func removeApiKey(provider: String, label: String) async {
+        do {
+            authState = try await rpcClient.auth.removeApiKey(provider: provider, label: label)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func addApiKey(provider: String, label: String, key: String) async {
+        do {
+            authState = try await rpcClient.auth.addNamedApiKey(provider: provider, label: label, key: key)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func renameAccount(provider: String, oldLabel: String, newLabel: String) async {
+        do {
+            authState = try await rpcClient.auth.renameAccount(
+                provider: provider, oldLabel: oldLabel, newLabel: newLabel
+            )
+        } catch {
             self.error = error.localizedDescription
         }
     }
@@ -235,16 +207,6 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    private func renameAccount(provider: String, oldLabel: String, newLabel: String) async {
-        do {
-            authState = try await rpcClient.auth.renameAccount(
-                provider: provider, oldLabel: oldLabel, newLabel: newLabel
-            )
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
     private func clearService(_ serviceId: String) async {
         do {
             authState = try await rpcClient.auth.clear(AuthClearParams(service: serviceId))
@@ -254,145 +216,305 @@ struct ProvidersSettingsPage: View {
     }
 }
 
-// MARK: - Standard Provider Form
+// MARK: - Provider Card
 
-private struct StandardProviderForm: View {
-    let providerId: String
-    let providerInfo: ProviderAuthInfo?
-    let onSave: (AuthUpdateParams) async -> Void
-    let onClear: () async -> Void
+private struct ProviderCard: View {
+    let provider: ProviderInfo
+    let providerAuth: ProviderAuthInfo?
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onSetActive: (ActiveCredentialParam) async -> Void
+    let onRemoveAccount: (String) async -> Void
+    let onRemoveApiKey: (String) async -> Void
+    let onAddApiKey: (String, String) async -> Void
     let onRenameAccount: (String, String) async -> Void
-    var onOAuthLogin: (() -> Void)?
+    let onOAuthLogin: () -> Void
+    let onClear: () async -> Void
 
-    @State private var apiKey = ""
-    @State private var isSaving = false
-    @State private var editingAccountLabel: String?
-    @State private var editedLabel = ""
+    @State private var showAddApiKey = false
 
-    private var hasAccounts: Bool {
-        !(providerInfo?.accounts?.isEmpty ?? true)
+    private var isConfigured: Bool {
+        let info = providerAuth
+        let hasAccounts = !(info?.accounts?.isEmpty ?? true)
+        let hasKeys = !(info?.apiKeys?.isEmpty ?? true)
+        return info?.hasApiKey == true || info?.hasOAuth == true || hasAccounts || hasKeys
     }
 
     var body: some View {
-        // Current key hint
-        if let hint = providerInfo?.apiKeyHint {
-            HStack {
-                Label("Current key", systemImage: "key")
-                    .font(TronTypography.subheadline)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(provider.assetIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(provider.color)
+                    .frame(width: 18, height: 18)
+                Text(provider.displayName)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(provider.color)
                 Spacer()
-                Text(hint)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextSecondary)
+                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
+                    .foregroundStyle(isConfigured ? provider.color : .tronTextMuted.opacity(0.3))
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(provider.color.opacity(0.6))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
-        }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { onToggle() }
 
-        // API key input
-        HStack {
-            Label("API Key", systemImage: "key.horizontal")
-                .font(TronTypography.subheadline)
-            Spacer()
-            SecureField("Enter key", text: $apiKey)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-        }
-
-        // OAuth status
-        if let info = providerInfo, info.hasOAuth {
-            HStack {
-                Label("OAuth", systemImage: "lock.shield.fill")
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Text(info.isOAuthExpired == true ? "Expired" : "Connected")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(info.isOAuthExpired == true ? .tronError : .tronSuccess)
-            }
-        }
-
-        // Accounts
-        if let accounts = providerInfo?.accounts, !accounts.isEmpty {
-            ForEach(accounts, id: \.label) { account in
-                Button {
-                    editedLabel = account.label
-                    editingAccountLabel = account.label
-                } label: {
-                    HStack {
-                        Label(account.label, systemImage: "person.circle.fill")
-                            .font(TronTypography.subheadline)
-                        Spacer()
-                        accountStatusView(account)
+            // Expanded content
+            if isExpanded {
+                VStack(spacing: 8) {
+                    // OAuth accounts
+                    if provider.supportsOAuth {
+                        if let accounts = providerAuth?.accounts, !accounts.isEmpty {
+                            ForEach(accounts, id: \.label) { account in
+                                CredentialRow(
+                                    isActive: providerAuth?.activeCredential?.isOAuth == true
+                                        && providerAuth?.activeCredential?.label == account.label,
+                                    icon: "lock.shield.fill",
+                                    label: account.label,
+                                    status: accountStatus(account),
+                                    statusColor: accountStatusColor(account),
+                                    providerColor: provider.color,
+                                    onSelect: {
+                                        await onSetActive(ActiveCredentialParam(type: "oauth", label: account.label))
+                                    },
+                                    onDelete: { await onRemoveAccount(account.label) }
+                                )
+                            }
+                        }
                     }
-                    .contentShape(Rectangle())
+
+                    // Named API keys
+                    if let apiKeys = providerAuth?.apiKeys, !apiKeys.isEmpty {
+                        ForEach(apiKeys, id: \.label) { key in
+                            CredentialRow(
+                                isActive: providerAuth?.activeCredential?.isApiKey == true
+                                    && providerAuth?.activeCredential?.label == key.label,
+                                icon: "key.horizontal",
+                                label: key.label,
+                                status: key.keyHint,
+                                statusColor: .tronTextSecondary,
+                                providerColor: provider.color,
+                                onSelect: {
+                                    await onSetActive(ActiveCredentialParam(type: "apiKey", label: key.label))
+                                },
+                                onDelete: { await onRemoveApiKey(key.label) }
+                            )
+                        }
+                    }
+
+                    // Action buttons row
+                    HStack(spacing: 8) {
+                        if provider.supportsOAuth {
+                            let hasActiveOAuth = providerAuth?.accounts?.contains(where: { !$0.isExpired || $0.hasRefreshToken }) ?? false
+                            Button { onOAuthLogin() } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "lock.shield")
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    Text("OAuth Login")
+                                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                }
+                                .foregroundStyle(provider.color)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                            }
+                            .disabled(hasActiveOAuth)
+                            .sectionFill(provider.color, cornerRadius: 8, subtle: true)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { showAddApiKey.toggle() } } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "key.horizontal")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                Text("Add Key")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            }
+                            .foregroundStyle(provider.color)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                        }
+                        .sectionFill(provider.color, cornerRadius: 8, subtle: true)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                        Spacer()
+                    }
+
+                    // Inline API key entry
+                    if showAddApiKey {
+                        AddApiKeyRow(providerColor: provider.color) { label, key in
+                            await onAddApiKey(label, key)
+                            withAnimation { showAddApiKey = false }
+                        }
+                    }
+
+                    // Google-specific fields
+                    if provider.id == "google" {
+                        GoogleProviderFields(
+                            providerInfo: providerAuth,
+                            onSave: { params in
+                                // Forward to the parent's save
+                                await onAddApiKey("", "") // Placeholder — Google uses its own save
+                            },
+                            onClear: { await onClear() }
+                        )
+                    }
                 }
-                .buttonStyle(.plain)
-            }
-            .alert("Rename Account", isPresented: .init(
-                get: { editingAccountLabel != nil },
-                set: { if !$0 { editingAccountLabel = nil } }
-            )) {
-                TextField("Account label", text: $editedLabel)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                Button("Cancel", role: .cancel) { editingAccountLabel = nil }
-                Button("Save") {
-                    guard let oldLabel = editingAccountLabel else { return }
-                    let newLabel = editedLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !newLabel.isEmpty, newLabel != oldLabel else { return }
-                    editingAccountLabel = nil
-                    Task { await onRenameAccount(oldLabel, newLabel) }
-                }
-            } message: {
-                Text("Enter a new label for this account")
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
             }
         }
-
-        // Actions
-        FormActions(
-            saveDisabled: apiKey.isEmpty || isSaving,
-            showClear: providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true || hasAccounts,
-            onSave: {
-                Task {
-                    guard !apiKey.isEmpty else { return }
-                    isSaving = true
-                    await onSave(AuthUpdateParams(provider: providerId, apiKey: .value(apiKey)))
-                    apiKey = ""
-                    isSaving = false
-                }
-            },
-            onClear: { Task { await onClear() } },
-            onOAuthLogin: (providerId == "anthropic" || providerId == "openai-codex") ? onOAuthLogin : nil
-        )
+        .clipped()
+        .sectionFill(provider.color)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    @ViewBuilder
-    private func accountStatusView(_ account: AccountInfo) -> some View {
+    private func accountStatus(_ account: AccountInfo) -> String {
         if account.isExpired {
-            if account.hasRefreshToken {
-                Label("Will refresh", systemImage: "arrow.clockwise")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.tronAmber)
-            } else {
-                Text("Expired")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.tronError)
-            }
-        } else {
-            Text("Active")
-                .font(TronTypography.caption)
-                .foregroundStyle(.tronSuccess)
+            return account.hasRefreshToken ? "Will refresh" : "Expired"
         }
+        return "Active"
+    }
+
+    private func accountStatusColor(_ account: AccountInfo) -> Color {
+        if account.isExpired {
+            return account.hasRefreshToken ? .tronAmber : .tronError
+        }
+        return .tronSuccess
     }
 }
 
-// MARK: - Google Provider Form
+// MARK: - Credential Row
 
-private struct GoogleProviderForm: View {
+private struct CredentialRow: View {
+    let isActive: Bool
+    let icon: String
+    let label: String
+    let status: String
+    let statusColor: Color
+    let providerColor: Color
+    let onSelect: () async -> Void
+    let onDelete: () async -> Void
+
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Radio button
+            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                .font(TronTypography.sans(size: TronTypography.sizeXL))
+                .foregroundStyle(isActive ? providerColor : .tronTextMuted)
+
+            // Credential icon
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(providerColor)
+                .frame(width: 16)
+
+            // Label + status
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(status)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(statusColor)
+            }
+
+            Spacer()
+
+            // Delete button
+            Button {
+                showDeleteConfirm = true
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronTextMuted)
+            }
+            .buttonStyle(.plain)
+            .confirmationDialog("Remove credential?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) {
+                    Task { await onDelete() }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+        .padding(10)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onTapGesture { Task { await onSelect() } }
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
+        .overlay {
+            if isActive {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(providerColor.opacity(0.5), lineWidth: 1)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Add API Key Row
+
+private struct AddApiKeyRow: View {
+    let providerColor: Color
+    let onAdd: (String, String) async -> Void
+
+    @State private var label = ""
+    @State private var key = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Label (e.g. work)", text: $label)
+                    .font(TronTypography.codeCaption)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            HStack(spacing: 8) {
+                SecureField("API Key", text: $key)
+                    .font(TronTypography.codeCaption)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                Button {
+                    guard !label.isEmpty, !key.isEmpty else { return }
+                    isSaving = true
+                    Task {
+                        await onAdd(label.trimmingCharacters(in: .whitespacesAndNewlines), key)
+                        label = ""
+                        key = ""
+                        isSaving = false
+                    }
+                } label: {
+                    Text("Add")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+                .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || key.isEmpty || isSaving)
+                .buttonStyle(.borderedProminent)
+                .tint(providerColor)
+            }
+        }
+        .padding(10)
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Google Provider Fields
+
+private struct GoogleProviderFields: View {
     let providerInfo: ProviderAuthInfo?
     let onSave: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
 
-    @State private var apiKey = ""
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var selectedEndpoint = "antigravity"
@@ -402,99 +524,97 @@ private struct GoogleProviderForm: View {
     private let endpoints = ["cloud-code-assist", "antigravity"]
 
     var body: some View {
-        // Current key
-        if let hint = providerInfo?.apiKeyHint {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Google Cloud Settings")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronCyan)
+                .padding(.top, 4)
+
             HStack {
-                Label("Current key", systemImage: "key")
-                    .font(TronTypography.subheadline)
+                Text("Client ID")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
                 Spacer()
-                Text(hint)
+                TextField("OAuth client ID", text: $clientId)
                     .font(TronTypography.codeCaption)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+
+            HStack {
+                Text("Client Secret")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                Spacer()
+                SecureField("OAuth secret", text: $clientSecret)
+                    .font(TronTypography.codeCaption)
+                    .multilineTextAlignment(.trailing)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+            }
+
+            Picker(selection: $selectedEndpoint) {
+                ForEach(endpoints, id: \.self) { ep in
+                    Text(ep == "cloud-code-assist" ? "Cloud Code Assist" : "Antigravity")
+                        .tag(ep)
+                }
+            } label: {
+                Text("Endpoint")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
             }
-        }
+            .pickerStyle(.menu)
 
-        // Fields
-        HStack {
-            Label("API Key", systemImage: "key.horizontal")
-                .font(TronTypography.subheadline)
-            Spacer()
-            SecureField("Enter key", text: $apiKey)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-        }
-
-        HStack {
-            Label("Client ID", systemImage: "person.text.rectangle")
-                .font(TronTypography.subheadline)
-            Spacer()
-            TextField("OAuth client ID", text: $clientId)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-        }
-
-        HStack {
-            Label("Client Secret", systemImage: "lock")
-                .font(TronTypography.subheadline)
-            Spacer()
-            SecureField("OAuth secret", text: $clientSecret)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-        }
-
-        // Endpoint picker
-        Picker(selection: $selectedEndpoint) {
-            ForEach(endpoints, id: \.self) { ep in
-                Text(ep == "cloud-code-assist" ? "Cloud Code Assist" : "Antigravity")
-                    .tag(ep)
+            HStack {
+                Text("Project ID")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                Spacer()
+                TextField("GCP project", text: $projectId)
+                    .font(TronTypography.codeCaption)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
             }
-        } label: {
-            Label("Endpoint", systemImage: "server.rack")
-                .font(TronTypography.subheadline)
-        }
-        .pickerStyle(.menu)
 
-        HStack {
-            Label("Project ID", systemImage: "folder")
-                .font(TronTypography.subheadline)
-            Spacer()
-            TextField("GCP project", text: $projectId)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-        }
-
-        // Actions
-        FormActions(
-            saveDisabled: isSaving,
-            showClear: providerInfo?.hasApiKey == true || providerInfo?.hasOAuth == true
-                || providerInfo?.hasClientId == true,
-            onSave: {
-                Task {
-                    isSaving = true
-                    var params = AuthUpdateParams(provider: "google")
-                    if !apiKey.isEmpty { params.apiKey = .value(apiKey) }
-                    if !clientId.isEmpty { params.clientId = clientId }
-                    if !clientSecret.isEmpty { params.clientSecret = clientSecret }
-                    params.endpoint = selectedEndpoint
-                    if !projectId.isEmpty { params.projectId = projectId }
-                    await onSave(params)
-                    apiKey = ""
-                    clientId = ""
-                    clientSecret = ""
-                    projectId = ""
-                    isSaving = false
+            HStack(spacing: 8) {
+                Button {
+                    Task {
+                        isSaving = true
+                        var params = AuthUpdateParams(provider: "google")
+                        if !clientId.isEmpty { params.clientId = clientId }
+                        if !clientSecret.isEmpty { params.clientSecret = clientSecret }
+                        params.endpoint = selectedEndpoint
+                        if !projectId.isEmpty { params.projectId = projectId }
+                        await onSave(params)
+                        clientId = ""
+                        clientSecret = ""
+                        projectId = ""
+                        isSaving = false
+                    }
+                } label: {
+                    Text("Save")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 }
-            },
-            onClear: { Task { await onClear() } }
-        )
+                .disabled(isSaving)
+                .buttonStyle(.borderedProminent)
+                .tint(.tronCyan)
+
+                Button(role: .destructive) {
+                    Task { await onClear() }
+                } label: {
+                    Text("Clear All")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+            }
+        }
+        .padding(10)
+        .sectionFill(.tronCyan, cornerRadius: 8, subtle: true)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onAppear {
             if let ep = providerInfo?.endpoint {
                 selectedEndpoint = ep
@@ -503,98 +623,94 @@ private struct GoogleProviderForm: View {
     }
 }
 
-// MARK: - Service Form
+// MARK: - Service Card
 
-private struct ServiceForm: View {
-    let serviceId: String
-    let serviceInfo: ServiceAuthInfo?
+private struct ServiceCard: View {
+    let service: ProviderInfo
+    let serviceAuth: ServiceAuthInfo?
+    let isExpanded: Bool
+    let onToggle: () -> Void
     let onSave: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
 
     @State private var apiKey = ""
     @State private var isSaving = false
 
-    var body: some View {
-        if let hint = serviceInfo?.apiKeyHint {
-            HStack {
-                Label("Current key", systemImage: "key")
-                    .font(TronTypography.subheadline)
-                Spacer()
-                Text(hint)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextSecondary)
-            }
-        }
-
-        HStack {
-            Label("API Key", systemImage: "key.horizontal")
-                .font(TronTypography.subheadline)
-            Spacer()
-            SecureField("Enter key", text: $apiKey)
-                .font(TronTypography.codeCaption)
-                .multilineTextAlignment(.trailing)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-        }
-
-        FormActions(
-            saveDisabled: apiKey.isEmpty || isSaving,
-            showClear: serviceInfo?.hasApiKey == true,
-            onSave: {
-                Task {
-                    guard !apiKey.isEmpty else { return }
-                    isSaving = true
-                    await onSave(AuthUpdateParams(service: serviceId, apiKey: .value(apiKey)))
-                    apiKey = ""
-                    isSaving = false
-                }
-            },
-            onClear: { Task { await onClear() } }
-        )
+    private var isConfigured: Bool {
+        serviceAuth?.hasApiKey == true
     }
-}
-
-// MARK: - Shared Form Actions
-
-private struct FormActions: View {
-    let saveDisabled: Bool
-    let showClear: Bool
-    let onSave: () -> Void
-    let onClear: () -> Void
-    var onOAuthLogin: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button { onSave() } label: {
-                Text("Save")
-                    .font(TronTypography.buttonSM)
-                    .frame(minWidth: 60)
-            }
-            .disabled(saveDisabled)
-            .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
-
-            if showClear {
-                Button(role: .destructive) { onClear() } label: {
-                    Text("Clear")
-                        .font(TronTypography.buttonSM)
-                        .frame(minWidth: 60)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: service.serviceSystemIcon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
+                    .foregroundStyle(service.color)
+                    .frame(width: 18, height: 18)
+                Text(service.displayName)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(service.color)
+                Spacer()
+                if let hint = serviceAuth?.apiKeyHint {
+                    Text(hint)
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
                 }
-                .buttonStyle(.bordered)
+                Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
+                    .foregroundStyle(isConfigured ? service.color : .tronTextMuted.opacity(0.3))
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(service.color.opacity(0.6))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { onToggle() }
 
-            if let onOAuthLogin {
-                Button { onOAuthLogin() } label: {
-                    Text("OAuth Login")
-                        .font(TronTypography.buttonSM)
-                        .frame(minWidth: 60)
+            if isExpanded {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        SecureField("API Key", text: $apiKey)
+                            .font(TronTypography.codeCaption)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+
+                        Button {
+                            guard !apiKey.isEmpty else { return }
+                            isSaving = true
+                            Task {
+                                await onSave(AuthUpdateParams(service: service.id, apiKey: .value(apiKey)))
+                                apiKey = ""
+                                isSaving = false
+                            }
+                        } label: {
+                            Text("Save")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        }
+                        .disabled(apiKey.isEmpty || isSaving)
+                        .buttonStyle(.borderedProminent)
+                        .tint(service.color)
+
+                        if isConfigured {
+                            Button(role: .destructive) {
+                                Task { await onClear() }
+                            } label: {
+                                Text("Clear")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(.tronEmerald)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
             }
-
-            Spacer()
         }
-        .padding(.vertical, 2)
+        .clipped()
+        .sectionFill(service.color)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

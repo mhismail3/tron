@@ -4,7 +4,7 @@
 //! loading for the Anthropic API.
 
 use super::errors::AuthError;
-use super::types::{OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
+use super::types::{ActiveCredential, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
 /// Default Anthropic OAuth settings (matching `tron login` CLI).
 pub fn default_config() -> OAuthConfig {
@@ -150,9 +150,10 @@ pub fn is_oauth_token(token: &str) -> bool {
 
 /// Load server auth from auth storage.
 ///
-/// Priority:
-/// 1. OAuth tokens (from `accounts[0]` or legacy `oauth`)
-/// 2. API key
+/// Uses [`super::resolve_credential`] to determine which credential to use:
+/// 1. `credential_override` (session pinning)
+/// 2. `active_credential` (user selection)
+/// 3. Fallback: `accounts[0]` → `api_keys[0]`
 ///
 /// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "anthropic"))]
@@ -160,7 +161,18 @@ pub async fn load_server_auth(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, config, super::shared_auth_client()).await
+    load_server_auth_with_credential(auth_path, config, None).await
+}
+
+/// Load server auth with an optional credential override (for session pinning).
+#[tracing::instrument(skip_all, fields(provider = "anthropic"))]
+pub async fn load_server_auth_with_credential(
+    auth_path: &std::path::Path,
+    config: &OAuthConfig,
+    credential_override: Option<&ActiveCredential>,
+) -> Result<Option<ServerAuth>, AuthError> {
+    load_server_auth_with_client(auth_path, config, credential_override, super::shared_auth_client())
+        .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -168,71 +180,57 @@ pub async fn load_server_auth(
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
+    credential_override: Option<&ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
     let Some(pa) = super::storage::get_provider_auth(auth_path, "anthropic") else {
         return Ok(None);
     };
 
-    // 1. OAuth tokens (accounts[0] takes precedence over legacy `oauth`)
-    if let Some(accounts) = &pa.accounts
-        && let Some(acct) = accounts.first()
-    {
-        let (tokens, _refreshed) = maybe_refresh_tokens(
-            auth_path,
-            Some(&acct.label),
-            &acct.oauth,
-            config,
-            client,
-        )
-        .await?;
-        return Ok(Some(ServerAuth::from_oauth(&tokens)));
-    }
+    let Some(resolved) = super::resolve_credential(&pa, credential_override) else {
+        return Ok(None);
+    };
 
-    if let Some(oauth) = &pa.oauth {
-        let (tokens, _refreshed) =
-            maybe_refresh_tokens(auth_path, None, oauth, config, client).await?;
-        return Ok(Some(ServerAuth::from_oauth(&tokens)));
+    match resolved {
+        super::ResolvedCredential::OAuthAccount(acct) => {
+            let (tokens, _refreshed) = maybe_refresh_tokens(
+                auth_path,
+                &acct.label,
+                &acct.oauth,
+                config,
+                client,
+            )
+            .await?;
+            Ok(Some(ServerAuth::from_oauth(&tokens)))
+        }
+        super::ResolvedCredential::ApiKey(key) => {
+            Ok(Some(ServerAuth::from_api_key(&key.key)))
+        }
     }
-
-    // 2. API key
-    if let Some(key) = &pa.api_key {
-        return Ok(Some(ServerAuth::from_api_key(key)));
-    }
-
-    Ok(None)
 }
 
-/// Read the current tokens for a specific account (or legacy oauth) from auth.json.
+/// Read the current tokens for a specific account from auth.json.
 fn read_tokens_from_disk(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
 ) -> Option<OAuthTokens> {
     let pa = super::storage::get_provider_auth(auth_path, "anthropic")?;
-    if let Some(label) = account_label {
-        pa.accounts?
-            .into_iter()
-            .find(|a| a.label == label)
-            .map(|a| a.oauth)
-    } else {
-        pa.oauth
-    }
+    pa.accounts?
+        .into_iter()
+        .find(|a| a.label == account_label)
+        .map(|a| a.oauth)
 }
 
 /// Save refreshed tokens back to auth.json (called while holding file lock).
 fn persist_tokens(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
     tokens: &OAuthTokens,
 ) {
-    let result = if let Some(label) = account_label {
-        tracing::info!(account = label, "persisting refreshed account tokens");
-        super::storage::save_account_oauth_tokens(auth_path, "anthropic", label, tokens)
-    } else {
-        tracing::info!("persisting refreshed provider tokens");
-        super::storage::save_provider_oauth_tokens(auth_path, "anthropic", tokens)
-    };
-    if let Err(e) = result {
+    tracing::info!(account = account_label, "persisting refreshed Anthropic account tokens");
+    if let Err(e) =
+        super::storage::save_account_oauth_tokens(auth_path, "anthropic", account_label, tokens)
+    {
         tracing::warn!(error = %e, "failed to persist refreshed tokens");
     }
 }
@@ -254,7 +252,7 @@ fn is_stale_token_error(e: &AuthError) -> bool {
 /// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
     auth_path: &std::path::Path,
-    account_label: Option<&str>,
+    account_label: &str,
     tokens: &OAuthTokens,
     config: &OAuthConfig,
     client: &reqwest::Client,
@@ -295,7 +293,7 @@ async fn maybe_refresh_tokens(
     let client = client.clone();
     let config = config.clone();
     let auth_path = auth_path.to_path_buf();
-    let account_label_owned = account_label.map(std::string::ToString::to_string);
+    let account_label_owned = account_label.to_string();
 
     let do_refresh = |tok: &OAuthTokens| {
         let client = client.clone();
@@ -323,7 +321,7 @@ async fn maybe_refresh_tokens(
         Ok((new_tokens, true)) => {
             persist_tokens(
                 &auth_path,
-                account_label_owned.as_deref(),
+                &account_label_owned,
                 &new_tokens,
             );
             Ok((new_tokens, true))
@@ -332,7 +330,7 @@ async fn maybe_refresh_tokens(
         Err(e) if is_stale_token_error(&e) => {
             tracing::info!("refresh token consumed by another process, re-reading auth.json");
 
-            let retry_tokens = read_tokens_from_disk(&auth_path, account_label_owned.as_deref());
+            let retry_tokens = read_tokens_from_disk(&auth_path, &account_label_owned);
             match retry_tokens {
                 Some(rt) if now_ms() + buffer_ms < rt.expires_at => {
                     Ok((rt, true))
@@ -343,7 +341,7 @@ async fn maybe_refresh_tokens(
                         Ok((new_tokens, true)) => {
                             persist_tokens(
                                 &auth_path,
-                                account_label_owned.as_deref(),
+                                &account_label_owned,
                                 &new_tokens,
                             );
                             Ok((new_tokens, true))
@@ -588,27 +586,10 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = read_tokens_from_disk(&path, Some("user@host")).unwrap();
+        let loaded = read_tokens_from_disk(&path, "user@host").unwrap();
         assert_eq!(loaded.access_token, "disk-tok");
 
-        assert!(read_tokens_from_disk(&path, Some("nonexistent")).is_none());
-    }
-
-    #[test]
-    fn read_tokens_from_disk_legacy() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        let tokens = OAuthTokens {
-            access_token: "legacy-tok".to_string(),
-            refresh_token: "legacy-ref".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens)
-            .unwrap();
-
-        let loaded = read_tokens_from_disk(&path, None).unwrap();
-        assert_eq!(loaded.access_token, "legacy-tok");
+        assert!(read_tokens_from_disk(&path, "nonexistent").is_none());
     }
 
     #[tokio::test]
@@ -641,7 +622,7 @@ mod tests {
         let cfg = default_config();
         let client = reqwest::Client::new();
         let (tokens, refreshed) =
-            maybe_refresh_tokens(&path, Some("user@host"), &expired, &cfg, &client)
+            maybe_refresh_tokens(&path, "user@host", &expired, &cfg, &client)
                 .await
                 .unwrap();
 

@@ -15,6 +15,10 @@ struct ProviderAuthInfo: Decodable {
     let isOAuthExpired: Bool?
     let accounts: [AccountInfo]?
 
+    // Multi-credential fields
+    let apiKeys: [ApiKeyInfo]?
+    let activeCredential: ActiveCredentialInfo?
+
     // Google-specific fields
     let endpoint: String?
     let projectId: String?
@@ -29,6 +33,8 @@ struct ProviderAuthInfo: Decodable {
         oauthExpiresAt = try? container.decodeIfPresent(Int64.self, forKey: .oauthExpiresAt)
         isOAuthExpired = try? container.decodeIfPresent(Bool.self, forKey: .isOAuthExpired)
         accounts = try? container.decodeIfPresent([AccountInfo].self, forKey: .accounts)
+        apiKeys = try? container.decodeIfPresent([ApiKeyInfo].self, forKey: .apiKeys)
+        activeCredential = try? container.decodeIfPresent(ActiveCredentialInfo.self, forKey: .activeCredential)
         endpoint = try? container.decodeIfPresent(String.self, forKey: .endpoint)
         projectId = try? container.decodeIfPresent(String.self, forKey: .projectId)
         hasClientId = try? container.decodeIfPresent(Bool.self, forKey: .hasClientId)
@@ -37,7 +43,8 @@ struct ProviderAuthInfo: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case hasApiKey, apiKeyHint, hasOAuth, oauthExpiresAt, isOAuthExpired
-        case accounts, endpoint, projectId, hasClientId, hasClientSecret
+        case accounts, apiKeys, activeCredential
+        case endpoint, projectId, hasClientId, hasClientSecret
     }
 }
 
@@ -142,4 +149,73 @@ struct RenameAccountParams: Encodable {
     let provider: String
     let oldLabel: String
     let newLabel: String
+}
+
+// MARK: - Named API Key Info (Response)
+
+struct ApiKeyInfo: Decodable {
+    let label: String
+    let keyHint: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        label = try container.decode(String.self, forKey: .label)
+        keyHint = try container.decode(String.self, forKey: .keyHint)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case label, keyHint
+    }
+}
+
+// MARK: - Active Credential Info (Response)
+
+struct ActiveCredentialInfo: Decodable, Equatable {
+    let type: String   // "oauth" or "apiKey"
+    let label: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        label = try container.decode(String.self, forKey: .label)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, label
+    }
+
+    var isOAuth: Bool { type == "oauth" }
+    var isApiKey: Bool { type == "apiKey" }
+}
+
+// MARK: - Set Active Credential Params
+
+struct SetActiveParams: Encodable {
+    let provider: String
+    let credential: ActiveCredentialParam
+}
+
+struct ActiveCredentialParam: Encodable {
+    let type: String
+    let label: String
+}
+
+// MARK: - Remove Account/Key Params
+
+struct RemoveAccountParams: Encodable {
+    let provider: String
+    let label: String
+}
+
+struct RemoveApiKeyParams: Encodable {
+    let provider: String
+    let label: String
+}
+
+// MARK: - Add Named API Key Params
+
+struct AddNamedApiKeyParams: Encodable {
+    let provider: String
+    let apiKey: String
+    let apiKeyLabel: String
 }

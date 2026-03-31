@@ -27,19 +27,92 @@ pub struct AccountEntry {
     pub oauth: OAuthTokens,
 }
 
+/// A named API key entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ApiKeyEntry {
+    /// Human-readable label (e.g., "work", "personal").
+    pub label: String,
+    /// The API key value.
+    pub key: String,
+}
+
+/// Which credential is currently active for a provider.
+///
+/// Serializes as `{"type":"oauth","label":"mhismail3"}` or
+/// `{"type":"apiKey","label":"work"}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ActiveCredential {
+    /// An OAuth account identified by label.
+    #[serde(rename = "oauth")]
+    OAuth {
+        /// The account label (e.g., "mhismail3").
+        label: String,
+    },
+    /// A named API key identified by label.
+    #[serde(rename = "apiKey")]
+    ApiKey {
+        /// The API key label (e.g., "work").
+        label: String,
+    },
+}
+
 /// Authentication for a single provider.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderAuth {
-    /// Legacy single OAuth token set.
+    /// Legacy single OAuth token set (kept for deserialization of old files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth: Option<OAuthTokens>,
-    /// API key (fallback auth method).
+    /// Legacy single API key (kept for deserialization of old files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    /// Named accounts (takes priority over legacy `oauth`).
+    /// Named OAuth accounts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accounts: Option<Vec<AccountEntry>>,
+    /// Named API keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_keys: Option<Vec<ApiKeyEntry>>,
+    /// Which credential is currently active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_credential: Option<ActiveCredential>,
+}
+
+impl ProviderAuth {
+    /// Migrate legacy `oauth` and `api_key` fields into the new arrays.
+    ///
+    /// - If `oauth` is `Some` and no matching account exists, moves it to `accounts[]`
+    ///   with label `"(migrated)"`.
+    /// - If `api_key` is `Some` and no matching key exists, moves it to `api_keys[]`
+    ///   with label `"(default)"`.
+    /// - Clears legacy fields after migration.
+    ///
+    /// Returns `true` if any migration occurred (caller should persist).
+    pub fn migrate_legacy(&mut self) -> bool {
+        let mut migrated = false;
+
+        // Migrate legacy oauth → accounts[]
+        if let Some(oauth) = self.oauth.take() {
+            let label = "(migrated)".to_string();
+            let accounts = self.accounts.get_or_insert_with(Vec::new);
+            if !accounts.iter().any(|a| a.label == label) {
+                accounts.push(AccountEntry { label, oauth });
+            }
+            migrated = true;
+        }
+
+        // Migrate legacy api_key → api_keys[]
+        if let Some(key) = self.api_key.take() {
+            let label = "(default)".to_string();
+            let api_keys = self.api_keys.get_or_insert_with(Vec::new);
+            if !api_keys.iter().any(|k| k.label == label) {
+                api_keys.push(ApiKeyEntry { label, key });
+            }
+            migrated = true;
+        }
+
+        migrated
+    }
 }
 
 /// Google-specific provider auth with endpoint metadata.
@@ -318,6 +391,8 @@ mod tests {
         assert!(pa.oauth.is_none());
         assert!(pa.api_key.is_none());
         assert!(pa.accounts.is_none());
+        assert!(pa.api_keys.is_none());
+        assert!(pa.active_credential.is_none());
     }
 
     #[test]
@@ -510,5 +585,278 @@ mod tests {
         // Should be after 2024-01-01 and before 2100-01-01
         assert!(ms > 1_704_067_200_000);
         assert!(ms < 4_102_444_800_000);
+    }
+
+    // ─── ApiKeyEntry ────────────────────────────────────────────────────
+
+    #[test]
+    fn api_key_entry_serde_roundtrip() {
+        let entry = ApiKeyEntry {
+            label: "work".to_string(),
+            key: "sk-abc123".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: ApiKeyEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.label, "work");
+        assert_eq!(back.key, "sk-abc123");
+    }
+
+    // ─── ActiveCredential ───────────────────────────────────────────────
+
+    #[test]
+    fn active_credential_oauth_serde() {
+        let cred = ActiveCredential::OAuth {
+            label: "mhismail3".to_string(),
+        };
+        let json = serde_json::to_string(&cred).unwrap();
+        assert!(json.contains(r#""type":"oauth""#));
+        assert!(json.contains(r#""label":"mhismail3""#));
+
+        let back: ActiveCredential = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back,
+            ActiveCredential::OAuth {
+                label: "mhismail3".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn active_credential_api_key_serde() {
+        let cred = ActiveCredential::ApiKey {
+            label: "work".to_string(),
+        };
+        let json = serde_json::to_string(&cred).unwrap();
+        assert!(json.contains(r#""type":"apiKey""#));
+        assert!(json.contains(r#""label":"work""#));
+
+        let back: ActiveCredential = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back,
+            ActiveCredential::ApiKey {
+                label: "work".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn active_credential_equality() {
+        let a = ActiveCredential::OAuth {
+            label: "x".to_string(),
+        };
+        let b = ActiveCredential::OAuth {
+            label: "x".to_string(),
+        };
+        let c = ActiveCredential::ApiKey {
+            label: "x".to_string(),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ─── ProviderAuth new fields ────────────────────────────────────────
+
+    #[test]
+    fn provider_auth_with_api_keys() {
+        let json = r#"{"apiKeys":[{"label":"work","key":"sk-123"},{"label":"personal","key":"sk-456"}]}"#;
+        let pa: ProviderAuth = serde_json::from_str(json).unwrap();
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].label, "work");
+        assert_eq!(keys[1].key, "sk-456");
+    }
+
+    #[test]
+    fn provider_auth_with_active_credential() {
+        let json = r#"{"activeCredential":{"type":"oauth","label":"main"}}"#;
+        let pa: ProviderAuth = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            pa.active_credential,
+            Some(ActiveCredential::OAuth {
+                label: "main".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn provider_auth_all_new_fields_roundtrip() {
+        let pa = ProviderAuth {
+            oauth: None,
+            api_key: None,
+            accounts: Some(vec![AccountEntry {
+                label: "acc1".to_string(),
+                oauth: OAuthTokens {
+                    access_token: "at".to_string(),
+                    refresh_token: "rt".to_string(),
+                    expires_at: 999,
+                },
+            }]),
+            api_keys: Some(vec![ApiKeyEntry {
+                label: "key1".to_string(),
+                key: "sk-x".to_string(),
+            }]),
+            active_credential: Some(ActiveCredential::OAuth {
+                label: "acc1".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&pa).unwrap();
+        let back: ProviderAuth = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.accounts.as_ref().unwrap().len(), 1);
+        assert_eq!(back.api_keys.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            back.active_credential,
+            Some(ActiveCredential::OAuth {
+                label: "acc1".to_string()
+            })
+        );
+        // Legacy fields should be None
+        assert!(back.oauth.is_none());
+        assert!(back.api_key.is_none());
+    }
+
+    #[test]
+    fn provider_auth_backward_compat_old_format() {
+        // Old auth.json only has oauth + api_key, no new fields
+        let json = r#"{"oauth":{"accessToken":"tok","refreshToken":"ref","expiresAt":123},"apiKey":"sk-old"}"#;
+        let pa: ProviderAuth = serde_json::from_str(json).unwrap();
+        assert!(pa.oauth.is_some());
+        assert_eq!(pa.api_key.as_deref(), Some("sk-old"));
+        assert!(pa.accounts.is_none());
+        assert!(pa.api_keys.is_none());
+        assert!(pa.active_credential.is_none());
+    }
+
+    // ─── migrate_legacy ─────────────────────────────────────────────────
+
+    #[test]
+    fn migrate_legacy_moves_oauth_to_accounts() {
+        let mut pa = ProviderAuth {
+            oauth: Some(OAuthTokens {
+                access_token: "tok".to_string(),
+                refresh_token: "ref".to_string(),
+                expires_at: 123,
+            }),
+            ..Default::default()
+        };
+        assert!(pa.migrate_legacy());
+        assert!(pa.oauth.is_none());
+        let accounts = pa.accounts.unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].label, "(migrated)");
+        assert_eq!(accounts[0].oauth.access_token, "tok");
+    }
+
+    #[test]
+    fn migrate_legacy_moves_api_key_to_api_keys() {
+        let mut pa = ProviderAuth {
+            api_key: Some("sk-old".to_string()),
+            ..Default::default()
+        };
+        assert!(pa.migrate_legacy());
+        assert!(pa.api_key.is_none());
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].label, "(default)");
+        assert_eq!(keys[0].key, "sk-old");
+    }
+
+    #[test]
+    fn migrate_legacy_moves_both() {
+        let mut pa = ProviderAuth {
+            oauth: Some(OAuthTokens {
+                access_token: "tok".to_string(),
+                refresh_token: "ref".to_string(),
+                expires_at: 123,
+            }),
+            api_key: Some("sk-old".to_string()),
+            ..Default::default()
+        };
+        assert!(pa.migrate_legacy());
+        assert!(pa.oauth.is_none());
+        assert!(pa.api_key.is_none());
+        assert_eq!(pa.accounts.as_ref().unwrap().len(), 1);
+        assert_eq!(pa.api_keys.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrate_legacy_noop_when_nothing_to_migrate() {
+        let mut pa = ProviderAuth::default();
+        assert!(!pa.migrate_legacy());
+    }
+
+    #[test]
+    fn migrate_legacy_noop_when_already_migrated() {
+        let mut pa = ProviderAuth {
+            accounts: Some(vec![AccountEntry {
+                label: "(migrated)".to_string(),
+                oauth: OAuthTokens {
+                    access_token: "tok".to_string(),
+                    refresh_token: "ref".to_string(),
+                    expires_at: 123,
+                },
+            }]),
+            ..Default::default()
+        };
+        assert!(!pa.migrate_legacy());
+    }
+
+    #[test]
+    fn migrate_legacy_idempotent() {
+        let mut pa = ProviderAuth {
+            oauth: Some(OAuthTokens {
+                access_token: "tok".to_string(),
+                refresh_token: "ref".to_string(),
+                expires_at: 123,
+            }),
+            api_key: Some("sk-old".to_string()),
+            ..Default::default()
+        };
+        pa.migrate_legacy();
+        // Second call should be a no-op (legacy fields already cleared)
+        assert!(!pa.migrate_legacy());
+        assert_eq!(pa.accounts.as_ref().unwrap().len(), 1);
+        assert_eq!(pa.api_keys.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrate_legacy_preserves_existing_accounts() {
+        let mut pa = ProviderAuth {
+            oauth: Some(OAuthTokens {
+                access_token: "legacy-tok".to_string(),
+                refresh_token: "ref".to_string(),
+                expires_at: 123,
+            }),
+            accounts: Some(vec![AccountEntry {
+                label: "existing".to_string(),
+                oauth: OAuthTokens {
+                    access_token: "existing-tok".to_string(),
+                    refresh_token: "ref".to_string(),
+                    expires_at: 456,
+                },
+            }]),
+            ..Default::default()
+        };
+        assert!(pa.migrate_legacy());
+        let accounts = pa.accounts.unwrap();
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(accounts[0].label, "existing");
+        assert_eq!(accounts[1].label, "(migrated)");
+    }
+
+    #[test]
+    fn migrate_legacy_preserves_existing_api_keys() {
+        let mut pa = ProviderAuth {
+            api_key: Some("sk-legacy".to_string()),
+            api_keys: Some(vec![ApiKeyEntry {
+                label: "existing".to_string(),
+                key: "sk-existing".to_string(),
+            }]),
+            ..Default::default()
+        };
+        assert!(pa.migrate_legacy());
+        let keys = pa.api_keys.unwrap();
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].label, "existing");
+        assert_eq!(keys[1].label, "(default)");
     }
 }

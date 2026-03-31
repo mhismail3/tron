@@ -979,40 +979,45 @@ _show_provider_login_status() {
     print_status "${display_name} auth status:"
     echo ""
 
+    # Show active credential
+    local active_type active_label
+    active_type=$(jq -r ".providers[\"${provider_key}\"].activeCredential.type // empty" "$AUTH_FILE" 2>/dev/null)
+    active_label=$(jq -r ".providers[\"${provider_key}\"].activeCredential.label // empty" "$AUTH_FILE" 2>/dev/null)
+
+    # OAuth accounts
     local account_count
     account_count=$(jq -r ".providers[\"${provider_key}\"].accounts // [] | length" "$AUTH_FILE" 2>/dev/null)
     if [[ "$account_count" -gt 0 ]]; then
-        jq -r --argjson now "$now_ms" --arg pk "$provider_key" '
+        echo -e "  ${DIM}OAuth accounts:${NC}"
+        jq -r --argjson now "$now_ms" --arg pk "$provider_key" --arg active_label "$active_label" --arg active_type "$active_type" '
             .providers[$pk].accounts[] |
             .label as $l |
             .oauth.expiresAt as $e |
             .oauth.accessToken[0:20] as $t |
+            (if $active_type == "oauth" and $active_label == $l then " *" else "  " end) as $marker |
             if $e > $now then
-                "  \(.label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
+                "\($marker) \($l): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
             else
-                "  \(.label): \u001b[31mexpired\u001b[0m  \($t)..."
+                "\($marker) \($l): \u001b[31mexpired\u001b[0m  \($t)..."
             end
         ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
     fi
 
-    local has_oauth
-    has_oauth=$(jq -r ".providers[\"${provider_key}\"].oauth // empty | .accessToken" "$AUTH_FILE" 2>/dev/null)
-    if [[ -n "$has_oauth" ]]; then
-        local label="(default)"
-        [[ "$account_count" -gt 0 ]] && label="(legacy)"
-        jq -r --argjson now "$now_ms" --arg label "$label" --arg pk "$provider_key" '
-            .providers[$pk].oauth |
-            .expiresAt as $e |
-            .accessToken[0:20] as $t |
-            if $e > $now then
-                "  \($label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
-            else
-                "  \($label): \u001b[31mexpired\u001b[0m  \($t)..."
-            end
+    # Named API keys
+    local key_count
+    key_count=$(jq -r ".providers[\"${provider_key}\"].apiKeys // [] | length" "$AUTH_FILE" 2>/dev/null)
+    if [[ "$key_count" -gt 0 ]]; then
+        echo -e "  ${DIM}API keys:${NC}"
+        jq -r --arg pk "$provider_key" --arg active_label "$active_label" --arg active_type "$active_type" '
+            .providers[$pk].apiKeys[] |
+            .label as $l |
+            .key[0:12] as $hint |
+            (if $active_type == "apiKey" and $active_label == $l then " *" else "  " end) as $marker |
+            "\($marker) \($l): \($hint)..."
         ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
     fi
 
-    if [[ "$account_count" -eq 0 ]] && [[ -z "$has_oauth" ]]; then
+    if [[ "$account_count" -eq 0 ]] && [[ "$key_count" -eq 0 ]]; then
         echo -e "  ${DIM}(not configured)${NC}"
     fi
 }

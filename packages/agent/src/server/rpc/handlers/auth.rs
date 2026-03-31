@@ -12,10 +12,10 @@ use tracing::instrument;
 
 use crate::llm::auth::storage::{
     acquire_auth_file_lock, clear_provider_auth, load_auth_storage, save_auth_storage,
-    save_provider_api_key, save_provider_oauth_tokens,
+    save_named_api_key,
 };
 use crate::llm::auth::types::{
-    GoogleOAuthEndpoint, OAuthTokens, ProviderAuth, ServiceAuth,
+    ActiveCredential, GoogleOAuthEndpoint, OAuthTokens, ProviderAuth, ServiceAuth,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
@@ -63,14 +63,28 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 .as_ref()
                 .and_then(crate::llm::auth::types::AuthStorage::get_google_auth);
 
+            // Also load migrated base ProviderAuth for consistent array-based fields
+            let migrated_base = crate::llm::auth::storage::get_provider_auth(auth_path, "google");
+
             let mut info = serde_json::Map::new();
             if let Some(ref g) = google {
-                let has_key = g.base.api_key.is_some();
+                let base = migrated_base.as_ref().unwrap_or(&g.base);
+
+                // Derive hasApiKey from api_keys[] (post-migration)
+                let has_api_keys = base.api_keys.as_ref().is_some_and(|k| !k.is_empty());
+                // Fall back to legacy for Google (may not have been migrated via get_provider_auth
+                // since Google uses get_google_provider_auth which doesn't run migration)
+                let has_key = has_api_keys || g.base.api_key.is_some();
                 let _ = info.insert("hasApiKey".into(), json!(has_key));
-                if let Some(ref key) = g.base.api_key {
+                if let Some(first_key) = base.api_keys.as_ref().and_then(|k| k.first()) {
+                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
+                } else if let Some(ref key) = g.base.api_key {
                     let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
                 }
-                let _ = info.insert("hasOAuth".into(), json!(g.base.oauth.is_some()));
+
+                // Derive hasOAuth from accounts[]
+                let has_accounts = base.accounts.as_ref().is_some_and(|a| !a.is_empty());
+                let _ = info.insert("hasOAuth".into(), json!(has_accounts || g.base.oauth.is_some()));
 
                 // Google-specific fields
                 if let Some(ref ep) = g.endpoint {
@@ -87,43 +101,122 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 let _ = info.insert("hasClientSecret".into(), json!(g.client_secret.is_some()));
 
                 // Accounts
-                let accounts = build_accounts_list(&g.base);
+                let accounts = build_accounts_list(base);
                 let _ = info.insert("accounts".into(), json!(accounts));
+
+                // Named API keys (masked)
+                let api_keys: Vec<Value> = base
+                    .api_keys
+                    .as_ref()
+                    .map(|keys| {
+                        keys.iter()
+                            .map(|k| json!({"label": k.label, "keyHint": mask_key(&k.key)}))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let _ = info.insert("apiKeys".into(), json!(api_keys));
+
+                // Effective active credential: explicit selection, or fallback to first available
+                let effective_active = crate::llm::auth::resolve_credential(base, None)
+                    .map(|resolved| match resolved {
+                        crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
+                            crate::llm::auth::ActiveCredential::OAuth {
+                                label: acct.label.clone(),
+                            }
+                        }
+                        crate::llm::auth::ResolvedCredential::ApiKey(key) => {
+                            crate::llm::auth::ActiveCredential::ApiKey {
+                                label: key.label.clone(),
+                            }
+                        }
+                    });
+                if let Some(active) = effective_active {
+                    let _ = info.insert(
+                        "activeCredential".into(),
+                        serde_json::to_value(&active).unwrap_or(json!(null)),
+                    );
+                }
             } else {
                 let _ = info.insert("hasApiKey".into(), json!(false));
                 let _ = info.insert("hasOAuth".into(), json!(false));
                 let _ = info.insert("hasClientId".into(), json!(false));
                 let _ = info.insert("hasClientSecret".into(), json!(false));
                 let _ = info.insert("accounts".into(), json!([]));
+                let _ = info.insert("apiKeys".into(), json!([]));
             }
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
-            let pa = storage
-                .as_ref()
-                .and_then(|s| s.get_provider_auth(provider));
+            // Use get_provider_auth (runs migration) instead of raw storage
+            let pa = crate::llm::auth::storage::get_provider_auth(auth_path, provider);
 
             let mut info = serde_json::Map::new();
             if let Some(ref pa) = pa {
-                let _ = info.insert("hasApiKey".into(), json!(pa.api_key.is_some()));
-                if let Some(ref key) = pa.api_key {
-                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
+                // Derive hasApiKey from api_keys[] (post-migration)
+                let has_api_keys = pa.api_keys.as_ref().is_some_and(|k| !k.is_empty());
+                let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
+                // Backward compat: apiKeyHint from first named key
+                if let Some(first_key) = pa.api_keys.as_ref().and_then(|k| k.first()) {
+                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
                 }
-                let _ = info.insert("hasOAuth".into(), json!(pa.oauth.is_some()));
 
-                if let Some(ref oauth) = pa.oauth {
-                    let _ = info.insert("oauthExpiresAt".into(), json!(oauth.expires_at));
-                    let is_expired =
-                        crate::llm::auth::types::now_ms() >= oauth.expires_at;
+                // Derive hasOAuth from accounts[]
+                let has_accounts = pa.accounts.as_ref().is_some_and(|a| !a.is_empty());
+                let _ = info.insert("hasOAuth".into(), json!(has_accounts));
+
+                // Backward compat: oauthExpiresAt/isOAuthExpired from first account
+                if let Some(first_acct) = pa.accounts.as_ref().and_then(|a| a.first()) {
+                    let _ = info.insert("oauthExpiresAt".into(), json!(first_acct.oauth.expires_at));
+                    let is_expired = crate::llm::auth::types::now_ms() >= first_acct.oauth.expires_at;
                     let _ = info.insert("isOAuthExpired".into(), json!(is_expired));
                 }
 
+                // Accounts list (OAuth)
                 let accounts = build_accounts_list(pa);
                 let _ = info.insert("accounts".into(), json!(accounts));
+
+                // Named API keys (masked)
+                let api_keys: Vec<Value> = pa
+                    .api_keys
+                    .as_ref()
+                    .map(|keys| {
+                        keys.iter()
+                            .map(|k| {
+                                json!({
+                                    "label": k.label,
+                                    "keyHint": mask_key(&k.key),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let _ = info.insert("apiKeys".into(), json!(api_keys));
+
+                // Effective active credential: explicit selection, or fallback to first available
+                let effective_active = crate::llm::auth::resolve_credential(pa, None)
+                    .map(|resolved| match resolved {
+                        crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
+                            crate::llm::auth::ActiveCredential::OAuth {
+                                label: acct.label.clone(),
+                            }
+                        }
+                        crate::llm::auth::ResolvedCredential::ApiKey(key) => {
+                            crate::llm::auth::ActiveCredential::ApiKey {
+                                label: key.label.clone(),
+                            }
+                        }
+                    });
+                if let Some(active) = effective_active {
+                    let _ = info.insert(
+                        "activeCredential".into(),
+                        serde_json::to_value(&active).unwrap_or(json!(null)),
+                    );
+                }
             } else {
                 let _ = info.insert("hasApiKey".into(), json!(false));
                 let _ = info.insert("hasOAuth".into(), json!(false));
                 let _ = info.insert("accounts".into(), json!([]));
+                let _ = info.insert("apiKeys".into(), json!([]));
             }
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
@@ -502,6 +595,116 @@ impl MethodHandler for RenameAccountHandler {
     }
 }
 
+// ─── Set Active Credential ──────────────────────────────────────────────────
+
+/// Set the active credential for a provider.
+pub struct SetActiveCredentialHandler;
+
+#[async_trait]
+impl MethodHandler for SetActiveCredentialHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.setActive"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let provider = require_string_param(params.as_ref(), "provider")?;
+
+        let cred_val = params
+            .as_ref()
+            .and_then(|p| p.get("credential"))
+            .ok_or_else(|| RpcError::InvalidParams {
+                message: "Missing required parameter: credential".into(),
+            })?;
+
+        let credential: ActiveCredential =
+            serde_json::from_value(cred_val.clone()).map_err(|e| RpcError::InvalidParams {
+                message: format!("Invalid credential: {e}"),
+            })?;
+
+        let auth_path = ctx.auth_path.clone();
+        let masked_state = ctx
+            .run_blocking("auth.setActive", move || {
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
+                })?;
+
+                crate::llm::auth::storage::set_active_credential(&auth_path, &provider, &credential)
+                    .map_err(|e| RpcError::InvalidParams {
+                        message: format!("Failed to set active credential: {e}"),
+                    })?;
+
+                Ok(build_masked_state(&auth_path))
+            })
+            .await?;
+
+        broadcast_auth_updated(ctx, &masked_state).await;
+        Ok(masked_state)
+    }
+}
+
+// ─── Remove Account ─────────────────────────────────────────────────────────
+
+/// Remove a specific OAuth account by label.
+pub struct RemoveAccountHandler;
+
+#[async_trait]
+impl MethodHandler for RemoveAccountHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.removeAccount"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let provider = require_string_param(params.as_ref(), "provider")?;
+        let label = require_string_param(params.as_ref(), "label")?;
+
+        let auth_path = ctx.auth_path.clone();
+        let masked_state = ctx
+            .run_blocking("auth.removeAccount", move || {
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
+                })?;
+
+                crate::llm::auth::storage::remove_account(&auth_path, &provider, &label)
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to remove account: {e}"),
+                    })?;
+
+                Ok(build_masked_state(&auth_path))
+            })
+            .await?;
+
+        broadcast_auth_updated(ctx, &masked_state).await;
+        Ok(masked_state)
+    }
+}
+
+// ─── Remove API Key ─────────────────────────────────────────────────────────
+
+/// Remove a specific named API key by label.
+pub struct RemoveApiKeyHandler;
+
+#[async_trait]
+impl MethodHandler for RemoveApiKeyHandler {
+    #[instrument(skip(self, ctx), fields(method = "auth.removeApiKey"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let provider = require_string_param(params.as_ref(), "provider")?;
+        let label = require_string_param(params.as_ref(), "label")?;
+
+        let auth_path = ctx.auth_path.clone();
+        let masked_state = ctx
+            .run_blocking("auth.removeApiKey", move || {
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
+                })?;
+
+                crate::llm::auth::storage::remove_named_api_key(&auth_path, &provider, &label)
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to remove API key: {e}"),
+                    })?;
+
+                Ok(build_masked_state(&auth_path))
+            })
+            .await?;
+
+        broadcast_auth_updated(ctx, &masked_state).await;
+        Ok(masked_state)
+    }
+}
+
 // ─── Update helpers ──────────────────────────────────────────────────────────
 
 fn update_standard_provider(
@@ -514,20 +717,34 @@ fn update_standard_provider(
     })?;
 
     // Handle API key: present string = set, null = clear, absent = preserve
+    // If apiKeyLabel is present, stores as named key in api_keys[].
+    // Otherwise, stores as legacy api_key (will be migrated on next read).
     if let Some(api_key_val) = params.get("apiKey") {
         if api_key_val.is_null() {
-            // Clear API key but preserve other fields
+            // Clear all API keys (both legacy and named)
             let mut storage = load_auth_storage(auth_path).unwrap_or_default();
             if let Some(mut pa) = storage.get_provider_auth(provider) {
                 pa.api_key = None;
+                pa.api_keys = None;
+                // Clear active if it pointed to an API key
+                if matches!(pa.active_credential, Some(ActiveCredential::ApiKey { .. })) {
+                    pa.active_credential = None;
+                }
                 storage.set_provider_auth(provider, &pa);
                 save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
                     message: format!("Failed to save auth: {e}"),
                 })?;
             }
         } else if let Some(key) = api_key_val.as_str() {
-            save_provider_api_key(auth_path, provider, key).map_err(|e| RpcError::Internal {
-                message: format!("Failed to save API key: {e}"),
+            // Use provided label, or generate a default
+            let label = params
+                .get("apiKeyLabel")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(default)");
+            save_named_api_key(auth_path, provider, label, key).map_err(|e| {
+                RpcError::Internal {
+                    message: format!("Failed to save API key: {e}"),
+                }
             })?;
         }
     }
@@ -535,20 +752,27 @@ fn update_standard_provider(
     // Handle OAuth tokens
     if let Some(oauth) = params.get("oauth") {
         if oauth.is_null() {
+            // Clear all OAuth (both legacy and accounts)
             let mut storage = load_auth_storage(auth_path).unwrap_or_default();
             if let Some(mut pa) = storage.get_provider_auth(provider) {
                 pa.oauth = None;
+                pa.accounts = None;
+                if matches!(pa.active_credential, Some(ActiveCredential::OAuth { .. })) {
+                    pa.active_credential = None;
+                }
                 storage.set_provider_auth(provider, &pa);
                 save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
                     message: format!("Failed to save auth: {e}"),
                 })?;
             }
         } else {
+            // Save as account with default label
             let tokens = parse_oauth_tokens(oauth)?;
-            save_provider_oauth_tokens(auth_path, provider, &tokens).map_err(|e| {
-                RpcError::Internal {
-                    message: format!("Failed to save OAuth tokens: {e}"),
-                }
+            crate::llm::auth::storage::save_account_oauth_tokens(
+                auth_path, provider, "(default)", &tokens,
+            )
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to save OAuth tokens: {e}"),
             })?;
         }
     }
@@ -784,7 +1008,7 @@ mod tests {
     #[tokio::test]
     async fn auth_get_with_api_key_returns_masked_hint() {
         let (ctx, _dir) = make_ctx_with_temp_auth();
-        save_provider_api_key(&ctx.auth_path, "anthropic", "sk-ant-api03-abcdefghijklmnop")
+        save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-abcdefghijklmnop")
             .unwrap();
 
         let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
@@ -798,7 +1022,7 @@ mod tests {
     #[tokio::test]
     async fn auth_get_masks_key_correctly_short_key() {
         let (ctx, _dir) = make_ctx_with_temp_auth();
-        save_provider_api_key(&ctx.auth_path, "minimax", "short").unwrap();
+        save_named_api_key(&ctx.auth_path, "minimax", "(test)", "short").unwrap();
 
         let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["providers"]["minimax"]["apiKeyHint"], "***");
@@ -807,7 +1031,7 @@ mod tests {
     #[tokio::test]
     async fn auth_get_masks_key_correctly_long_key() {
         let (ctx, _dir) = make_ctx_with_temp_auth();
-        save_provider_api_key(&ctx.auth_path, "anthropic", "sk-ant-api03-verylongkeyvalue1234")
+        save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-verylongkeyvalue1234")
             .unwrap();
 
         let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
@@ -825,7 +1049,7 @@ mod tests {
             refresh_token: "rt".into(),
             expires_at: future_ms,
         };
-        save_provider_oauth_tokens(&ctx.auth_path, "anthropic", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&ctx.auth_path, "anthropic", "(test)", &tokens).unwrap();
 
         let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
         let anthropic = &result["providers"]["anthropic"];
@@ -841,7 +1065,7 @@ mod tests {
             refresh_token: "rt".into(),
             expires_at: 0, // already expired
         };
-        save_provider_oauth_tokens(&ctx.auth_path, "anthropic", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&ctx.auth_path, "anthropic", "(test)", &tokens).unwrap();
 
         let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["providers"]["anthropic"]["isOAuthExpired"], true);
@@ -939,9 +1163,13 @@ mod tests {
         let hint = result["providers"]["anthropic"]["apiKeyHint"].as_str().unwrap();
         assert!(hint.contains("..."));
 
-        // Verify on disk
+        // Verify on disk (migration moves legacy api_key → api_keys[])
         let pa = crate::llm::auth::storage::get_provider_auth(&ctx.auth_path, "anthropic").unwrap();
-        assert_eq!(pa.api_key.as_deref(), Some("sk-ant-api03-newkey123456789"));
+        // Legacy field is cleared after migration
+        assert!(pa.api_key.is_none());
+        // Key is now in api_keys[] under "(default)" label
+        let api_keys = pa.api_keys.unwrap();
+        assert_eq!(api_keys[0].key, "sk-ant-api03-newkey123456789");
     }
 
     #[tokio::test]
@@ -1130,7 +1358,7 @@ mod tests {
         let (ctx, _dir) = make_ctx_with_temp_auth();
 
         // Set up
-        save_provider_api_key(&ctx.auth_path, "anthropic", "sk-ant-api03-clearme123456789").unwrap();
+        save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-clearme123456789").unwrap();
 
         let result = ClearAuthHandler
             .handle(Some(json!({"provider": "anthropic"})), &ctx)
@@ -1144,8 +1372,8 @@ mod tests {
     async fn auth_clear_preserves_other_providers() {
         let (ctx, _dir) = make_ctx_with_temp_auth();
 
-        save_provider_api_key(&ctx.auth_path, "anthropic", "sk-ant-api03-keep12345678901").unwrap();
-        save_provider_api_key(&ctx.auth_path, "openai-codex", "sk-proj-remove12345678901").unwrap();
+        save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-keep12345678901").unwrap();
+        save_named_api_key(&ctx.auth_path, "openai-codex", "(test)", "sk-proj-remove12345678901").unwrap();
 
         let result = ClearAuthHandler
             .handle(Some(json!({"provider": "openai-codex"})), &ctx)
@@ -1604,5 +1832,204 @@ mod tests {
         assert!(url.contains("claude.ai"), "Anthropic URL should use claude.ai");
         assert!(url.contains("code_challenge="), "Anthropic should use PKCE");
         assert!(url.contains("code_challenge_method=S256"), "Anthropic should use S256");
+    }
+
+    // ── auth.setActive ──
+
+    #[tokio::test]
+    async fn auth_set_active_oauth() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let tokens = OAuthTokens {
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &ctx.auth_path, "anthropic", "main", &tokens,
+        )
+        .unwrap();
+
+        let result = SetActiveCredentialHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "main"}})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["providers"]["anthropic"]["activeCredential"]["type"],
+            "oauth"
+        );
+        assert_eq!(
+            result["providers"]["anthropic"]["activeCredential"]["label"],
+            "main"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_set_active_api_key() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path, "anthropic", "work", "sk-123",
+        )
+        .unwrap();
+
+        let result = SetActiveCredentialHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "credential": {"type": "apiKey", "label": "work"}})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["providers"]["anthropic"]["activeCredential"]["type"],
+            "apiKey"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_set_active_nonexistent_errors() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let err = SetActiveCredentialHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "nope"}})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    // ── auth.removeAccount ──
+
+    #[tokio::test]
+    async fn auth_remove_account() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let tokens = OAuthTokens {
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &ctx.auth_path, "anthropic", "del-me", &tokens,
+        )
+        .unwrap();
+
+        let result = RemoveAccountHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "label": "del-me"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let accounts = result["providers"]["anthropic"]["accounts"].as_array().unwrap();
+        assert!(accounts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn auth_remove_account_clears_active() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let tokens = OAuthTokens {
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &ctx.auth_path, "anthropic", "active-one", &tokens,
+        )
+        .unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &ctx.auth_path,
+            "anthropic",
+            &ActiveCredential::OAuth { label: "active-one".into() },
+        )
+        .unwrap();
+
+        let result = RemoveAccountHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "label": "active-one"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result["providers"]["anthropic"]["activeCredential"].is_null());
+    }
+
+    // ── auth.removeApiKey ──
+
+    #[tokio::test]
+    async fn auth_remove_api_key() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path, "anthropic", "del-me", "sk-123",
+        )
+        .unwrap();
+
+        let result = RemoveApiKeyHandler
+            .handle(
+                Some(json!({"provider": "anthropic", "label": "del-me"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+        assert!(api_keys.is_empty());
+    }
+
+    // ── auth.get response shape ──
+
+    #[tokio::test]
+    async fn auth_get_returns_api_keys_and_active_credential() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path, "anthropic", "work", "sk-ant-api03-workkey123456789",
+        )
+        .unwrap();
+        crate::llm::auth::storage::set_active_credential(
+            &ctx.auth_path,
+            "anthropic",
+            &ActiveCredential::ApiKey { label: "work".into() },
+        )
+        .unwrap();
+
+        let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
+
+        let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+        assert_eq!(api_keys.len(), 1);
+        assert_eq!(api_keys[0]["label"], "work");
+        assert!(api_keys[0]["keyHint"].as_str().unwrap().contains("..."));
+
+        assert_eq!(
+            result["providers"]["anthropic"]["activeCredential"]["type"],
+            "apiKey"
+        );
+    }
+
+    // ── auth.update with apiKeyLabel ──
+
+    #[tokio::test]
+    async fn auth_update_with_api_key_label_creates_named_key() {
+        let (ctx, _dir) = make_ctx_with_temp_auth();
+        let result = UpdateAuthHandler
+            .handle(
+                Some(json!({
+                    "provider": "anthropic",
+                    "apiKey": "sk-ant-api03-namedkey123456789",
+                    "apiKeyLabel": "work"
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+        assert_eq!(api_keys.len(), 1);
+        assert_eq!(api_keys[0]["label"], "work");
     }
 }
