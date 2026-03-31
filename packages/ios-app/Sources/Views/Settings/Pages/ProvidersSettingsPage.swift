@@ -575,7 +575,7 @@ private struct GoogleProviderFields: View {
                     .foregroundStyle(.tronCyan)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
+                    .background(Color.tronCyan.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)

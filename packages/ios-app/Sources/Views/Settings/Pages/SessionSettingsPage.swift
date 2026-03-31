@@ -48,121 +48,26 @@ struct SessionSettingsPage: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if #available(iOS 26.0, *) {
-                    QuickSessionSection(
-                        displayWorkspace: settingsState.displayQuickSessionWorkspace,
-                        selectedModelDisplayName: selectedModelDisplayName,
-                        onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
-                        onModelTap: { showModelPicker = true }
-                    )
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Quick Session
+                    if #available(iOS 26.0, *) {
+                        quickSessionCard
+                    }
+
+                    // Chat
+                    chatCard
+
+                    // Git Isolation
+                    gitIsolationCard
+
+                    // Session Management
+                    sessionManagementCard
                 }
-
-                Section {
-                    Button(action: { showChatWorkspaceSelector = true }) {
-                        HStack {
-                            Label {
-                                Text("Workspace")
-                                    .foregroundStyle(.tronTextPrimary)
-                            } icon: {
-                                Image(systemName: "folder")
-                                    .foregroundStyle(.tronEmerald)
-                            }
-                            .font(TronTypography.subheadline)
-                            Spacer()
-                            Text(settingsState.displayChatWorkspace.isEmpty
-                                 ? "Default"
-                                 : settingsState.displayChatWorkspace)
-                                .font(TronTypography.subheadline)
-                                .foregroundStyle(.tronEmerald)
-                                .lineLimit(1)
-                        }
-                    }
-                } header: {
-                    Text("Chat")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                } footer: {
-                    Text("Changing the workspace will archive the current chat and start a fresh one.")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                }
-                .listSectionSpacing(16)
-
-                Section {
-                    Picker(selection: Bindable(settingsState).isolationMode) {
-                        Text("Always").tag("always")
-                        Text("Lazy").tag("lazy")
-                        Text("Never").tag("never")
-                    } label: {
-                        Label("Isolation Mode", systemImage: "arrow.triangle.branch")
-                            .font(TronTypography.subheadline)
-                    }
-                    .onChange(of: settingsState.isolationMode) { _, newValue in
-                        updateServerSetting {
-                            ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
-                        }
-                    }
-                } header: {
-                    Text("Git Isolation")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                } footer: {
-                    Text(isolationDescription)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                }
-                .listSectionSpacing(16)
-
-                Section {
-                    HStack {
-                        Label("Max Sessions", systemImage: "square.stack.3d.up")
-                            .font(TronTypography.subheadline)
-                        Spacer()
-                        Text("\(settingsState.maxConcurrentSessions)")
-                            .font(TronTypography.subheadline)
-                            .foregroundStyle(.tronEmerald)
-                            .monospacedDigit()
-                            .frame(minWidth: 20)
-                        TronStepper(
-                            value: Bindable(settingsState).maxConcurrentSessions,
-                            range: 1...50
-                        )
-                    }
-                    .onChange(of: settingsState.maxConcurrentSessions) { _, newValue in
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(maxConcurrentSessions: newValue))
-                        }
-                    }
-
-                    HStack {
-                        Label("Cache TTL", systemImage: "clock.arrow.circlepath")
-                            .font(TronTypography.subheadline)
-                        Spacer()
-                        Text(cacheTtlDisplayText)
-                            .font(TronTypography.subheadline)
-                            .foregroundStyle(.tronEmerald)
-                            .monospacedDigit()
-                            .frame(minWidth: 40)
-                        TronStepper(
-                            value: Bindable(settingsState).cacheTtlSecs,
-                            range: 0...7200,
-                            step: 300
-                        )
-                    }
-                    .onChange(of: settingsState.cacheTtlSecs) { _, newValue in
-                        updateServerSetting {
-                            ServerSettingsUpdate(session: .init(cacheTtlSecs: newValue))
-                        }
-                    }
-
-                    Toggle(isOn: $confirmArchive) {
-                        Label("Confirm before archiving", systemImage: "questionmark.circle")
-                            .font(TronTypography.subheadline)
-                    }
-                } header: {
-                    Text("Session Management")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                }
-                .listSectionSpacing(16)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
-            .listStyle(.insetGrouped)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -230,5 +135,248 @@ struct SessionSettingsPage: View {
                 }
             }
         }
+    }
+
+    // MARK: - Quick Session Card
+
+    @available(iOS 26.0, *)
+    private var quickSessionCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Quick Session")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.bottom, 8)
+
+            VStack(spacing: 0) {
+                settingsRow(
+                    icon: "folder",
+                    label: "Workspace",
+                    value: settingsState.displayQuickSessionWorkspace,
+                    action: { showQuickSessionWorkspaceSelector = true }
+                )
+
+                Divider().padding(.leading, 38)
+
+                settingsRow(
+                    icon: "cpu",
+                    label: "Model",
+                    value: selectedModelDisplayName,
+                    action: { showModelPicker = true }
+                )
+            }
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Long-press the + button to instantly start a session with these defaults.")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: - Chat Card
+
+    private var chatCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Chat")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.bottom, 8)
+
+            settingsRow(
+                icon: "folder",
+                label: "Workspace",
+                value: settingsState.displayChatWorkspace.isEmpty
+                    ? "Default"
+                    : settingsState.displayChatWorkspace,
+                action: { showChatWorkspaceSelector = true }
+            )
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Changing the workspace will archive the current chat and start a fresh one.")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: - Git Isolation Card
+
+    private var gitIsolationCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Git Isolation")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.bottom, 8)
+
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 18)
+                Text("Isolation Mode")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                Spacer()
+                isolationToggle
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text(isolationDescription)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var isolationToggle: some View {
+        let modes = ["always", "lazy", "never"]
+        let labels = ["Always", "Lazy", "Never"]
+        let currentIndex = modes.firstIndex(of: settingsState.isolationMode) ?? 1
+
+        return Button {
+            let nextIndex = (currentIndex + 1) % modes.count
+            let newValue = modes[nextIndex]
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                settingsState.isolationMode = newValue
+            }
+            updateServerSetting {
+                ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(labels[currentIndex])
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.tronEmerald.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Session Management Card
+
+    private var sessionManagementCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Session Management")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.bottom, 8)
+
+            VStack(spacing: 0) {
+                // Max Sessions
+                HStack {
+                    Image(systemName: "square.stack.3d.up")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Max Sessions")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    Text("\(settingsState.maxConcurrentSessions)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 20)
+                    TronStepper(
+                        value: Bindable(settingsState).maxConcurrentSessions,
+                        range: 1...50
+                    )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .onChange(of: settingsState.maxConcurrentSessions) { _, newValue in
+                    updateServerSetting {
+                        ServerSettingsUpdate(server: .init(maxConcurrentSessions: newValue))
+                    }
+                }
+
+                Divider().padding(.leading, 38)
+
+                // Cache TTL
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Cache TTL")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    Text(cacheTtlDisplayText)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 40)
+                    TronStepper(
+                        value: Bindable(settingsState).cacheTtlSecs,
+                        range: 0...7200,
+                        step: 300
+                    )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .onChange(of: settingsState.cacheTtlSecs) { _, newValue in
+                    updateServerSetting {
+                        ServerSettingsUpdate(session: .init(cacheTtlSecs: newValue))
+                    }
+                }
+
+                Divider().padding(.leading, 38)
+
+                // Confirm archive toggle
+                HStack {
+                    Image(systemName: "questionmark.circle")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Confirm archiving")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    Toggle("", isOn: $confirmArchive)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+            }
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    // MARK: - Shared Row
+
+    private func settingsRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 18)
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+            Spacer()
+            Text(value)
+                .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                .foregroundStyle(.tronEmerald)
+                .lineLimit(1)
+            Image(systemName: "chevron.right")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture { action() }
     }
 }
