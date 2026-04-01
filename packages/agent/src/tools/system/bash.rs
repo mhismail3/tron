@@ -255,6 +255,28 @@ impl BashTool {
         }
 
         match handle.result {
+            Some(result) if result.cancelled => {
+                // User interrupted this command.
+                let output = if result.output.is_empty() {
+                    format!("[Interrupted by user] Command `{command}` was cancelled. Do not retry — the user intentionally stopped this command.")
+                } else {
+                    format!("{}\n\n[Interrupted by user] Command was cancelled.", result.output)
+                };
+
+                Ok(TronToolResult {
+                    content: ToolResultBody::Text(output),
+                    details: Some(json!({
+                        "command": command,
+                        "exitCode": -1,
+                        "duration": result.duration_ms,
+                        "description": description,
+                        "processId": process_id,
+                        "interrupted": true,
+                    })),
+                    is_error: Some(true),
+                    stop_turn: None,
+                })
+            }
             Some(result) => {
                 // Completed within blocking timeout — inline the result.
                 let exit_code = result.exit_code.unwrap_or(-1);
