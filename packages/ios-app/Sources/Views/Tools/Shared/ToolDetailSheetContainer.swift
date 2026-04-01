@@ -107,3 +107,14 @@ extension ToolDetailSheetContainer where LeadingToolbar == EmptyView {
         self.leadingToolbar = { EmptyView() }
     }
 }
+
+// MARK: - Sheet Section Padding
+
+/// Single point of control for the horizontal padding applied to each section
+/// inside a tool detail sheet. Every section should use `.sheetSection()` instead
+/// of raw `.padding(.horizontal)` so the value can be changed in one place.
+extension View {
+    func sheetSection() -> some View {
+        padding(.horizontal)
+    }
+}

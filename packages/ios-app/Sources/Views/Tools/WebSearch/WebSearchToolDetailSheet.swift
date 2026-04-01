@@ -58,30 +58,30 @@ struct WebSearchToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 querySection
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if let error = parsed.error {
                         searchErrorSection(error)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if parsed.results.isEmpty {
                         noResultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else {
                         resultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         searchErrorSection(WebSearchDetailParser.extractError(from: result))
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

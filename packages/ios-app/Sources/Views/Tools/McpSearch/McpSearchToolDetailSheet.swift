@@ -41,13 +41,13 @@ struct McpSearchToolDetailSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     statusRow
-                        .padding(.horizontal)
+                        .sheetSection()
 
                     querySection
-                        .padding(.horizontal)
+                        .sheetSection()
 
                     contentSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
                 .padding(.vertical)
                 .frame(maxWidth: .infinity)

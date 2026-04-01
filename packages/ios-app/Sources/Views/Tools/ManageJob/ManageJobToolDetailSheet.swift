@@ -39,11 +39,11 @@ struct ManageJobToolDetailSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     statusRow
-                        .padding(.horizontal)
+                        .sheetSection()
                     actionSection
-                        .padding(.horizontal)
+                        .sheetSection()
                     contentSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
                 .padding(.vertical)
                 .frame(maxWidth: .infinity)

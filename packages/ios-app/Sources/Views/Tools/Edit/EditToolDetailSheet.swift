@@ -63,31 +63,31 @@ struct EditToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 fileInfoSection
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if let msg = successMessage {
                         resultNote(msg)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                     if hasDiff && !diffLines.isEmpty {
                         EditDiffSection(diffLines: diffLines, resultText: data.result, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if let result = data.result, !result.isEmpty, successMessage == nil {
                         EditFallbackResultSection(result: result, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         errorSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

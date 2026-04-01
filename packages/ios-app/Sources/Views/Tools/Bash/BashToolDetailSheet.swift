@@ -166,53 +166,53 @@ struct BashToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 BashCommandSection(command: command, commandDescription: commandDescription, tint: tint)
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 if let stdin = stdinContent, !stdin.isEmpty {
                     BashStdinSection(content: stdin, tint: tint)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
                 if let env = envVars, !env.isEmpty {
                     BashEnvSection(env: env, tint: tint)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
                 if let pairs = ptyInputPairs, !pairs.isEmpty {
                     BashPtyInputSection(pairs: pairs, tint: tint)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
 
                 if isBackgroundedProcess {
                     // Process was auto-backgrounded — show streaming output + action buttons
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 } else {
                     switch data.status {
                     case .success:
                         if outputLines.isEmpty {
                             ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
-                                .padding(.horizontal)
+                                .sheetSection()
                         } else {
                             outputSection
-                                .padding(.horizontal)
+                                .sheetSection()
                         }
                     case .error:
                         if isBlocked {
                             BashBlockedSection(result: data.result, colorScheme: colorScheme)
-                                .padding(.horizontal)
+                                .sheetSection()
                         } else if outputLines.isEmpty {
                             if let result = data.result {
                                 errorFallbackSection(result)
-                                    .padding(.horizontal)
+                                    .sheetSection()
                             }
                         } else {
                             outputSection
-                                .padding(.horizontal)
+                                .sheetSection()
                         }
                     case .running:
                         runningSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 }
             }

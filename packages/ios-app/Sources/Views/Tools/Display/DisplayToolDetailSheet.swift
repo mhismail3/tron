@@ -78,10 +78,10 @@ struct DisplayToolDetailSheet: View {
                         color: .tronIndigo
                     )
                 }
-                .padding(.horizontal)
+                .sheetSection()
 
                 contentForType
-                    .padding(.horizontal)
+                    .sheetSection()
             }
         }
     }

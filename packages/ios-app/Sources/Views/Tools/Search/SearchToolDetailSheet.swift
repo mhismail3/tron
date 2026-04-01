@@ -71,36 +71,36 @@ struct SearchToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 SearchQuerySection(pattern: pattern, searchPath: searchPath, fileFilter: fileFilter, tint: tint)
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if isNoResults {
                         noResultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if outputMode == "files_with_matches" {
                         SearchFileListSection(result: data.result, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if !parsedResults.isEmpty {
                         SearchMatchesSection(parsedResults: parsedResults, result: data.result, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if let result = data.result, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         rawResultSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else {
                         noResultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         errorSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

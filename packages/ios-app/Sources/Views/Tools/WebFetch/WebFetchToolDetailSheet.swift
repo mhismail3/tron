@@ -57,44 +57,44 @@ struct WebFetchToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 WebFetchSourceSection(url: url, domain: domain, source: parsed.source, tint: tint)
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 if parsed.isRawMode {
                     WebFetchRawHttpInfoSection(method: method, httpStatus: parsed.httpStatus, tint: tint)
-                        .padding(.horizontal)
+                        .sheetSection()
                 } else if !prompt.isEmpty {
                     WebFetchPromptSection(prompt: prompt, tint: tint)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
 
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if let error = parsed.error {
                         fetchErrorSection(error)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if !parsed.answer.isEmpty {
                         if parsed.isRawMode {
                             WebFetchRawResponseBodySection(answer: parsed.answer, tint: tint)
-                                .padding(.horizontal)
+                                .sheetSection()
                         } else {
                             WebFetchAnswerSection(answer: parsed.answer, tint: tint)
-                                .padding(.horizontal)
+                                .sheetSection()
                         }
                     } else {
                         emptyResultSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         fetchErrorSection(WebFetchDetailParser.extractError(from: result))
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

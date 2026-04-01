@@ -56,30 +56,30 @@ struct GlobToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 GlobPatternSection(pattern: pattern, searchPath: searchPath, tint: tint)
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if isNoResults {
                         noResultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else if !parsedFiles.isEmpty {
                         GlobResultsSection(files: parsedFiles, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else {
                         noResultsSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         errorSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

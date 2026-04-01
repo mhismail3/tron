@@ -36,27 +36,27 @@ struct ReadToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 fileInfoSection
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if let result = data.result, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         contentSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else {
                         emptyFileSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result {
                         errorSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     runningSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

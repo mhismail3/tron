@@ -64,27 +64,27 @@ struct McpCallToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 serverSection
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 if let args = prettyArguments {
                     argumentsSection(args)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
 
                 switch data.status {
                 case .success, .error:
                     if resultText.isEmpty {
                         ToolEmptyState(title: "Result", icon: "text.page.slash", message: "No response", accent: .tronEmerald, tint: tint)
-                            .padding(.horizontal)
+                            .sheetSection()
                     } else {
                         resultSection
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     ToolRunningSpinner(title: "Result", accent: .tronEmerald, tint: tint, actionText: "Calling \(server).\(tool)...")
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)

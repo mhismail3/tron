@@ -108,20 +108,20 @@ struct ComputerUseToolDetailSheet: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 actionSection
-                    .padding(.horizontal)
+                    .sheetSection()
                 statusRow
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 switch data.status {
                 case .success:
                     if let result = data.result, !result.isEmpty {
                         resultSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .error:
                     if let result = data.result, !result.isEmpty {
                         errorSection(result)
-                            .padding(.horizontal)
+                            .sheetSection()
                     }
                 case .running:
                     ToolRunningSpinner(
@@ -130,7 +130,7 @@ struct ComputerUseToolDetailSheet: View {
                         tint: tint,
                         actionText: runningActionText
                     )
-                    .padding(.horizontal)
+                    .sheetSection()
                 }
             }
             .padding(.vertical)

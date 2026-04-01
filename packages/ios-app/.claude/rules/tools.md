@@ -46,6 +46,7 @@ For tools that need structured error display:
 - Use `ToolCodeBlock` for line-numbered content display (Read content, Write preview, Bash output)
 - Use `ToolEmptyState` for no-results states instead of hand-rolling VStack + Image + Text
 - Use `ToolCopyButton` for section copy buttons instead of inline Button + Image
+- Use `.sheetSection()` on every top-level section inside a detail sheet — never raw `.padding(.horizontal)`
 - Keep detail sheets under 500 LOC; extract nested subviews for large sheets
 
 ---

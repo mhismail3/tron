@@ -46,19 +46,19 @@ struct NotifyAppDetailSheet: View {
                         )
                     }
                 }
-                .padding(.horizontal)
+                .sheetSection()
 
                 notificationSection
-                    .padding(.horizontal)
+                    .sheetSection()
 
                 if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                     sheetContentSection(sheetContent)
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
 
                 if data.status == .failed {
                     errorSection
-                        .padding(.horizontal)
+                        .sheetSection()
                 }
             }
             .padding(.vertical)
