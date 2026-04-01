@@ -101,10 +101,6 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var display: DisplayClient = DisplayClient(transport: self)
 
-    /// Process management client (promote, cancel, list, status).
-    @ObservationIgnored
-    lazy var process: ProcessClient = ProcessClient(transport: self)
-
     /// Unified job management client (background, cancel, subscribe, unsubscribe).
     @ObservationIgnored
     lazy var job: JobClient = JobClient(transport: self)

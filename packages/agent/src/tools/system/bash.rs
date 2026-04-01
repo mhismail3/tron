@@ -1755,8 +1755,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bash_async_default_with_auto_wait_fast_command() {
-        // Fast commands complete within 150ms and get inlined
+    async fn bash_managed_fast_command_returns_inline() {
+        // Fast commands complete within the blocking timeout and get inlined
         let tool = BashTool::new(Arc::new(MockRunner::ok("fast-result")), None);
         let mut ctx = make_ctx();
         let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
@@ -1768,9 +1768,7 @@ mod tests {
             .unwrap();
 
         let text = extract_text(&r);
-        // Auto-wait should have caught the fast completion and inlined the result
         assert!(text.contains("fast-result"), "expected inlined result, got: {text}");
-        // Should NOT contain process ID since it completed fast
         assert!(!text.contains("proc-"), "should not return process ID for fast command");
     }
 

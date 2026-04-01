@@ -31,7 +31,6 @@ pub mod device;
 pub mod display;
 pub mod events;
 pub(crate) mod job;
-pub(crate) mod process;
 pub mod filesystem;
 pub mod git;
 pub mod logs;
@@ -188,12 +187,6 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Display
     registry.register("display.stopStream", display::StopStreamHandler);
-
-    // Process management (legacy — kept until iOS migrates to job.*)
-    registry.register("process.promote", process::PromoteHandler);
-    registry.register("process.cancel", process::CancelHandler);
-    registry.register("process.list", process::ListHandler);
-    registry.register("process.status", process::StatusHandler);
 
     // Unified job management
     registry.register("job.background", job::BackgroundHandler);
@@ -524,7 +517,7 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            128,
+            124,
             "expected 123 methods, got {}",
             reg.methods().len()
         );

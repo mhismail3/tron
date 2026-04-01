@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		0098504E27110ABA5526A277 /* ChatNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14179D8DE18C8395648834F8 /* ChatNotificationCoordinator.swift */; };
 		015EA8A6D91D8CF64EB6C02A /* TokenRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AAAFBBBB189F7F66F3242A /* TokenRecordTests.swift */; };
-		01BF35BB3B4880F0ED5AAB2F /* ProcessClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9564F6AF570C51621D985874 /* ProcessClient.swift */; };
 		01D532A6F212FA7359AB9C44 /* MessageBubbleTapAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A8B39E8CDC7FA87EBCFC7C /* MessageBubbleTapAction.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		02FE389EB93928871C55206C /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BCC3CF17E11CB993CBEF33D /* LogViewer.swift */; };
@@ -1038,7 +1037,6 @@
 		93B246F168C6810A4234865D /* SettingsClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsClientTests.swift; sourceTree = "<group>"; };
 		94E8411550275B4DEA1E38CD /* SubagentChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentChip.swift; sourceTree = "<group>"; };
 		94F09E7C7AFEA4A3EFF6D980 /* AskUserQuestionDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionDetector.swift; sourceTree = "<group>"; };
-		9564F6AF570C51621D985874 /* ProcessClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessClient.swift; sourceTree = "<group>"; };
 		95A57FFB0CA4967AA9029825 /* SubagentStatBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentStatBadge.swift; sourceTree = "<group>"; };
 		96E1AEE3FD94E75C67C21B73 /* VoiceNotesRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecordingSheet.swift; sourceTree = "<group>"; };
 		970306301D10D6C84BBD1013 /* DateParserCachingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParserCachingTests.swift; sourceTree = "<group>"; };
@@ -1503,7 +1501,6 @@
 				A23D9005BFAABD136EC9FDF2 /* MiscClient.swift */,
 				73FC1466CB50C9CEF5F84DFC /* ModelClient.swift */,
 				57B9733D5E8DF4410DC76DAC /* NotificationClient.swift */,
-				9564F6AF570C51621D985874 /* ProcessClient.swift */,
 				47C66B4B0B54B4C0AC49D7E7 /* SandboxClient.swift */,
 				FCAAB7252A3CBA03F71E8C65 /* SessionClient.swift */,
 				A469493C34CE771CE26B5DCE /* SessionClientProtocol.swift */,
@@ -3439,7 +3436,6 @@
 				2F755300CB121D5A8BDB554A /* OrbitingParticleIndicator.swift in Sources */,
 				4B01C49DADEE19BAF1D704E5 /* ParsedEventV2.swift in Sources */,
 				8F42824BAB5A7D9564A4AA62 /* PhaseWaveIndicator.swift in Sources */,
-				01BF35BB3B4880F0ED5AAB2F /* ProcessClient.swift in Sources */,
 				35ECD4E2388F07ED315B0D2D /* ProcessCompletedPlugin.swift in Sources */,
 				71E144A3E1DE3DD31DB0D823 /* ProcessListSheet.swift in Sources */,
 				CCE3E95A40D19B38A7EF9424 /* ProcessSpawnedPlugin.swift in Sources */,
