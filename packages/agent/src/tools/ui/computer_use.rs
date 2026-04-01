@@ -96,7 +96,7 @@ impl TronTool for ComputerUseTool {
              app (e.g. \"Dock\", \"Finder\", \"Safari\"). Defaults to the frontmost app.\n\
              - **listElements**: List clickable elements in an app. Set `app` to target a specific app \
              (e.g. \"Dock\", \"Safari\"). Defaults to frontmost app. Use before clickElement to see what's available.\n\
-             - **screenshot**: Capture full screen or a specific window by name.\n\
+             - **screenshot**: Capture full screen, a specific window by name, or a screen region by coordinates.\n\
              - **keypress**: Press key combinations. Primary navigation method alongside clickElement.\n\
              - **type**: Type text into the focused input field.\n\
              - **scroll**: Scroll in a direction (up/down/left/right).\n\
@@ -116,6 +116,7 @@ impl TronTool for ComputerUseTool {
         .property("app", json!({"type": "string", "description": "Target app name for clickElement/listElements (e.g. 'Dock', 'Safari', 'Finder'). Defaults to frontmost app."}))
         .property("keys", json!({"type": "array", "items": {"type": "string"}, "description": "Keys to press (for keypress action), e.g. [\"cmd\", \"c\"]"}))
         .property("window", json!({"type": "string", "description": "Window name or title (for screenshot, focusWindow)"}))
+        .property("region", json!({"type": "object", "description": "Screen region to capture (for screenshot). Specify x, y, width, height in screen points.", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number"}, "height": {"type": "number"}}, "required": ["x", "y", "width", "height"]}))
         .property("direction", json!({"type": "string", "description": "Scroll direction: up, down, left, right", "enum": ["up", "down", "left", "right"]}))
         .property("amount", json!({"type": "number", "description": "Scroll amount in pixels (default: 100)", "default": 100}))
         .property("confirmed", json!({"type": "boolean", "description": "Set to true after user has confirmed via GetConfirmation (bypasses confirmation gate)"}))
@@ -292,12 +293,19 @@ impl ComputerUseTool {
 
         let tmp_path = format!("/tmp/tron-screenshot-{}.png", uuid::Uuid::now_v7());
         let window = get_optional_string(params, "window");
+        let region = params.get("region").and_then(Value::as_object);
 
         // Window logical dimensions and position (set during window lookup below)
         let mut win_w: f64 = 0.0;
         let mut win_h: f64 = 0.0;
         let mut win_x: f64 = 0.0;
         let mut win_y: f64 = 0.0;
+
+        // Region dimensions (set during region capture below)
+        let mut region_x: f64 = 0.0;
+        let mut region_y: f64 = 0.0;
+        let mut region_w: f64 = 0.0;
+        let mut region_h: f64 = 0.0;
 
         if let Some(ref w) = window {
             // Window-specific capture: use scored CGWindowList lookup via Swift to find
@@ -354,6 +362,33 @@ impl ComputerUseTool {
                     output.stderr.trim()
                 )));
             }
+        } else if let Some(r) = region {
+            // Region capture: use screencapture -R x,y,width,height
+            region_x = r.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+            region_y = r.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+            region_w = r.get("width").and_then(Value::as_f64).unwrap_or(0.0);
+            region_h = r.get("height").and_then(Value::as_f64).unwrap_or(0.0);
+
+            if region_w <= 0.0 || region_h <= 0.0 {
+                return Ok(error_result(
+                    "Region width and height must be positive numbers.".to_string(),
+                ));
+            }
+
+            // On Retina displays, screencapture -R uses screen points (logical coordinates),
+            // which is what we want since the agent works in logical coordinates.
+            #[allow(clippy::cast_possible_truncation)]
+            let command = format!(
+                "screencapture -x -t png -R {},{},{},{} {tmp_path}",
+                region_x as i32, region_y as i32, region_w as i32, region_h as i32
+            );
+            let output = self.run_shell(&command, ctx).await?;
+            if output.exit_code != 0 {
+                return Ok(error_result(format!(
+                    "Region screenshot failed: {}. Grant Screen Recording permission in System Settings > Privacy & Security.",
+                    output.stderr
+                )));
+            }
         } else {
             // Full screen capture
             let command = format!("screencapture -x -t png {tmp_path}");
@@ -385,6 +420,9 @@ impl ComputerUseTool {
         let resize_target = if window.is_some() {
             // Use window logical dimensions (from CGWindowList metadata)
             (win_w as u32, win_h as u32)
+        } else if region.is_some() {
+            // Use region logical dimensions
+            (region_w as u32, region_h as u32)
         } else {
             // Use screen logical dimensions
             self.screen_bounds().await
@@ -507,6 +545,12 @@ impl ComputerUseTool {
             details["windowX"] = json!(win_x as i32);
             details["windowY"] = json!(win_y as i32);
         }
+        if region.is_some() {
+            details["regionX"] = json!(region_x as i32);
+            details["regionY"] = json!(region_y as i32);
+            details["regionWidth"] = json!(region_w as i32);
+            details["regionHeight"] = json!(region_h as i32);
+        }
         details["screenshotPath"] = json!(saved_path);
 
         let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
@@ -522,6 +566,15 @@ impl ComputerUseTool {
                 text.push_str(&format!(
                     "\nWindow at ({}, {}). Pixel (x,y) in this image = screen point ({} + x, {} + y).",
                     win_x as i32, win_y as i32, win_x as i32, win_y as i32
+                ));
+            }
+        } else if region.is_some() {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                text.push_str(&format!(
+                    "\nRegion at ({}, {}), size {}x{}. Pixel (x,y) in this image = screen point ({} + x, {} + y).",
+                    region_x as i32, region_y as i32, region_w as i32, region_h as i32,
+                    region_x as i32, region_y as i32
                 ));
             }
         } else if let Some((sw, sh)) = screen {
@@ -1177,6 +1230,21 @@ mod tests {
     }
 
     #[test]
+    fn schema_has_region_property() {
+        let t = tool(true);
+        let def = t.definition();
+        let props = def.parameters.properties.unwrap();
+        assert!(props.contains_key("region"), "should have region property for area screenshots");
+        let region = &props["region"];
+        assert_eq!(region["type"], "object");
+        let region_props = region["properties"].as_object().unwrap();
+        assert!(region_props.contains_key("x"));
+        assert!(region_props.contains_key("y"));
+        assert!(region_props.contains_key("width"));
+        assert!(region_props.contains_key("height"));
+    }
+
+    #[test]
     fn serialized_execution_mode() {
         let t = tool(true);
         assert_eq!(
@@ -1672,6 +1740,103 @@ mod tests {
         assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
         let d = r.details.unwrap();
         assert_eq!(d["mimeType"], "image/png");
+    }
+
+    // ─── Region screenshot tests ───
+
+    #[tokio::test]
+    async fn screenshot_region_captures_with_correct_command() {
+        use std::sync::{Arc as StdArc, Mutex};
+        let commands: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let cmds = commands.clone();
+        let runner = MockRunner::with_handler(move |cmd| {
+            cmds.lock().unwrap().push(cmd.to_string());
+            if cmd.contains("screencapture") {
+                // Write a fake PNG with valid header
+                let path = cmd.rsplit(' ').next().unwrap_or("/tmp/test.png");
+                let mut data = Vec::with_capacity(1000);
+                data.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+                data.extend_from_slice(&13u32.to_be_bytes());
+                data.extend_from_slice(b"IHDR");
+                data.extend_from_slice(&400u32.to_be_bytes());
+                data.extend_from_slice(&300u32.to_be_bytes());
+                data.resize(1000, 0);
+                std::fs::write(path, &data).ok();
+            }
+            ProcessOutput {
+                stdout: String::new(), stderr: String::new(), exit_code: 0,
+                duration_ms: 10, timed_out: false, interrupted: false,
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({
+            "action": "screenshot",
+            "region": {"x": 100, "y": 200, "width": 400, "height": 300}
+        }), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
+
+        // Verify screencapture was called with -R flag
+        let cmds = commands.lock().unwrap();
+        let capture_cmd = cmds.iter().find(|c| c.contains("screencapture")).unwrap();
+        assert!(capture_cmd.contains("-R 100,200,400,300"), "should use -R flag: {capture_cmd}");
+
+        // Verify text includes region coordinate info
+        let text = extract_text(&r);
+        assert!(text.contains("Region at"), "should mention region: {text}");
+        assert!(text.contains("100"), "should include region x: {text}");
+        assert!(text.contains("200"), "should include region y: {text}");
+
+        // Verify details include region info
+        let d = r.details.unwrap();
+        assert_eq!(d["regionX"], 100);
+        assert_eq!(d["regionY"], 200);
+        assert_eq!(d["regionWidth"], 400);
+        assert_eq!(d["regionHeight"], 300);
+    }
+
+    #[tokio::test]
+    async fn screenshot_region_rejects_zero_dimensions() {
+        let t = tool(false);
+        let r = t.execute(json!({
+            "action": "screenshot",
+            "region": {"x": 100, "y": 200, "width": 0, "height": 300}
+        }), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("positive"));
+
+        let r = t.execute(json!({
+            "action": "screenshot",
+            "region": {"x": 100, "y": 200, "width": 400, "height": -10}
+        }), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("positive"));
+    }
+
+    #[tokio::test]
+    async fn screenshot_region_screencapture_failure() {
+        let runner = MockRunner::with_handler(|cmd| {
+            if cmd.contains("screencapture") {
+                ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "screen recording not permitted".into(),
+                    exit_code: 1,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            } else {
+                ProcessOutput {
+                    stdout: String::new(), stderr: String::new(), exit_code: 0,
+                    duration_ms: 10, timed_out: false, interrupted: false,
+                }
+            }
+        });
+        let t = tool_with_runner(runner, false);
+        let r = t.execute(json!({
+            "action": "screenshot",
+            "region": {"x": 0, "y": 0, "width": 100, "height": 100}
+        }), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("Region screenshot failed"));
+        assert!(extract_text(&r).contains("Screen Recording"));
     }
 
     // ─── Window selection scoring tests ───
