@@ -25,7 +25,7 @@ struct ToolCodeBlock: View {
     private var lineNumWidth: CGFloat {
         let maxNum = lines.last?.lineNumber ?? lines.count
         let digits = max(String(maxNum).count, 1)
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 
     var body: some View {

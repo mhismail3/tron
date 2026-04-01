@@ -214,7 +214,7 @@ enum EditDiffParser {
     static func lineNumberWidth(for lines: [EditDiffLine]) -> CGFloat {
         let maxNum = lines.compactMap(\.lineNum).max() ?? 0
         let digits = max(String(maxNum).count, 1)
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 }
 

@@ -17,7 +17,7 @@ struct LineNumberedContentView: View {
     private var lineNumWidth: CGFloat {
         let maxNum = parsedLines.last?.lineNum ?? parsedLines.count
         let digits = String(maxNum).count
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 
     var body: some View {

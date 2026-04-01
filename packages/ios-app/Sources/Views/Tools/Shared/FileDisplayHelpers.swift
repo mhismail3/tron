@@ -57,12 +57,12 @@ enum FileDisplayHelpers {
     static func lineNumberWidth(for lines: [ContentLineParser.ParsedLine]) -> CGFloat {
         let maxNum = lines.last?.lineNum ?? lines.count
         let digits = String(maxNum).count
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 
     static func lineNumberWidth(lineCount: Int) -> CGFloat {
         let digits = String(lineCount).count
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 
     static func formattedSize(_ byteCount: Int) -> String {

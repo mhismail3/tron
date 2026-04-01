@@ -58,7 +58,7 @@ enum SearchResultParser {
     static func lineNumberWidth(for matches: [SearchMatch]) -> CGFloat {
         let maxNum = matches.compactMap(\.lineNumber).max() ?? 0
         let digits = max(String(maxNum).count, 1)
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 }
 

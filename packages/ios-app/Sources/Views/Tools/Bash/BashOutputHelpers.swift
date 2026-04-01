@@ -67,7 +67,7 @@ enum BashOutputHelpers {
     /// Calculate line number gutter width based on total line count.
     static func lineNumberWidth(lineCount: Int) -> CGFloat {
         let digits = max(String(lineCount).count, 1)
-        return CGFloat(max(digits * 10, 18))
+        return CGFloat(max(digits * 8, 14))
     }
 
     /// Produce a collapsed view: first N lines + last M lines, with indices preserved.
