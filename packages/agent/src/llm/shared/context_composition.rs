@@ -20,8 +20,7 @@ use crate::core::messages::Context;
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
 /// 5. `skill_index_context` (lightweight index of all available skills)
 /// 6. `skill_context` (full content of explicitly invoked skills)
-/// 7. `subagent_results_context`
-/// 8. `process_results_context`
+/// 7. `job_results_context` (completed background processes + subagents)
 /// 9. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
@@ -62,16 +61,10 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         parts.push(skills.clone());
     }
 
-    if let Some(ref subagent) = context.subagent_results_context
-        && !subagent.is_empty()
+    if let Some(ref jobs) = context.job_results_context
+        && !jobs.is_empty()
     {
-        parts.push(subagent.clone());
-    }
-
-    if let Some(ref process) = context.process_results_context
-        && !process.is_empty()
-    {
-        parts.push(process.clone());
+        parts.push(jobs.clone());
     }
 
     // Environment details: server origin + working directory
@@ -108,7 +101,7 @@ pub struct GroupedContextParts {
 /// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`,
 /// `skill_index_context`
 /// **Volatile** (5m cache TTL): `dynamic_rules_context`, `skill_context`,
-/// `subagent_results_context`, `process_results_context`
+/// `job_results_context`
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     let mut stable = Vec::new();
     let mut volatile = Vec::new();
@@ -164,16 +157,10 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         volatile.push(skills.clone());
     }
 
-    if let Some(ref subagent) = context.subagent_results_context
-        && !subagent.is_empty()
+    if let Some(ref jobs) = context.job_results_context
+        && !jobs.is_empty()
     {
-        volatile.push(subagent.clone());
-    }
-
-    if let Some(ref process) = context.process_results_context
-        && !process.is_empty()
-    {
-        volatile.push(process.clone());
+        volatile.push(jobs.clone());
     }
 
     GroupedContextParts { stable, volatile }
@@ -197,8 +184,7 @@ mod tests {
             memory_content: Some("User prefers concise responses.".into()),
             skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
             skill_context: Some("Available skill: /commit".into()),
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: Some("Rule: no console.log".into()),
             server_origin: None,
         }
@@ -234,8 +220,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };
@@ -254,8 +239,7 @@ mod tests {
             memory_content: Some("memory".into()),
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };
@@ -275,8 +259,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };
@@ -320,8 +303,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };
@@ -341,8 +323,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };
@@ -427,8 +408,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: Some("Skill".into()),
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         };

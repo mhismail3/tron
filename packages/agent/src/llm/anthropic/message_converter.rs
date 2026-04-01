@@ -473,8 +473,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
-            subagent_results_context: None,
-            process_results_context: None,
+            job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
         }

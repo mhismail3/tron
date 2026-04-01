@@ -11,7 +11,7 @@
 //! - **Search**: text/AST unified search
 //! - **Web**: `WebFetch`, `WebSearch`
 //! - **UI**: `AskUserQuestion`, `NotifyApp`
-//! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
+//! - **Subagent**: `SpawnSubagent`
 //!
 //! ## Module Position
 //!

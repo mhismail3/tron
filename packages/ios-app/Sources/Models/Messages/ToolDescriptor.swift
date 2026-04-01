@@ -37,7 +37,7 @@ enum ToolRegistry {
         "webfetch", "websearch",
         "computeruse",
         "display",
-        "manageprocess",
+        "managejob", "wait",
         "mcpsearch", "mcpcall"
     ]
 
@@ -45,7 +45,7 @@ enum ToolRegistry {
     static let specialToolNames: Set<String> = [
         "askuserquestion",
         "getconfirmation",
-        "spawnsubagent", "queryagent", "waitforagents",
+        "spawnsubagent", "queryagent",
         "notifyapp"
     ]
 
@@ -295,21 +295,26 @@ enum ToolRegistry {
             },
             viewerFactory: nil
         ),
-        "manageprocess": ToolDescriptor(
+        "managejob": ToolDescriptor(
             icon: "gearshape.2",
             iconColor: .tronSlate,
-            displayName: "Process",
+            displayName: "Jobs",
             completedDisplayName: "Managed",
             summaryExtractor: { args in
                 ToolArgumentParser.string("action", from: args) ?? ""
             },
-            viewerFactory: { tool, isExpanded in
-                AnyView(ManageProcessResultViewer(
-                    action: ToolArgumentParser.string("action", from: tool.arguments) ?? "",
-                    result: tool.result ?? "",
-                    isExpanded: isExpanded
-                ))
-            }
+            viewerFactory: nil
+        ),
+        "wait": ToolDescriptor(
+            icon: "clock.arrow.circlepath",
+            iconColor: .tronTeal,
+            displayName: "Wait",
+            completedDisplayName: "Waited",
+            summaryExtractor: { args in
+                let ids = ToolArgumentParser.stringArray("ids", from: args) ?? []
+                return ids.isEmpty ? "" : "\(ids.count) job\(ids.count == 1 ? "" : "s")"
+            },
+            viewerFactory: nil
         ),
     ]
 

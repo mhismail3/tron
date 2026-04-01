@@ -53,6 +53,8 @@ pub struct ToolExecutionContext<'a> {
     pub workspace_id: Option<&'a str>,
     /// Optional process manager for background process execution.
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Optional unified job manager for process + subagent lifecycle.
+    pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -198,6 +200,7 @@ pub async fn execute_tool(
         workspace_id: ctx.workspace_id.map(String::from),
         output_tx: Some(output_tx),
         process_manager: ctx.process_manager.map(Arc::clone),
+        job_manager: ctx.job_manager.map(Arc::clone),
     };
 
     // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events
@@ -352,6 +355,7 @@ mod tests {
                 subagent_max_depth: 0,
                 workspace_id: None,
                 process_manager: None,
+                job_manager: None,
             }
         };
     }

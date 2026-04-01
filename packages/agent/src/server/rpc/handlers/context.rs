@@ -953,6 +953,7 @@ mod tests {
             mcp_router: None,
             display_stream_registry: None,
             process_manager: None,
+            job_manager: None,
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))

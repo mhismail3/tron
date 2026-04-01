@@ -78,6 +78,8 @@ pub struct TurnParams<'a> {
     pub server_origin: Option<&'a str>,
     /// Optional process manager for background process execution.
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Optional unified job manager for process + subagent lifecycle.
+    pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -105,6 +107,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         workspace_id,
         server_origin,
         process_manager,
+        job_manager,
     } = params;
     let turn_start = Instant::now();
 
@@ -322,6 +325,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         workspace_id,
         persister,
         process_manager,
+        job_manager,
     })
     .await;
 
@@ -417,11 +421,8 @@ fn build_turn_context(
         .clone_from(&run_context.skill_index_context);
     context.skill_context.clone_from(&run_context.skill_context);
     context
-        .subagent_results_context
-        .clone_from(&run_context.subagent_results);
-    context
-        .process_results_context
-        .clone_from(&run_context.process_results);
+        .job_results_context
+        .clone_from(&run_context.job_results);
     context.dynamic_rules_context = run_context
         .dynamic_rules_context
         .clone()

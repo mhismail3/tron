@@ -39,10 +39,11 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 3_600_000;
 const PTY_MAX_TIMEOUT_MS: u64 = 120_000;
 const INTERACTIVE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
-const MAX_OUTPUT_CHARS: usize = 400_000;
-const INLINE_OUTPUT_LIMIT: usize = 30_000;
-const BLOB_HEAD_CHARS: usize = 20_000;
-const BLOB_TAIL_CHARS: usize = 8_000;
+const MAX_OUTPUT_CHARS: usize = 5_000_000;
+
+use crate::tools::utils::truncation::{
+    safe_char_boundary, truncate_head_tail, HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS,
+};
 
 /// The `Bash` tool executes shell commands.
 pub struct BashTool {
@@ -124,19 +125,23 @@ impl BashTool {
             .collect()
     }
 
-    /// Execute a command in the background via ProcessManager.
-    async fn execute_background(
+    /// Execute a command asynchronously with auto-wait heuristic.
+    ///
+    /// Spawns the command as a background process, then waits up to ~150ms for
+    /// it to complete. If it finishes within the window, the result is inlined
+    /// (same format as synchronous execution). Otherwise, the process ID is
+    /// returned immediately and the agent can use the Wait tool later.
+    async fn execute_async_with_auto_wait(
         &self,
         command: &str,
         timeout_ms: u64,
         description: &Option<String>,
         shell: &str,
         env_vars: &std::collections::HashMap<String, String>,
-        stdin: Option<String>,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         let pm = ctx.process_manager.as_ref().ok_or(ToolError::Internal {
-            message: "Background execution requires ProcessManager (not available)".into(),
+            message: "Async execution requires ProcessManager (not available)".into(),
         })?;
 
         let config = crate::tools::traits::ManagedProcessConfig {
@@ -160,11 +165,11 @@ impl BashTool {
                 timeout_ms,
                 cancellation: cancel,
                 env: env_vars,
-                stdin,
+                stdin: None,
                 shell,
                 interactive: false,
                 pty_input: Vec::new(),
-                output_tx: None, // No streaming for background
+                output_tx: None,
             };
 
             match runner.run_command(&cmd, &opts).await {
@@ -184,17 +189,15 @@ impl BashTool {
                         blob_id: None,
                     }
                 }
-                Err(e) => {
-                    crate::tools::traits::ManagedProcessResult {
-                        process_id: String::new(),
-                        output: format!("Error: {e}"),
-                        exit_code: None,
-                        duration_ms: start.elapsed().as_millis() as u64,
-                        timed_out: false,
-                        cancelled: false,
-                        blob_id: None,
-                    }
-                }
+                Err(e) => crate::tools::traits::ManagedProcessResult {
+                    process_id: String::new(),
+                    output: e.to_string(),
+                    exit_code: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    timed_out: false,
+                    cancelled: false,
+                    blob_id: None,
+                },
             }
         });
 
@@ -204,26 +207,53 @@ impl BashTool {
                 &ctx.tool_call_id,
                 config,
                 task,
-                true, // background
+                true, // always background
             )
             .await?;
 
-        Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Command backgrounded ({}). You will be notified when it completes.",
-                    handle.process_id
-                )),
-            ]),
-            details: Some(json!({
-                "command": command,
-                "processId": handle.process_id,
-                "background": true,
-                "description": description,
-            })),
-            is_error: None,
-            stop_turn: None,
-        })
+        let process_id = handle.process_id.clone();
+
+        // Auto-wait heuristic: give the command ~150ms to complete.
+        // Fast commands (ls, cat, git status) resolve inline without extra round-trips.
+        const AUTO_WAIT_MS: u64 = 150;
+        match pm.wait_for_process(&process_id, AUTO_WAIT_MS).await {
+            Ok(result) => {
+                // Completed fast — inline the result.
+                // Output is already truncated by the ProcessManager (head+tail if large).
+                let exit_code = result.exit_code.unwrap_or(-1);
+
+                Ok(TronToolResult {
+                    content: ToolResultBody::Text(result.output),
+                    details: Some(json!({
+                        "command": command,
+                        "exitCode": exit_code,
+                        "duration": result.duration_ms,
+                        "description": description,
+                        "blobId": result.blob_id,
+                    })),
+                    is_error: if exit_code != 0 { Some(true) } else { None },
+                    stop_turn: None,
+                })
+            }
+            Err(_) => {
+                // Still running after 150ms — return process ID for async pickup.
+                Ok(TronToolResult {
+                    content: ToolResultBody::Text(format!(
+                        "Process started: {process_id}\nCommand: {command}\n\n\
+                         Results will be automatically available at your next turn. \
+                         Only use the Wait tool if you need the output before proceeding."
+                    )),
+                    details: Some(json!({
+                        "command": command,
+                        "processId": process_id,
+                        "async": true,
+                        "description": description,
+                    })),
+                    is_error: None,
+                    stop_turn: None,
+                })
+            }
+        }
     }
 }
 
@@ -250,34 +280,6 @@ fn is_sensitive_prompt(prompt: &str) -> bool {
     false
 }
 
-/// Find a UTF-8-safe char boundary at or before `target` byte index.
-fn safe_char_boundary(s: &str, target: usize) -> usize {
-    if target >= s.len() {
-        return s.len();
-    }
-    // floor_char_boundary is nightly-only; use char_indices
-    let mut boundary = 0;
-    for (i, _) in s.char_indices() {
-        if i > target {
-            break;
-        }
-        boundary = i;
-    }
-    boundary
-}
-
-/// Find a UTF-8-safe char boundary at or after `target` byte index (for tail start).
-fn safe_char_boundary_ceil(s: &str, target: usize) -> usize {
-    if target >= s.len() {
-        return s.len();
-    }
-    for (i, _) in s.char_indices() {
-        if i >= target {
-            return i;
-        }
-    }
-    s.len()
-}
 
 #[async_trait]
 impl TronTool for BashTool {
@@ -292,9 +294,12 @@ impl TronTool for BashTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "Bash",
-            "Execute a shell command. Commands that are potentially destructive require confirmation.\n\n\
+            "Execute a shell command. Commands run asynchronously by default — fast commands (~150ms) return results inline, \
+             slower commands return a process ID immediately. Use `wait: true` for commands where you need the output \
+             synchronously. Commands that are potentially destructive require confirmation.\n\n\
              Parameters:\n\
              - **command** (required): The shell command to execute.\n\
+             - **wait** (optional): Block until completion (default false). Set true for quick commands (ls, cat, git status).\n\
              - **timeout** (optional): Timeout in milliseconds (default 120000, max 3600000).\n\
              - **description** (optional): Brief description of what the command does.\n\
              - **stdin** (optional): Data to pipe to the command's stdin.\n\
@@ -334,9 +339,9 @@ impl TronTool for BashTool {
             "description": "Paths to symlink into the sandbox (read-only)",
             "items": {"type": "string"}
         }))
-        .property("background", json!({
+        .property("wait", json!({
             "type": "boolean",
-            "description": "Run in background. Returns immediately with a process ID. You will be notified when it completes. Use for long-running commands (builds, test suites).",
+            "description": "Block until command completes. Default false — commands run async and return a process ID if they take >150ms. Only set true for commands that complete near-instantly (ls, cat, echo, pwd, git status). NEVER use wait:true for builds, tests, installs, or anything that may take more than a few seconds.",
             "default": false
         }))
         .build()
@@ -415,16 +420,30 @@ impl TronTool for BashTool {
             timeout_ms
         };
 
-        // Background execution via ProcessManager
-        let background = get_optional_bool(&params, "background").unwrap_or(false);
-        if background {
-            return self.execute_background(
-                &command, timeout_ms, &description, &shell, &env_vars, stdin, ctx,
-            ).await;
+        // Async-first execution: commands run asynchronously by default.
+        // Exceptions that always run synchronously:
+        // - interactive/PTY mode (inherently blocking)
+        // - sandbox mode (workspace is ephemeral)
+        // - stdin provided (pipe needs to complete)
+        // - explicit wait: true
+        // - no ProcessManager available (graceful fallback)
+        let wait = get_optional_bool(&params, "wait").unwrap_or(false);
+        let sandbox_mode = params.get("sandbox");
+        let force_sync = wait
+            || interactive
+            || stdin.is_some()
+            || sandbox_mode.is_some()
+            || ctx.process_manager.is_none();
+
+        if !force_sync {
+            return self
+                .execute_async_with_auto_wait(
+                    &command, timeout_ms, &description, &shell, &env_vars, ctx,
+                )
+                .await;
         }
 
         // Parse sandbox config
-        let sandbox_mode = params.get("sandbox");
         let sandbox_mounts: Vec<String> = params
             .get("sandboxMounts")
             .and_then(Value::as_array)
@@ -565,7 +584,6 @@ impl TronTool for BashTool {
         // Blob storage for large outputs
         let mut blob_id: Option<String> = None;
         if combined.len() > INLINE_OUTPUT_LIMIT {
-            // Try to store in blob store
             if let Some(ref store) = self.blob_store {
                 match store.store(combined.as_bytes(), "text/plain").await {
                     Ok(id) => blob_id = Some(id),
@@ -574,31 +592,20 @@ impl TronTool for BashTool {
                     }
                 }
             }
-
-            // Build head + tail inline
-            let head_end = safe_char_boundary(&combined, BLOB_HEAD_CHARS);
-            let tail_start = safe_char_boundary_ceil(&combined, combined.len() - BLOB_TAIL_CHARS);
-            let omitted = tail_start - head_end;
-
-            let marker = if let Some(ref id) = blob_id {
-                format!("\n\n... [{omitted} chars omitted — stored as {id}] ...\n\n")
-            } else {
-                format!("\n\n... [{omitted} chars omitted] ...\n\n")
-            };
-
-            let mut inline =
-                String::with_capacity(head_end + marker.len() + (combined.len() - tail_start));
-            inline.push_str(&combined[..head_end]);
-            inline.push_str(&marker);
-            inline.push_str(&combined[tail_start..]);
-            combined = inline;
+            combined = truncate_head_tail(
+                &combined,
+                INLINE_OUTPUT_LIMIT,
+                HEAD_CHARS,
+                TAIL_CHARS,
+                blob_id.as_deref(),
+            );
         }
 
         let mut details = json!({
             "command": command,
             "exitCode": output.exit_code,
             "durationMs": output.duration_ms,
-            "truncated": hard_truncated || blob_id.is_some(),
+            "truncated": hard_truncated || original_chars > INLINE_OUTPUT_LIMIT,
             "originalChars": original_chars,
             "originalTokens": estimate_tokens(original_chars),
             "finalTokens": estimate_tokens(combined.len()),
@@ -1678,33 +1685,24 @@ mod tests {
         assert!(!is_sensitive_prompt("Continue? [y/n]"));
     }
 
-    // ── Background execution ──────────────────────────────────
+    // ── Async-first execution ──────────────────────────────────
 
     #[test]
-    fn bash_schema_has_background_param() {
+    fn bash_schema_has_wait_param() {
         let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        assert!(props.contains_key("background"), "missing background property");
-        assert_eq!(props["background"]["type"], "boolean");
+        assert!(props.contains_key("wait"), "missing wait property");
+        assert_eq!(props["wait"]["type"], "boolean");
+        // background param should be gone
+        assert!(!props.contains_key("background"), "background should be removed");
     }
 
     #[tokio::test]
-    async fn bash_background_no_process_manager_returns_error() {
-        let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
-        let ctx = make_ctx(); // process_manager is None
-        let r = tool
-            .execute(json!({"command": "echo hello", "background": true}), &ctx)
-            .await;
-        assert!(r.is_err());
-        assert!(r.unwrap_err().to_string().contains("ProcessManager"));
-    }
-
-    #[tokio::test]
-    async fn bash_foreground_unchanged_when_background_false() {
+    async fn bash_wait_true_is_synchronous() {
         let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
         let r = tool
-            .execute(json!({"command": "echo hello", "background": false}), &make_ctx())
+            .execute(json!({"command": "echo hello", "wait": true}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -1713,47 +1711,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bash_foreground_unchanged_when_background_omitted() {
-        let tool = BashTool::new(Arc::new(MockRunner::ok("world")), None);
+    async fn bash_no_process_manager_falls_back_to_sync() {
+        // When process_manager is None, async-first degrades to synchronous
+        let tool = BashTool::new(Arc::new(MockRunner::ok("fallback")), None);
+        let ctx = make_ctx(); // process_manager is None
         let r = tool
-            .execute(json!({"command": "echo world"}), &make_ctx())
+            .execute(json!({"command": "echo fallback"}), &ctx)
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert!(extract_text(&r).contains("world"));
+        assert!(extract_text(&r).contains("fallback"));
     }
 
     #[tokio::test]
-    async fn bash_background_dangerous_command_still_blocked() {
+    async fn bash_interactive_always_synchronous() {
+        // interactive mode should bypass async even with process_manager
+        let tool = BashTool::new(Arc::new(MockRunner::ok("pty-output")), None);
+        let r = tool
+            .execute(json!({"command": "echo pty", "interactive": true}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(extract_text(&r).contains("pty-output"));
+    }
+
+    #[tokio::test]
+    async fn bash_stdin_always_synchronous() {
+        // stdin should force synchronous
+        let tool = BashTool::new(Arc::new(MockRunner::ok("piped")), None);
+        let r = tool
+            .execute(json!({"command": "cat", "stdin": "data"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(extract_text(&r).contains("piped"));
+    }
+
+    #[tokio::test]
+    async fn bash_async_default_with_auto_wait_fast_command() {
+        // Fast commands complete within 150ms and get inlined
+        let tool = BashTool::new(Arc::new(MockRunner::ok("fast-result")), None);
+        let mut ctx = make_ctx();
+        let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
+        ctx.process_manager = Some(pm);
+
+        let r = tool
+            .execute(json!({"command": "echo hello"}), &ctx)
+            .await
+            .unwrap();
+
+        let text = extract_text(&r);
+        // Auto-wait should have caught the fast completion and inlined the result
+        assert!(text.contains("fast-result"), "expected inlined result, got: {text}");
+        // Should NOT contain process ID since it completed fast
+        assert!(!text.contains("proc-"), "should not return process ID for fast command");
+    }
+
+    #[tokio::test]
+    async fn bash_async_dangerous_command_still_blocked() {
         let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
         let mut ctx = make_ctx();
         let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
         ctx.process_manager = Some(pm);
 
+        // Dangerous commands are blocked before async/sync dispatch
         let r = tool
-            .execute(json!({"command": "rm -rf /", "background": true}), &ctx)
+            .execute(json!({"command": "rm -rf /"}), &ctx)
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
-    }
-
-    #[tokio::test]
-    async fn bash_background_returns_immediately_with_process_id() {
-        let tool = BashTool::new(Arc::new(MockRunner::ok("output")), None);
-        let mut ctx = make_ctx();
-        let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
-        ctx.process_manager = Some(pm);
-
-        let r = tool
-            .execute(json!({"command": "echo hello", "background": true}), &ctx)
-            .await
-            .unwrap();
-
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        let details = r.details.unwrap();
-        assert_eq!(details["background"], true);
-        assert!(details["processId"].as_str().unwrap().starts_with("proc-"));
-        assert!(text.contains("backgrounded"));
     }
 }

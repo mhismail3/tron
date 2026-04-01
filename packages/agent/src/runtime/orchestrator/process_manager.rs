@@ -26,9 +26,12 @@ use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::core::events::{BaseEvent, TronEvent};
+use crate::tools::utils::truncation::{
+    truncate_head_tail, HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS,
+};
 use crate::events::{EventStore, EventType};
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::tools::errors::ToolError;
@@ -190,11 +193,54 @@ impl ProcessManagerOps for ProcessManager {
             };
 
             let success = matches!(new_state, ProcessState::Completed);
+
+            // Truncate large output and store full content in blob.
+            let (truncated_output, blob_id) = if result.output.len() > INLINE_OUTPUT_LIMIT {
+                let blob_id = if let Some(ref store) = event_store_for_completion {
+                    match crate::tools::traits::BlobStore::store(
+                        store.as_ref(),
+                        result.output.as_bytes(),
+                        "text/plain",
+                    )
+                    .await
+                    {
+                        Ok(id) => Some(id),
+                        Err(e) => {
+                            warn!(error = %e, "blob store failed for process output");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let truncated = truncate_head_tail(
+                    &result.output,
+                    INLINE_OUTPUT_LIMIT,
+                    HEAD_CHARS,
+                    TAIL_CHARS,
+                    blob_id.as_deref(),
+                );
+                (truncated, blob_id)
+            } else {
+                (result.output.clone(), result.blob_id.clone())
+            };
+
+            let stored_result = ManagedProcessResult {
+                output: truncated_output,
+                blob_id: blob_id.clone(),
+                ..result
+            };
+
             *task_tracker.state.lock() = new_state;
-            *task_tracker.result.lock() = Some(result.clone());
+            *task_tracker.result.lock() = Some(stored_result.clone());
 
             // Emit ProcessCompleted event.
             let completed_at = chrono::Utc::now().to_rfc3339();
+            let result_summary = if stored_result.output.len() > 200 {
+                format!("{}...", &stored_result.output[..200])
+            } else {
+                stored_result.output.clone()
+            };
             if let Some(ref broadcast) = broadcast_for_completion {
                 let _ = broadcast.emit(TronEvent::ProcessCompleted {
                     base: BaseEvent::now(&task_tracker.session_id),
@@ -202,26 +248,22 @@ impl ProcessManagerOps for ProcessManager {
                     process_id: task_tracker.process_id.clone(),
                     label: task_tracker.config.label.clone(),
                     success,
-                    exit_code: result.exit_code,
-                    duration: result.duration_ms,
-                    result_summary: if result.output.len() > 200 {
-                        format!("{}...", &result.output[..200])
-                    } else {
-                        result.output.clone()
-                    },
-                    blob_id: result.blob_id.clone(),
+                    exit_code: stored_result.exit_code,
+                    duration: stored_result.duration_ms,
+                    result_summary: result_summary.clone(),
+                    blob_id: blob_id.clone(),
                     completed_at: completed_at.clone(),
                 });
             }
 
             // Persist notification.process_result for RunContext injection.
             if let Some(ref store) = event_store_for_completion {
-                let output_for_context = if result.output.len() > 4000 {
-                    Some(format!("{}...", &result.output[..4000]))
-                } else if result.output.is_empty() {
+                let output_for_context = if stored_result.output.len() > 4000 {
+                    Some(format!("{}...", &stored_result.output[..4000]))
+                } else if stored_result.output.is_empty() {
                     None
                 } else {
-                    Some(result.output.clone())
+                    Some(stored_result.output.clone())
                 };
 
                 let _ = store.append(&crate::events::AppendOptions {
@@ -231,16 +273,12 @@ impl ProcessManagerOps for ProcessManager {
                         "parentSessionId": task_tracker.session_id,
                         "processId": task_tracker.process_id,
                         "label": task_tracker.config.label,
-                        "resultSummary": if result.output.len() > 200 {
-                            format!("{}...", &result.output[..200])
-                        } else {
-                            result.output.clone()
-                        },
+                        "resultSummary": result_summary,
                         "success": success,
-                        "exitCode": result.exit_code,
-                        "duration": result.duration_ms as i64,
+                        "exitCode": stored_result.exit_code,
+                        "duration": stored_result.duration_ms as i64,
                         "completedAt": completed_at,
-                        "blobId": result.blob_id,
+                        "blobId": blob_id,
                         "output": output_for_context,
                     }),
                     parent_id: None,
@@ -436,6 +474,44 @@ impl ProcessManagerOps for ProcessManager {
             entry.value().cancel.cancel();
         }
         self.processes.clear();
+    }
+
+    async fn wait_for_process(
+        &self,
+        process_id: &str,
+        timeout_ms: u64,
+    ) -> Result<ManagedProcessResult, ToolError> {
+        let tracker = self
+            .processes
+            .get(process_id)
+            .ok_or_else(|| ToolError::Validation {
+                message: format!("Process not found: {process_id}"),
+            })?;
+
+        // Check if already completed.
+        {
+            let result = tracker.result.lock();
+            if let Some(ref r) = *result {
+                return Ok(r.clone());
+            }
+        }
+
+        // Wait for completion or timeout.
+        let tracker = tracker.clone();
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            tracker.done.notified(),
+        )
+        .await
+        {
+            Ok(()) => {
+                let result = tracker.result.lock();
+                result.clone().ok_or_else(|| ToolError::Internal {
+                    message: format!("Process {process_id} notified but no result available"),
+                })
+            }
+            Err(_) => Err(ToolError::Timeout { timeout_ms }),
+        }
     }
 }
 
@@ -1022,5 +1098,101 @@ mod tests {
         // Process is already completed.
         let result = pm.promote_to_background(&handle.process_id);
         assert!(result.is_err());
+    }
+
+    // ── wait_for_process ──
+
+    #[tokio::test]
+    async fn wait_already_completed() {
+        let pm = ProcessManager::new();
+        let handle = pm
+            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("done", 0), true)
+            .await
+            .unwrap();
+
+        // Give the background task a moment to complete.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let result = pm.wait_for_process(&handle.process_id, 1000).await.unwrap();
+        assert_eq!(result.output, "done");
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn wait_completes_within_timeout() {
+        let pm = ProcessManager::new();
+        let handle = pm
+            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(50, "finished"), true)
+            .await
+            .unwrap();
+
+        let result = pm.wait_for_process(&handle.process_id, 5000).await.unwrap();
+        assert_eq!(result.output, "finished");
+    }
+
+    #[tokio::test]
+    async fn wait_timeout_returns_error() {
+        let pm = ProcessManager::new();
+        let handle = pm
+            .spawn_managed("s1", "tc1", make_config("very-slow"), boxed_delayed(5000, "late"), true)
+            .await
+            .unwrap();
+
+        let err = pm.wait_for_process(&handle.process_id, 50).await;
+        assert!(err.is_err());
+        match err.unwrap_err() {
+            ToolError::Timeout { timeout_ms } => assert_eq!(timeout_ms, 50),
+            other => panic!("expected Timeout, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_for_cancelled_process() {
+        let pm = ProcessManager::new();
+        let handle = pm
+            .spawn_managed("s1", "tc1", make_config("cancel-me"), boxed_delayed(5000, "nope"), true)
+            .await
+            .unwrap();
+
+        pm.cancel_process(&handle.process_id).unwrap();
+        // Give cancellation a moment to propagate.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let result = pm.wait_for_process(&handle.process_id, 1000).await.unwrap();
+        assert!(result.cancelled);
+    }
+
+    #[tokio::test]
+    async fn wait_unknown_process_returns_error() {
+        let pm = ProcessManager::new();
+        let err = pm.wait_for_process("proc-nonexistent", 1000).await;
+        assert!(err.is_err());
+        match err.unwrap_err() {
+            ToolError::Validation { message } => assert!(message.contains("not found")),
+            other => panic!("expected Validation, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_concurrent_waiters_both_get_result() {
+        let pm = Arc::new(ProcessManager::new());
+        let handle = pm
+            .spawn_managed("s1", "tc1", make_config("shared"), boxed_delayed(50, "shared-result"), true)
+            .await
+            .unwrap();
+        let pid = handle.process_id.clone();
+
+        let pm1 = pm.clone();
+        let pid1 = pid.clone();
+        let w1 = tokio::spawn(async move { pm1.wait_for_process(&pid1, 5000).await });
+
+        let pm2 = pm.clone();
+        let pid2 = pid;
+        let w2 = tokio::spawn(async move { pm2.wait_for_process(&pid2, 5000).await });
+
+        let r1 = w1.await.unwrap().unwrap();
+        let r2 = w2.await.unwrap().unwrap();
+        assert_eq!(r1.output, "shared-result");
+        assert_eq!(r2.output, "shared-result");
     }
 }

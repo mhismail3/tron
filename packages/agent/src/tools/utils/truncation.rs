@@ -1,10 +1,20 @@
-//! Token-based output truncation with line preservation.
+//! Output truncation utilities.
 //!
-//! Estimates token counts from character length (4 chars ≈ 1 token) and truncates
-//! output while preserving configurable start/end lines.
+//! Provides token-based truncation (with line preservation) and character-based
+//! head+tail truncation (with blob reference markers). Used by the Bash tool,
+//! ProcessManager, Wait tool, and JobManager.
 
 /// Default characters per token for estimation.
 pub const DEFAULT_CHARS_PER_TOKEN: usize = 4;
+
+/// Output size above which blob storage is used and inline content is head+tail.
+pub const INLINE_OUTPUT_LIMIT: usize = 30_000;
+/// Characters to keep from the start when truncating to head+tail.
+pub const HEAD_CHARS: usize = 20_000;
+/// Characters to keep from the end when truncating to head+tail.
+pub const TAIL_CHARS: usize = 8_000;
+/// Maximum output shown per job in Wait tool results.
+pub const WAIT_OUTPUT_LIMIT: usize = 4_000;
 
 /// Estimate token count from character count.
 pub fn estimate_tokens(chars: usize) -> usize {
@@ -84,6 +94,90 @@ pub fn truncate_output(output: &str, max_tokens: usize, options: &TruncateOption
     } else {
         message
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTF-8–safe character boundary helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Find a UTF-8–safe char boundary at or before `target` byte index.
+pub fn safe_char_boundary(s: &str, target: usize) -> usize {
+    if target >= s.len() {
+        return s.len();
+    }
+    let mut boundary = 0;
+    for (i, _) in s.char_indices() {
+        if i > target {
+            break;
+        }
+        boundary = i;
+    }
+    boundary
+}
+
+/// Find a UTF-8–safe char boundary at or after `target` byte index.
+pub fn safe_char_boundary_ceil(s: &str, target: usize) -> usize {
+    if target >= s.len() {
+        return s.len();
+    }
+    for (i, _) in s.char_indices() {
+        if i >= target {
+            return i;
+        }
+    }
+    s.len()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Head+tail truncation with blob reference
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Truncate output to head + marker + tail.
+///
+/// If `output.len() <= limit`, returns it unchanged.
+/// Otherwise, keeps `head` chars from the start and `tail` chars from the end,
+/// with a marker in between indicating how much was omitted and optionally
+/// referencing the blob where full content is stored.
+pub fn truncate_head_tail(
+    output: &str,
+    limit: usize,
+    head: usize,
+    tail: usize,
+    blob_id: Option<&str>,
+) -> String {
+    if output.len() <= limit {
+        return output.to_owned();
+    }
+
+    let head_end = safe_char_boundary(output, head);
+    let tail_start = safe_char_boundary_ceil(output, output.len().saturating_sub(tail));
+    let omitted = tail_start.saturating_sub(head_end);
+
+    let marker = if let Some(id) = blob_id {
+        format!("\n\n... [{omitted} chars omitted — stored as {id}] ...\n\n")
+    } else {
+        format!("\n\n... [{omitted} chars omitted] ...\n\n")
+    };
+
+    let mut result = String::with_capacity(head_end + marker.len() + (output.len() - tail_start));
+    result.push_str(&output[..head_end]);
+    result.push_str(&marker);
+    result.push_str(&output[tail_start..]);
+    result
+}
+
+/// Truncate to the last `limit` characters, with a marker showing how much was cut.
+///
+/// If `output.len() <= limit`, returns it unchanged.
+pub fn truncate_tail(output: &str, limit: usize) -> String {
+    if output.len() <= limit {
+        return output.to_owned();
+    }
+
+    let start = safe_char_boundary_ceil(output, output.len().saturating_sub(limit));
+    let omitted = start;
+
+    format!("[... {omitted} chars truncated]\n{}", &output[start..])
 }
 
 #[cfg(test)]
@@ -213,5 +307,115 @@ mod tests {
         let output = "a".repeat(100_000);
         let result = truncate_output(&output, 100, &TruncateOptions::default());
         assert!(result.len() < output.len());
+    }
+
+    // ── safe_char_boundary ──
+
+    #[test]
+    fn safe_boundary_ascii() {
+        let s = "hello world";
+        assert_eq!(safe_char_boundary(s, 5), 5);
+    }
+
+    #[test]
+    fn safe_boundary_at_end() {
+        let s = "hello";
+        assert_eq!(safe_char_boundary(s, 100), 5);
+    }
+
+    #[test]
+    fn safe_boundary_multibyte() {
+        let s = "aé"; // 'a' = 1 byte, 'é' = 2 bytes, total 3 bytes
+        // target=1 is mid-char for 'é' — should return 1 (start of 'é')
+        assert_eq!(safe_char_boundary(s, 1), 1);
+        // target=2 is mid-char for 'é' — should return 1 (start of 'é')
+        assert_eq!(safe_char_boundary(s, 2), 1);
+    }
+
+    #[test]
+    fn safe_boundary_ceil_ascii() {
+        let s = "hello world";
+        assert_eq!(safe_char_boundary_ceil(s, 5), 5);
+    }
+
+    #[test]
+    fn safe_boundary_ceil_multibyte() {
+        let s = "aé"; // 'a' at 0, 'é' at 1-2
+        // target=2 is inside 'é' — ceil should return 3 (after 'é')
+        assert_eq!(safe_char_boundary_ceil(s, 2), 3);
+    }
+
+    #[test]
+    fn safe_boundary_ceil_at_end() {
+        let s = "hello";
+        assert_eq!(safe_char_boundary_ceil(s, 100), 5);
+    }
+
+    // ── truncate_head_tail ──
+
+    #[test]
+    fn head_tail_under_limit() {
+        let s = "short";
+        assert_eq!(truncate_head_tail(s, 30_000, 20_000, 8_000, None), "short");
+    }
+
+    #[test]
+    fn head_tail_at_limit() {
+        let s = "a".repeat(30_000);
+        let result = truncate_head_tail(&s, 30_000, 20_000, 8_000, None);
+        assert_eq!(result, s);
+    }
+
+    #[test]
+    fn head_tail_over_limit() {
+        let s = "a".repeat(50_000);
+        let result = truncate_head_tail(&s, 30_000, 20_000, 8_000, None);
+        assert!(result.len() < 50_000);
+        assert!(result.starts_with(&"a".repeat(100))); // has head
+        assert!(result.ends_with(&"a".repeat(100))); // has tail
+        assert!(result.contains("chars omitted"));
+        assert!(!result.contains("stored as"));
+    }
+
+    #[test]
+    fn head_tail_with_blob_id() {
+        let s = "a".repeat(50_000);
+        let result = truncate_head_tail(&s, 30_000, 20_000, 8_000, Some("blob_abc123"));
+        assert!(result.contains("stored as blob_abc123"));
+    }
+
+    #[test]
+    fn head_tail_without_blob_id() {
+        let s = "a".repeat(50_000);
+        let result = truncate_head_tail(&s, 30_000, 20_000, 8_000, None);
+        assert!(result.contains("chars omitted"));
+        assert!(!result.contains("stored as"));
+    }
+
+    #[test]
+    fn head_tail_empty() {
+        assert_eq!(truncate_head_tail("", 30_000, 20_000, 8_000, None), "");
+    }
+
+    // ── truncate_tail ──
+
+    #[test]
+    fn tail_under_limit() {
+        let s = "short";
+        assert_eq!(truncate_tail(s, 4_000), "short");
+    }
+
+    #[test]
+    fn tail_over_limit() {
+        let s = "a".repeat(10_000);
+        let result = truncate_tail(&s, 4_000);
+        assert!(result.contains("chars truncated"));
+        assert!(result.ends_with(&"a".repeat(100)));
+        assert!(result.len() < 10_000);
+    }
+
+    #[test]
+    fn tail_empty() {
+        assert_eq!(truncate_tail("", 4_000), "");
     }
 }

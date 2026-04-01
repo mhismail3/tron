@@ -24,6 +24,7 @@
 pub mod agent_factory;
 pub mod agent_runner;
 pub mod event_persister;
+pub mod job_manager;
 #[allow(clippy::module_inception)]
 pub mod orchestrator;
 pub mod process_manager;

@@ -25,6 +25,7 @@ pub fn make_ctx() -> ToolContext {
         workspace_id: None,
         output_tx: None,
         process_manager: None,
+        job_manager: None,
     }
 }
 

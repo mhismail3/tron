@@ -59,6 +59,8 @@ pub struct AgentDeps {
     pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
     /// Optional process manager for background process execution.
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Optional unified job manager for process + subagent lifecycle.
+    pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -81,6 +83,8 @@ pub struct TronAgent {
     persister: Option<Arc<EventPersister>>,
     /// Optional process manager for background process execution.
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Optional unified job manager for process + subagent lifecycle.
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 impl TronAgent {
@@ -104,6 +108,7 @@ impl TronAgent {
             compaction,
             session_id,
             process_manager: deps.process_manager,
+            job_manager: deps.job_manager,
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -183,6 +188,7 @@ impl TronAgent {
                 workspace_id: self.config.workspace_id.as_deref(),
                 server_origin: self.config.server_origin.as_deref(),
                 process_manager: self.process_manager.as_ref(),
+                job_manager: self.job_manager.as_ref(),
             })
             .await;
 
@@ -575,6 +581,7 @@ mod tests {
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
+            job_manager: None,
         }
     }
 
@@ -959,6 +966,7 @@ mod tests {
                 subagent_manager: None,
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
+                job_manager: None,
             },
             sid.clone(),
         );
@@ -1328,6 +1336,7 @@ mod tests {
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
+            job_manager: None,
         };
         for tool in tools {
             deps.registry.register(tool);

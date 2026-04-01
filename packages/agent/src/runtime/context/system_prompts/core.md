@@ -183,8 +183,14 @@ Use the right tool for the job. Never use Bash for file operations when a dedica
 
 ### Bash
 
-For terminal operations: builds, tests, git, package management, system commands.
+For terminal operations: builds, tests, git, package management, system commands. Commands run **asynchronously by default** — fast commands (~150ms) return results inline, slower commands return a process ID and run in the background. Results from background commands are **automatically injected into your context on the next turn** — you do NOT need to call Wait immediately. Continue with other work and the output will be there when you need it.
 
+**`wait: true` is ONLY for near-instant commands.** If a command might take more than a few seconds, do NOT use `wait: true` — let it run in the background.
+
+**Wait tool**: Only use Wait when you have multiple background jobs running and need ALL their results before you can proceed. Do NOT call Wait immediately after a single background command — just continue working and the result will arrive automatically.
+
+- `wait: true`: ls, cat, head, echo, pwd, wc, git status, git diff, grep — commands that finish in milliseconds
+- Default (async): cargo build, cargo test, npm install, npm test, pip install, docker build, make, any build/test/install command
 - Quote paths with spaces: `cd "/path/with spaces"`
 - Prefer absolute paths over `cd`
 - Chain dependent commands with `&&`. Parallelize independent commands as separate tool calls.
@@ -236,13 +242,15 @@ Don't batch — send notifications as events happen. Title max 50 chars, body ma
 
 ### Sub-agents
 
-**SpawnSubagent** spawns sub-agents for parallel or background work.
-- **In-process** (default): `blocking: true` waits for result. `blocking: false` is fire-and-forget.
-- **Tmux mode** (`mode: "tmux"`): out-of-process, always fire-and-forget. Use for long-running persistent tasks. Provide `sessionName` for identification.
+**SpawnSubagent** spawns sub-agents for parallel or background work. Non-blocking by default — returns session ID immediately. Set `blocking: true` to wait inline.
+- **In-process** (default): runs in same process, sharing event store.
+- **Tmux mode** (`mode: "tmux"`): out-of-process, always fire-and-forget. Use for long-running persistent tasks.
 - Sub-agents inherit parent model unless overridden. Restrict tools with `toolDenials`.
 - Completed sub-agent results are auto-injected into parent context on next turn.
 
-**WaitForAgents** waits for multiple sub-agents. `mode: "all"` (default) or `"any"`.
+**Wait** blocks until background jobs (processes or sub-agents) complete. `mode: "all"` (default) or `"any"`. Pass an array of job IDs.
+
+**ManageJob** lists active background jobs or cancels a specific job. Actions: `list`, `cancel`.
 
 ### Self-deployment
 

@@ -58,6 +58,8 @@ pub struct ToolContext {
     pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     /// Process manager for spawning/managing background processes.
     pub process_manager: Option<Arc<dyn ProcessManagerOps>>,
+    /// Unified job manager for waiting on and managing processes + subagents.
+    pub job_manager: Option<Arc<dyn JobManagerOps>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -70,6 +72,7 @@ impl std::fmt::Debug for ToolContext {
             .field("subagent_max_depth", &self.subagent_max_depth)
             .field("workspace_id", &self.workspace_id)
             .field("process_manager", &self.process_manager.as_ref().map(|_| "..."))
+            .field("job_manager", &self.job_manager.as_ref().map(|_| "..."))
             .finish_non_exhaustive()
     }
 }
@@ -192,7 +195,7 @@ pub struct SubagentHandle {
     pub token_usage: Option<Value>,
 }
 
-/// Wait mode for `WaitForAgents`.
+/// Wait mode for job and subagent waiting.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WaitMode {
@@ -387,6 +390,16 @@ pub trait ProcessManagerOps: Send + Sync {
 
     /// Cancel ALL tracked processes (server shutdown).
     fn cancel_all(&self);
+
+    /// Wait for a specific process to complete, with timeout.
+    ///
+    /// Returns immediately if the process has already completed.
+    /// Returns `ToolError::Timeout` if the process doesn't complete within `timeout_ms`.
+    async fn wait_for_process(
+        &self,
+        process_id: &str,
+        timeout_ms: u64,
+    ) -> Result<ManagedProcessResult, ToolError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -485,7 +498,7 @@ pub trait ContentSummarizer: Send + Sync {
     ) -> Result<SummarizerResult, ToolError>;
 }
 
-/// Subagent spawning (`SpawnSubagent`, `WaitForAgents`, `WebFetch` summarizer).
+/// Subagent spawning (`SpawnSubagent`, `WebFetch` summarizer).
 #[async_trait]
 pub trait SubagentSpawner: Send + Sync {
     /// Spawn a new subagent.
@@ -497,6 +510,127 @@ pub trait SubagentSpawner: Send + Sync {
         mode: WaitMode,
         timeout_ms: u64,
     ) -> Result<Vec<SubagentResult>, ToolError>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unified job types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Discriminator for job kind — determines result shape and display.
+///
+/// Every job is tagged with its kind so consumers can format results appropriately
+/// and distinguish deterministic processes from non-deterministic agent sessions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobKind {
+    /// Deterministic: shell command with exit code, stdout/stderr.
+    Process,
+    /// Non-deterministic: LLM-driven agent with turns, token usage, reasoning.
+    Agent,
+}
+
+/// Lifecycle state of a tracked job.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    /// Job is currently executing.
+    Running,
+    /// Job completed successfully.
+    Completed,
+    /// Job failed (error, non-zero exit, etc.).
+    Failed,
+    /// Job was explicitly cancelled.
+    Cancelled,
+}
+
+/// Unified view of an in-flight or completed async job.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobInfo {
+    /// Job identifier (process ID or subagent session ID).
+    pub id: String,
+    /// Whether this is a process or agent job.
+    pub kind: JobKind,
+    /// Human-readable label (command text or task description).
+    pub label: String,
+    /// Current lifecycle state.
+    pub state: JobState,
+    /// Milliseconds since job started.
+    pub elapsed_ms: u64,
+    /// Session that owns this job.
+    pub session_id: String,
+}
+
+/// Unified completion result for any job.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobResult {
+    /// Job identifier.
+    pub id: String,
+    /// Whether this was a process or agent job.
+    pub kind: JobKind,
+    /// Human-readable label.
+    pub label: String,
+    /// Output text (stdout for processes, final output for agents).
+    pub output: String,
+    /// Whether the job completed successfully.
+    pub success: bool,
+    /// Total duration in milliseconds.
+    pub duration_ms: u64,
+    /// Kind-specific extras:
+    /// - Process: `{ "exit_code": i32 }`
+    /// - Agent: `{ "token_usage": {...}, "turns": u32 }`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+/// Subagent operations needed by the JobManager facade.
+///
+/// This trait abstracts the SubagentManager's methods that JobManager needs,
+/// allowing clean test mocking without requiring full SubagentManager construction.
+#[async_trait]
+pub trait SubagentOps: Send + Sync {
+    /// List all active and recently-completed subagents for a parent session.
+    fn list_active_jobs(&self, parent_session_id: &str) -> Vec<JobInfo>;
+
+    /// Cancel a specific subagent by session ID.
+    fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError>;
+
+    /// Wait for one or more subagents to complete.
+    async fn wait_for_agents(
+        &self,
+        session_ids: &[String],
+        mode: WaitMode,
+        timeout_ms: u64,
+    ) -> Result<Vec<SubagentResult>, ToolError>;
+
+    /// Get result of a completed subagent (None if still running or not found).
+    fn get_subagent_result(&self, session_id: &str) -> Option<SubagentResult>;
+}
+
+/// Operations for unified job management across processes and subagents.
+///
+/// The `JobManager` facade implements this trait, delegating to `ProcessManagerOps`
+/// and `SubagentSpawner` under the hood. Job IDs are routed by prefix:
+/// `proc-*` → process manager, everything else → subagent manager.
+#[async_trait]
+pub trait JobManagerOps: Send + Sync {
+    /// List all active and recently-completed jobs for a session.
+    fn list_jobs(&self, session_id: &str) -> Vec<JobInfo>;
+
+    /// Wait for specific jobs to complete.
+    ///
+    /// Accepts a mix of process IDs and subagent session IDs.
+    /// Returns partial results on timeout (does NOT auto-cancel).
+    async fn wait_for_jobs(
+        &self,
+        ids: &[String],
+        mode: WaitMode,
+        timeout_ms: u64,
+    ) -> Result<Vec<JobResult>, ToolError>;
+
+    /// Cancel a job by ID (auto-detects process vs agent).
+    fn cancel_job(&self, id: &str) -> Result<(), ToolError>;
 }
 
 /// iOS app notifications (`NotifyApp`).
@@ -595,6 +729,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -613,6 +748,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -630,6 +766,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -798,6 +935,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         };
         assert!(ctx.process_manager.is_none());
     }
@@ -823,5 +961,155 @@ mod tests {
         assert_eq!(opts.shell, "bash");
         assert!(!opts.interactive);
         assert!(opts.pty_input.is_empty());
+    }
+
+    // ── Unified job types ────────────────────────────────────
+
+    #[test]
+    fn job_kind_serde_roundtrip() {
+        for kind in [JobKind::Process, JobKind::Agent] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: JobKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn job_kind_snake_case_serialization() {
+        assert_eq!(serde_json::to_string(&JobKind::Process).unwrap(), "\"process\"");
+        assert_eq!(serde_json::to_string(&JobKind::Agent).unwrap(), "\"agent\"");
+    }
+
+    #[test]
+    fn job_state_serde_roundtrip() {
+        for state in [JobState::Running, JobState::Completed, JobState::Failed, JobState::Cancelled] {
+            let json = serde_json::to_string(&state).unwrap();
+            let back: JobState = serde_json::from_str(&json).unwrap();
+            assert_eq!(state, back);
+        }
+    }
+
+    #[test]
+    fn job_state_snake_case_serialization() {
+        assert_eq!(serde_json::to_string(&JobState::Running).unwrap(), "\"running\"");
+        assert_eq!(serde_json::to_string(&JobState::Completed).unwrap(), "\"completed\"");
+        assert_eq!(serde_json::to_string(&JobState::Failed).unwrap(), "\"failed\"");
+        assert_eq!(serde_json::to_string(&JobState::Cancelled).unwrap(), "\"cancelled\"");
+    }
+
+    #[test]
+    fn job_info_process_construction() {
+        let info = JobInfo {
+            id: "proc-abc123".into(),
+            kind: JobKind::Process,
+            label: "cargo build --release".into(),
+            state: JobState::Running,
+            elapsed_ms: 5000,
+            session_id: "sess-1".into(),
+        };
+        assert_eq!(info.id, "proc-abc123");
+        assert_eq!(info.kind, JobKind::Process);
+        assert_eq!(info.state, JobState::Running);
+
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"kind\":\"process\""));
+        assert!(json.contains("\"state\":\"running\""));
+        assert!(json.contains("\"elapsedMs\":5000"));
+    }
+
+    #[test]
+    fn job_info_agent_construction() {
+        let info = JobInfo {
+            id: "ses-xyz789".into(),
+            kind: JobKind::Agent,
+            label: "Research API patterns".into(),
+            state: JobState::Completed,
+            elapsed_ms: 32000,
+            session_id: "sess-1".into(),
+        };
+        assert_eq!(info.kind, JobKind::Agent);
+        assert_eq!(info.state, JobState::Completed);
+
+        let json = serde_json::to_string(&info).unwrap();
+        let back: JobInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, "ses-xyz789");
+        assert_eq!(back.kind, JobKind::Agent);
+    }
+
+    #[test]
+    fn job_result_with_process_details() {
+        let result = JobResult {
+            id: "proc-abc".into(),
+            kind: JobKind::Process,
+            label: "cargo test".into(),
+            output: "test result: ok".into(),
+            success: true,
+            duration_ms: 5000,
+            details: Some(serde_json::json!({ "exit_code": 0 })),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"kind\":\"process\""));
+        assert!(json.contains("\"exit_code\":0"));
+
+        let back: JobResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind, JobKind::Process);
+        assert!(back.success);
+        assert_eq!(back.details.unwrap()["exit_code"], 0);
+    }
+
+    #[test]
+    fn job_result_with_agent_details() {
+        let result = JobResult {
+            id: "ses-xyz".into(),
+            kind: JobKind::Agent,
+            label: "Research task".into(),
+            output: "Found 3 patterns".into(),
+            success: true,
+            duration_ms: 32000,
+            details: Some(serde_json::json!({
+                "token_usage": { "input": 1000, "output": 500 },
+                "turns": 5
+            })),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"kind\":\"agent\""));
+        assert!(json.contains("\"turns\":5"));
+
+        let back: JobResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind, JobKind::Agent);
+        assert_eq!(back.details.unwrap()["turns"], 5);
+    }
+
+    #[test]
+    fn job_result_without_details() {
+        let result = JobResult {
+            id: "proc-none".into(),
+            kind: JobKind::Process,
+            label: "echo hi".into(),
+            output: "hi".into(),
+            success: true,
+            duration_ms: 10,
+            details: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        // details should be omitted from JSON when None
+        assert!(!json.contains("details"));
+    }
+
+    #[test]
+    fn tool_context_job_manager_is_optional() {
+        let ctx = ToolContext {
+            tool_call_id: String::new(),
+            session_id: String::new(),
+            working_directory: String::new(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            output_tx: None,
+            process_manager: None,
+            job_manager: None,
+        };
+        assert!(ctx.job_manager.is_none());
     }
 }

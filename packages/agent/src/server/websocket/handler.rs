@@ -123,6 +123,7 @@ mod tests {
             mcp_router: None,
             display_stream_registry: None,
             process_manager: None,
+            job_manager: None,
         }
     }
 

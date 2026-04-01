@@ -205,9 +205,9 @@ pub struct RunContext {
     /// Skill context to inject (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
-    /// Subagent results to inject.
+    /// Completed background job results to inject (unified processes + subagents).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_results: Option<String>,
+    pub job_results: Option<String>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
@@ -218,9 +218,6 @@ pub struct RunContext {
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<crate::core::messages::UserMessageContent>,
-    /// Background process results to inject.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub process_results: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,8 +405,7 @@ mod tests {
         let ctx = RunContext::default();
         assert!(ctx.skill_index_context.is_none());
         assert!(ctx.skill_context.is_none());
-        assert!(ctx.subagent_results.is_none());
-        assert!(ctx.process_results.is_none());
+        assert!(ctx.job_results.is_none());
         assert!(ctx.reasoning_level.is_none());
         assert!(ctx.dynamic_rules_context.is_none());
     }

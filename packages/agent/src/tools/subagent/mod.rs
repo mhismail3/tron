@@ -1,4 +1,3 @@
-//! Subagent tools: `SpawnSubagent`, `WaitForAgents`.
+//! Subagent tools: `SpawnSubagent`.
 
 pub mod spawn;
-pub mod wait;

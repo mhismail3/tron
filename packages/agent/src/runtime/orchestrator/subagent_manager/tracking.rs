@@ -7,6 +7,8 @@ use tokio_util::sync::CancellationToken;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{SubagentResult, WaitMode};
 
+use crate::tools::traits::{JobInfo, JobKind, JobState};
+
 use super::{SpawnType, SubagentManager, TrackedSubagent};
 
 impl SubagentManager {
@@ -56,6 +58,60 @@ impl SubagentManager {
                 entry.value().spawn_type == *spawn_type && entry.value().result.lock().is_none()
             })
             .count()
+    }
+
+    /// List all active subagents for a parent session as unified `JobInfo`.
+    pub fn list_active_jobs(&self, parent_session_id: &str) -> Vec<JobInfo> {
+        self.subagents
+            .iter()
+            .filter(|entry| {
+                entry.value().parent_session_id == parent_session_id
+            })
+            .map(|entry| {
+                let t = entry.value();
+                let state = if t.result.lock().is_some() {
+                    // Check the actual result for success/failure
+                    match t.result.lock().as_ref().map(|r| r.status.as_str()) {
+                        Some("completed") => JobState::Completed,
+                        Some("failed") => JobState::Failed,
+                        _ => JobState::Failed,
+                    }
+                } else if t.cancel.is_cancelled() {
+                    JobState::Cancelled
+                } else {
+                    JobState::Running
+                };
+                JobInfo {
+                    id: entry.key().clone(),
+                    kind: JobKind::Agent,
+                    label: t.task.clone(),
+                    state,
+                    elapsed_ms: t.started_at.elapsed().as_millis() as u64,
+                    session_id: t.parent_session_id.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Cancel a specific subagent by session ID.
+    ///
+    /// Returns Ok(()) if the subagent was found and cancelled (or already finished).
+    /// Returns error if the session ID is not found.
+    pub fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+        let tracker = self
+            .subagents
+            .get(session_id)
+            .ok_or_else(|| ToolError::Validation {
+                message: format!("Subagent not found: {session_id}"),
+            })?;
+
+        // If already completed, no-op.
+        if tracker.result.lock().is_some() {
+            return Ok(());
+        }
+
+        tracker.cancel.cancel();
+        Ok(())
     }
 
     /// List active subsessions as `(session_id, task)` pairs.

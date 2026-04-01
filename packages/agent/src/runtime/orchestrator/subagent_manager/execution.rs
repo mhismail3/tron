@@ -152,6 +152,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             subagent_manager: params.child_subagent_manager,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
+            job_manager: None,
         },
     );
 
@@ -310,6 +311,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             subagent_manager: params.child_subagent_manager,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
+            job_manager: None,
         },
     );
 

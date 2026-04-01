@@ -82,6 +82,8 @@ pub struct RpcContext {
     pub display_stream_registry: Option<crate::tools::ui::display_stream::ActiveStreamRegistry>,
     /// Process manager for background process lifecycle (shared with tools).
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Unified job manager for waiting on and managing processes + subagents.
+    pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 impl RpcContext {

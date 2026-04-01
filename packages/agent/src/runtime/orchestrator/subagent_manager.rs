@@ -457,6 +457,33 @@ impl SubagentSpawner for SubagentManager {
     }
 }
 
+#[async_trait]
+impl crate::tools::traits::SubagentOps for SubagentManager {
+    fn list_active_jobs(&self, parent_session_id: &str) -> Vec<crate::tools::traits::JobInfo> {
+        self.list_active_jobs(parent_session_id)
+    }
+
+    fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+        self.cancel_subagent(session_id)
+    }
+
+    async fn wait_for_agents(
+        &self,
+        session_ids: &[String],
+        mode: WaitMode,
+        timeout_ms: u64,
+    ) -> Result<Vec<crate::tools::traits::SubagentResult>, ToolError> {
+        self.wait_for_agents_impl(session_ids, mode, timeout_ms)
+            .await
+    }
+
+    fn get_subagent_result(&self, session_id: &str) -> Option<crate::tools::traits::SubagentResult> {
+        self.subagents
+            .get(session_id)
+            .and_then(|t| t.result.lock().clone())
+    }
+}
+
 fn truncate(s: &str, max: usize) -> &str {
     crate::core::text::truncate_str(s, max)
 }

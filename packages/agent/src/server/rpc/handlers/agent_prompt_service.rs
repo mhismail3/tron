@@ -46,6 +46,7 @@ struct PromptRunPlan {
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -142,6 +143,7 @@ pub fn spawn_prompt_run(
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
         process_manager: ctx.process_manager.clone(),
+        job_manager: ctx.job_manager.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -176,6 +178,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         shutdown_token,
         worktree_coordinator,
         process_manager,
+        job_manager,
         server_origin,
         run_id,
         model,
@@ -318,8 +321,16 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let resolved_ws_id = prompt_artifacts.workspace_id;
 
     let memory: Option<String> = None;
-    let subagent_results_context = prompt_bootstrap.subagent_results_context;
-    let process_results_context = prompt_bootstrap.process_results_context;
+    // Merge subagent and process results into unified job results
+    let job_results_context = match (
+        prompt_bootstrap.subagent_results_context,
+        prompt_bootstrap.process_results_context,
+    ) {
+        (Some(a), Some(p)) => Some(format!("{a}\n\n{p}")),
+        (Some(a), None) => Some(a),
+        (None, Some(p)) => Some(p),
+        (None, None) => None,
+    };
 
     let memory = if let Some(ref worktree) = worktree_info {
         let worktree_context = format!(
@@ -424,6 +435,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             subagent_manager: subagent_manager.clone(),
             compaction_trigger_config: compactor_settings.into(),
             process_manager: process_manager.clone(),
+            job_manager: job_manager.clone(),
         },
     );
 
@@ -482,8 +494,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
         skill_index_context,
         skill_context,
-        subagent_results: subagent_results_context,
-        process_results: process_results_context,
+        job_results: job_results_context,
         user_content_override,
         ..Default::default()
     };

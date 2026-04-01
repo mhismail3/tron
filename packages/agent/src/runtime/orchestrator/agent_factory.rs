@@ -52,6 +52,8 @@ pub struct CreateAgentOpts {
     pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
     /// Optional process manager for background process execution.
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    /// Optional unified job manager for process + subagent lifecycle.
+    pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -88,7 +90,7 @@ impl AgentFactory {
             }
             // Remove spawn tools when at max nesting depth
             if opts.subagent_max_depth == 0 {
-                for name in &["SpawnSubagent", "WaitForAgents"] {
+                for name in &["SpawnSubagent", "Wait"] {
                     let _ = registry.remove(name);
                 }
             }
@@ -139,6 +141,7 @@ impl AgentFactory {
                 subagent_manager: opts.subagent_manager,
                 compaction_trigger_config: opts.compaction_trigger_config,
                 process_manager: opts.process_manager,
+                job_manager: opts.job_manager,
             },
             session_id,
         )
@@ -172,6 +175,7 @@ mod tests {
             subagent_manager: None,
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
+            job_manager: None,
         }
     }
 
@@ -452,14 +456,14 @@ mod tests {
     #[async_trait]
     impl TronTool for FakeWaitTool {
         fn name(&self) -> &'static str {
-            "WaitForAgents"
+            "Wait"
         }
         fn category(&self) -> ToolCategory {
             ToolCategory::Custom
         }
         fn definition(&self) -> Tool {
             Tool {
-                name: "WaitForAgents".into(),
+                name: "Wait".into(),
                 description: "Wait".into(),
                 parameters: ToolParameterSchema {
                     schema_type: "object".into(),
@@ -539,7 +543,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"WaitForAgents".into()));
+        assert!(!names.contains(&"Wait".into()));
         assert!(names.contains(&"bash".into()));
     }
 
@@ -557,7 +561,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"WaitForAgents".into()));
+        assert!(names.contains(&"Wait".into()));
     }
 
     // ── Attended (user) agent tests ──
@@ -582,7 +586,7 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         let names = agent.context_manager().tool_names();
         assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"WaitForAgents".into()));
+        assert!(names.contains(&"Wait".into()));
     }
 
     #[test]
@@ -643,7 +647,7 @@ mod tests {
         assert!(!names.contains(&"interactive_tool_2".into()));
         // Spawn tools removed at depth 0
         assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"WaitForAgents".into()));
+        assert!(!names.contains(&"Wait".into()));
         // Core tools preserved
         assert!(names.contains(&"bash".into()));
     }
@@ -658,7 +662,7 @@ mod tests {
         let names = agent.context_manager().tool_names();
         assert!(names.contains(&"bash".into()));
         assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"WaitForAgents".into()));
+        assert!(names.contains(&"Wait".into()));
     }
 
     #[test]
@@ -684,7 +688,7 @@ mod tests {
         // Simulate cron: is_unattended=true, denied_tools from user restrictions, max_depth=0
         let mut opts = default_opts(Arc::new(MockProvider), full_registry());
         opts.is_unattended = true;
-        opts.denied_tools = vec!["WaitForAgents".into()]; // simulate user restriction
+        opts.denied_tools = vec!["Wait".into()]; // simulate user restriction
         opts.subagent_max_depth = 0;
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
@@ -696,7 +700,7 @@ mod tests {
 
         // Spawn tools removed at depth 0
         assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"WaitForAgents".into()));
+        assert!(!names.contains(&"Wait".into()));
 
         // Core tools preserved
         assert!(names.contains(&"bash".into()));

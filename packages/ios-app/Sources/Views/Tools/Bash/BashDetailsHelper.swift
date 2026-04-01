@@ -6,11 +6,6 @@ import Foundation
 /// Used by BashToolDetailSheet to display shell, interactive, env, ptyInput info.
 enum BashDetailsHelper {
 
-    /// Check if this Bash call was backgrounded.
-    static func isBackground(from args: String) -> Bool {
-        ToolArgumentParser.boolean("background", from: args) == true
-    }
-
     /// Extract exit code from details JSON (more reliable than regex from result text).
     static func exitCode(from details: [String: AnyCodable]?) -> Int? {
         guard let details else { return nil }

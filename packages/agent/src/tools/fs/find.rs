@@ -278,6 +278,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         }
     }
 

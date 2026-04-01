@@ -45,28 +45,20 @@ impl TronTool for SpawnSubagentTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "SpawnSubagent",
-            "Spawn an agent to handle a specific task. Supports two execution modes:\n\n\
-**1. In-Process Mode (default):**\n\
-- Runs in the same process, sharing the event store\n\
-- **Blocking by default**: Waits for completion and returns full results\n\
-- Efficient for quick tasks (< 5 minutes)\n\
-- Use `blocking: false` for fire-and-forget\n\n\
-**2. Tmux Mode:**\n\
-- Runs in a separate tmux session with its own process\n\
-- Always fire-and-forget (returns immediately)\n\
-- Persists beyond this conversation\n\
-- Best for long-running tasks (hours/days)\n\n\
+            "Spawn an agent to handle a specific task. Non-blocking by default — returns the session ID immediately. \
+Use the Wait tool to get results, or set `blocking: true` to wait inline.\n\n\
+**Execution Modes:**\n\
+**1. In-Process (default):** Runs in the same process, sharing the event store.\n\
+**2. Tmux:** Runs in a separate tmux session. Always fire-and-forget.\n\n\
 Parameters:\n\
 - **task**: The task description for the agent (required)\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
-- **blocking**: If true (default), waits for completion (inProcess only)\n\
-- **timeout**: Max wait time in ms (default: 30 minutes, inProcess only)\n\
+- **blocking**: If true, waits for completion (default: false). Use Wait tool instead for flexible multi-job waiting.\n\
+- **timeout**: Max wait time in ms (default: 30 minutes, blocking only)\n\
 - **model**, **systemPrompt**, **toolDenials**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
 - **toolDenials**: Deny tools/patterns. Use { denyAll: true } for text-only agents\n\n\
-Returns (when mode=inProcess and blocking=true):\n\
-- Full output from the agent\n\
-- Token usage and duration statistics\n\
-- Success/failure status",
+Returns (when blocking=true):\n\
+- Full output, token usage, duration statistics, status",
         )
         .required_property("task", json!({"type": "string", "description": "Task/prompt for the subagent"}))
         .property("mode", json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}))
@@ -99,8 +91,7 @@ Returns (when mode=inProcess and blocking=true):\n\
             }
         };
 
-        let blocking =
-            get_optional_bool(&params, "blocking").unwrap_or(mode == SubagentMode::InProcess);
+        let blocking = get_optional_bool(&params, "blocking").unwrap_or(false);
         let timeout_ms = get_optional_u64(&params, "timeout").unwrap_or(DEFAULT_TIMEOUT_MS);
         let default_turns = if mode == SubagentMode::Tmux {
             DEFAULT_MAX_TURNS_TMUX
@@ -166,8 +157,10 @@ Returns (when mode=inProcess and blocking=true):\n\
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
                             crate::core::content::ToolResultContent::text(format!(
-                                "Subagent spawned (session: {})",
-                                handle.session_id
+                                "Subagent spawned: {}\nTask: {}\n\n\
+                                 Results will be automatically available at your next turn. \
+                                 Only use the Wait tool if you need the output before proceeding.",
+                                handle.session_id, task
                             )),
                         ]),
                         details: Some(json!({
@@ -239,7 +232,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn blocking_in_process_default() {
+    async fn default_is_non_blocking() {
+        // Default behavior (no blocking param) should be non-blocking
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
             .execute(json!({"task": "do something"}), &make_ctx())
@@ -247,10 +241,25 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
+        assert!(text.contains("Subagent spawned"), "got: {text}");
+        assert!(text.contains("Wait tool"), "should mention Wait tool");
+        let d = r.details.unwrap();
+        assert_eq!(d["blocking"], false);
+        assert_eq!(d["sessionId"], "sub-1");
+    }
+
+    #[tokio::test]
+    async fn explicit_blocking_true() {
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
+        let r = tool
+            .execute(json!({"task": "do something", "blocking": true}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
         assert!(text.contains("task completed"));
         let d = r.details.unwrap();
         assert_eq!(d["blocking"], true);
-        assert_eq!(d["sessionId"], "sub-1");
     }
 
     #[tokio::test]
@@ -382,7 +391,7 @@ mod tests {
     async fn token_usage_in_blocking_result() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "t"}), &make_ctx())
+            .execute(json!({"task": "t", "blocking": true}), &make_ctx())
             .await
             .unwrap();
         let d = r.details.unwrap();
@@ -441,6 +450,7 @@ mod tests {
             workspace_id: None,
             output_tx: None,
             process_manager: None,
+            job_manager: None,
         }
     }
 

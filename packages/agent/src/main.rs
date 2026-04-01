@@ -133,8 +133,6 @@ struct ToolRegistryConfig {
     computer_use_settings: tron::settings::ComputerUseSettings,
     /// Broadcast sender for Display tool streaming (DisplayFrame events).
     display_event_tx: Option<tokio::sync::broadcast::Sender<tron::core::events::TronEvent>>,
-    /// Process manager for ManageProcess tool.
-    process_manager: Option<Arc<dyn tron::tools::traits::ProcessManagerOps>>,
     /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
     mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
     /// `McpCall` meta-tool (calls a tool on an MCP server).
@@ -247,12 +245,9 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     // Subagent tools: registered separately via SubagentManager (see main)
 
-    // 13: ManageProcess (list, check, cancel background processes)
-    if let Some(ref pm) = config.process_manager {
-        registry.register(Arc::new(
-            tron::tools::system::manage_process::ManageProcessTool::new(pm.clone()),
-        ));
-    }
+    // 13: ManageJob + Wait — registered in the tool factory closure where
+    // both ProcessManager and SubagentManager are available for JobManager creation.
+    // See the `tool_factory` closure below.
 
     // MCP meta-tools (McpSearch + McpCall replace individual tool registration)
     if let Some(ref tool) = config.mcp_search {
@@ -512,7 +507,6 @@ async fn main() -> Result<()> {
         // Use the orchestrator's broadcast sender so DisplayFrame events
         // flow through the same channel the EventBridge listens to.
         display_event_tx: Some(orchestrator.broadcast().sender()),
-        process_manager: Some(process_manager.clone()),
         mcp_search,
         mcp_call,
     });
@@ -551,17 +545,32 @@ async fn main() -> Result<()> {
     ));
     subagent_manager.set_self_ref();
 
-    // Build tool factory that includes subagent tools + summarizer-backed WebFetch
+    // Unified job manager (processes + subagents) — shared across tool factory and RpcContext
+    let subagent_ops: Arc<dyn tron::tools::traits::SubagentOps> = subagent_manager.clone();
+    let job_manager: Arc<dyn tron::tools::traits::JobManagerOps> = Arc::new(
+        tron::runtime::orchestrator::job_manager::JobManager::new(
+            process_manager.clone(),
+            subagent_ops,
+        ),
+    );
+
+    // Build tool factory that includes subagent tools, job management, and summarizer-backed WebFetch
     let config = tool_config.clone();
     let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
     let sm_for_summarizer = subagent_manager.clone();
+    let jm_for_tools = job_manager.clone();
     let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
         let mut registry = create_tool_registry(&config);
         registry.register(Arc::new(
             tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
         ));
+
+        // Job management tools
         registry.register(Arc::new(
-            tron::tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
+            tron::tools::system::manage_process::ManageJobTool::new(jm_for_tools.clone()),
+        ));
+        registry.register(Arc::new(
+            tron::tools::system::wait::WaitTool::new(jm_for_tools.clone()),
         ));
 
         // Re-register WebFetch with LLM summarizer (overrides the basic version)
@@ -715,6 +724,7 @@ async fn main() -> Result<()> {
         mcp_router,
         display_stream_registry: None,
         process_manager: Some(process_manager.clone()),
+        job_manager: Some(job_manager.clone()),
     };
 
     // Method registry
@@ -1358,6 +1368,7 @@ mod tests {
             mcp_router: None,
             display_stream_registry: None,
             process_manager: None,
+            job_manager: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1441,7 +1452,6 @@ mod tests {
             sandbox_settings: tron::settings::BashSandboxSettings::default(),
             computer_use_settings: tron::settings::ComputerUseSettings::default(),
             display_event_tx: None,
-            process_manager: None,
             mcp_search: None,
             mcp_call: None,
         }
@@ -1548,6 +1558,7 @@ mod tests {
             mcp_router: None,
             display_stream_registry: None,
             process_manager: None,
+            job_manager: None,
         };
 
         let mut registry = MethodRegistry::new();
