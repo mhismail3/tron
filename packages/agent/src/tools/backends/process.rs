@@ -62,6 +62,7 @@ impl TokioProcessRunner {
 
         // Build command
         let mut cmd = CommandBuilder::new(shell);
+        cmd.arg("-l");
         cmd.arg("-c");
         cmd.arg(command);
         cmd.cwd(&opts.working_directory);
@@ -224,6 +225,7 @@ impl ProcessRunner for TokioProcessRunner {
 
         let mut cmd = tokio::process::Command::new(shell);
         let _ = cmd
+            .arg("-l")
             .arg("-c")
             .arg(command)
             .current_dir(&opts.working_directory)
@@ -848,5 +850,169 @@ mod tests {
             combined.contains("pty streaming test"),
             "PTY streamed output should contain the text: {combined}"
         );
+    }
+
+    // ── login shell tests ──
+
+    #[tokio::test]
+    async fn login_shell_sources_profile() {
+        // Create a temp HOME with a .bash_profile that exports a unique var
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_path = tmp.path().join(".bash_profile");
+        std::fs::write(&profile_path, "export TRON_LOGIN_TEST_VAR=profile_loaded\n").unwrap();
+
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let result = runner
+            .run_command("echo $TRON_LOGIN_TEST_VAR", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout.trim(),
+            "profile_loaded",
+            "Login shell should source .bash_profile and export the var"
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_has_expanded_path() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("echo $PATH", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        // A login shell should have more than the minimal launchd PATH
+        let path = result.stdout.trim();
+        assert!(
+            !path.is_empty(),
+            "PATH should not be empty in login shell"
+        );
+        // Verify it contains at least the basics
+        assert!(
+            path.contains("/usr/bin"),
+            "PATH should contain /usr/bin: {path}"
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_bash() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("echo $0", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.stdout.contains("bash"),
+            "Login bash should report bash in $0: {}",
+            result.stdout.trim()
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_zsh() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.shell = "zsh".into();
+        let result = runner.run_command("echo $0", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.stdout.contains("zsh"),
+            "Login zsh should report zsh in $0: {}",
+            result.stdout.trim()
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_sh() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.shell = "sh".into();
+        let result = runner.run_command("echo $0", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.stdout.contains("sh"),
+            "Login sh should report sh in $0: {}",
+            result.stdout.trim()
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_env_vars_still_merged() {
+        // Custom env vars should still work alongside login shell
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_path = tmp.path().join(".bash_profile");
+        std::fs::write(&profile_path, "export FROM_PROFILE=yes\n").unwrap();
+
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let _ = opts.env.insert("FROM_ENV".into(), "injected".into());
+        let result = runner
+            .run_command("echo $FROM_PROFILE:$FROM_ENV", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.stdout.trim(),
+            "yes:injected",
+            "Both profile vars and injected env vars should be available"
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_interactive_pty() {
+        // PTY path should also use login shell
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_path = tmp.path().join(".bash_profile");
+        std::fs::write(&profile_path, "export PTY_LOGIN_VAR=pty_loaded\n").unwrap();
+
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.interactive = true;
+        opts.timeout_ms = 5_000;
+        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let result = runner
+            .run_command("echo $PTY_LOGIN_VAR", &opts)
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.stdout.contains("pty_loaded"),
+            "PTY login shell should source .bash_profile: {}",
+            result.stdout
+        );
+    }
+
+    #[tokio::test]
+    async fn login_shell_stdin_still_works() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.stdin = Some("hello from login stdin".into());
+        let result = runner.run_command("cat", &opts).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, "hello from login stdin");
+    }
+
+    #[tokio::test]
+    async fn login_shell_timeout_still_works() {
+        let runner = TokioProcessRunner;
+        let mut opts = default_opts();
+        opts.timeout_ms = 200;
+        let result = runner.run_command("sleep 60", &opts).await.unwrap();
+        assert!(result.timed_out, "Timeout should still work with login shell");
+    }
+
+    #[tokio::test]
+    async fn login_shell_exit_code_preserved() {
+        let runner = TokioProcessRunner;
+        let result = runner
+            .run_command("exit 42", &default_opts())
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 42, "Exit code should be preserved in login shell");
     }
 }
