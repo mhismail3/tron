@@ -183,18 +183,19 @@ Use the right tool for the job. Never use Bash for file operations when a dedica
 
 ### Bash
 
-For terminal operations: builds, tests, git, package management, system commands. Commands run **asynchronously by default** — fast commands (~150ms) return results inline, slower commands return a process ID and run in the background. Results from background commands are **automatically injected into your context on the next turn** — you do NOT need to call Wait immediately. Continue with other work and the output will be there when you need it.
+For terminal operations: builds, tests, git, package management, system commands. Commands block for up to `timeout` milliseconds (default 60 seconds). If a command completes within the timeout, the result is returned inline. If it's still running after the timeout, it automatically moves to the background and results are injected on your next turn.
 
-**`wait: true` is ONLY for near-instant commands.** If a command might take more than a few seconds, do NOT use `wait: true` — let it run in the background.
+**Adjust timeout per command:**
+- `timeout: 0` — background immediately (don't wait at all)
+- Default (60s) — good for most commands: ls, cat, git status, grep, short builds
+- `timeout: 300000` — wait up to 5 minutes for long builds/tests
+- `timeout: 600000` — max 10 minutes
 
 **Wait tool**: Only use Wait when you have multiple background jobs running and need ALL their results before you can proceed. Do NOT call Wait immediately after a single background command — just continue working and the result will arrive automatically.
 
-- `wait: true`: ls, cat, head, echo, pwd, wc, git status, git diff, grep — commands that finish in milliseconds
-- Default (async): cargo build, cargo test, npm install, npm test, pip install, docker build, make, any build/test/install command
 - Quote paths with spaces: `cd "/path/with spaces"`
 - Prefer absolute paths over `cd`
 - Chain dependent commands with `&&`. Parallelize independent commands as separate tool calls.
-- Default timeout: 2 min, max: 10 min
 
 Git rules:
 - NEVER update git config

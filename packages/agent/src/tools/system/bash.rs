@@ -165,7 +165,7 @@ impl BashTool {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
         // Forwarder task: channel → buffer. Exits when tx is dropped (process completes).
-        tokio::spawn(async move {
+        let _ = tokio::spawn(async move {
             while let Some(chunk) = output_rx.recv().await {
                 buffer_for_forwarder.push(chunk);
             }
