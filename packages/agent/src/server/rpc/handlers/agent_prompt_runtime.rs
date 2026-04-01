@@ -202,6 +202,7 @@ pub struct PromptBootstrapData {
     pub artifacts: PromptContextArtifacts,
     pub subagent_results_context: Option<String>,
     pub process_results_context: Option<String>,
+    pub user_job_actions_context: Option<String>,
 }
 
 pub struct ResumedPromptSession {
@@ -459,6 +460,33 @@ pub fn format_process_results(results: &[(String, Value)]) -> Option<String> {
     Some(ctx)
 }
 
+/// Get pending user job action notifications (backgrounded/cancelled from iOS).
+pub fn get_pending_user_job_actions(
+    event_store: &crate::events::EventStore,
+    session_id: &str,
+) -> Vec<Value> {
+    event_store
+        .get_events_by_type(session_id, &["notification.user_job_action"], None)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|event| {
+            serde_json::from_str::<Value>(&event.payload).ok()
+        })
+        .collect()
+}
+
+/// Format user job actions into a system message for context injection.
+pub fn format_user_job_actions(actions: &[Value]) -> String {
+    let mut ctx = String::from("# User Job Actions\n\n");
+    for action in actions {
+        let job_id = action.get("jobId").and_then(Value::as_str).unwrap_or("unknown");
+        let action_type = action.get("action").and_then(Value::as_str).unwrap_or("unknown");
+        let label = action.get("label").and_then(Value::as_str).unwrap_or("unknown");
+        let _ = writeln!(ctx, "- User **{action_type}** job `{label}` ({job_id})");
+    }
+    ctx
+}
+
 /// Gather recent event types and Bash tool call commands since the last compact.boundary.
 ///
 /// Returns `(event_types, bash_commands)` for the compaction trigger's progress-signal check.
@@ -590,10 +618,19 @@ pub async fn load_prompt_bootstrap(
             formatted
         };
 
+        // Inject user job actions (backgrounded / cancelled from iOS).
+        let user_job_actions = get_pending_user_job_actions(event_store.as_ref(), &session_id);
+        let user_job_actions_context = if user_job_actions.is_empty() {
+            None
+        } else {
+            Some(format_user_job_actions(&user_job_actions))
+        };
+
         Ok(PromptBootstrapData {
             artifacts,
             subagent_results_context,
             process_results_context,
+            user_job_actions_context,
         })
     })
     .await

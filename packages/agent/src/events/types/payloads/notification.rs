@@ -92,3 +92,18 @@ pub struct ProcessResultsConsumedPayload {
     /// Number of results consumed.
     pub count: usize,
 }
+
+/// Payload for `notification.user_job_action` events.
+///
+/// Persisted when the user backgrounds or cancels a job from the iOS app.
+/// Picked up by the turn runner for system message injection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserJobActionPayload {
+    /// Job identifier (process ID or subagent session ID).
+    pub job_id: String,
+    /// Action taken: `"backgrounded"` or `"cancelled"`.
+    pub action: String,
+    /// Human-readable label (command text).
+    pub label: String,
+}

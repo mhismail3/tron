@@ -30,6 +30,7 @@ pub mod cron;
 pub mod device;
 pub mod display;
 pub mod events;
+pub(crate) mod job;
 pub(crate) mod process;
 pub mod filesystem;
 pub mod git;
@@ -188,11 +189,18 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Display
     registry.register("display.stopStream", display::StopStreamHandler);
 
-    // Process management
+    // Process management (legacy — kept until iOS migrates to job.*)
     registry.register("process.promote", process::PromoteHandler);
     registry.register("process.cancel", process::CancelHandler);
     registry.register("process.list", process::ListHandler);
     registry.register("process.status", process::StatusHandler);
+
+    // Unified job management
+    registry.register("job.background", job::BackgroundHandler);
+    registry.register("job.cancel", job::CancelHandler);
+    registry.register("job.list", job::ListHandler);
+    registry.register("job.subscribe", job::SubscribeHandler);
+    registry.register("job.unsubscribe", job::UnsubscribeHandler);
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);
@@ -516,7 +524,7 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            123,
+            128,
             "expected 123 methods, got {}",
             reg.methods().len()
         );

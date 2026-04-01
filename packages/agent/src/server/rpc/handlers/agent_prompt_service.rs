@@ -311,6 +311,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 artifacts: PromptContextArtifacts::default(),
                 subagent_results_context: None,
                 process_results_context: None,
+                user_job_actions_context: None,
             }
         }
     };
@@ -321,15 +322,21 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let resolved_ws_id = prompt_artifacts.workspace_id;
 
     let memory: Option<String> = None;
-    // Merge subagent and process results into unified job results
-    let job_results_context = match (
-        prompt_bootstrap.subagent_results_context,
-        prompt_bootstrap.process_results_context,
-    ) {
-        (Some(a), Some(p)) => Some(format!("{a}\n\n{p}")),
-        (Some(a), None) => Some(a),
-        (None, Some(p)) => Some(p),
-        (None, None) => None,
+    // Merge subagent results, process results, and user job actions into unified context
+    let mut job_parts: Vec<String> = Vec::new();
+    if let Some(a) = prompt_bootstrap.subagent_results_context {
+        job_parts.push(a);
+    }
+    if let Some(p) = prompt_bootstrap.process_results_context {
+        job_parts.push(p);
+    }
+    if let Some(u) = prompt_bootstrap.user_job_actions_context {
+        job_parts.push(u);
+    }
+    let job_results_context = if job_parts.is_empty() {
+        None
+    } else {
+        Some(job_parts.join("\n\n"))
     };
 
     let memory = if let Some(ref worktree) = worktree_info {
