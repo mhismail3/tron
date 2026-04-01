@@ -327,6 +327,7 @@
 		80BE6981CB995BAD2F9CAAA8 /* ChatViewModel+GetConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 062CC8B33A9D59C8820A54B3 /* ChatViewModel+GetConfirmation.swift */; };
 		81A38C86B2332F2FA3A2087C /* Literata-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 326B0EB2632E6020760E8A2B /* Literata-Variable.ttf */; };
 		8262909B97AA787D3938755D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED0C1BBA0825C927DC8A345A /* ChatView.swift */; };
+		829887338DE66A444E3371F8 /* JobClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBF9A41214258457DE4D6C4 /* JobClient.swift */; };
 		82A111246FAE7CFB0EBA7B2D /* ManageProcessDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F16751D1FEA670D1739E5AE /* ManageProcessDetailSheet.swift */; };
 		82A4EF229FA040A968B1866B /* ContentLineParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D8FFEFE3AFC29958CF8D47 /* ContentLineParserTests.swift */; };
 		82CE340859E9E8607280A836 /* AskUserQuestionDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F09E7C7AFEA4A3EFF6D980 /* AskUserQuestionDetector.swift */; };
@@ -460,6 +461,7 @@
 		B9B87D4483B11ABDF6CABFDE /* SessionClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A469493C34CE771CE26B5DCE /* SessionClientProtocol.swift */; };
 		B9D3A6CF740D85DBEDE37287 /* AgentTurnPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764DB47D41D106965D7949E5 /* AgentTurnPlugin.swift */; };
 		B9D5247EE9080564BF78985F /* RememberSubviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70ABEABCA609249875C37B6A /* RememberSubviews.swift */; };
+		BA01EB0DEC91D1D4EF6BCFFE /* JobBackgroundedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 393AD46FAE358E76760BB9D0 /* JobBackgroundedPlugin.swift */; };
 		BA2CF7B1A33B04E9F522CF50 /* WebFetchToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1833211CA2FD795125F527C /* WebFetchToolDetailSheet.swift */; };
 		BAD8FD58BCCD73164DB862FB /* DashboardToolbarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2491CA1DEC97E8887AE1DF2A /* DashboardToolbarContent.swift */; };
 		BB77012AA7EF0B61932402C1 /* ChatViewModel+TurnLifecycleContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C98FABA8FDB335C43C0FED4 /* ChatViewModel+TurnLifecycleContext.swift */; };
@@ -805,6 +807,7 @@
 		3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPillTests.swift; sourceTree = "<group>"; };
 		38A55381A199C9A004F1135B /* FilesystemClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesystemClient.swift; sourceTree = "<group>"; };
 		38B48561A985D4D19269729A /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
+		393AD46FAE358E76760BB9D0 /* JobBackgroundedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobBackgroundedPlugin.swift; sourceTree = "<group>"; };
 		393C89DB821923F90B216AFE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3ACFA2E1D7E2775277E8E1C4 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Sources/Resources/Fonts; sourceTree = SOURCE_ROOT; };
 		3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUpdatingPlugin.swift; sourceTree = "<group>"; };
@@ -815,6 +818,7 @@
 		3E852A9ACF44E56E933A101B /* RPCTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTypesTests.swift; sourceTree = "<group>"; };
 		3F629B1556A7F9BA7B37205A /* WorkspaceSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSelector.swift; sourceTree = "<group>"; };
 		3FBA23C0842C370DE8FA77A0 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
+		3FBF9A41214258457DE4D6C4 /* JobClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobClient.swift; sourceTree = "<group>"; };
 		41145C128CF6914A6FF51074 /* MessageIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageIndexTests.swift; sourceTree = "<group>"; };
 		417A957F1B03E3F563D2A0F3 /* SheetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetCoordinator.swift; sourceTree = "<group>"; };
 		41D57DD6FF464C8855554DF5 /* AutomationRunDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationRunDetailSheet.swift; sourceTree = "<group>"; };
@@ -1493,6 +1497,7 @@
 				B994C686C0032857E8F2A222 /* DisplayClient.swift */,
 				9CC598C04FD3B825DAFAE69D /* EventSyncClient.swift */,
 				38A55381A199C9A004F1135B /* FilesystemClient.swift */,
+				3FBF9A41214258457DE4D6C4 /* JobClient.swift */,
 				36181E5BF6E26F465A9CB85A /* MCPClient.swift */,
 				EB6E57FDBBD6080C970423AF /* MediaClient.swift */,
 				A23D9005BFAABD136EC9FDF2 /* MiscClient.swift */,
@@ -2108,6 +2113,7 @@
 		74E5A51D2E0592010CBE5182 /* Process */ = {
 			isa = PBXGroup;
 			children = (
+				393AD46FAE358E76760BB9D0 /* JobBackgroundedPlugin.swift */,
 				C8E9B387EA2225D1C60386C6 /* ProcessCompletedPlugin.swift */,
 				9773BD08D8941F09C5C0A45A /* ProcessSpawnedPlugin.swift */,
 				8D556155E0E9376A7C757809 /* ProcessStatusUpdatePlugin.swift */,
@@ -3373,6 +3379,8 @@
 				91913D4D67A083554752DE1A /* InputTextField.swift in Sources */,
 				9048D955BCAD323414ECF050 /* InteractivePopGestureEnabler.swift in Sources */,
 				346055FC0DAE1C9F54913395 /* InterleavedContentProcessor.swift in Sources */,
+				BA01EB0DEC91D1D4EF6BCFFE /* JobBackgroundedPlugin.swift in Sources */,
+				829887338DE66A444E3371F8 /* JobClient.swift in Sources */,
 				FC6A95E7D82AB0CAAC9BF3EE /* KeyboardObserver.swift in Sources */,
 				C4D3F600444E9B277D6FB8B8 /* LineNumberedContentView.swift in Sources */,
 				02FE389EB93928871C55206C /* LogViewer.swift in Sources */,

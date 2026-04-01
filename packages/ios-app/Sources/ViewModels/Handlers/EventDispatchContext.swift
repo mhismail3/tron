@@ -66,6 +66,7 @@ import Foundation
     func handleProcessSpawned(_ result: ProcessSpawnedPlugin.Result)
     func handleProcessCompleted(_ result: ProcessCompletedPlugin.Result)
     func handleProcessStatusUpdate(_ result: ProcessStatusUpdatePlugin.Result)
+    func handleJobBackgrounded(_ result: JobBackgroundedPlugin.Result)
 }
 
 @MainActor protocol EventDispatchLogger: AnyObject {

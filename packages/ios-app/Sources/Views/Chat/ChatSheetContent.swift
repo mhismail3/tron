@@ -134,7 +134,7 @@ struct ChatSheetContent: View {
         case "edit":
             EditToolDetailSheet(data: liveData)
         case "bash":
-            BashToolDetailSheet(data: liveData)
+            BashToolDetailSheet(data: liveData, rpcClient: rpcClient, sessionId: sessionId)
         case "glob", "find":
             GlobToolDetailSheet(data: liveData)
         case "search":

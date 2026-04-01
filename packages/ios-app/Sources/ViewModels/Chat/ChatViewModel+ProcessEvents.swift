@@ -22,6 +22,11 @@ extension ChatViewModel: ProcessEventHandler {
         logDebug("Process status: \(result.processId) -> \(result.status)")
     }
 
+    func handleJobBackgrounded(_ result: JobBackgroundedPlugin.Result) {
+        processState.trackBackgrounded(jobId: result.jobId, reason: result.reason)
+        logDebug("Job backgrounded: \(result.jobId) [\(result.label)] reason=\(result.reason)")
+    }
+
     // MARK: - Actions
 
     /// Cancel a running background process via RPC.

@@ -19,21 +19,21 @@ final class ProcessState {
         var resultSummary: String?
 
         enum Status: String {
-            case running, completed, failed, cancelled
+            case running, backgrounded, completed, failed, cancelled
         }
     }
 
     /// All tracked processes keyed by processId.
     private(set) var processes: [String: TrackedProcess] = [:]
 
-    /// Whether any processes are currently running.
+    /// Whether any processes are currently active (running or backgrounded).
     var hasActiveProcesses: Bool {
-        processes.values.contains { $0.status == .running }
+        processes.values.contains { $0.status == .running || $0.status == .backgrounded }
     }
 
-    /// Count of currently running processes.
+    /// Count of currently active processes.
     var activeCount: Int {
-        processes.values.filter { $0.status == .running }.count
+        processes.values.filter { $0.status == .running || $0.status == .backgrounded }.count
     }
 
     /// All processes sorted by start time (most recent first).
@@ -78,6 +78,12 @@ final class ProcessState {
         default:
             break
         }
+    }
+
+    /// Track a job being backgrounded (auto-timeout or user action).
+    func trackBackgrounded(jobId: String, reason: String) {
+        guard processes[jobId] != nil else { return }
+        processes[jobId]?.status = .backgrounded
     }
 
     /// Mark a process as cancelled locally (optimistic UI update).

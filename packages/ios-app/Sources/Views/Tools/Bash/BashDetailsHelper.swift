@@ -42,6 +42,11 @@ enum BashDetailsHelper {
         }
     }
 
+    /// Extract process ID from details (present for managed/backgrounded commands).
+    static func processId(from details: [String: AnyCodable]?) -> String? {
+        details?["processId"]?.value as? String
+    }
+
     /// Determine sandbox mode from arguments.
     /// Returns nil (no sandbox), "lightweight", or "docker".
     static func sandboxMode(from args: String) -> String? {

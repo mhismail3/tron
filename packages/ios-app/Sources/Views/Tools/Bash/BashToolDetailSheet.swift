@@ -8,6 +8,8 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct BashToolDetailSheet: View {
     let data: CommandToolChipData
+    var rpcClient: RPCClient?
+    var sessionId: String?
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllLines = false
 
@@ -121,6 +123,26 @@ struct BashToolDetailSheet: View {
             copyContent: command
         ) {
             contentBody
+        }
+        .onAppear {
+            subscribeToOutputIfNeeded()
+        }
+        .onDisappear {
+            unsubscribeFromOutput()
+        }
+    }
+
+    private func subscribeToOutputIfNeeded() {
+        guard let processId, let rpcClient, let sessionId, isJobActive else { return }
+        Task {
+            try? await rpcClient.job.subscribe(jobId: processId, sessionId: sessionId)
+        }
+    }
+
+    private func unsubscribeFromOutput() {
+        guard let processId, let rpcClient else { return }
+        Task {
+            try? await rpcClient.job.unsubscribe(jobId: processId)
         }
     }
 
@@ -265,6 +287,65 @@ struct BashToolDetailSheet: View {
             BashStreamingOutputView(output: output, tint: tint)
         } else {
             ToolRunningSpinner(title: "Output", accent: .tronEmerald, tint: tint, actionText: "Running command...")
+        }
+
+        if isJobActive {
+            jobActionButtons
+        }
+    }
+
+    // MARK: - Job State
+
+    private var processId: String? {
+        BashDetailsHelper.processId(from: data.details)
+    }
+
+    private var isBackgroundedProcess: Bool {
+        processId != nil
+            && data.result?.contains("Process backgrounded:") == true
+    }
+
+    private var isJobActive: Bool {
+        data.status == .running || isBackgroundedProcess
+    }
+
+    // MARK: - Job Action Buttons
+
+    @ViewBuilder
+    private var jobActionButtons: some View {
+        HStack(spacing: 12) {
+            if data.status == .running {
+                Button {
+                    backgroundJob()
+                } label: {
+                    Label("Background", systemImage: "arrow.down.to.line")
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+            }
+
+            Button {
+                cancelJob()
+            } label: {
+                Label("Interrupt", systemImage: "stop.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+        }
+        .padding(.top, 8)
+    }
+
+    private func backgroundJob() {
+        guard let processId, let rpcClient, let sessionId else { return }
+        Task {
+            try? await rpcClient.job.background(jobId: processId, sessionId: sessionId)
+        }
+    }
+
+    private func cancelJob() {
+        guard let processId, let rpcClient, let sessionId else { return }
+        Task {
+            try? await rpcClient.job.cancel(jobId: processId, sessionId: sessionId)
         }
     }
 }

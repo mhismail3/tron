@@ -121,7 +121,7 @@ private struct ProcessRow: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch process.status {
-        case .running:
+        case .running, .backgrounded:
             ProgressView()
                 .controlSize(.small)
                 .tint(.tronEmerald)

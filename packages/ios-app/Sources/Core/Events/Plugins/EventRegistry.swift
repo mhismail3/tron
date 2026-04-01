@@ -128,6 +128,7 @@ final class EventRegistry: @unchecked Sendable {
         register(ProcessSpawnedPlugin.self)
         register(ProcessCompletedPlugin.self)
         register(ProcessStatusUpdatePlugin.self)
+        register(JobBackgroundedPlugin.self)
 
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }

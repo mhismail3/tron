@@ -105,6 +105,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var process: ProcessClient = ProcessClient(transport: self)
 
+    /// Unified job management client (background, cancel, subscribe, unsubscribe).
+    @ObservationIgnored
+    lazy var job: JobClient = JobClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
