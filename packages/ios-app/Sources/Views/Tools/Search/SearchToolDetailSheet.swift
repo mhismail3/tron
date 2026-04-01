@@ -151,12 +151,7 @@ struct SearchToolDetailSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.purple)
         }
     }

@@ -59,12 +59,7 @@ struct GlobResultsSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.cyan)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.cyan)
         }
     }
@@ -155,12 +150,7 @@ struct GlobStreamingResultsSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.cyan)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.cyan)
         }
     }

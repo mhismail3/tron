@@ -79,12 +79,7 @@ struct SearchMatchesSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.purple)
         }
     }
@@ -146,10 +141,9 @@ struct SearchMatchLineView: View {
         HStack(alignment: .top, spacing: 0) {
             if let lineNum = match.lineNumber {
                 Text("\(lineNum)")
-                    .font(TronTypography.pill)
+                    .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.tronTextMuted.opacity(0.4))
                     .frame(width: lineNumWidth, alignment: .trailing)
-                    .padding(.leading, 8)
                     .padding(.trailing, 6)
             }
 
@@ -194,12 +188,7 @@ struct SearchFileListSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.purple)
         }
     }
@@ -255,12 +244,7 @@ struct SearchStreamingMatchesSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.purple)
         }
     }

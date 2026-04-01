@@ -38,12 +38,7 @@ struct EditDiffSection: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(accentColor)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(accentColor)
         }
     }
@@ -62,15 +57,14 @@ struct EditDiffLineRow: View {
         HStack(alignment: .top, spacing: 0) {
             // Line number
             Text(line.lineNum.map(String.init) ?? "")
-                .font(TronTypography.pill)
+                .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
                 .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.leading, 4)
                 .padding(.trailing, 4)
 
             // +/- marker
             Text(DiffFormatting.marker(for: line.type))
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(DiffFormatting.markerColor(for: line.type))
                 .frame(width: 14)
                 .padding(.trailing, 4)

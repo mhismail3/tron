@@ -136,12 +136,11 @@ struct BashBlockedSection: View {
     }
 }
 
-/// Line-numbered output with leading accent border. Used by both completed and streaming output.
+/// Line-numbered output. Used by both completed and streaming output.
 @available(iOS 26.0, *)
 struct BashLineNumberedOutput: View {
     let lines: [(index: Int, content: String)]
     let lineNumWidth: CGFloat
-    let borderColor: Color
     let tint: TintedColors
     var collapseConfig: CollapseConfig?
 
@@ -155,10 +154,9 @@ struct BashLineNumberedOutput: View {
             ForEach(lines, id: \.index) { index, line in
                 HStack(alignment: .top, spacing: 0) {
                     Text("\(index + 1)")
-                        .font(TronTypography.pill)
+                        .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                         .foregroundStyle(.tronTextMuted.opacity(0.4))
                         .frame(width: lineNumWidth, alignment: .trailing)
-                        .padding(.leading, 4)
                         .padding(.trailing, 8)
 
                     Text(BashOutputHelpers.capLineLength(line))
@@ -195,12 +193,7 @@ struct BashLineNumberedOutput: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 3)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(borderColor)
-                .frame(width: 3)
-        }
-        .padding(14)
+        .padding(10)
         .sectionFill(.tronEmerald)
     }
 }
@@ -210,7 +203,6 @@ struct BashLineNumberedOutput: View {
 struct BashOutputLinesView: View {
     let lines: [(index: Int, content: String)]
     let lineNumWidth: CGFloat
-    let borderColor: Color
     let tint: TintedColors
     let shouldCollapse: Bool
     let showAllLines: Bool
@@ -221,7 +213,6 @@ struct BashOutputLinesView: View {
         BashLineNumberedOutput(
             lines: lines,
             lineNumWidth: lineNumWidth,
-            borderColor: borderColor,
             tint: tint,
             collapseConfig: (shouldCollapse && !showAllLines)
                 ? .init(hiddenLineCount: hiddenLineCount, onExpand: onExpand)
@@ -258,7 +249,6 @@ struct BashStreamingOutputView: View {
             BashLineNumberedOutput(
                 lines: indexedLines,
                 lineNumWidth: lineNumWidth,
-                borderColor: .tronEmerald,
                 tint: tint
             )
         }

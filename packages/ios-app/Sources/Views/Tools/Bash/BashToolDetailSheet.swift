@@ -112,10 +112,6 @@ struct BashToolDetailSheet: View {
         return outputLineCount - BashOutputHelpers.headLines - BashOutputHelpers.tailLines
     }
 
-    private var borderColor: Color {
-        data.status == .error ? .tronError : .tronEmerald
-    }
-
     var body: some View {
         ToolDetailSheetContainer(
             toolName: "Bash",
@@ -281,7 +277,6 @@ struct BashToolDetailSheet: View {
             BashOutputLinesView(
                 lines: displayLines,
                 lineNumWidth: lineNumWidth,
-                borderColor: borderColor,
                 tint: tint,
                 shouldCollapse: shouldCollapse,
                 showAllLines: showAllLines,

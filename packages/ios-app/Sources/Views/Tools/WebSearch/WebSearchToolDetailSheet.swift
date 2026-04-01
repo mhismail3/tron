@@ -178,12 +178,7 @@ struct WebSearchToolDetailSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.tronInfo)
         }
     }
@@ -295,12 +290,7 @@ struct WebSearchToolDetailSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-            }
-            .padding(14)
+            .padding(10)
             .sectionFill(.tronInfo)
         }
     }

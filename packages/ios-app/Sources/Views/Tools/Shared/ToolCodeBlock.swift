@@ -6,14 +6,13 @@ import SwiftUI
 /// WriteToolDetailSheet (contentPreviewSection), and BashToolDetailSheet (outputSection).
 ///
 /// Renders a section header with optional copy button, followed by a scrollable code view
-/// with line numbers, left accent border, and configurable line transform.
+/// with line numbers and configurable line transform.
 @available(iOS 26.0, *)
 struct ToolCodeBlock: View {
     let title: String
     let lines: [(lineNumber: Int, content: String)]
     let accent: Color
     let tint: TintedColors
-    var borderColor: Color? = nil
     var copyContent: String? = nil
     var lineTransform: ((String) -> String)? = nil
 
@@ -22,8 +21,6 @@ struct ToolCodeBlock: View {
 
     /// Whether the content wraps (Write tool) or scrolls horizontally (Read tool).
     var wrapsContent: Bool = false
-
-    private var effectiveBorderColor: Color { borderColor ?? accent }
 
     private var lineNumWidth: CGFloat {
         let maxNum = lines.last?.lineNumber ?? lines.count
@@ -48,16 +45,14 @@ struct ToolCodeBlock: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let note = headerNote {
                     Text(note)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(tint.subtle)
                         .padding(.bottom, 6)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 14)
                 }
 
                 codeContent
             }
-            .padding(14)
+            .padding(10)
             .sectionFill(accent)
         }
     }
@@ -70,11 +65,6 @@ struct ToolCodeBlock: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 wrappedCodeView
             }
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(effectiveBorderColor)
-                    .frame(width: 3)
-            }
         }
     }
 
@@ -83,10 +73,9 @@ struct ToolCodeBlock: View {
             ForEach(lines, id: \.lineNumber) { line in
                 HStack(alignment: .top, spacing: 0) {
                     Text("\(line.lineNumber)")
-                        .font(TronTypography.pill)
+                        .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                         .foregroundStyle(.tronTextMuted.opacity(0.4))
                         .frame(width: lineNumWidth, alignment: .trailing)
-                        .padding(.leading, 4)
                         .padding(.trailing, 8)
 
                     let displayContent = lineTransform?(line.content) ?? line.content
@@ -100,12 +89,5 @@ struct ToolCodeBlock: View {
             }
         }
         .padding(.vertical, 3)
-        .if(wrapsContent) { view in
-            view.overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(effectiveBorderColor)
-                    .frame(width: 3)
-            }
-        }
     }
 }

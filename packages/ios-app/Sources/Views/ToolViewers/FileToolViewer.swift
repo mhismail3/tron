@@ -73,12 +73,6 @@ struct ReadResultViewer: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.tronSurface)
-            .overlay(
-                Rectangle()
-                    .fill(languageColor)
-                    .frame(width: 3),
-                alignment: .leading
-            )
 
             // Content lines - show all
             ScrollView(.horizontal, showsIndicators: false) {
@@ -87,10 +81,9 @@ struct ReadResultViewer: View {
                         HStack(spacing: 0) {
                             // Line number
                             Text("\(line.lineNum)")
-                                .font(TronTypography.pill)
+                                .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                                 .foregroundStyle(.tronTextMuted.opacity(0.4))
                                 .frame(width: lineNumWidth, alignment: .trailing)
-                                .padding(.leading, 4)
                                 .padding(.trailing, 8)
 
                             // Line content (cleaned)
@@ -152,10 +145,9 @@ struct WriteResultViewer: View {
                             ForEach(Array(contentLines.enumerated()), id: \.offset) { index, line in
                                 HStack(spacing: 0) {
                                     Text("\(index + 1)")
-                                        .font(TronTypography.pill)
+                                        .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                                         .foregroundStyle(.tronTextMuted.opacity(0.4))
                                         .frame(width: 16, alignment: .trailing)
-                                        .padding(.leading, 4)
                                         .padding(.trailing, 8)
 
                                     Text(line.isEmpty ? " " : line)
@@ -324,16 +316,15 @@ struct DiffLineView: View {
         HStack(spacing: 0) {
             // Line number
             Text(displayLineNum)
-                .font(TronTypography.pill)
+                .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(lineNumColor.opacity(0.6))
                 .frame(width: 20, alignment: .trailing)
-                .padding(.leading, 4)
                 .padding(.trailing, 6)
                 .background(lineNumBackground)
 
             // Marker
             Text(marker)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(markerColor)
                 .frame(width: 12)
 

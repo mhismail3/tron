@@ -178,30 +178,25 @@ extension RememberToolDetailSheet {
             if entries.isEmpty {
                 rawContentSection(result)
             } else {
-                HStack(alignment: .top, spacing: 0) {
-                    Rectangle()
-                        .fill(accentColor)
-                        .frame(width: 3)
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                            if index > 0 {
-                                Divider()
-                                    .background(Color.purple.opacity(0.12))
-                                    .padding(.horizontal, 4)
-                            }
-                            Text(entry)
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(tint.body)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                        if index > 0 {
+                            Divider()
+                                .background(Color.purple.opacity(0.12))
+                                .padding(.horizontal, 4)
                         }
+                        Text(entry)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(tint.body)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(10)
                 .sectionFill(.purple)
             }
         }
@@ -268,21 +263,15 @@ extension RememberToolDetailSheet {
                 ToolCopyButton(content: result, accent: .purple)
             }
 
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(accentColor)
-                    .frame(width: 3)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(result)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(tint.body)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(result)
+                    .font(TronTypography.codeContent)
+                    .foregroundStyle(tint.body)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
             .sectionFill(.purple)
         }
     }
@@ -290,19 +279,13 @@ extension RememberToolDetailSheet {
     // MARK: - Raw Content Fallback
 
     func rawContentSection(_ result: String) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            Rectangle()
-                .fill(accentColor)
-                .frame(width: 3)
-
-            Text(result)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(tint.body)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-        }
-        .sectionFill(.purple)
+        Text(result)
+            .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+            .foregroundStyle(tint.body)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .sectionFill(.purple)
     }
 }

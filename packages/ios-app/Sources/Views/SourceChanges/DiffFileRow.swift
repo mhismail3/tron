@@ -112,11 +112,6 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(langColor)
-                    .frame(width: 3)
-            }
             .background {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(.clear)
@@ -157,7 +152,6 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                 .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
                 .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.leading, 4)
                 .padding(.trailing, 4)
 
             Text(DiffFormatting.marker(for: line.type))
