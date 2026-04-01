@@ -170,31 +170,37 @@ struct BashToolDetailSheet: View {
                         .padding(.horizontal)
                 }
 
-                switch data.status {
-                case .success:
-                    if outputLines.isEmpty {
-                        ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
-                            .padding(.horizontal)
-                    } else {
-                        outputSection
-                            .padding(.horizontal)
-                    }
-                case .error:
-                    if isBlocked {
-                        BashBlockedSection(result: data.result, colorScheme: colorScheme)
-                            .padding(.horizontal)
-                    } else if outputLines.isEmpty {
-                        if let result = data.result {
-                            errorFallbackSection(result)
-                                .padding(.horizontal)
-                        }
-                    } else {
-                        outputSection
-                            .padding(.horizontal)
-                    }
-                case .running:
+                if isBackgroundedProcess {
+                    // Process was auto-backgrounded — show streaming output + action buttons
                     runningSection
                         .padding(.horizontal)
+                } else {
+                    switch data.status {
+                    case .success:
+                        if outputLines.isEmpty {
+                            ToolEmptyState(title: "Output", icon: "text.page.slash", message: "No output", accent: .tronEmerald, tint: tint)
+                                .padding(.horizontal)
+                        } else {
+                            outputSection
+                                .padding(.horizontal)
+                        }
+                    case .error:
+                        if isBlocked {
+                            BashBlockedSection(result: data.result, colorScheme: colorScheme)
+                                .padding(.horizontal)
+                        } else if outputLines.isEmpty {
+                            if let result = data.result {
+                                errorFallbackSection(result)
+                                    .padding(.horizontal)
+                            }
+                        } else {
+                            outputSection
+                                .padding(.horizontal)
+                        }
+                    case .running:
+                        runningSection
+                            .padding(.horizontal)
+                    }
                 }
             }
             .padding(.vertical)
