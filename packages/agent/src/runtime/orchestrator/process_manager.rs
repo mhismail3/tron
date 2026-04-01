@@ -36,8 +36,8 @@ use crate::events::{EventStore, EventType};
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult, ProcessInfo,
-    ProcessManagerOps, ProcessState,
+    BackgroundReason, ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult,
+    ProcessInfo, ProcessManagerOps, ProcessState,
 };
 
 mod tracking;
@@ -301,6 +301,7 @@ impl ProcessManagerOps for ProcessManager {
             return Ok(ManagedProcessHandle {
                 process_id,
                 result: None,
+                backgrounded: Some(BackgroundReason::AutoTimeout),
             });
         }
 
@@ -313,6 +314,7 @@ impl ProcessManagerOps for ProcessManager {
                 Ok(ManagedProcessHandle {
                     process_id,
                     result,
+                    backgrounded: None,
                 })
             }
             // User manually backgrounded from iOS.
@@ -330,6 +332,7 @@ impl ProcessManagerOps for ProcessManager {
                 Ok(ManagedProcessHandle {
                     process_id,
                     result: None,
+                    backgrounded: Some(BackgroundReason::UserAction),
                 })
             }
             // Blocking timeout expired — auto-background.
@@ -347,6 +350,7 @@ impl ProcessManagerOps for ProcessManager {
                 Ok(ManagedProcessHandle {
                     process_id,
                     result: None,
+                    backgrounded: Some(BackgroundReason::AutoTimeout),
                 })
             }
         }

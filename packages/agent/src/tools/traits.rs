@@ -339,13 +339,24 @@ pub struct ManagedProcessResult {
     pub blob_id: Option<String>,
 }
 
+/// Why a managed process was backgrounded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackgroundReason {
+    /// Blocking timeout expired.
+    AutoTimeout,
+    /// User manually backgrounded from iOS.
+    UserAction,
+}
+
 /// Handle returned when spawning a managed process.
 #[derive(Clone, Debug)]
 pub struct ManagedProcessHandle {
     /// Process identifier.
     pub process_id: String,
-    /// Result (populated only for foreground/blocking processes).
+    /// Result (populated only when the process completed within the blocking window).
     pub result: Option<ManagedProcessResult>,
+    /// If backgrounded, why. `None` when the process completed inline.
+    pub backgrounded: Option<BackgroundReason>,
 }
 
 /// Summary info for listing processes.

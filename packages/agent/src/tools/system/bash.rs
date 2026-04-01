@@ -296,17 +296,29 @@ impl BashTool {
                 })
             }
             None => {
-                // Auto-backgrounded — process continues running.
-                Ok(TronToolResult {
-                    content: ToolResultBody::Text(format!(
+                // Backgrounded — process continues running.
+                let user_initiated = handle.backgrounded == Some(crate::tools::traits::BackgroundReason::UserAction);
+                let message = if user_initiated {
+                    format!(
+                        "[Backgrounded by user] Process {process_id}\nCommand: {command}\n\n\
+                         The user manually backgrounded this command. It continues running. \
+                         Results will be automatically available at your next turn."
+                    )
+                } else {
+                    format!(
                         "Process backgrounded: {process_id}\nCommand: {command}\n\n\
                          Results will be automatically available at your next turn. \
                          Only use the Wait tool if you need the output before proceeding."
-                    )),
+                    )
+                };
+
+                Ok(TronToolResult {
+                    content: ToolResultBody::Text(message),
                     details: Some(json!({
                         "command": command,
                         "processId": process_id,
                         "description": description,
+                        "backgroundedByUser": user_initiated,
                     })),
                     is_error: None,
                     stop_turn: None,
