@@ -45,6 +45,13 @@ struct SkillDetailSheet: View {
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(accentColor)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accentColor)
+                    }
+                }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
@@ -195,7 +202,7 @@ struct SkillDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             HStack {
-                Text("SKILL.md")
+                Text("Content")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
@@ -218,7 +225,7 @@ struct SkillDetailSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(accentColor)
 
-                    Text("Content")
+                    Text("SKILL.md")
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(accentColor)
 
@@ -232,7 +239,10 @@ struct SkillDetailSheet: View {
                 }
             }
             .padding(14)
-            .sectionFill(accentColor)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(accentColor.opacity(0.06))
+            }
         }
     }
 
