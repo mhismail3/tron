@@ -119,7 +119,7 @@ pub fn build_skill_index(skills: &[SkillInfo]) -> String {
     }
     use std::fmt::Write;
     let mut out =
-        String::from("# Available Skills\n\nUse `@skill-name` to load a skill's full instructions.\n\n");
+        String::from("# Available Skills\n\nTo load a skill, read its file at `~/.tron/skills/<name>/SKILL.md`.\n\n");
     for skill in skills {
         if skill.description.is_empty() {
             let _ = writeln!(out, "- `@{}`", skill.name);
@@ -552,7 +552,7 @@ mod tests {
     fn test_build_skill_index_header_content() {
         let skills = vec![make_skill_info("any", "Any skill")];
         let index = build_skill_index(&skills);
-        assert!(index.contains("@skill-name"));
+        assert!(index.contains("~/.tron/skills/<name>/SKILL.md"));
         assert!(index.contains("Available Skills"));
     }
 
