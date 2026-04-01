@@ -149,6 +149,7 @@ impl MethodHandler for SubscribeHandler {
     #[instrument(skip(self, ctx), fields(method = "job.subscribe"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let job_id = require_string_param(params.as_ref(), "jobId")?;
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
         let registry = ctx.output_buffer_registry.as_ref().ok_or_else(|| RpcError::Internal {
             message: "Output buffer registry not available".into(),
@@ -167,18 +168,6 @@ impl MethodHandler for SubscribeHandler {
         let _ = ACTIVE_SUBSCRIPTIONS.insert(job_id.clone(), cancel.clone());
 
         let emitter = ctx.orchestrator.broadcast().clone();
-        let session_id = {
-            // Try to get session_id from process manager
-            let sid = if let Some(ref pm) = ctx.process_manager {
-                pm.list_processes("")
-                    .into_iter()
-                    .find(|p| p.process_id == job_id)
-                    .map(|p| p.session_id)
-            } else {
-                None
-            };
-            sid.unwrap_or_default()
-        };
 
         let sub_job_id = job_id.clone();
         let _ = tokio::spawn(async move {
@@ -204,6 +193,11 @@ async fn run_subscriber(
     let mut offset = 0;
 
     loop {
+        // Register for notification BEFORE reading to avoid race:
+        // if push() calls notify_waiters() between read_from and notified(),
+        // we'd miss it without this ordering.
+        let notified = buffer.notifier().notified();
+
         // Read any new chunks.
         let (chunks, new_offset) = buffer.read_from(offset);
         offset = new_offset;
@@ -216,9 +210,8 @@ async fn run_subscriber(
             });
         }
 
-        // If buffer is closed, we've drained everything — exit.
+        // If buffer is closed, drain anything remaining and exit.
         if buffer.is_closed() {
-            // Final drain.
             let (final_chunks, _) = buffer.read_from(offset);
             for chunk in final_chunks {
                 let _ = emitter.emit(TronEvent::ToolExecutionUpdate {
@@ -233,7 +226,7 @@ async fn run_subscriber(
         // Wait for more data or cancellation.
         tokio::select! {
             () = cancel.cancelled() => break,
-            () = buffer.notifier().notified() => {}
+            () = notified => {}
         }
     }
 }

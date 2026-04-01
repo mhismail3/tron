@@ -47,6 +47,7 @@ struct PromptRunPlan {
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -144,6 +145,7 @@ pub fn spawn_prompt_run(
         worktree_coordinator: ctx.worktree_coordinator.clone(),
         process_manager: ctx.process_manager.clone(),
         job_manager: ctx.job_manager.clone(),
+        output_buffer_registry: ctx.output_buffer_registry.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -179,6 +181,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         worktree_coordinator,
         process_manager,
         job_manager,
+        output_buffer_registry,
         server_origin,
         run_id,
         model,
@@ -443,7 +446,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             compaction_trigger_config: compactor_settings.into(),
             process_manager: process_manager.clone(),
             job_manager: job_manager.clone(),
-            output_buffer_registry: None,
+            output_buffer_registry,
         },
     );
 

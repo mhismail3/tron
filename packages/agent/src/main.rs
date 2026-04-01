@@ -496,6 +496,9 @@ async fn main() -> Result<()> {
             event_store.clone(),
         ),
     );
+    let output_buffer_registry = Arc::new(
+        tron::runtime::orchestrator::output_buffer::OutputBufferRegistry::new(),
+    );
 
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -725,7 +728,7 @@ async fn main() -> Result<()> {
         display_stream_registry: None,
         process_manager: Some(process_manager.clone()),
         job_manager: Some(job_manager.clone()),
-        output_buffer_registry: None, // created and wired in Phase 2
+        output_buffer_registry: Some(output_buffer_registry.clone()),
     };
 
     // Method registry
