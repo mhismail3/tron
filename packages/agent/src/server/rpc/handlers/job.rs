@@ -270,7 +270,7 @@ fn persist_user_action(
     action: &str,
     label: &str,
 ) {
-    let _ = event_store.append(&AppendOptions {
+    match event_store.append(&AppendOptions {
         session_id,
         event_type: EventType::NotificationUserJobAction,
         payload: json!({
@@ -279,5 +279,24 @@ fn persist_user_action(
             "label": label,
         }),
         parent_id: None,
-    });
+    }) {
+        Ok(event) => {
+            tracing::info!(
+                job_id,
+                action,
+                session_id,
+                event_id = %event.id,
+                "persisted user job action"
+            );
+        }
+        Err(e) => {
+            tracing::error!(
+                job_id,
+                action,
+                session_id,
+                error = %e,
+                "failed to persist user job action"
+            );
+        }
+    }
 }

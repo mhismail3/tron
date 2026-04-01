@@ -103,6 +103,8 @@ define_events! {
         ProcessResultsConsumed => "process.results_consumed" => payloads::notification::ProcessResultsConsumedPayload,
         /// User backgrounded or cancelled a job from iOS.
         NotificationUserJobAction => "notification.user_job_action" => payloads::notification::UserJobActionPayload,
+        /// User job actions consumed by agent (marks them as processed).
+        UserJobActionsConsumed => "user_job_actions.consumed" => payloads::notification::UserJobActionsConsumedPayload,
         /// Todo list written.
         TodoWrite => "todo.write" => payloads::todo::TodoWritePayload,
         /// Turn failed.
@@ -224,7 +226,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_51_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 53);
+        assert_eq!(ALL_EVENT_TYPES.len(), 54);
     }
 
     #[test]

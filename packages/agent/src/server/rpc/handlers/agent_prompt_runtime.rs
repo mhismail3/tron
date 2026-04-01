@@ -461,24 +461,51 @@ pub fn format_process_results(results: &[(String, Value)]) -> Option<String> {
 }
 
 /// Get pending user job action notifications (backgrounded/cancelled from iOS).
+/// Filters out already-consumed actions using `user_job_actions.consumed` events.
 pub fn get_pending_user_job_actions(
     event_store: &crate::events::EventStore,
     session_id: &str,
-) -> Vec<Value> {
-    event_store
+) -> Vec<(String, Value)> {
+    let notifications = event_store
         .get_events_by_type(session_id, &["notification.user_job_action"], None)
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    if notifications.is_empty() {
+        return vec![];
+    }
+
+    let consumed_events = event_store
+        .get_events_by_type(session_id, &["user_job_actions.consumed"], None)
+        .unwrap_or_default();
+
+    let mut consumed_ids: HashSet<String> = HashSet::new();
+    for event in &consumed_events {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
+            && let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array())
+        {
+            for id in ids {
+                if let Some(s) = id.as_str() {
+                    let _ = consumed_ids.insert(s.to_owned());
+                }
+            }
+        }
+    }
+
+    notifications
         .into_iter()
+        .filter(|event| !consumed_ids.contains(&event.id))
         .filter_map(|event| {
-            serde_json::from_str::<Value>(&event.payload).ok()
+            serde_json::from_str::<Value>(&event.payload)
+                .ok()
+                .map(|payload| (event.id, payload))
         })
         .collect()
 }
 
 /// Format user job actions into a system message for context injection.
-pub fn format_user_job_actions(actions: &[Value]) -> String {
+pub fn format_user_job_actions(actions: &[(String, Value)]) -> String {
     let mut ctx = String::from("# User Job Actions\n\n");
-    for action in actions {
+    for (_event_id, action) in actions {
         let job_id = action.get("jobId").and_then(Value::as_str).unwrap_or("unknown");
         let action_type = action.get("action").and_then(Value::as_str).unwrap_or("unknown");
         let label = action.get("label").and_then(Value::as_str).unwrap_or("unknown");
@@ -623,7 +650,18 @@ pub async fn load_prompt_bootstrap(
         let user_job_actions_context = if user_job_actions.is_empty() {
             None
         } else {
-            Some(format_user_job_actions(&user_job_actions))
+            let event_ids: Vec<String> = user_job_actions.iter().map(|(id, _)| id.clone()).collect();
+            let formatted = format_user_job_actions(&user_job_actions);
+            let _ = event_store.append(&crate::events::AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::UserJobActionsConsumed,
+                payload: serde_json::json!({
+                    "consumedEventIds": event_ids,
+                    "count": user_job_actions.len(),
+                }),
+                parent_id: None,
+            });
+            Some(formatted)
         };
 
         Ok(PromptBootstrapData {

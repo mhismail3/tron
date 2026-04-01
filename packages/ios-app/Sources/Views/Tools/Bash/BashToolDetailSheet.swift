@@ -12,6 +12,7 @@ struct BashToolDetailSheet: View {
     var sessionId: String?
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllLines = false
+    @State private var actionTaken = false
 
     private var tint: TintedColors {
         TintedColors(accent: .tronEmerald, colorScheme: colorScheme)
@@ -124,7 +125,7 @@ struct BashToolDetailSheet: View {
         ) {
             contentBody
         } leadingToolbar: {
-            if isJobActive {
+            if isJobActive && !actionTaken {
                 Button { backgroundJob() } label: {
                     Image(systemName: "arrow.down.to.line")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -252,6 +253,12 @@ struct BashToolDetailSheet: View {
             if isTruncated {
                 ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
+            if isBackgroundedProcess {
+                ToolInfoPill(icon: "arrow.down.to.line", label: "Backgrounded", color: .orange)
+            }
+            if actionTaken && data.status == .error {
+                ToolInfoPill(icon: "stop.fill", label: "Interrupted", color: .red)
+            }
         }
     }
 
@@ -331,6 +338,7 @@ struct BashToolDetailSheet: View {
 
     private func backgroundJob() {
         guard let processId, let rpcClient, let sessionId else { return }
+        actionTaken = true
         Task {
             try? await rpcClient.job.background(jobId: processId, sessionId: sessionId)
         }
@@ -338,6 +346,7 @@ struct BashToolDetailSheet: View {
 
     private func cancelJob() {
         guard let processId, let rpcClient, let sessionId else { return }
+        actionTaken = true
         Task {
             try? await rpcClient.job.cancel(jobId: processId, sessionId: sessionId)
         }

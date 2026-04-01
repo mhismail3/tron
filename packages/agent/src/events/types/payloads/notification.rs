@@ -93,6 +93,16 @@ pub struct ProcessResultsConsumedPayload {
     pub count: usize,
 }
 
+/// Payload for `user_job_actions.consumed` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserJobActionsConsumedPayload {
+    /// IDs of the consumed `notification.user_job_action` events.
+    pub consumed_event_ids: Vec<String>,
+    /// Number of actions consumed.
+    pub count: usize,
+}
+
 /// Payload for `notification.user_job_action` events.
 ///
 /// Persisted when the user backgrounds or cancels a job from the iOS app.
