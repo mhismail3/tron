@@ -931,6 +931,20 @@ tron_events! {
         #[serde(rename = "completedAt")]
         completed_at: String,
     } => "process_completed",
+
+    /// A blocking job was moved to the background (auto-timeout or user action).
+    JobBackgrounded {
+        /// Job identifier (process ID or subagent session ID).
+        #[serde(rename = "jobId")]
+        job_id: String,
+        /// Why it was backgrounded: `"auto_timeout"` or `"user_action"`.
+        reason: String,
+        /// Human-readable label.
+        label: String,
+        /// Tool call that spawned this job.
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+    } => "job_backgrounded",
 }
 
 impl TronEvent {
@@ -1743,7 +1757,7 @@ mod tests {
                 status: "background".into(),
             },
             TronEvent::ProcessCompleted {
-                base,
+                base: base.clone(),
                 parent_session_id: "s1".into(),
                 process_id: "proc-1".into(),
                 label: "test".into(),
@@ -1753,6 +1767,13 @@ mod tests {
                 result_summary: "ok".into(),
                 blob_id: None,
                 completed_at: "2026-01-01T00:00:00Z".into(),
+            },
+            TronEvent::JobBackgrounded {
+                base,
+                job_id: "proc-1".into(),
+                reason: "auto_timeout".into(),
+                label: "test".into(),
+                tool_call_id: "tc-1".into(),
             },
         ];
 

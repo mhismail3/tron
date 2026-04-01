@@ -446,6 +446,7 @@ impl DisplayTool {
             label: format!("display_stream:{stream_id}"),
             kind: crate::tools::traits::ProcessKind::DisplayStream,
             timeout_ms: None,
+            blocking_timeout_ms: None, // immediate background
             sandbox: false,
         };
 
@@ -455,7 +456,6 @@ impl DisplayTool {
                 &ctx.tool_call_id,
                 pm_config,
                 task,
-                true, // always background
             )
             .await?;
 

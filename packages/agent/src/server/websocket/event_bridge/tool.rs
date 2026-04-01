@@ -100,6 +100,22 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "toolName": tool_name,
             })),
         )),
+        TronEvent::JobBackgrounded {
+            job_id,
+            reason,
+            label,
+            tool_call_id,
+            ..
+        } => Some(session_scoped(
+            event,
+            "agent.job_backgrounded",
+            Some(json!({
+                "jobId": job_id,
+                "reason": reason,
+                "label": label,
+                "toolCallId": tool_call_id,
+            })),
+        )),
         _ => None,
     }
 }

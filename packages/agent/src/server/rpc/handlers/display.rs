@@ -80,9 +80,10 @@ mod tests {
             label: "display_stream:s1".into(),
             kind: ProcessKind::DisplayStream,
             timeout_ms: None,
+            blocking_timeout_ms: None,
             sandbox: false,
         };
-        let _ = pm.spawn_managed("sess-1", "tc1", config, boxed_delayed(5000), true).await.unwrap();
+        let _ = pm.spawn_managed("sess-1", "tc1", config, boxed_delayed(5000)).await.unwrap();
 
         let mut ctx = make_test_context();
         ctx.process_manager = Some(pm);

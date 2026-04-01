@@ -381,7 +381,6 @@ mod tests {
             _tool_call_id: &str,
             _config: ManagedProcessConfig,
             _task: Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-            _background: bool,
         ) -> Result<ManagedProcessHandle, ToolError> {
             unimplemented!()
         }

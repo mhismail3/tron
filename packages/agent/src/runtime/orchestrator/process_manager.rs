@@ -122,11 +122,13 @@ impl ProcessManagerOps for ProcessManager {
         tool_call_id: &str,
         config: ManagedProcessConfig,
         task: Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-        background: bool,
     ) -> Result<ManagedProcessHandle, ToolError> {
         let process_id = Self::generate_id();
         let cancel = CancellationToken::new();
         let (promote_tx, promote_rx) = oneshot::channel();
+
+        let blocking_ms = config.blocking_timeout_ms.unwrap_or(0);
+        let background = blocking_ms == 0;
 
         let tracker = Arc::new(TrackedProcess {
             process_id: process_id.clone(),
@@ -295,26 +297,17 @@ impl ProcessManagerOps for ProcessManager {
         });
 
         if background {
-            // Return immediately for background processes.
+            // Immediate background — return without blocking.
             return Ok(ManagedProcessHandle {
                 process_id,
                 result: None,
             });
         }
 
-        // Foreground: wait for completion, promotion, or timeout.
-        let timeout_ms = tracker.config.timeout_ms;
+        // Blocking: wait for completion, user-backgrounding, or blocking timeout.
         tokio::select! {
             biased;
-            // Promotion signal — return early without result.
-            Ok(()) = promote_rx => {
-                *tracker.state.lock() = ProcessState::Background;
-                Ok(ManagedProcessHandle {
-                    process_id,
-                    result: None,
-                })
-            }
-            // Process completed.
+            // Process completed within the blocking window.
             () = tracker.done.notified() => {
                 let result = tracker.result.lock().clone();
                 Ok(ManagedProcessHandle {
@@ -322,23 +315,38 @@ impl ProcessManagerOps for ProcessManager {
                     result,
                 })
             }
-            // Timeout (if configured).
-            () = async {
-                if let Some(ms) = timeout_ms {
-                    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-                } else {
-                    // No timeout — pend forever (other branches will fire).
-                    std::future::pending::<()>().await;
+            // User manually backgrounded from iOS.
+            Ok(()) = promote_rx => {
+                *tracker.state.lock() = ProcessState::Background;
+                if let Some(ref broadcast) = self.broadcast {
+                    let _ = broadcast.emit(TronEvent::JobBackgrounded {
+                        base: BaseEvent::now(session_id),
+                        job_id: process_id.clone(),
+                        reason: "user_action".into(),
+                        label: tracker.config.label.clone(),
+                        tool_call_id: tool_call_id.to_owned(),
+                    });
                 }
-            } => {
-                // Timeout: cancel the process.
-                cancel.cancel();
-                // Wait briefly for the task to register cancellation.
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                let result = tracker.result.lock().clone();
                 Ok(ManagedProcessHandle {
                     process_id,
-                    result,
+                    result: None,
+                })
+            }
+            // Blocking timeout expired — auto-background.
+            () = tokio::time::sleep(std::time::Duration::from_millis(blocking_ms)) => {
+                *tracker.state.lock() = ProcessState::Background;
+                if let Some(ref broadcast) = self.broadcast {
+                    let _ = broadcast.emit(TronEvent::JobBackgrounded {
+                        base: BaseEvent::now(session_id),
+                        job_id: process_id.clone(),
+                        reason: "auto_timeout".into(),
+                        label: tracker.config.label.clone(),
+                        tool_call_id: tool_call_id.to_owned(),
+                    });
+                }
+                Ok(ManagedProcessHandle {
+                    process_id,
+                    result: None,
                 })
             }
         }
@@ -530,6 +538,17 @@ mod tests {
             label: label.into(),
             kind: ProcessKind::Shell,
             timeout_ms: None,
+            blocking_timeout_ms: None,
+            sandbox: false,
+        }
+    }
+
+    fn make_blocking_config(label: &str) -> ManagedProcessConfig {
+        ManagedProcessConfig {
+            label: label.into(),
+            kind: ProcessKind::Shell,
+            timeout_ms: None,
+            blocking_timeout_ms: Some(60_000),
             sandbox: false,
         }
     }
@@ -599,7 +618,7 @@ mod tests {
         let pm = ProcessManager::new();
         let start = Instant::now();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("test"), boxed_delayed(100, "ok"), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("test"), boxed_delayed(100, "ok"))
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -611,7 +630,7 @@ mod tests {
     async fn spawn_foreground_returns_correct_result() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("echo"), boxed_immediate("hello", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("echo"), boxed_immediate("hello", 0))
             .await
             .unwrap();
         let result = handle.result.unwrap();
@@ -625,7 +644,7 @@ mod tests {
     async fn spawn_foreground_short_task() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("ok", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
             .await
             .unwrap();
         assert!(handle.result.is_some());
@@ -636,7 +655,7 @@ mod tests {
     async fn spawn_foreground_failed_exit_code() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fail"), boxed_immediate("error", 1), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fail"), boxed_immediate("error", 1))
             .await
             .unwrap();
         let result = handle.result.unwrap();
@@ -653,7 +672,7 @@ mod tests {
         let pm = ProcessManager::new();
         let start = Instant::now();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(500, "done"), true)
+            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(500, "done"))
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -666,7 +685,7 @@ mod tests {
     async fn spawn_background_handle_has_process_id() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(50, "ok"), true)
+            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(50, "ok"))
             .await
             .unwrap();
         assert!(handle.process_id.starts_with("proc-"));
@@ -676,7 +695,7 @@ mod tests {
     async fn spawn_background_result_available_after_completion() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(50, "done"), true)
+            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(50, "done"))
             .await
             .unwrap();
 
@@ -702,7 +721,6 @@ mod tests {
                     &format!("tc{i}"),
                     make_config(&format!("cmd-{i}")),
                     boxed_delayed(50, &format!("result-{i}")),
-                    true,
                 )
                 .await
                 .unwrap();
@@ -729,7 +747,7 @@ mod tests {
 
         // Spawn foreground with a long-running task.
         let fg_handle = tokio::spawn(async move {
-            pm2.spawn_managed("s1", "tc1", make_config("long"), boxed_delayed(5000, "done"), false)
+            pm2.spawn_managed("s1", "tc1", make_blocking_config("long"), boxed_delayed(5000, "done"))
                 .await
                 .unwrap()
         });
@@ -760,7 +778,7 @@ mod tests {
         let pm2 = pm.clone();
 
         let fg_handle = tokio::spawn(async move {
-            pm2.spawn_managed("s1", "tc1", make_config("cmd"), boxed_delayed(200, "bg-done"), false)
+            pm2.spawn_managed("s1", "tc1", make_blocking_config("cmd"), boxed_delayed(200, "bg-done"))
                 .await
                 .unwrap()
         });
@@ -793,7 +811,7 @@ mod tests {
     async fn promote_already_background_returns_error() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(500, "ok"), true)
+            .spawn_managed("s1", "tc1", make_config("bg"), boxed_delayed(500, "ok"))
             .await
             .unwrap();
         let err = pm.promote_to_background(&handle.process_id).unwrap_err();
@@ -804,7 +822,7 @@ mod tests {
     async fn promote_already_completed_returns_error() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("ok", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
             .await
             .unwrap();
         // Process is already completed.
@@ -824,7 +842,6 @@ mod tests {
                 "tc1",
                 make_config("cancellable"),
                 boxed_cancellable(inner_cancel.clone()),
-                true,
             )
             .await
             .unwrap();
@@ -844,7 +861,7 @@ mod tests {
     async fn cancel_completed_process_is_noop() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("done"), boxed_immediate("ok", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("done"), boxed_immediate("ok", 0))
             .await
             .unwrap();
         // Should not error.
@@ -861,13 +878,13 @@ mod tests {
     #[tokio::test]
     async fn cancel_session_processes_cancels_all_for_session() {
         let pm = ProcessManager::new();
-        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(5000, "a"), true)
+        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(5000, "a"))
             .await
             .unwrap();
-        pm.spawn_managed("s1", "tc2", make_config("b"), boxed_delayed(5000, "b"), true)
+        pm.spawn_managed("s1", "tc2", make_config("b"), boxed_delayed(5000, "b"))
             .await
             .unwrap();
-        pm.spawn_managed("s2", "tc3", make_config("c"), boxed_delayed(5000, "c"), true)
+        pm.spawn_managed("s2", "tc3", make_config("c"), boxed_delayed(5000, "c"))
             .await
             .unwrap();
 
@@ -882,10 +899,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_all_cancels_everything() {
         let pm = ProcessManager::new();
-        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(5000, "a"), true)
+        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(5000, "a"))
             .await
             .unwrap();
-        pm.spawn_managed("s2", "tc2", make_config("b"), boxed_delayed(5000, "b"), true)
+        pm.spawn_managed("s2", "tc2", make_config("b"), boxed_delayed(5000, "b"))
             .await
             .unwrap();
 
@@ -900,10 +917,10 @@ mod tests {
     #[tokio::test]
     async fn list_processes_filters_by_session() {
         let pm = ProcessManager::new();
-        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(500, "a"), true)
+        pm.spawn_managed("s1", "tc1", make_config("a"), boxed_delayed(500, "a"))
             .await
             .unwrap();
-        pm.spawn_managed("s2", "tc2", make_config("b"), boxed_delayed(500, "b"), true)
+        pm.spawn_managed("s2", "tc2", make_config("b"), boxed_delayed(500, "b"))
             .await
             .unwrap();
 
@@ -926,7 +943,7 @@ mod tests {
     async fn list_processes_includes_recently_completed() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("ok", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
             .await
             .unwrap();
 
@@ -940,7 +957,7 @@ mod tests {
     async fn get_result_returns_none_while_running() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(500, "ok"), true)
+            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(500, "ok"))
             .await
             .unwrap();
         assert!(pm.get_result(&handle.process_id).is_none());
@@ -950,7 +967,7 @@ mod tests {
     async fn get_result_returns_some_after_completion() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("done", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("done", 0))
             .await
             .unwrap();
         let result = pm.get_result(&handle.process_id);
@@ -977,10 +994,10 @@ mod tests {
                     label: "display_stream:stream-123".into(),
                     kind: ProcessKind::DisplayStream,
                     timeout_ms: None,
+                    blocking_timeout_ms: None,
                     sandbox: false,
                 },
                 boxed_delayed(500, "ok"),
-                true,
             )
             .await
             .unwrap();
@@ -999,10 +1016,10 @@ mod tests {
                 label: "display_stream:stream-1".into(),
                 kind: ProcessKind::DisplayStream,
                 timeout_ms: None,
+                blocking_timeout_ms: None,
                 sandbox: false,
             },
             boxed_delayed(500, "ok"),
-            true,
         )
         .await
         .unwrap();
@@ -1020,10 +1037,10 @@ mod tests {
                 label: "display_stream:stream-1".into(),
                 kind: ProcessKind::DisplayStream,
                 timeout_ms: None,
+                blocking_timeout_ms: Some(60_000),
                 sandbox: false,
             },
             boxed_immediate("ok", 0),
-            false,
         )
         .await
         .unwrap();
@@ -1035,22 +1052,25 @@ mod tests {
     // ── Timeout ──
 
     #[tokio::test]
-    async fn foreground_timeout_cancels_process() {
+    async fn blocking_timeout_auto_backgrounds() {
         let pm = ProcessManager::new();
         let config = ManagedProcessConfig {
             label: "timeout-test".into(),
             kind: ProcessKind::Shell,
-            timeout_ms: Some(100),
+            timeout_ms: Some(5000),
+            blocking_timeout_ms: Some(100), // auto-background after 100ms
             sandbox: false,
         };
+        let start = std::time::Instant::now();
         let handle = pm
-            .spawn_managed("s1", "tc1", config, boxed_delayed(5000, "late"), false)
+            .spawn_managed("s1", "tc1", config, boxed_delayed(5000, "late"))
             .await
             .unwrap();
 
-        // Should have returned due to timeout.
-        let result = handle.result.unwrap();
-        assert!(result.cancelled);
+        // Should have returned due to blocking timeout (auto-backgrounded).
+        let elapsed = start.elapsed();
+        assert!(elapsed < std::time::Duration::from_millis(1000), "should return quickly after 100ms blocking timeout");
+        assert!(handle.result.is_none(), "auto-backgrounded: no inline result");
     }
 
     #[tokio::test]
@@ -1060,10 +1080,11 @@ mod tests {
             label: "no-timeout".into(),
             kind: ProcessKind::Shell,
             timeout_ms: None,
+            blocking_timeout_ms: Some(60_000),
             sandbox: false,
         };
         let handle = pm
-            .spawn_managed("s1", "tc1", config, boxed_delayed(100, "done"), false)
+            .spawn_managed("s1", "tc1", config, boxed_delayed(100, "done"))
             .await
             .unwrap();
         assert_eq!(handle.result.unwrap().output, "done");
@@ -1075,7 +1096,7 @@ mod tests {
     async fn process_id_format_valid() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("test"), boxed_immediate("ok", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("test"), boxed_immediate("ok", 0))
             .await
             .unwrap();
         assert!(handle.process_id.starts_with("proc-"));
@@ -1091,7 +1112,7 @@ mod tests {
         // If the process completes just before promotion, promotion should fail gracefully.
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("done", 0), false)
+            .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("done", 0))
             .await
             .unwrap();
 
@@ -1106,7 +1127,7 @@ mod tests {
     async fn wait_already_completed() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("done", 0), true)
+            .spawn_managed("s1", "tc1", make_config("fast"), boxed_immediate("done", 0))
             .await
             .unwrap();
 
@@ -1122,7 +1143,7 @@ mod tests {
     async fn wait_completes_within_timeout() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(50, "finished"), true)
+            .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(50, "finished"))
             .await
             .unwrap();
 
@@ -1134,7 +1155,7 @@ mod tests {
     async fn wait_timeout_returns_error() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("very-slow"), boxed_delayed(5000, "late"), true)
+            .spawn_managed("s1", "tc1", make_config("very-slow"), boxed_delayed(5000, "late"))
             .await
             .unwrap();
 
@@ -1150,7 +1171,7 @@ mod tests {
     async fn wait_for_cancelled_process() {
         let pm = ProcessManager::new();
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("cancel-me"), boxed_delayed(5000, "nope"), true)
+            .spawn_managed("s1", "tc1", make_config("cancel-me"), boxed_delayed(5000, "nope"))
             .await
             .unwrap();
 
@@ -1177,7 +1198,7 @@ mod tests {
     async fn wait_concurrent_waiters_both_get_result() {
         let pm = Arc::new(ProcessManager::new());
         let handle = pm
-            .spawn_managed("s1", "tc1", make_config("shared"), boxed_delayed(50, "shared-result"), true)
+            .spawn_managed("s1", "tc1", make_config("shared"), boxed_delayed(50, "shared-result"))
             .await
             .unwrap();
         let pid = handle.process_id.clone();

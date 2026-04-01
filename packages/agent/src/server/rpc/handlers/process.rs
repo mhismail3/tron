@@ -158,9 +158,10 @@ mod tests {
             label: "test".into(),
             kind: ProcessKind::Shell,
             timeout_ms: None,
+            blocking_timeout_ms: None,
             sandbox: false,
         };
-        let h = pm.spawn_managed("s1", "tc1", config, boxed_delayed(5000), true).await.unwrap();
+        let h = pm.spawn_managed("s1", "tc1", config, boxed_delayed(5000)).await.unwrap();
 
         let mut ctx = make_test_context();
         ctx.process_manager = Some(pm.clone());
@@ -192,9 +193,10 @@ mod tests {
             label: "test-cmd".into(),
             kind: ProcessKind::Shell,
             timeout_ms: None,
+            blocking_timeout_ms: None,
             sandbox: false,
         };
-        let _ = pm.spawn_managed("s1", "tc1", config, boxed_delayed(5000), true).await.unwrap();
+        let _ = pm.spawn_managed("s1", "tc1", config, boxed_delayed(5000)).await.unwrap();
 
         let mut ctx = make_test_context();
         ctx.process_manager = Some(pm);

@@ -303,8 +303,11 @@ pub struct ManagedProcessConfig {
     pub label: String,
     /// Process taxonomy.
     pub kind: ProcessKind,
-    /// Timeout in milliseconds (None = no timeout, runs until cancelled).
+    /// Kill timeout in milliseconds (None = no timeout, runs until cancelled).
     pub timeout_ms: Option<u64>,
+    /// Blocking timeout in milliseconds — how long the caller waits before
+    /// the process auto-backgrounds. `None` or `Some(0)` = immediate background.
+    pub blocking_timeout_ms: Option<u64>,
     /// Whether to suggest sandboxing for background shell commands.
     pub sandbox: bool,
 }
@@ -362,15 +365,15 @@ pub struct ProcessInfo {
 /// Managed process execution for shell commands, streams, and long-running ops.
 #[async_trait]
 pub trait ProcessManagerOps: Send + Sync {
-    /// Spawn a managed process running a future. If `background` is false,
-    /// blocks until completion. If true, returns immediately with a handle.
+    /// Spawn a managed process running a future. Blocks for up to
+    /// `config.blocking_timeout_ms` before auto-backgrounding. If the timeout
+    /// is `None` or `Some(0)`, returns immediately (background).
     async fn spawn_managed(
         &self,
         session_id: &str,
         tool_call_id: &str,
         config: ManagedProcessConfig,
         task: std::pin::Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-        background: bool,
     ) -> Result<ManagedProcessHandle, ToolError>;
 
     /// Promote a foreground process to background. Unblocks the awaiting tool call.
@@ -857,6 +860,7 @@ mod tests {
             label: "cargo build".into(),
             kind: ProcessKind::Shell,
             timeout_ms: Some(120_000),
+            blocking_timeout_ms: None,
             sandbox: true,
         };
         assert_eq!(config.label, "cargo build");

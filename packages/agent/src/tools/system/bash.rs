@@ -35,8 +35,10 @@ use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::estimate_tokens;
 use crate::tools::utils::validation::{get_optional_bool, get_optional_string, get_optional_u64, validate_required_string};
 
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
-const MAX_TIMEOUT_MS: u64 = 3_600_000;
+const DEFAULT_BLOCKING_TIMEOUT_MS: u64 = 60_000;
+const MAX_BLOCKING_TIMEOUT_MS: u64 = 600_000;
+const MIN_KILL_TIMEOUT_MS: u64 = 120_000;
+const MAX_KILL_TIMEOUT_MS: u64 = 3_600_000;
 const PTY_MAX_TIMEOUT_MS: u64 = 120_000;
 const INTERACTIVE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_OUTPUT_CHARS: usize = 5_000_000;
@@ -125,31 +127,50 @@ impl BashTool {
             .collect()
     }
 
-    /// Execute a command asynchronously with auto-wait heuristic.
+    /// Execute a command via ProcessManager with blocking timeout.
     ///
-    /// Spawns the command as a background process, then waits up to ~150ms for
-    /// it to complete. If it finishes within the window, the result is inlined
-    /// (same format as synchronous execution). Otherwise, the process ID is
-    /// returned immediately and the agent can use the Wait tool later.
-    async fn execute_async_with_auto_wait(
+    /// The command blocks for up to `timeout_ms` (the `timeout` param, default 60s).
+    /// If it completes within that window, the result is returned inline.
+    /// If it's still running, it auto-backgrounds and returns a process ID.
+    /// Output is always captured in a `SharedOutputBuffer` for on-demand streaming.
+    async fn execute_managed(
         &self,
         command: &str,
-        timeout_ms: u64,
+        blocking_timeout_ms: u64,
         description: &Option<String>,
         shell: &str,
         env_vars: &std::collections::HashMap<String, String>,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         let pm = ctx.process_manager.as_ref().ok_or(ToolError::Internal {
-            message: "Async execution requires ProcessManager (not available)".into(),
+            message: "Managed execution requires ProcessManager (not available)".into(),
         })?;
+
+        // Kill timeout: 2x blocking timeout, minimum 120s, capped at 1 hour.
+        let kill_timeout_ms = (blocking_timeout_ms * 2).max(MIN_KILL_TIMEOUT_MS).min(MAX_KILL_TIMEOUT_MS);
 
         let config = crate::tools::traits::ManagedProcessConfig {
             label: command.to_owned(),
             kind: crate::tools::traits::ProcessKind::Shell,
-            timeout_ms: Some(timeout_ms),
+            timeout_ms: Some(kill_timeout_ms),
+            blocking_timeout_ms: Some(blocking_timeout_ms),
             sandbox: false,
         };
+
+        // Set up output buffer for on-demand streaming.
+        let output_buffer = std::sync::Arc::new(
+            crate::runtime::orchestrator::output_buffer::SharedOutputBuffer::new(),
+        );
+        let buffer_for_forwarder = output_buffer.clone();
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        // Forwarder task: channel → buffer. Exits when tx is dropped (process completes).
+        tokio::spawn(async move {
+            while let Some(chunk) = output_rx.recv().await {
+                buffer_for_forwarder.push(chunk);
+            }
+            buffer_for_forwarder.close();
+        });
 
         let runner = self.runner.clone();
         let cmd = command.to_owned();
@@ -162,14 +183,14 @@ impl BashTool {
             let start = std::time::Instant::now();
             let opts = ProcessOptions {
                 working_directory: working_dir,
-                timeout_ms,
+                timeout_ms: kill_timeout_ms,
                 cancellation: cancel,
                 env: env_vars,
                 stdin: None,
                 shell,
                 interactive: false,
                 pty_input: Vec::new(),
-                output_tx: None,
+                output_tx: Some(output_tx),
             };
 
             match runner.run_command(&cmd, &opts).await {
@@ -207,19 +228,19 @@ impl BashTool {
                 &ctx.tool_call_id,
                 config,
                 task,
-                true, // always background
             )
             .await?;
 
         let process_id = handle.process_id.clone();
 
-        // Auto-wait heuristic: give the command ~150ms to complete.
-        // Fast commands (ls, cat, git status) resolve inline without extra round-trips.
-        const AUTO_WAIT_MS: u64 = 150;
-        match pm.wait_for_process(&process_id, AUTO_WAIT_MS).await {
-            Ok(result) => {
-                // Completed fast — inline the result.
-                // Output is already truncated by the ProcessManager (head+tail if large).
+        // Register the output buffer for on-demand streaming via job.subscribe RPC.
+        if let Some(ref registry) = ctx.output_buffer_registry {
+            registry.register(&process_id, &ctx.tool_call_id, output_buffer);
+        }
+
+        match handle.result {
+            Some(result) => {
+                // Completed within blocking timeout — inline the result.
                 let exit_code = result.exit_code.unwrap_or(-1);
 
                 Ok(TronToolResult {
@@ -229,24 +250,24 @@ impl BashTool {
                         "exitCode": exit_code,
                         "duration": result.duration_ms,
                         "description": description,
+                        "processId": process_id,
                         "blobId": result.blob_id,
                     })),
                     is_error: if exit_code != 0 { Some(true) } else { None },
                     stop_turn: None,
                 })
             }
-            Err(_) => {
-                // Still running after 150ms — return process ID for async pickup.
+            None => {
+                // Auto-backgrounded — process continues running.
                 Ok(TronToolResult {
                     content: ToolResultBody::Text(format!(
-                        "Process started: {process_id}\nCommand: {command}\n\n\
+                        "Process backgrounded: {process_id}\nCommand: {command}\n\n\
                          Results will be automatically available at your next turn. \
                          Only use the Wait tool if you need the output before proceeding."
                     )),
                     details: Some(json!({
                         "command": command,
                         "processId": process_id,
-                        "async": true,
                         "description": description,
                     })),
                     is_error: None,
@@ -294,13 +315,13 @@ impl TronTool for BashTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "Bash",
-            "Execute a shell command. Commands run asynchronously by default — fast commands (~150ms) return results inline, \
-             slower commands return a process ID immediately. Use `wait: true` for commands where you need the output \
-             synchronously. Commands that are potentially destructive require confirmation.\n\n\
+            "Execute a shell command. Commands block for up to `timeout` milliseconds (default 60 seconds). \
+             If the command completes within the timeout, the result is returned inline. If it's still running, \
+             it automatically moves to the background and results are injected on your next turn. \
+             Commands that are potentially destructive require confirmation.\n\n\
              Parameters:\n\
              - **command** (required): The shell command to execute.\n\
-             - **wait** (optional): Block until completion (default false). Set true for quick commands (ls, cat, git status).\n\
-             - **timeout** (optional): Timeout in milliseconds (default 120000, max 3600000).\n\
+             - **timeout** (optional): How long to wait before auto-backgrounding in milliseconds (default 60000). Set higher for builds/tests. Set 0 to background immediately.\n\
              - **description** (optional): Brief description of what the command does.\n\
              - **stdin** (optional): Data to pipe to the command's stdin.\n\
              - **env** (optional): Environment variables as key-value object.\n\
@@ -309,7 +330,7 @@ impl TronTool for BashTool {
              - **ptyInput** (optional): Pattern-response pairs for interactive prompts. Array of {wait, send} objects.",
         )
         .required_property("command", json!({"type": "string", "description": "The shell command to execute"}))
-        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds (default 120000, max 3600000)"}))
+        .property("timeout", json!({"type": "number", "description": "How long to block before auto-backgrounding, in milliseconds (default 60000). Set higher for builds/tests, 0 for immediate background."}))
         .property("description", json!({"type": "string", "description": "Brief description of what the command does"}))
         .property("stdin", json!({"type": "string", "description": "Data to pipe to the command's stdin"}))
         .property("env", json!({"type": "object", "description": "Environment variables", "additionalProperties": {"type": "string"}}))
@@ -339,11 +360,6 @@ impl TronTool for BashTool {
             "description": "Paths to symlink into the sandbox (read-only)",
             "items": {"type": "string"}
         }))
-        .property("wait", json!({
-            "type": "boolean",
-            "description": "Block until command completes. Default false — commands run async and return a process ID if they take >150ms. Only set true for commands that complete near-instantly (ls, cat, echo, pwd, git status). NEVER use wait:true for builds, tests, installs, or anything that may take more than a few seconds.",
-            "default": false
-        }))
         .build()
     }
 
@@ -359,8 +375,8 @@ impl TronTool for BashTool {
         }
 
         let timeout_ms = get_optional_u64(&params, "timeout")
-            .unwrap_or(DEFAULT_TIMEOUT_MS)
-            .min(MAX_TIMEOUT_MS);
+            .unwrap_or(DEFAULT_BLOCKING_TIMEOUT_MS)
+            .min(MAX_BLOCKING_TIMEOUT_MS);
         let description = get_optional_string(&params, "description");
 
         // Parse env vars from params
@@ -420,24 +436,17 @@ impl TronTool for BashTool {
             timeout_ms
         };
 
-        // Async-first execution: commands run asynchronously by default.
-        // Exceptions that always run synchronously:
-        // - interactive/PTY mode (inherently blocking)
-        // - sandbox mode (workspace is ephemeral)
-        // - stdin provided (pipe needs to complete)
-        // - explicit wait: true
-        // - no ProcessManager available (graceful fallback)
-        let wait = get_optional_bool(&params, "wait").unwrap_or(false);
+        // Direct-run exceptions: these bypass ProcessManager because they
+        // need direct pipe/PTY access or an ephemeral sandbox workspace.
         let sandbox_mode = params.get("sandbox");
-        let force_sync = wait
-            || interactive
+        let direct_run = interactive
             || stdin.is_some()
             || sandbox_mode.is_some()
             || ctx.process_manager.is_none();
 
-        if !force_sync {
+        if !direct_run {
             return self
-                .execute_async_with_auto_wait(
+                .execute_managed(
                     &command, timeout_ms, &description, &shell, &env_vars, ctx,
                 )
                 .await;
@@ -1688,21 +1697,21 @@ mod tests {
     // ── Async-first execution ──────────────────────────────────
 
     #[test]
-    fn bash_schema_has_wait_param() {
+    fn bash_schema_has_timeout_param() {
         let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        assert!(props.contains_key("wait"), "missing wait property");
-        assert_eq!(props["wait"]["type"], "boolean");
-        // background param should be gone
-        assert!(!props.contains_key("background"), "background should be removed");
+        assert!(props.contains_key("timeout"), "missing timeout property");
+        // wait param should be gone (replaced by timeout)
+        assert!(!props.contains_key("wait"), "wait should be removed");
     }
 
     #[tokio::test]
-    async fn bash_wait_true_is_synchronous() {
+    async fn bash_direct_run_returns_inline() {
+        // Without ProcessManager, bash falls back to direct run
         let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
         let r = tool
-            .execute(json!({"command": "echo hello", "wait": true}), &make_ctx())
+            .execute(json!({"command": "echo hello"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
