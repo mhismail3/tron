@@ -36,6 +36,11 @@ final class ProcessState {
         processes.values.filter { $0.status == .running || $0.status == .backgrounded }.count
     }
 
+    /// Find a process by its tool call ID.
+    func process(forToolCallId toolCallId: String) -> TrackedProcess? {
+        processes.values.first { $0.toolCallId == toolCallId }
+    }
+
     /// All processes sorted by start time (most recent first).
     var allProcessesSorted: [TrackedProcess] {
         processes.values.sorted { $0.startedAt > $1.startedAt }

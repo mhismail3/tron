@@ -8,6 +8,19 @@ extension ChatViewModel: ProcessEventHandler {
 
     func handleProcessSpawned(_ result: ProcessSpawnedPlugin.Result) {
         processState.trackSpawn(result: result)
+
+        // Inject processId into the tool's details so BashToolDetailSheet
+        // can access it during .running status (before tool_end arrives).
+        if let index = messageIndex.index(forToolCallId: result.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages),
+           case .toolUse(var tool) = messages[index].content {
+            var details = tool.details ?? [:]
+            details["processId"] = AnyCodable(result.processId)
+            tool.details = details
+            messages[index].content = .toolUse(tool)
+            messageWindowManager.updateMessage(messages[index])
+        }
+
         logDebug("Process spawned: \(result.processId) [\(result.label)]")
     }
 

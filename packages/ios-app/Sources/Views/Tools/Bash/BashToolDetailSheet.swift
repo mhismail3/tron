@@ -120,9 +120,28 @@ struct BashToolDetailSheet: View {
             toolName: "Bash",
             iconName: "terminal",
             accent: .tronEmerald,
-            copyContent: command
+            copyContent: isJobActive ? nil : command
         ) {
             contentBody
+        }
+        .toolbar {
+            if isJobActive {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button { backgroundJob() } label: {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.orange.opacity(0.8))
+                    }
+                    .accessibilityLabel("Background")
+
+                    Button { cancelJob() } label: {
+                        Image(systemName: "stop.fill")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                    .accessibilityLabel("Interrupt")
+                }
+            }
         }
         .onAppear {
             subscribeToOutputIfNeeded()
@@ -294,10 +313,6 @@ struct BashToolDetailSheet: View {
         } else {
             ToolRunningSpinner(title: "Output", accent: .tronEmerald, tint: tint, actionText: "Running command...")
         }
-
-        if isJobActive {
-            jobActionButtons
-        }
     }
 
     // MARK: - Job State
@@ -315,31 +330,7 @@ struct BashToolDetailSheet: View {
         data.status == .running || isBackgroundedProcess
     }
 
-    // MARK: - Job Action Buttons
-
-    @ViewBuilder
-    private var jobActionButtons: some View {
-        HStack(spacing: 12) {
-            if data.status == .running {
-                Button {
-                    backgroundJob()
-                } label: {
-                    Label("Background", systemImage: "arrow.down.to.line")
-                }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-            }
-
-            Button {
-                cancelJob()
-            } label: {
-                Label("Interrupt", systemImage: "stop.fill")
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-        }
-        .padding(.top, 8)
-    }
+    // MARK: - Job Actions
 
     private func backgroundJob() {
         guard let processId, let rpcClient, let sessionId else { return }
