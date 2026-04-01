@@ -157,10 +157,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        // On iPhone with no sessions, show WelcomePage or alternate dashboard
-        if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
-            compactWelcomePage
-        } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
+        if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
             compactVoiceNotesList
         } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
             compactSandboxesDashboard
@@ -177,16 +174,6 @@ struct ContentView: View {
             onNavigationModeChange: { mode in navigationMode = mode },
             notificationUnreadCount: notificationStore.unreadCount,
             onNotificationBell: { showNotificationSheet = true }
-        )
-    }
-
-    @ViewBuilder
-    private var compactWelcomePage: some View {
-        WelcomePage(
-            onNewSession: { showNewSessionSheet = true },
-            onNewSessionLongPress: { createQuickSession() },
-            onVoiceNote: { showVoiceNotesRecording = true },
-            actions: dashboardActions
         )
     }
 
@@ -238,15 +225,29 @@ struct ContentView: View {
 
     @ViewBuilder
     private var splitViewContent: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebarContent
-        } detail: {
-            detailContent
+        if horizontalSizeClass == .compact {
+            // Use NavigationStack + navigationDestination on compact to ensure
+            // .navigationBarBackButtonHidden(true) is applied before the push
+            // animation starts. NavigationSplitView's compact push applies the
+            // modifier too late, causing the default back button to flash.
+            NavigationStack {
+                sidebarContent
+                    .navigationDestination(item: $selectedSessionId) { sessionId in
+                        chatViewForSession(sessionId)
+                    }
+            }
+            .tint(.tronEmerald)
+        } else {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                sidebarContent
+            } detail: {
+                detailContent
+            }
+            .navigationSplitViewStyle(.balanced)
+            .scrollContentBackground(.hidden)
+            .tint(.tronEmerald)
+            .animation(.easeInOut(duration: 0.35), value: columnVisibility)
         }
-        .navigationSplitViewStyle(.balanced)
-        .scrollContentBackground(.hidden)
-        .tint(.tronEmerald)
-        .animation(.easeInOut(duration: 0.35), value: columnVisibility)
     }
 
     @ViewBuilder

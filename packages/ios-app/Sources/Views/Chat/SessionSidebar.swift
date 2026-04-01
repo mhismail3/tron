@@ -128,7 +128,7 @@ struct SessionSidebar: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)
         .toolbar {
-            DashboardToolbarContent(title: "Sessions", accent: .tronEmerald, actions: actions)
+            DashboardToolbarContent(title: eventStoreManager.sortedSessions.isEmpty ? "Tron" : "Sessions", accent: .tronEmerald, actions: actions)
         }
     }
 
