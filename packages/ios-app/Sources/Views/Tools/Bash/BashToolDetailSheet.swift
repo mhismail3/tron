@@ -123,24 +123,21 @@ struct BashToolDetailSheet: View {
             copyContent: isJobActive ? nil : command
         ) {
             contentBody
-        }
-        .toolbar {
+        } leadingToolbar: {
             if isJobActive {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button { backgroundJob() } label: {
-                        Image(systemName: "arrow.down.to.line")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.orange.opacity(0.8))
-                    }
-                    .accessibilityLabel("Background")
-
-                    Button { cancelJob() } label: {
-                        Image(systemName: "stop.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.red.opacity(0.8))
-                    }
-                    .accessibilityLabel("Interrupt")
+                Button { backgroundJob() } label: {
+                    Image(systemName: "arrow.down.to.line")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.orange.opacity(0.8))
                 }
+                .accessibilityLabel("Background")
+
+                Button { cancelJob() } label: {
+                    Image(systemName: "stop.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.red.opacity(0.8))
+                }
+                .accessibilityLabel("Interrupt")
             }
         }
         .onAppear {

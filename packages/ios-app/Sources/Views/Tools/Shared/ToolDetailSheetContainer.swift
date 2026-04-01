@@ -17,12 +17,13 @@ import SwiftUI
 /// }
 /// ```
 @available(iOS 26.0, *)
-struct ToolDetailSheetContainer<Content: View>: View {
+struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
     let toolName: String
     let iconName: String
     let accent: Color
     let copyContent: String?
     @ViewBuilder let content: () -> Content
+    @ViewBuilder let leadingToolbar: () -> LeadingToolbar
     @Environment(\.dismiss) private var dismiss
 
     init(
@@ -30,13 +31,15 @@ struct ToolDetailSheetContainer<Content: View>: View {
         iconName: String,
         accent: Color,
         copyContent: String? = nil,
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder leadingToolbar: @escaping () -> LeadingToolbar
     ) {
         self.toolName = toolName
         self.iconName = iconName
         self.accent = accent
         self.copyContent = copyContent
         self.content = content
+        self.leadingToolbar = leadingToolbar
     }
 
     var body: some View {
@@ -47,8 +50,9 @@ struct ToolDetailSheetContainer<Content: View>: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                if let copyContent {
-                    ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    leadingToolbar()
+                    if let copyContent {
                         Button {
                             UIPasteboard.general.string = copyContent
                         } label: {
@@ -82,5 +86,24 @@ struct ToolDetailSheetContainer<Content: View>: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accent)
+    }
+}
+
+// Convenience init without custom leading toolbar (backward compat for all other tool sheets).
+@available(iOS 26.0, *)
+extension ToolDetailSheetContainer where LeadingToolbar == EmptyView {
+    init(
+        toolName: String,
+        iconName: String,
+        accent: Color,
+        copyContent: String? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.toolName = toolName
+        self.iconName = iconName
+        self.accent = accent
+        self.copyContent = copyContent
+        self.content = content
+        self.leadingToolbar = { EmptyView() }
     }
 }
