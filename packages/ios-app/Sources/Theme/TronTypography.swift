@@ -5,7 +5,7 @@ import UIKit
 
 /// Centralized typography definitions.
 /// All text uses the user-selected font family from FontSettings.
-/// Code blocks and file paths always use Recursive Mono.
+/// Code blocks and file paths use the user-selected mono family.
 enum TronTypography {
     // MARK: - Font Sizes
 
@@ -99,15 +99,15 @@ enum TronTypography {
         )
     }
 
-    // MARK: - Semantic Presets (Code — always Recursive Mono)
+    // MARK: - Semantic Presets (Code — selected mono family)
 
-    /// Code blocks - 15pt (always Recursive Mono)
+    /// Code blocks - 15pt (selected mono family)
     @MainActor static var codeBlock: Font { code(size: sizeBodyLG) }
 
-    /// Inline code content - 11pt (always Recursive Mono, for commands, output, paths, identifiers)
+    /// Inline code content - 11pt (selected mono family, for commands, output, paths, identifiers)
     @MainActor static var codeContent: Font { code(size: sizeBody2) }
 
-    /// Small code content - 10pt (always Recursive Mono, for env vars, metadata identifiers)
+    /// Small code content - 10pt (selected mono family, for env vars, metadata identifiers)
     @MainActor static var codeContentSM: Font { code(size: sizeCaption) }
 
     // MARK: - Semantic Presets (Selected Font)

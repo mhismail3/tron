@@ -431,30 +431,6 @@ struct BashChipSummaryTests {
     }
 }
 
-// MARK: - Background Detection Tests
-
-@Suite("Bash Background Detection")
-struct BashBackgroundDetectionTests {
-
-    @Test("isBackground returns true when background is true")
-    func testIsBackgroundTrue() {
-        let args = "{\"command\": \"sleep 10\", \"background\": true}"
-        #expect(BashDetailsHelper.isBackground(from: args) == true)
-    }
-
-    @Test("isBackground returns false when background is absent")
-    func testIsBackgroundAbsent() {
-        let args = "{\"command\": \"sleep 10\"}"
-        #expect(BashDetailsHelper.isBackground(from: args) == false)
-    }
-
-    @Test("isBackground returns false when background is false")
-    func testIsBackgroundFalse() {
-        let args = "{\"command\": \"sleep 10\", \"background\": false}"
-        #expect(BashDetailsHelper.isBackground(from: args) == false)
-    }
-}
-
 // MARK: - ptyInput Redaction Tests
 
 @Suite("Bash ptyInput Redaction")

@@ -48,6 +48,17 @@
 		<string>Fonts/IBMPlexSerif-Medium.ttf</string>
 		<string>Fonts/IBMPlexSerif-SemiBold.ttf</string>
 		<string>Fonts/IBMPlexSerif-Bold.ttf</string>
+		<string>Fonts/Literata-Variable.ttf</string>
+		<string>Fonts/SourceSerif4-Variable.ttf</string>
+		<string>Fonts/Lora-Variable.ttf</string>
+		<string>Fonts/CrimsonPro-Variable.ttf</string>
+		<string>Fonts/JetBrainsMono-Variable.ttf</string>
+		<string>Fonts/IBMPlexMono-Light.ttf</string>
+		<string>Fonts/IBMPlexMono-Regular.ttf</string>
+		<string>Fonts/IBMPlexMono-Medium.ttf</string>
+		<string>Fonts/IBMPlexMono-SemiBold.ttf</string>
+		<string>Fonts/IBMPlexMono-Bold.ttf</string>
+		<string>Fonts/GeistMono-Variable.ttf</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

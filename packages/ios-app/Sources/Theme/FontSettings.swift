@@ -13,6 +13,13 @@ final class FontSettings {
         }
     }
 
+    /// Selected font family for monospace/code text
+    var selectedMonoFamily: FontFamily {
+        didSet {
+            UserDefaults.standard.set(selectedMonoFamily.rawValue, forKey: "monoFontFamily")
+        }
+    }
+
     /// CASL axis value (0 = Linear, 1 = Casual) — backward-compatible convenience for Recursive
     var casualAxis: Double {
         get { axisValue(for: .recursive, axis: .casual) }
@@ -51,6 +58,15 @@ final class FontSettings {
             self.selectedFamily = .recursive
         }
 
+        // Load selected mono family
+        if let raw = UserDefaults.standard.string(forKey: "monoFontFamily"),
+           let family = FontFamily(rawValue: raw),
+           FontFamily.monoFamilies.contains(family) {
+            self.selectedMonoFamily = family
+        } else {
+            self.selectedMonoFamily = .recursive
+        }
+
         // Load axis values
         if let data = UserDefaults.standard.data(forKey: "fontAxisValues"),
            let decoded = try? JSONDecoder().decode([String: [String: Double]].self, from: data) {
@@ -78,6 +94,14 @@ final class FontSettings {
             self.selectedFamily = family
         } else {
             self.selectedFamily = .recursive
+        }
+
+        if let raw = defaults.string(forKey: "monoFontFamily"),
+           let family = FontFamily(rawValue: raw),
+           FontFamily.monoFamilies.contains(family) {
+            self.selectedMonoFamily = family
+        } else {
+            self.selectedMonoFamily = .recursive
         }
 
         if let data = defaults.data(forKey: "fontAxisValues"),

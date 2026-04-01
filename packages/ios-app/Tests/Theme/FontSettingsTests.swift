@@ -6,7 +6,7 @@ import Testing
 struct FontFamilyTests {
 
     @Test func allCasesCount() {
-        #expect(FontFamily.allCases.count == 6)
+        #expect(FontFamily.allCases.count == 13)
     }
 
     @Test func displayNames() {
@@ -16,6 +16,13 @@ struct FontFamilyTests {
         #expect(FontFamily.donegalOne.displayName == "Donegal One")
         #expect(FontFamily.ibmPlexSerif.displayName == "IBM Plex Serif")
         #expect(FontFamily.libreBaskerville.displayName == "Libre Baskerville")
+        #expect(FontFamily.literata.displayName == "Literata")
+        #expect(FontFamily.sourceSerif4.displayName == "Source Serif 4")
+        #expect(FontFamily.lora.displayName == "Lora")
+        #expect(FontFamily.crimsonPro.displayName == "Crimson Pro")
+        #expect(FontFamily.jetBrainsMono.displayName == "JetBrains Mono")
+        #expect(FontFamily.ibmPlexMono.displayName == "IBM Plex Mono")
+        #expect(FontFamily.geistMono.displayName == "Geist Mono")
     }
 
     @Test func rawValueRoundTrip() {
@@ -33,15 +40,33 @@ struct FontFamilyTests {
     }
 
     @Test func recursiveHasCasualAxis() {
-        #expect(FontFamily.recursive.customAxes == [.casual])
+        #expect(FontFamily.recursive.customAxes.contains(.casual))
+        #expect(FontFamily.recursive.customAxes.contains(.weight))
     }
 
-    @Test func weightOnlyFontsHaveNoCustomAxes() {
-        #expect(FontFamily.alanSans.customAxes.isEmpty)
-        #expect(FontFamily.comme.customAxes.isEmpty)
-        #expect(FontFamily.donegalOne.customAxes.isEmpty)
-        #expect(FontFamily.ibmPlexSerif.customAxes.isEmpty)
-        #expect(FontFamily.libreBaskerville.customAxes.isEmpty)
+    @Test func opticalSizeFontsHaveOpszAxis() {
+        #expect(FontFamily.literata.customAxes.contains(.opticalSize))
+        #expect(FontFamily.literata.customAxes.contains(.weight))
+        #expect(FontFamily.sourceSerif4.customAxes.contains(.opticalSize))
+        #expect(FontFamily.sourceSerif4.customAxes.contains(.weight))
+    }
+
+    @Test func variableFontsHaveWeightAxis() {
+        let variableFonts: [FontFamily] = [
+            .recursive, .alanSans, .comme, .libreBaskerville,
+            .literata, .sourceSerif4, .lora, .crimsonPro,
+            .jetBrainsMono, .geistMono,
+        ]
+        for family in variableFonts {
+            #expect(family.customAxes.contains(.weight), "\(family.displayName) should have weight axis")
+        }
+    }
+
+    @Test func staticFontsHaveNoCustomAxes() {
+        let staticFonts: [FontFamily] = [.donegalOne, .ibmPlexSerif, .ibmPlexMono]
+        for family in staticFonts {
+            #expect(family.customAxes.isEmpty, "Expected no custom axes for \(family.displayName)")
+        }
     }
 
     @Test func weightRanges() {
@@ -51,15 +76,87 @@ struct FontFamilyTests {
         #expect(FontFamily.donegalOne.weightRange == 400...400)
         #expect(FontFamily.ibmPlexSerif.weightRange == 300...700)
         #expect(FontFamily.libreBaskerville.weightRange == 400...700)
+        #expect(FontFamily.literata.weightRange == 200...900)
+        #expect(FontFamily.sourceSerif4.weightRange == 200...900)
+        #expect(FontFamily.lora.weightRange == 400...700)
+        #expect(FontFamily.crimsonPro.weightRange == 200...900)
+        #expect(FontFamily.jetBrainsMono.weightRange == 100...800)
+        #expect(FontFamily.ibmPlexMono.weightRange == 300...700)
+        #expect(FontFamily.geistMono.weightRange == 100...900)
     }
 
     @Test func variableFontClassification() {
-        #expect(FontFamily.recursive.isVariable == true)
-        #expect(FontFamily.alanSans.isVariable == true)
-        #expect(FontFamily.comme.isVariable == true)
-        #expect(FontFamily.libreBaskerville.isVariable == true)
-        #expect(FontFamily.donegalOne.isVariable == false)
-        #expect(FontFamily.ibmPlexSerif.isVariable == false)
+        let variable: [FontFamily] = [
+            .recursive, .alanSans, .comme, .libreBaskerville,
+            .literata, .sourceSerif4, .lora, .crimsonPro,
+            .jetBrainsMono, .geistMono,
+        ]
+        for family in variable {
+            #expect(family.isVariable == true, "\(family.displayName) should be variable")
+        }
+
+        let staticFonts: [FontFamily] = [.donegalOne, .ibmPlexSerif, .ibmPlexMono]
+        for family in staticFonts {
+            #expect(family.isVariable == false, "\(family.displayName) should be static")
+        }
+    }
+
+    // MARK: - Category Tests
+
+    @Test func categoryAssignment() {
+        #expect(FontFamily.recursive.category == .sans)
+        #expect(FontFamily.alanSans.category == .sans)
+        #expect(FontFamily.comme.category == .sans)
+
+        #expect(FontFamily.donegalOne.category == .serif)
+        #expect(FontFamily.ibmPlexSerif.category == .serif)
+        #expect(FontFamily.libreBaskerville.category == .serif)
+        #expect(FontFamily.literata.category == .serif)
+        #expect(FontFamily.sourceSerif4.category == .serif)
+        #expect(FontFamily.lora.category == .serif)
+        #expect(FontFamily.crimsonPro.category == .serif)
+
+        #expect(FontFamily.jetBrainsMono.category == .mono)
+        #expect(FontFamily.ibmPlexMono.category == .mono)
+        #expect(FontFamily.geistMono.category == .mono)
+    }
+
+    @Test func textFamiliesExcludeMono() {
+        let textFamilies = FontFamily.textFamilies
+        for family in textFamilies {
+            #expect(family.category != .mono, "\(family.displayName) should not be in textFamilies")
+        }
+        #expect(textFamilies.count == 10)
+    }
+
+    @Test func monoFamiliesIncludeRecursiveAndMonoCategory() {
+        let monoFamilies = FontFamily.monoFamilies
+        #expect(monoFamilies.contains(.recursive))
+        #expect(monoFamilies.contains(.jetBrainsMono))
+        #expect(monoFamilies.contains(.ibmPlexMono))
+        #expect(monoFamilies.contains(.geistMono))
+        #expect(monoFamilies.count == 4)
+    }
+
+    @Test func everyFamilyHasNonEmptyFontName() {
+        for family in FontFamily.allCases {
+            #expect(!family.fontName.isEmpty, "\(family.displayName) has empty fontName")
+        }
+    }
+
+    @Test func everyFamilyHasNonEmptyShortDescription() {
+        for family in FontFamily.allCases {
+            #expect(!family.shortDescription.isEmpty, "\(family.displayName) has empty shortDescription")
+        }
+    }
+
+    @Test func weightRangeLowerBoundNeverExceedsUpper() {
+        for family in FontFamily.allCases {
+            #expect(
+                family.weightRange.lowerBound <= family.weightRange.upperBound,
+                "\(family.displayName) has invalid weight range"
+            )
+        }
     }
 }
 
@@ -67,7 +164,24 @@ struct FontFamilyTests {
 struct FontAxisTests {
 
     @Test func allCasesCount() {
-        #expect(FontAxis.allCases.count == 1)
+        #expect(FontAxis.allCases.count == 3)
+    }
+
+    @Test func weightRange() {
+        let range = FontAxis.weight.range(for: .recursive)
+        #expect(range == 300...1000)
+
+        let literataRange = FontAxis.weight.range(for: .literata)
+        #expect(literataRange == 200...900)
+    }
+
+    @Test func weightDefaultValue() {
+        #expect(FontAxis.weight.defaultValue(for: .recursive) == 400)
+        #expect(FontAxis.weight.defaultValue(for: .literata) == 400)
+    }
+
+    @Test func weightAxisIsUserControlled() {
+        #expect(FontAxis.weight.isAutomatic == false)
     }
 
     @Test func casualRange() {
@@ -75,17 +189,56 @@ struct FontAxisTests {
         #expect(range == 0...1)
     }
 
+    @Test func opticalSizeRanges() {
+        let literataRange = FontAxis.opticalSize.range(for: .literata)
+        #expect(literataRange == 7...72)
+
+        let sourceSerifRange = FontAxis.opticalSize.range(for: .sourceSerif4)
+        #expect(sourceSerifRange == 8...60)
+    }
+
     @Test func defaultValues() {
         #expect(FontAxis.casual.defaultValue(for: .recursive) == 0.5)
+        #expect(FontAxis.opticalSize.defaultValue(for: .literata) == 14)
+        #expect(FontAxis.opticalSize.defaultValue(for: .sourceSerif4) == 14)
+    }
+
+    @Test func automaticAxisFlag() {
+        #expect(FontAxis.casual.isAutomatic == false)
+        #expect(FontAxis.opticalSize.isAutomatic == true)
     }
 
     @Test func labels() {
         #expect(FontAxis.casual.minLabel == "Linear")
         #expect(FontAxis.casual.maxLabel == "Casual")
+        #expect(FontAxis.opticalSize.minLabel == "Small")
+        #expect(FontAxis.opticalSize.maxLabel == "Large")
     }
 
     @Test func tags() {
         #expect(FontAxis.casual.tag == 0x4341534C)
+        #expect(FontAxis.opticalSize.tag == 0x6F70737A)
+    }
+}
+
+@MainActor
+struct FontCategoryTests {
+
+    @Test func allCasesCount() {
+        #expect(FontCategory.allCases.count == 3)
+    }
+
+    @Test func displayNames() {
+        #expect(FontCategory.sans.displayName == "Sans")
+        #expect(FontCategory.serif.displayName == "Serif")
+        #expect(FontCategory.mono.displayName == "Mono")
+    }
+
+    @Test func everyFamilyBelongsToExactlyOneCategory() {
+        for family in FontFamily.allCases {
+            let category = family.category
+            #expect(FontCategory.allCases.contains(category))
+        }
     }
 }
 
@@ -99,6 +252,13 @@ struct FontSettingsTests {
         #expect(settings.selectedFamily == .recursive)
     }
 
+    @Test func defaultMonoFamilyIsRecursive() {
+        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoDefault")!
+        defaults.removePersistentDomain(forName: "FontSettingsTests.monoDefault")
+        let settings = FontSettings(defaults: defaults)
+        #expect(settings.selectedMonoFamily == .recursive)
+    }
+
     @Test func selectedFamilyPersists() {
         let settings = FontSettings.shared
         let original = settings.selectedFamily
@@ -109,7 +269,49 @@ struct FontSettingsTests {
         settings.selectedFamily = .comme
         #expect(UserDefaults.standard.string(forKey: "fontFamily") == "comme")
 
+        settings.selectedFamily = .literata
+        #expect(UserDefaults.standard.string(forKey: "fontFamily") == "literata")
+
+        settings.selectedFamily = .sourceSerif4
+        #expect(UserDefaults.standard.string(forKey: "fontFamily") == "sourceSerif4")
+
         settings.selectedFamily = original
+    }
+
+    @Test func selectedMonoFamilyPersists() {
+        let settings = FontSettings.shared
+        let original = settings.selectedMonoFamily
+
+        settings.selectedMonoFamily = .jetBrainsMono
+        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "jetBrainsMono")
+
+        settings.selectedMonoFamily = .ibmPlexMono
+        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "ibmPlexMono")
+
+        settings.selectedMonoFamily = .geistMono
+        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "geistMono")
+
+        settings.selectedMonoFamily = .recursive
+        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "recursive")
+
+        settings.selectedMonoFamily = original
+    }
+
+    @Test func monoFamilyDefaultsToRecursiveForInvalidValue() {
+        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoInvalid")!
+        defaults.removePersistentDomain(forName: "FontSettingsTests.monoInvalid")
+        defaults.set("nonExistentFont", forKey: "monoFontFamily")
+        let settings = FontSettings(defaults: defaults)
+        #expect(settings.selectedMonoFamily == .recursive)
+    }
+
+    @Test func monoFamilyDefaultsToRecursiveForNonMonoFont() {
+        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoNonMono")!
+        defaults.removePersistentDomain(forName: "FontSettingsTests.monoNonMono")
+        // Try to set a serif font as mono — should fall back to recursive
+        defaults.set(FontFamily.literata.rawValue, forKey: "monoFontFamily")
+        let settings = FontSettings(defaults: defaults)
+        #expect(settings.selectedMonoFamily == .recursive)
     }
 
     @Test func axisValueDefaultsWhenNotSet() {
@@ -169,5 +371,15 @@ struct FontSettingsTests {
         #expect(settings.currentAxisValue(for: .casual) == 0.6)
 
         settings.selectedFamily = origFamily
+    }
+
+    @Test func newSerifFontsLoadWithCorrectDefaults() {
+        let defaults = UserDefaults(suiteName: "FontSettingsTests.newSerifs")!
+        defaults.removePersistentDomain(forName: "FontSettingsTests.newSerifs")
+        let settings = FontSettings(defaults: defaults)
+
+        // New serif fonts should have default optical size axis values
+        #expect(settings.axisValue(for: .literata, axis: .opticalSize) == 14)
+        #expect(settings.axisValue(for: .sourceSerif4, axis: .opticalSize) == 14)
     }
 }

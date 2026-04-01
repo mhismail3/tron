@@ -9,6 +9,7 @@ struct AppearanceSettingsPage: View {
         SettingsPageContainer(title: "Appearance") {
             themeCard
             fontCard
+            codeFontCard
             thinkingIndicatorCard
         }
     }
@@ -68,7 +69,7 @@ struct AppearanceSettingsPage: View {
 
     private var fontCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Font")
+            SettingsSectionHeader(title: "Text Font")
 
             SettingsCard {
                 // Preview + info row
@@ -99,37 +100,142 @@ struct AppearanceSettingsPage: View {
 
                 Divider().padding(.leading, 12)
 
-                // Font family chips
+                // Font family chips grouped by category
+                fontCategoryChips(
+                    families: FontFamily.textFamilies,
+                    selected: fontSettings.selectedFamily
+                ) { family in
+                    fontSettings.selectedFamily = family
+                }
+
+                // Axis sliders (only for fonts with user-facing axes)
+                let axes = fontSettings.selectedFamily.customAxes.filter { !$0.isAutomatic }
+                if !axes.isEmpty {
+                    Divider().padding(.leading, 12)
+
+                    ForEach(axes) { axis in
+                        axisSlider(axis, family: fontSettings.selectedFamily)
+                    }
+                }
+            }
+
+            SettingsCaption(text: "Used for messages, headings, and UI text.")
+        }
+    }
+
+    // MARK: - Code Font Card
+
+    private var codeFontCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Code Font")
+
+            SettingsCard {
+                // Preview + info row
+                HStack(spacing: 12) {
+                    Text("{;}")
+                        .font(TronFontLoader.createFont(
+                            size: 22,
+                            weight: .medium,
+                            mono: true,
+                            family: fontSettings.selectedMonoFamily
+                        ))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 44)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(fontSettings.selectedMonoFamily.displayName)
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(fontSettings.selectedMonoFamily.shortDescription)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+
+                Divider().padding(.leading, 12)
+
+                // Mono font chips
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(FontFamily.allCases) { family in
-                            fontChip(family)
+                        ForEach(FontFamily.monoFamilies, id: \.id) { family in
+                            fontSelectionChip(
+                                family: family,
+                                isSelected: fontSettings.selectedMonoFamily == family
+                            ) {
+                                fontSettings.selectedMonoFamily = family
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                 }
 
-                // Axis sliders (only for Recursive's CASL axis)
-                let axes = fontSettings.selectedFamily.customAxes
+                // Axis sliders for mono family (Recursive's CASL axis)
+                let axes = fontSettings.selectedMonoFamily.customAxes.filter { !$0.isAutomatic }
                 if !axes.isEmpty {
                     Divider().padding(.leading, 12)
 
                     ForEach(axes) { axis in
-                        axisSlider(axis)
+                        axisSlider(axis, family: fontSettings.selectedMonoFamily)
                     }
                 }
             }
 
-            SettingsCaption(text: "Code and file paths always use Recursive mono.")
+            SettingsCaption(text: "Used for code blocks, file paths, and terminal output.")
         }
     }
 
-    private func fontChip(_ family: FontFamily) -> some View {
-        let isSelected = fontSettings.selectedFamily == family
-        return Button {
+    // MARK: - Font Chips
+
+    private func fontCategoryChips(
+        families: [FontFamily],
+        selected: FontFamily,
+        onSelect: @escaping (FontFamily) -> Void
+    ) -> some View {
+        let grouped = Dictionary(grouping: families) { $0.category }
+        let categories: [FontCategory] = [.sans, .serif]
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(categories, id: \.self) { category in
+                if let categoryFamilies = grouped[category] {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            Text(category.displayName)
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(.tronTextMuted)
+                                .frame(width: 32, alignment: .leading)
+
+                            ForEach(categoryFamilies, id: \.id) { family in
+                                fontSelectionChip(
+                                    family: family,
+                                    isSelected: selected == family
+                                ) {
+                                    onSelect(family)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func fontSelectionChip(
+        family: FontFamily,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                fontSettings.selectedFamily = family
+                action()
             }
         } label: {
             Text(family.displayName)
@@ -145,9 +251,12 @@ struct AppearanceSettingsPage: View {
         .buttonStyle(.plain)
     }
 
-    private func axisSlider(_ axis: FontAxis) -> some View {
-        let family = fontSettings.selectedFamily
+    private func axisSlider(_ axis: FontAxis, family: FontFamily) -> some View {
         let range = axis.range(for: family)
+        let binding = Binding(
+            get: { fontSettings.axisValue(for: family, axis: axis) },
+            set: { fontSettings.setAxisValue(for: family, axis: axis, value: $0) }
+        )
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -163,10 +272,7 @@ struct AppearanceSettingsPage: View {
             }
 
             Slider(
-                value: Binding(
-                    get: { fontSettings.axisValue(for: family, axis: axis) },
-                    set: { fontSettings.setAxisValue(for: family, axis: axis, value: $0) }
-                ),
+                value: binding,
                 in: range.lowerBound...range.upperBound
             ) {
                 Text(axis.displayName)
@@ -188,8 +294,12 @@ struct AppearanceSettingsPage: View {
     private func axisValueLabel(_ axis: FontAxis, family: FontFamily) -> String {
         let value = fontSettings.axisValue(for: family, axis: axis)
         switch axis {
+        case .weight:
+            return String(format: "%.0f", value)
         case .casual:
             return String(format: "%.2f", value)
+        case .opticalSize:
+            return String(format: "%.0fpt", value)
         }
     }
 

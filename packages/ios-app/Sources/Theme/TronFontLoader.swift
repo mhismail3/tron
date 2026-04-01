@@ -7,11 +7,12 @@ enum TronFontLoader {
     // MARK: - Variable Font Axis Tags
 
     enum AxisTag {
-        static let weight: UInt32 = 0x77676874   // 'wght'
-        static let casual: UInt32 = 0x4341534C   // 'CASL'
-        static let mono: UInt32 = 0x4D4F4E4F     // 'MONO'
-        static let slant: UInt32 = 0x736C6E74    // 'slnt'
-        static let cursive: UInt32 = 0x43525356   // 'CRSV'
+        static let weight: UInt32 = 0x77676874    // 'wght'
+        static let casual: UInt32 = 0x4341534C    // 'CASL'
+        static let mono: UInt32 = 0x4D4F4E4F      // 'MONO'
+        static let slant: UInt32 = 0x736C6E74     // 'slnt'
+        static let cursive: UInt32 = 0x43525356    // 'CRSV'
+        static let opticalSize: UInt32 = 0x6F70737A // 'opsz'
     }
 
     /// Weight values for variable fonts
@@ -63,9 +64,11 @@ enum TronFontLoader {
         casual: CGFloat? = nil,
         family: FontFamily? = nil
     ) -> UIFont {
-        // Mono text always uses Recursive
-        let resolvedFamily = mono ? .recursive : (family ?? FontSettings.shared.selectedFamily)
-        let clampedWeight = clampWeight(weight.rawValue, for: resolvedFamily)
+        let resolvedFamily = mono
+            ? (family ?? FontSettings.shared.selectedMonoFamily)
+            : (family ?? FontSettings.shared.selectedFamily)
+        let adjustedWeight = applyWeightPreference(weight.rawValue, for: resolvedFamily)
+        let clampedWeight = clampWeight(adjustedWeight, for: resolvedFamily)
 
         let descriptor: UIFontDescriptor
         if resolvedFamily.isVariable {
@@ -73,29 +76,30 @@ enum TronFontLoader {
                 family: resolvedFamily,
                 weight: clampedWeight,
                 mono: mono,
-                casual: casual
+                casual: casual,
+                size: size
             )
             descriptor = UIFontDescriptor(fontAttributes: [
-                .family: resolvedFamily.displayName,
+                .family: resolvedFamily.systemFamilyName,
                 UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): variations,
             ])
         } else {
             // Static fonts: use traits for weight selection
-            descriptor = UIFontDescriptor(fontAttributes: [.family: resolvedFamily.displayName])
+            descriptor = UIFontDescriptor(fontAttributes: [.family: resolvedFamily.systemFamilyName])
                 .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: uiFontWeight(from: weight)]])
         }
 
         let font = UIFont(descriptor: descriptor, size: size)
 
         // Verify we got the right font (case-insensitive match on family or font name)
-        let expectedName = resolvedFamily.displayName.lowercased()
+        let expectedName = resolvedFamily.systemFamilyName.lowercased()
         if font.fontName.lowercased().contains(expectedName.replacingOccurrences(of: " ", with: ""))
             || font.familyName.lowercased().contains(expectedName) {
             return font
         }
 
         logger.warning("Font creation failed for \(resolvedFamily.displayName), using system fallback", category: .ui)
-        return mono
+        return (mono || resolvedFamily.category == .mono)
             ? UIFont.monospacedSystemFont(ofSize: size, weight: uiFontWeight(from: weight))
             : UIFont.systemFont(ofSize: size, weight: uiFontWeight(from: weight))
     }
@@ -120,7 +124,8 @@ enum TronFontLoader {
         family: FontFamily,
         weight: CGFloat,
         mono: Bool,
-        casual: CGFloat?
+        casual: CGFloat?,
+        size: CGFloat
     ) -> [UInt32: CGFloat] {
         var variations: [UInt32: CGFloat] = [AxisTag.weight: weight]
 
@@ -132,14 +137,33 @@ enum TronFontLoader {
             variations[AxisTag.slant] = 0.0
             variations[AxisTag.cursive] = 0.0
 
-        case .alanSans, .comme, .libreBaskerville:
-            break // weight-only
+        case .literata:
+            let range = FontAxis.opticalSize.range(for: .literata)
+            variations[AxisTag.opticalSize] = min(max(CGFloat(range.lowerBound), size), CGFloat(range.upperBound))
 
-        case .donegalOne, .ibmPlexSerif:
-            break // static font — buildVariations should never be called for these
+        case .sourceSerif4:
+            let range = FontAxis.opticalSize.range(for: .sourceSerif4)
+            variations[AxisTag.opticalSize] = min(max(CGFloat(range.lowerBound), size), CGFloat(range.upperBound))
+
+        case .alanSans, .comme, .libreBaskerville, .lora, .crimsonPro,
+             .jetBrainsMono, .geistMono:
+            break // weight-only variable fonts
+
+        case .donegalOne, .ibmPlexSerif, .ibmPlexMono:
+            break // static fonts — buildVariations should never be called for these
         }
 
         return variations
+    }
+
+    /// Apply user weight preference as an offset from the default (400).
+    /// If the user sets base weight to 500, all requested weights shift up by 100.
+    @MainActor
+    private static func applyWeightPreference(_ requestedWeight: CGFloat, for family: FontFamily) -> CGFloat {
+        guard family.isVariable else { return requestedWeight }
+        let userBase = CGFloat(FontSettings.shared.axisValue(for: family, axis: .weight))
+        let offset = userBase - CGFloat(FontAxis.weight.defaultValue(for: family))
+        return requestedWeight + offset
     }
 
     /// Clamp weight to the family's supported range
