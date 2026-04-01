@@ -954,6 +954,7 @@ mod tests {
             display_stream_registry: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))

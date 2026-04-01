@@ -436,6 +436,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             compaction_trigger_config: compactor_settings.into(),
             process_manager: process_manager.clone(),
             job_manager: job_manager.clone(),
+            output_buffer_registry: None,
         },
     );
 

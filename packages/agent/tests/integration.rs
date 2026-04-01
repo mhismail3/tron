@@ -76,6 +76,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         display_stream_registry: None,
         process_manager: None,
         job_manager: None,
+        output_buffer_registry: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -361,6 +362,7 @@ async fn boot_server_with_provider_and_handles(
         display_stream_registry: None,
         process_manager: None,
         job_manager: None,
+        output_buffer_registry: None,
     };
 
     let mut registry = MethodRegistry::new();

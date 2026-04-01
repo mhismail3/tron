@@ -183,6 +183,7 @@ mod tests {
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
+                output_buffer_registry: None,
             },
             "test-session".into(),
         )
@@ -321,6 +322,7 @@ mod tests {
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
+                output_buffer_registry: None,
             },
             "test-session".into(),
         );
@@ -400,6 +402,7 @@ mod tests {
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
+                output_buffer_registry: None,
             },
             "test-session".into(),
         );

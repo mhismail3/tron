@@ -84,6 +84,8 @@ pub struct RpcContext {
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Unified job manager for waiting on and managing processes + subagents.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    /// Output buffer registry for on-demand process output streaming.
+    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 impl RpcContext {

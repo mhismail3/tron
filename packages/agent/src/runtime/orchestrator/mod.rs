@@ -27,6 +27,7 @@ pub mod event_persister;
 pub mod job_manager;
 #[allow(clippy::module_inception)]
 pub mod orchestrator;
+pub mod output_buffer;
 pub mod process_manager;
 pub mod session_context;
 pub mod session_manager;

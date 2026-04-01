@@ -38,6 +38,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub persister: Option<&'a EventPersister>,
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
+    pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 #[derive(Default)]
@@ -109,6 +110,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     workspace_id: params.workspace_id,
                     process_manager: params.process_manager,
                     job_manager: params.job_manager,
+                    output_buffer_registry: params.output_buffer_registry,
                 };
                 async move {
                     let result = tool_executor::execute_tool(

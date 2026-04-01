@@ -80,6 +80,8 @@ pub struct TurnParams<'a> {
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
+    /// Optional output buffer registry for process output streaming.
+    pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -108,6 +110,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         server_origin,
         process_manager,
         job_manager,
+        output_buffer_registry,
     } = params;
     let turn_start = Instant::now();
 
@@ -326,6 +329,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         persister,
         process_manager,
         job_manager,
+        output_buffer_registry,
     })
     .await;
 

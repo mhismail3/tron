@@ -54,6 +54,8 @@ pub struct CreateAgentOpts {
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    /// Optional output buffer registry for process output streaming.
+    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -142,6 +144,7 @@ impl AgentFactory {
                 compaction_trigger_config: opts.compaction_trigger_config,
                 process_manager: opts.process_manager,
                 job_manager: opts.job_manager,
+                output_buffer_registry: opts.output_buffer_registry,
             },
             session_id,
         )
@@ -176,6 +179,7 @@ mod tests {
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         }
     }
 

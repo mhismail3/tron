@@ -26,6 +26,7 @@ pub fn make_ctx() -> ToolContext {
         output_tx: None,
         process_manager: None,
         job_manager: None,
+        output_buffer_registry: None,
     }
 }
 

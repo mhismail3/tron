@@ -61,6 +61,8 @@ pub struct AgentDeps {
     pub process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    /// Optional output buffer registry for process output streaming.
+    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -85,6 +87,8 @@ pub struct TronAgent {
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Optional unified job manager for process + subagent lifecycle.
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    /// Optional output buffer registry for process output streaming.
+    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 impl TronAgent {
@@ -109,6 +113,7 @@ impl TronAgent {
             session_id,
             process_manager: deps.process_manager,
             job_manager: deps.job_manager,
+            output_buffer_registry: deps.output_buffer_registry,
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -189,6 +194,7 @@ impl TronAgent {
                 server_origin: self.config.server_origin.as_deref(),
                 process_manager: self.process_manager.as_ref(),
                 job_manager: self.job_manager.as_ref(),
+                output_buffer_registry: self.output_buffer_registry.as_ref(),
             })
             .await;
 
@@ -582,6 +588,7 @@ mod tests {
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         }
     }
 
@@ -967,6 +974,7 @@ mod tests {
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
+                output_buffer_registry: None,
             },
             sid.clone(),
         );
@@ -1337,6 +1345,7 @@ mod tests {
             compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         for tool in tools {
             deps.registry.register(tool);

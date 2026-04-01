@@ -213,6 +213,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
+                output_buffer_registry: None,
             },
         );
 

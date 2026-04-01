@@ -60,6 +60,8 @@ pub struct ToolContext {
     pub process_manager: Option<Arc<dyn ProcessManagerOps>>,
     /// Unified job manager for waiting on and managing processes + subagents.
     pub job_manager: Option<Arc<dyn JobManagerOps>>,
+    /// Registry for process output buffers (for on-demand streaming to iOS).
+    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -73,6 +75,7 @@ impl std::fmt::Debug for ToolContext {
             .field("workspace_id", &self.workspace_id)
             .field("process_manager", &self.process_manager.as_ref().map(|_| "..."))
             .field("job_manager", &self.job_manager.as_ref().map(|_| "..."))
+            .field("output_buffer_registry", &self.output_buffer_registry.as_ref().map(|_| "..."))
             .finish_non_exhaustive()
     }
 }
@@ -730,6 +733,7 @@ mod tests {
             output_tx: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -749,6 +753,7 @@ mod tests {
             output_tx: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -767,6 +772,7 @@ mod tests {
             output_tx: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -936,6 +942,7 @@ mod tests {
             output_tx: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         assert!(ctx.process_manager.is_none());
     }
@@ -1109,6 +1116,7 @@ mod tests {
             output_tx: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
         assert!(ctx.job_manager.is_none());
     }

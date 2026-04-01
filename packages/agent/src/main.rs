@@ -725,6 +725,7 @@ async fn main() -> Result<()> {
         display_stream_registry: None,
         process_manager: Some(process_manager.clone()),
         job_manager: Some(job_manager.clone()),
+        output_buffer_registry: None, // created and wired in Phase 2
     };
 
     // Method registry
@@ -1369,6 +1370,7 @@ mod tests {
             display_stream_registry: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1559,6 +1561,7 @@ mod tests {
             display_stream_registry: None,
             process_manager: None,
             job_manager: None,
+            output_buffer_registry: None,
         };
 
         let mut registry = MethodRegistry::new();
