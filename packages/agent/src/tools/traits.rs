@@ -62,6 +62,9 @@ pub struct ToolContext {
     pub job_manager: Option<Arc<dyn JobManagerOps>>,
     /// Registry for process output buffers (for on-demand streaming to iOS).
     pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Event emitter for broadcasting tool events (used by managed processes
+    /// to emit `ToolExecutionUpdate` events directly, bypassing `output_tx`).
+    pub event_emitter: Option<Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -76,6 +79,7 @@ impl std::fmt::Debug for ToolContext {
             .field("process_manager", &self.process_manager.as_ref().map(|_| "..."))
             .field("job_manager", &self.job_manager.as_ref().map(|_| "..."))
             .field("output_buffer_registry", &self.output_buffer_registry.as_ref().map(|_| "..."))
+            .field("event_emitter", &self.event_emitter.as_ref().map(|_| "..."))
             .finish_non_exhaustive()
     }
 }
@@ -739,6 +743,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -759,6 +764,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -778,6 +784,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -949,6 +956,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         };
         assert!(ctx.process_manager.is_none());
     }
@@ -1123,6 +1131,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         };
         assert!(ctx.job_manager.is_none());
     }

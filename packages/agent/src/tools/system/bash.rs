@@ -164,10 +164,26 @@ impl BashTool {
         let buffer_for_forwarder = output_buffer.clone();
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-        // Forwarder task: channel → buffer. Exits when tx is dropped (process completes).
+        // Forwarder task: ProcessRunner chunks → buffer + ToolExecutionUpdate events.
+        //
+        // Emits ToolExecutionUpdate events directly via EventEmitter (not ctx.output_tx).
+        // This avoids a channel lifetime conflict: ctx.output_tx is owned by the
+        // ToolExecutor, and cloning it would prevent its stream_handle from completing
+        // when the tool returns. By emitting directly, the ToolExecutor's channel
+        // stays unused and closes cleanly.
+        let forwarder_emitter = ctx.event_emitter.clone();
+        let forwarder_tool_call_id = ctx.tool_call_id.clone();
+        let forwarder_session_id = ctx.session_id.clone();
         let _ = tokio::spawn(async move {
             while let Some(chunk) = output_rx.recv().await {
-                buffer_for_forwarder.push(chunk);
+                buffer_for_forwarder.push(chunk.clone());
+                if let Some(ref emitter) = forwarder_emitter {
+                    let _ = emitter.emit(crate::core::events::TronEvent::ToolExecutionUpdate {
+                        base: crate::core::events::BaseEvent::now(&forwarder_session_id),
+                        tool_call_id: forwarder_tool_call_id.clone(),
+                        update: chunk,
+                    });
+                }
             }
             buffer_for_forwarder.close();
         });

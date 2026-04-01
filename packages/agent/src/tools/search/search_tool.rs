@@ -205,6 +205,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            event_emitter: None,
         }
     }
 
