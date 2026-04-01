@@ -57,6 +57,8 @@ struct TrackedProcess {
     result: Mutex<Option<ManagedProcessResult>>,
     cancel: CancellationToken,
     promote_tx: Mutex<Option<oneshot::Sender<()>>>,
+    /// Set before cancellation if triggered by user action (iOS interrupt button).
+    user_cancelled: std::sync::atomic::AtomicBool,
 }
 
 // =============================================================================
@@ -145,6 +147,7 @@ impl ProcessManagerOps for ProcessManager {
             result: Mutex::new(None),
             cancel: cancel.clone(),
             promote_tx: Mutex::new(Some(promote_tx)),
+            user_cancelled: std::sync::atomic::AtomicBool::new(false),
         });
 
         let _ = self.processes.insert(process_id.clone(), tracker.clone());
@@ -179,6 +182,7 @@ impl ProcessManagerOps for ProcessManager {
                         timed_out: false,
                         cancelled: true,
                         blob_id: None,
+                        user_cancelled: task_tracker.user_cancelled.load(std::sync::atomic::Ordering::Acquire),
                     }
                 }
                 result = task => {
@@ -390,7 +394,7 @@ impl ProcessManagerOps for ProcessManager {
         }
     }
 
-    fn cancel_process(&self, process_id: &str) -> Result<(), ToolError> {
+    fn cancel_process(&self, process_id: &str, user_initiated: bool) -> Result<(), ToolError> {
         let tracker = self
             .processes
             .get(process_id)
@@ -401,6 +405,9 @@ impl ProcessManagerOps for ProcessManager {
         let state = tracker.state.lock().clone();
         match state {
             ProcessState::Foreground | ProcessState::Background => {
+                if user_initiated {
+                    tracker.user_cancelled.store(true, std::sync::atomic::Ordering::Release);
+                }
                 tracker.cancel.cancel();
                 Ok(())
             }
@@ -566,6 +573,7 @@ mod tests {
             timed_out: false,
             cancelled: false,
             blob_id: None,
+            user_cancelled: false,
         }
     }
 
@@ -580,6 +588,7 @@ mod tests {
                 timed_out: false,
                 cancelled: false,
                 blob_id: None,
+                user_cancelled: false,
             }
         })
     }
@@ -596,6 +605,7 @@ mod tests {
                 timed_out: false,
                 cancelled: false,
                 blob_id: None,
+                user_cancelled: false,
             }
         })
     }
@@ -611,6 +621,7 @@ mod tests {
                 timed_out: false,
                 cancelled: true,
                 blob_id: None,
+                user_cancelled: false,
             }
         })
     }
@@ -851,7 +862,7 @@ mod tests {
             .unwrap();
 
         assert!(!inner_cancel.is_cancelled());
-        pm.cancel_process(&handle.process_id).unwrap();
+        pm.cancel_process(&handle.process_id, false).unwrap();
 
         // The PM cancellation should cause the task to complete.
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -869,13 +880,13 @@ mod tests {
             .await
             .unwrap();
         // Should not error.
-        pm.cancel_process(&handle.process_id).unwrap();
+        pm.cancel_process(&handle.process_id, false).unwrap();
     }
 
     #[tokio::test]
     async fn cancel_nonexistent_returns_error() {
         let pm = ProcessManager::new();
-        let err = pm.cancel_process("proc-nonexistent").unwrap_err();
+        let err = pm.cancel_process("proc-nonexistent", false).unwrap_err();
         assert!(matches!(err, ToolError::Validation { .. }));
     }
 
@@ -1179,7 +1190,7 @@ mod tests {
             .await
             .unwrap();
 
-        pm.cancel_process(&handle.process_id).unwrap();
+        pm.cancel_process(&handle.process_id, false).unwrap();
         // Give cancellation a moment to propagate.
         tokio::time::sleep(Duration::from_millis(50)).await;
 

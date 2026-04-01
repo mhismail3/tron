@@ -334,6 +334,10 @@ pub struct ManagedProcessResult {
     pub timed_out: bool,
     /// Whether the process was cancelled.
     pub cancelled: bool,
+    /// Whether the cancellation was user-initiated (from iOS interrupt button).
+    /// Set by ProcessManager when `cancel_process(id, user_initiated: true)` is called.
+    #[serde(default)]
+    pub user_cancelled: bool,
     /// Blob ID for large outputs stored externally.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_id: Option<String>,
@@ -397,7 +401,9 @@ pub trait ProcessManagerOps: Send + Sync {
     fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError>;
 
     /// Cancel a running process (any state).
-    fn cancel_process(&self, process_id: &str) -> Result<(), ToolError>;
+    /// When `user_initiated` is true, the result's `user_cancelled` flag is set
+    /// so tools can produce appropriate messages (e.g., "Do not retry").
+    fn cancel_process(&self, process_id: &str, user_initiated: bool) -> Result<(), ToolError>;
 
     /// List processes for a session (active + recently completed).
     fn list_processes(&self, session_id: &str) -> Vec<ProcessInfo>;
@@ -653,7 +659,9 @@ pub trait JobManagerOps: Send + Sync {
     ) -> Result<Vec<JobResult>, ToolError>;
 
     /// Cancel a job by ID (auto-detects process vs agent).
-    fn cancel_job(&self, id: &str) -> Result<(), ToolError>;
+    /// `user_initiated` marks the cancellation as coming from the iOS user,
+    /// which sets `user_cancelled` on the result so tools don't retry.
+    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), ToolError>;
 }
 
 /// iOS app notifications (`NotifyApp`).
@@ -899,6 +907,7 @@ mod tests {
             timed_out: false,
             cancelled: false,
             blob_id: None,
+            user_cancelled: false,
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: ManagedProcessResult = serde_json::from_str(&json).unwrap();
@@ -917,6 +926,7 @@ mod tests {
             timed_out: false,
             cancelled: false,
             blob_id: Some("blob-123".into()),
+            user_cancelled: false,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("blob-123"));

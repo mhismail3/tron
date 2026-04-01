@@ -224,6 +224,7 @@ impl BashTool {
                         timed_out: output.timed_out,
                         cancelled: output.interrupted,
                         blob_id: None,
+                        user_cancelled: false,
                     }
                 }
                 Err(e) => crate::tools::traits::ManagedProcessResult {
@@ -234,6 +235,7 @@ impl BashTool {
                     timed_out: false,
                     cancelled: false,
                     blob_id: None,
+                    user_cancelled: false,
                 },
             }
         });
@@ -255,8 +257,8 @@ impl BashTool {
         }
 
         match handle.result {
-            Some(result) if result.cancelled => {
-                // User interrupted this command.
+            Some(result) if result.user_cancelled => {
+                // User interrupted from iOS — tell the agent not to retry.
                 let output = if result.output.is_empty() {
                     format!("[Interrupted by user] Command `{command}` was cancelled. Do not retry — the user intentionally stopped this command.")
                 } else {
@@ -272,6 +274,7 @@ impl BashTool {
                         "description": description,
                         "processId": process_id,
                         "interrupted": true,
+                        "userCancelled": true,
                     })),
                     is_error: Some(true),
                     stop_turn: None,

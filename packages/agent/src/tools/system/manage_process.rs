@@ -121,7 +121,7 @@ impl ManageJobTool {
             None => return Ok(error_result("Missing 'id' for cancel action.")),
         };
 
-        match self.job_manager.cancel_job(&id) {
+        match self.job_manager.cancel_job(&id, false) {
             Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Text(format!("Job `{id}` cancelled.")),
                 details: Some(json!({"id": id, "cancelled": true})),
@@ -186,7 +186,7 @@ mod tests {
         ) -> Result<Vec<JobResult>, ToolError> {
             Ok(Vec::new())
         }
-        fn cancel_job(&self, _id: &str) -> Result<(), ToolError> {
+        fn cancel_job(&self, _id: &str, _user_initiated: bool) -> Result<(), ToolError> {
             if self.cancel_ok {
                 Ok(())
             } else {

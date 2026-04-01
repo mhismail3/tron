@@ -125,9 +125,9 @@ impl JobManagerOps for JobManager {
         }
     }
 
-    fn cancel_job(&self, id: &str) -> Result<(), ToolError> {
+    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), ToolError> {
         if Self::is_process_id(id) {
-            self.process_manager.cancel_process(id)
+            self.process_manager.cancel_process(id, user_initiated)
         } else {
             self.subagent_ops.cancel_subagent(id)
         }
@@ -387,7 +387,7 @@ mod tests {
         fn promote_to_background(&self, _process_id: &str) -> Result<(), ToolError> {
             unimplemented!()
         }
-        fn cancel_process(&self, process_id: &str) -> Result<(), ToolError> {
+        fn cancel_process(&self, process_id: &str, _user_initiated: bool) -> Result<(), ToolError> {
             if self.results.lock().unwrap().contains_key(process_id)
                 || self
                     .processes
@@ -526,6 +526,7 @@ mod tests {
             timed_out: false,
             cancelled: false,
             blob_id: None,
+            user_cancelled: false,
         }
     }
 
@@ -802,7 +803,7 @@ mod tests {
         let sm = make_mock_subagent_ops();
         let jm = JobManager::new(pm, sm);
 
-        assert!(jm.cancel_job("proc-a").is_ok());
+        assert!(jm.cancel_job("proc-a", false).is_ok());
     }
 
     #[tokio::test]
@@ -819,7 +820,7 @@ mod tests {
         });
         let jm = JobManager::new(pm, sm);
 
-        assert!(jm.cancel_job("ses-abc").is_ok());
+        assert!(jm.cancel_job("ses-abc", false).is_ok());
     }
 
     #[tokio::test]
@@ -828,7 +829,7 @@ mod tests {
         let sm = make_mock_subagent_ops();
         let jm = JobManager::new(pm, sm);
 
-        assert!(jm.cancel_job("proc-nonexistent").is_err());
-        assert!(jm.cancel_job("ses-nonexistent").is_err());
+        assert!(jm.cancel_job("proc-nonexistent", false).is_err());
+        assert!(jm.cancel_job("ses-nonexistent", false).is_err());
     }
 }

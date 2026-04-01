@@ -73,11 +73,11 @@ impl MethodHandler for CancelHandler {
 
         // Try job manager (routes to process or subagent), fall back to process manager.
         if let Some(ref jm) = ctx.job_manager {
-            jm.cancel_job(&job_id).map_err(|e| RpcError::Internal {
+            jm.cancel_job(&job_id, true).map_err(|e| RpcError::Internal {
                 message: format!("Failed to cancel: {e}"),
             })?;
         } else if let Some(ref pm) = ctx.process_manager {
-            pm.cancel_process(&job_id).map_err(|e| RpcError::Internal {
+            pm.cancel_process(&job_id, true).map_err(|e| RpcError::Internal {
                 message: format!("Failed to cancel: {e}"),
             })?;
         } else {

@@ -439,6 +439,7 @@ impl DisplayTool {
                 timed_out: false,
                 cancelled: false,
                 blob_id,
+                user_cancelled: false,
             }
         });
 
@@ -495,7 +496,7 @@ impl DisplayTool {
 
         let label = format!("display_stream:{stream_id}");
         if let Some(process_id) = pm.find_by_label(&ctx.session_id, &label) {
-            pm.cancel_process(&process_id)?;
+            pm.cancel_process(&process_id, false)?;
             Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(

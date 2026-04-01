@@ -217,7 +217,7 @@ mod tests {
         ) -> Result<Vec<JobResult>, ToolError> {
             Ok(self.results.lock().unwrap().clone())
         }
-        fn cancel_job(&self, _id: &str) -> Result<(), ToolError> {
+        fn cancel_job(&self, _id: &str, _user_initiated: bool) -> Result<(), ToolError> {
             Ok(())
         }
     }

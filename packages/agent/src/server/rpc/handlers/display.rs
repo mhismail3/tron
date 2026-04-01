@@ -33,7 +33,7 @@ impl MethodHandler for StopStreamHandler {
         let stopped = if let Some(ref pm) = ctx.process_manager {
             let label = format!("display_stream:{stream_id}");
             if let Some(process_id) = pm.find_by_label(session_id, &label) {
-                let _ = pm.cancel_process(&process_id);
+                let _ = pm.cancel_process(&process_id, false);
                 true
             } else {
                 false
@@ -69,6 +69,7 @@ mod tests {
                 timed_out: false,
                 cancelled: false,
                 blob_id: None,
+                user_cancelled: false,
             }
         })
     }
