@@ -13,7 +13,7 @@ struct DetailedMessageRow: View {
         switch message.role {
         case "user": return "person.fill"
         case "assistant": return "sparkles"
-        case "toolResult": return message.isError == true ? "xmark.circle.fill" : "checkmark.circle.fill"
+        case "tool_result": return message.isError == true ? "xmark.circle.fill" : "checkmark.circle.fill"
         default: return "questionmark.circle"
         }
     }
@@ -22,7 +22,7 @@ struct DetailedMessageRow: View {
         switch message.role {
         case "user": return .tronBlue
         case "assistant": return .tronEmerald
-        case "toolResult": return message.isError == true ? .tronError : .tronCyan
+        case "tool_result": return message.isError == true ? .tronError : .tronCyan
         default: return .gray
         }
     }
@@ -37,7 +37,7 @@ struct DetailedMessageRow: View {
                 return names.joined(separator: ", ") + suffix
             }
             return "Assistant"
-        case "toolResult": return message.isError == true ? "Error" : "Result"
+        case "tool_result": return message.isError == true ? "Error" : "Result"
         default: return "Message"
         }
     }

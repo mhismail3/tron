@@ -236,7 +236,7 @@ struct ContextCompactResult: Codable {
 /// Detailed message info for context auditing
 struct DetailedMessageInfo: Codable, Identifiable {
     let index: Int
-    let role: String  // "user" | "assistant" | "toolResult"
+    let role: String  // "user" | "assistant" | "tool_result"
     let tokens: Int
     let summary: String
     let content: String
