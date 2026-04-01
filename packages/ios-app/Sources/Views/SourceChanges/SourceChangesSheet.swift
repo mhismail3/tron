@@ -462,6 +462,7 @@ struct SourceChangesSheet: View {
                 }
             }
         }
+        .scrollClipDisabled()
     }
 
     // MARK: - Common Views

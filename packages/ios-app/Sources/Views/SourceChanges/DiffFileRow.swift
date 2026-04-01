@@ -154,20 +154,20 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
     private func diffLineRow(_ line: EditDiffLine, lineNumWidth: CGFloat) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text(line.lineNum.map(String.init) ?? "")
-                .font(TronTypography.pill)
+                .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
                 .frame(width: lineNumWidth, alignment: .trailing)
                 .padding(.leading, 4)
                 .padding(.trailing, 4)
 
             Text(DiffFormatting.marker(for: line.type))
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(DiffFormatting.markerColor(for: line.type))
                 .frame(width: 14)
                 .padding(.trailing, 4)
 
             Text(line.content.isEmpty ? " " : line.content)
-                .font(TronTypography.codeCaption)
+                .font(TronTypography.codeContent)
                 .foregroundStyle(tint.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
