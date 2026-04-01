@@ -227,7 +227,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             max_turns,
             spawn_depth,
             tool_call_id,
-            blocking,
+            blocking_timeout_ms,
             working_directory,
             ..
         } => {
@@ -237,8 +237,10 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "model": model,
                 "maxTurns": max_turns,
                 "spawnDepth": spawn_depth,
-                "blocking": blocking,
             });
+            if let Some(timeout) = blocking_timeout_ms {
+                data["blockingTimeoutMs"] = json!(timeout);
+            }
             set_opt(&mut data, "toolCallId", tool_call_id);
             set_opt(&mut data, "workingDirectory", working_directory);
             Some(session_scoped(event, "agent.subagent_spawned", Some(data)))

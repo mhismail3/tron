@@ -61,8 +61,9 @@ pub struct SubsessionConfig {
     pub working_directory: String,
     /// Timeout in milliseconds (default `30_000`).
     pub timeout_ms: u64,
-    /// If true, wait for completion; if false, return immediately with `session_id`.
-    pub blocking: bool,
+    /// Blocking timeout in milliseconds — how long to wait before auto-backgrounding.
+    /// `None` = immediate background (non-blocking).
+    pub blocking_timeout_ms: Option<u64>,
     /// Maximum LLM turns (default 1).
     pub max_turns: u32,
     /// Maximum subagent nesting depth (default 0 = no nesting).
@@ -84,7 +85,7 @@ impl Default for SubsessionConfig {
             system_prompt: String::new(),
             working_directory: "/tmp".into(),
             timeout_ms: 30_000,
-            blocking: true,
+            blocking_timeout_ms: Some(30_000),
             max_turns: 1,
             max_depth: 0,
             inherit_tools: false,
@@ -227,7 +228,7 @@ impl SubagentManager {
             max_turns: config.max_turns,
             spawn_depth: 0,
             tool_call_id: None,
-            blocking: config.blocking,
+            blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
         });
 
@@ -269,9 +270,9 @@ impl SubagentManager {
             tools,
         });
 
-        if config.blocking {
+        if let Some(timeout) = config.blocking_timeout_ms {
             if let Some(result) = self
-                .wait_for_tracker_result(&tracker, config.timeout_ms)
+                .wait_for_tracker_result(&tracker, timeout)
                 .await?
             {
                 Ok(SubsessionOutput {
@@ -373,7 +374,7 @@ impl SubagentSpawner for SubagentManager {
             max_turns: config.max_turns,
             spawn_depth: config.current_depth,
             tool_call_id: config.tool_call_id.clone(),
-            blocking: config.blocking,
+            blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
         });
 
@@ -389,7 +390,7 @@ impl SubagentSpawner for SubagentManager {
                     "maxTurns": config.max_turns,
                     "spawnDepth": config.current_depth,
                     "toolCallId": config.tool_call_id,
-                    "blocking": config.blocking,
+                    "blockingTimeoutMs": config.blocking_timeout_ms,
                     "workingDirectory": config.working_directory,
                 }),
                 parent_id: None,
@@ -414,15 +415,16 @@ impl SubagentSpawner for SubagentManager {
             max_turns: config.max_turns,
             subagent_depth: config.current_depth,
             subagent_max_depth: config.max_depth,
-            blocking: config.blocking,
+            blocking_timeout_ms: config.blocking_timeout_ms,
             tracker: tracker.clone(),
             cancel,
             tools: tool_factory(),
         });
 
-        if config.blocking {
+        if let Some(timeout) = config.blocking_timeout_ms {
+            let effective_timeout = if timeout > 0 { timeout } else { config.timeout_ms };
             if let Some(result) = self
-                .wait_for_tracker_result(&tracker, config.timeout_ms)
+                .wait_for_tracker_result(&tracker, effective_timeout)
                 .await?
             {
                 Ok(SubagentHandle {
@@ -642,7 +644,7 @@ mod tests {
         SubagentConfig {
             task: task.into(),
             mode: SubagentMode::InProcess,
-            blocking: true,
+            blocking_timeout_ms: Some(300_000),
             model: None,
             parent_session_id: None,
             system_prompt: None,
@@ -683,7 +685,7 @@ mod tests {
     async fn spawn_nonblocking_returns_immediately() {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
         let mut config = make_config("test task");
-        config.blocking = false;
+        config.blocking_timeout_ms = None;
         let handle = manager.spawn(config).await.unwrap();
 
         assert!(!handle.session_id.is_empty());
@@ -744,11 +746,11 @@ mod tests {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
 
         let mut c1 = make_config("task 1");
-        c1.blocking = false;
+        c1.blocking_timeout_ms = None;
         let h1 = manager.spawn(c1).await.unwrap();
 
         let mut c2 = make_config("task 2");
-        c2.blocking = false;
+        c2.blocking_timeout_ms = None;
         let h2 = manager.spawn(c2).await.unwrap();
 
         let results = manager
@@ -764,11 +766,11 @@ mod tests {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
 
         let mut c1 = make_config("task 1");
-        c1.blocking = false;
+        c1.blocking_timeout_ms = None;
         let h1 = manager.spawn(c1).await.unwrap();
 
         let mut c2 = make_config("task 2");
-        c2.blocking = false;
+        c2.blocking_timeout_ms = None;
         let h2 = manager.spawn(c2).await.unwrap();
 
         let results = manager
@@ -867,7 +869,7 @@ mod tests {
         assert!(config.model.is_none());
         assert!(config.system_prompt.is_empty());
         assert_eq!(config.timeout_ms, 30_000);
-        assert!(config.blocking);
+        assert_eq!(config.blocking_timeout_ms, Some(30_000));
         assert_eq!(config.max_turns, 1);
         assert_eq!(config.max_depth, 0);
         assert!(!config.inherit_tools);
@@ -928,7 +930,7 @@ mod tests {
     async fn spawn_subsession_nonblocking_returns_session_id() {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
         let mut config = make_subsession_config("summarize", "parent-001");
-        config.blocking = false;
+        config.blocking_timeout_ms = None;
         let result = manager.spawn_subsession(config).await.unwrap();
 
         assert!(!result.session_id.is_empty());
@@ -992,7 +994,7 @@ mod tests {
     async fn spawn_subsession_tracked_as_subsession_type() {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
         let mut config = make_subsession_config("summarize", "parent-001");
-        config.blocking = false;
+        config.blocking_timeout_ms = None;
         let result = manager.spawn_subsession(config).await.unwrap();
 
         // Check tracker has Subsession type
@@ -1080,7 +1082,7 @@ mod tests {
 
         let mut config = make_config("research task");
         config.parent_session_id = Some(parent_sid.clone());
-        config.blocking = false;
+        config.blocking_timeout_ms = None;
         let handle = manager.spawn(config).await.unwrap();
 
         // Wait for non-blocking agent to finish
@@ -1131,7 +1133,7 @@ mod tests {
 
         let mut config = make_config("failing task");
         config.parent_session_id = Some(parent_sid.clone());
-        config.blocking = false;
+        config.blocking_timeout_ms = None;
         let handle = manager.spawn(config).await.unwrap();
 
         // Wait for non-blocking agent to finish
@@ -1159,7 +1161,7 @@ mod tests {
 
         let mut config = make_config("blocking task");
         config.parent_session_id = Some(parent_sid.clone());
-        config.blocking = true;
+        config.blocking_timeout_ms = Some(300_000);
         let _handle = manager.spawn(config).await.unwrap();
 
         // Blocking subagents should NOT persist notification.subagent_result

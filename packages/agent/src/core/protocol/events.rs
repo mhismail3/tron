@@ -742,7 +742,8 @@ tron_events! {
         spawn_depth: u32,
         #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
-        blocking: bool,
+        #[serde(rename = "blockingTimeoutMs", skip_serializing_if = "Option::is_none")]
+        blocking_timeout_ms: Option<u64>,
         #[serde(rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
         working_directory: Option<String>,
     } => "subagent_spawned",
@@ -1662,7 +1663,7 @@ mod tests {
                 max_turns: 50,
                 spawn_depth: 0,
                 tool_call_id: None,
-                blocking: true,
+                blocking_timeout_ms: Some(300_000),
                 working_directory: None,
             },
             TronEvent::SubagentStatusUpdate {

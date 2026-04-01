@@ -61,7 +61,7 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) max_turns: u32,
     pub(super) subagent_depth: u32,
     pub(super) subagent_max_depth: u32,
-    pub(super) blocking: bool,
+    pub(super) blocking_timeout_ms: Option<u64>,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
     pub(super) tools: ToolRegistry,
@@ -438,7 +438,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         }
     };
 
-    if !params.blocking && !params.tracker.parent_session_id.is_empty() {
+    if params.blocking_timeout_ms.is_none() && !params.tracker.parent_session_id.is_empty() {
         let payload = json!({
             "parentSessionId": params.tracker.parent_session_id,
             "subagentSessionId": params.child_session_id,

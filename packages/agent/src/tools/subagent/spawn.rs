@@ -1,7 +1,7 @@
 //! `SpawnSubagent` tool — launches child agent sessions.
 //!
 //! Spawns a subagent with the given task, mode, and configuration.
-//! Supports blocking (wait for result) and non-blocking (return session ID) modes.
+//! Supports blocking (wait for result within timeout) and non-blocking (return session ID) modes.
 
 use std::sync::Arc;
 
@@ -45,19 +45,19 @@ impl TronTool for SpawnSubagentTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "SpawnSubagent",
-            "Spawn an agent to handle a specific task. Non-blocking by default — returns the session ID immediately. \
-Use the Wait tool to get results, or set `blocking: true` to wait inline.\n\n\
+            "Spawn an agent to handle a specific task. Blocks for up to `timeout` milliseconds (default 5 minutes). \
+If the subagent completes within the timeout, the result is returned inline. If it's still running, \
+it automatically moves to the background and results are injected on your next turn.\n\n\
 **Execution Modes:**\n\
 **1. In-Process (default):** Runs in the same process, sharing the event store.\n\
 **2. Tmux:** Runs in a separate tmux session. Always fire-and-forget.\n\n\
 Parameters:\n\
 - **task**: The task description for the agent (required)\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
-- **blocking**: If true, waits for completion (default: false). Use Wait tool instead for flexible multi-job waiting.\n\
-- **timeout**: Max wait time in ms (default: 30 minutes, blocking only)\n\
+- **timeout**: How long to block before auto-backgrounding in ms (default: 300000 = 5 min). Set 0 to background immediately.\n\
 - **model**, **systemPrompt**, **toolDenials**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
 - **toolDenials**: Deny tools/patterns. Use { denyAll: true } for text-only agents\n\n\
-Returns (when blocking=true):\n\
+Returns (when completed within timeout):\n\
 - Full output, token usage, duration statistics, status",
         )
         .required_property("task", json!({"type": "string", "description": "Task/prompt for the subagent"}))
@@ -68,8 +68,7 @@ Returns (when blocking=true):\n\
         .property("skills", json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}))
         .property("workingDirectory", json!({"type": "string", "description": "Working directory"}))
         .property("maxTurns", json!({"type": "number", "description": "Maximum turns before stopping"}))
-        .property("blocking", json!({"type": "boolean", "description": "Whether to wait for completion"}))
-        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds when blocking"}))
+        .property("timeout", json!({"type": "number", "description": "How long to block before auto-backgrounding, in milliseconds (default 300000 = 5 min). Set 0 to background immediately."}))
         .property("maxDepth", json!({"type": "number", "description": "Maximum nesting depth for child subagents (0 = no children)"}))
         .build()
     }
@@ -91,8 +90,8 @@ Returns (when blocking=true):\n\
             }
         };
 
-        let blocking = get_optional_bool(&params, "blocking").unwrap_or(false);
         let timeout_ms = get_optional_u64(&params, "timeout").unwrap_or(DEFAULT_TIMEOUT_MS);
+        let blocking_timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
         let default_turns = if mode == SubagentMode::Tmux {
             DEFAULT_MAX_TURNS_TMUX
         } else {
@@ -123,7 +122,7 @@ Returns (when blocking=true):\n\
         let config = SubagentConfig {
             task: task.clone(),
             mode: mode.clone(),
-            blocking,
+            blocking_timeout_ms,
             model,
             parent_session_id: Some(ctx.session_id.clone()),
             system_prompt,
@@ -139,21 +138,21 @@ Returns (when blocking=true):\n\
 
         match self.spawner.spawn(config).await {
             Ok(handle) => {
-                if blocking {
-                    let output = handle.output.unwrap_or_default();
+                if let Some(output) = handle.output {
+                    // Completed within blocking timeout.
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
                             crate::core::content::ToolResultContent::text(&output),
                         ]),
                         details: Some(json!({
                             "sessionId": handle.session_id,
-                            "blocking": true,
                             "tokenUsage": handle.token_usage,
                         })),
                         is_error: None,
                         stop_turn: None,
                     })
                 } else {
+                    // Auto-backgrounded or non-blocking.
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
                             crate::core::content::ToolResultContent::text(format!(
@@ -165,8 +164,6 @@ Returns (when blocking=true):\n\
                         ]),
                         details: Some(json!({
                             "sessionId": handle.session_id,
-                            "success": true,
-                            "blocking": false,
                         })),
                         is_error: None,
                         stop_turn: None,
@@ -208,12 +205,12 @@ mod tests {
             }
             Ok(SubagentHandle {
                 session_id: "sub-1".into(),
-                output: if config.blocking {
+                output: if config.blocking_timeout_ms.is_some() {
                     Some("task completed".into())
                 } else {
                     None
                 },
-                token_usage: if config.blocking {
+                token_usage: if config.blocking_timeout_ms.is_some() {
                     Some(json!({"input": 100, "output": 50}))
                 } else {
                     None
@@ -232,8 +229,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_is_non_blocking() {
-        // Default behavior (no blocking param) should be non-blocking
+    async fn default_is_blocking_with_default_timeout() {
+        // Default behavior (no timeout param) should block with default timeout
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
             .execute(json!({"task": "do something"}), &make_ctx())
@@ -241,33 +238,29 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
-        assert!(text.contains("Subagent spawned"), "got: {text}");
-        assert!(text.contains("Wait tool"), "should mention Wait tool");
+        assert!(text.contains("task completed"), "got: {text}");
         let d = r.details.unwrap();
-        assert_eq!(d["blocking"], false);
         assert_eq!(d["sessionId"], "sub-1");
     }
 
     #[tokio::test]
-    async fn explicit_blocking_true() {
+    async fn explicit_timeout_blocks() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "do something", "blocking": true}), &make_ctx())
+            .execute(json!({"task": "do something", "timeout": 300_000}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("task completed"));
-        let d = r.details.unwrap();
-        assert_eq!(d["blocking"], true);
     }
 
     #[tokio::test]
-    async fn non_blocking_returns_session_id() {
+    async fn zero_timeout_returns_session_id() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
             .execute(
-                json!({"task": "do something", "blocking": false}),
+                json!({"task": "do something", "timeout": 0}),
                 &make_ctx(),
             )
             .await
@@ -275,9 +268,6 @@ mod tests {
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("sub-1"));
-        let d = r.details.unwrap();
-        assert_eq!(d["blocking"], false);
-        assert_eq!(d["success"], true);
     }
 
     #[tokio::test]
@@ -285,7 +275,7 @@ mod tests {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
             .execute(
-                json!({"task": "do something", "mode": "tmux", "blocking": false}),
+                json!({"task": "do something", "mode": "tmux", "timeout": 0}),
                 &make_ctx(),
             )
             .await
@@ -391,7 +381,7 @@ mod tests {
     async fn token_usage_in_blocking_result() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "t", "blocking": true}), &make_ctx())
+            .execute(json!({"task": "t", "timeout": 300_000}), &make_ctx())
             .await
             .unwrap();
         let d = r.details.unwrap();
@@ -421,7 +411,7 @@ mod tests {
             *self.captured.lock().unwrap() = Some(config.clone());
             Ok(SubagentHandle {
                 session_id: "sub-cap".into(),
-                output: if config.blocking {
+                output: if config.blocking_timeout_ms.is_some() {
                     Some("done".into())
                 } else {
                     None

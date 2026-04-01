@@ -65,7 +65,7 @@ mod tests {
         let config = SubagentConfig {
             task: "test".into(),
             mode: crate::tools::traits::SubagentMode::InProcess,
-            blocking: false,
+            blocking_timeout_ms: None,
             model: None,
             parent_session_id: None,
             system_prompt: None,

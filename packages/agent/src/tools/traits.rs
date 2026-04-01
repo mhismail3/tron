@@ -140,8 +140,10 @@ pub struct SubagentConfig {
     pub task: String,
     /// Execution mode.
     pub mode: SubagentMode,
-    /// Whether to block until the subagent completes.
-    pub blocking: bool,
+    /// Blocking timeout in milliseconds — how long the caller waits before
+    /// the subagent auto-backgrounds. `None` = immediate background.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocking_timeout_ms: Option<u64>,
     /// Optional model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,

@@ -983,7 +983,7 @@ fn all_event_types_have_wire_mapping() {
             max_turns: 5,
             spawn_depth: 0,
             tool_call_id: None,
-            blocking: true,
+            blocking_timeout_ms: Some(300_000),
             working_directory: None,
         },
         TronEvent::SubagentStatusUpdate {
@@ -1335,14 +1335,14 @@ fn converts_subagent_spawned_with_new_fields() {
         max_turns: 50,
         spawn_depth: 0,
         tool_call_id: Some("tc_42".into()),
-        blocking: false,
+        blocking_timeout_ms: None,
         working_directory: Some("/tmp/project".into()),
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.subagent_spawned");
     let data = rpc.data.unwrap();
     assert_eq!(data["toolCallId"], "tc_42");
-    assert_eq!(data["blocking"], false);
+    assert!(data.get("blockingTimeoutMs").is_none() || data["blockingTimeoutMs"].is_null());
     assert_eq!(data["workingDirectory"], "/tmp/project");
     assert_eq!(data["subagentSessionId"], "sub-1");
 }

@@ -243,7 +243,7 @@ Don't batch — send notifications as events happen. Title max 50 chars, body ma
 
 ### Sub-agents
 
-**SpawnSubagent** spawns sub-agents for parallel or background work. Non-blocking by default — returns session ID immediately. Set `blocking: true` to wait inline.
+**SpawnSubagent** spawns sub-agents for parallel or background work. Blocks for up to `timeout` ms (default 300000 = 5 min) before auto-backgrounding. Set `timeout: 0` to background immediately.
 - **In-process** (default): runs in same process, sharing event store.
 - **Tmux mode** (`mode: "tmux"`): out-of-process, always fire-and-forget. Use for long-running persistent tasks.
 - Sub-agents inherit parent model unless overridden. Restrict tools with `toolDenials`.
