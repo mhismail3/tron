@@ -78,10 +78,11 @@ struct DisplayToolDetailSheet: View {
                         color: .tronIndigo
                     )
                 }
+                .padding(.horizontal)
 
                 contentForType
+                    .padding(.horizontal)
             }
-            .padding(.horizontal, 8)
         }
     }
 
@@ -114,14 +115,12 @@ struct DisplayToolDetailSheet: View {
     @ViewBuilder
     private var imageSection: some View {
         if let blobId = imageBlobId {
-            ToolDetailSection(title: "Image", tint: tint) {
-                VStack(spacing: 4) {
-                    BlobImageView(blobId: blobId)
-                    if let note = conversionNote {
-                        Text(note)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(spacing: 4) {
+                BlobImageView(blobId: blobId)
+                if let note = conversionNote {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
         } else {

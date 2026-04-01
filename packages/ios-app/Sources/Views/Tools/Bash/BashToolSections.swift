@@ -193,7 +193,8 @@ struct BashLineNumberedOutput: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 3)
-        .padding(10)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 6)
         .sectionFill(.tronEmerald)
     }
 }

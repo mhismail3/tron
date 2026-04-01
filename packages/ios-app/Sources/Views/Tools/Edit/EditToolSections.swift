@@ -38,7 +38,8 @@ struct EditDiffSection: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(accentColor)
         }
     }

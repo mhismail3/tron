@@ -170,15 +170,18 @@ struct WebSearchToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
                     if index > 0 {
-                        Divider()
-                            .background(Color.tronInfo.opacity(0.08))
-                            .padding(.horizontal, 8)
+                        Rectangle()
+                            .fill(Color.tronInfo.opacity(0.1))
+                            .frame(height: 1)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 4)
                     }
                     searchResultRow(result, index: index + 1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.tronInfo)
         }
     }
@@ -282,15 +285,18 @@ struct WebSearchToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
                     if index > 0 {
-                        Divider()
-                            .background(Color.tronInfo.opacity(0.08))
-                            .padding(.horizontal, 8)
+                        Rectangle()
+                            .fill(Color.tronInfo.opacity(0.1))
+                            .frame(height: 1)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 4)
                     }
                     searchResultRow(result, index: index + 1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.tronInfo)
         }
     }

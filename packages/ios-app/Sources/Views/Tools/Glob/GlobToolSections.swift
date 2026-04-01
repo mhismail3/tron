@@ -59,7 +59,8 @@ struct GlobResultsSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.cyan)
         }
     }
@@ -150,7 +151,8 @@ struct GlobStreamingResultsSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.cyan)
         }
     }

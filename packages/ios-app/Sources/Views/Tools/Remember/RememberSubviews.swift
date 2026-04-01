@@ -196,7 +196,8 @@ extension RememberToolDetailSheet {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
-                .padding(10)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 6)
                 .sectionFill(.purple)
             }
         }
@@ -271,7 +272,8 @@ extension RememberToolDetailSheet {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.purple)
         }
     }
@@ -285,7 +287,8 @@ extension RememberToolDetailSheet {
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.purple)
     }
 }

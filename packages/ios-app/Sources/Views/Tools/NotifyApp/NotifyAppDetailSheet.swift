@@ -7,6 +7,19 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct NotifyAppDetailSheet: View {
     let data: NotifyAppChipData
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: TintedColors {
+        TintedColors(accent: .tronEmerald, colorScheme: colorScheme)
+    }
+
+    private var statusToolStatus: CommandToolStatus {
+        switch data.status {
+        case .sending: .running
+        case .sent: .success
+        case .failed: .error
+        }
+    }
 
     var body: some View {
         ToolDetailSheetContainer(
@@ -23,95 +36,69 @@ struct NotifyAppDetailSheet: View {
     @ViewBuilder
     private var contentView: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                // Notification Header Section
-                notificationHeaderSection
+            VStack(alignment: .leading, spacing: 16) {
+                ToolStatusRow(status: statusToolStatus, durationMs: nil) {
+                    if let count = data.successCount, data.status == .sent {
+                        ToolInfoPill(
+                            icon: "iphone.gen3",
+                            label: "\(count) device\(count == 1 ? "" : "s")",
+                            color: .tronSuccess
+                        )
+                    }
+                }
+                .padding(.horizontal)
 
-                // Sheet Content Section (markdown)
+                notificationSection
+                    .padding(.horizontal)
+
                 if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                     sheetContentSection(sheetContent)
+                        .padding(.horizontal)
                 }
 
-                // Delivery Status Section
-                if data.status == .sent || data.status == .failed {
-                    deliveryStatusSection
+                if data.status == .failed {
+                    errorSection
+                        .padding(.horizontal)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.vertical)
         }
     }
 
     // MARK: - Sections
 
-    @ViewBuilder
-    private var notificationHeaderSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Title
-            Text(data.title)
-                .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
+    private var notificationSection: some View {
+        ToolDetailSection(title: "Message", accent: .tronEmerald, tint: tint) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(data.title)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(tint.body)
 
-            // Body
-            Text(data.body)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-                .foregroundStyle(.tronTextSecondary)
+                Text(data.body)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(tint.secondary)
+            }
         }
     }
 
     @ViewBuilder
     private func sheetContentSection(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section Header
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronSlate)
-                Text("Details")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-                Spacer()
-            }
-
-            // Markdown content (block-level rendering)
+        ToolDetailSection(title: "Details", accent: .tronEmerald, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 let blocks = MarkdownBlockParser.parse(content)
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    MarkdownBlockView(block: block, textColor: .tronTextSecondary)
+                    MarkdownBlockView(block: block, textColor: tint.body)
                 }
             }
             .textSelection(.enabled)
         }
     }
 
-    @ViewBuilder
-    private var deliveryStatusSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section Header
-            HStack(spacing: 8) {
-                Image(systemName: data.status == .sent ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(data.status == .sent ? .tronSuccess : .tronError)
-                Text("DELIVERY STATUS")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-                Spacer()
-            }
-
-            // Status message
-            HStack(spacing: 8) {
-                if data.status == .sent {
-                    if let count = data.successCount {
-                        Text("Delivered to \(count) device\(count == 1 ? "" : "s")")
-                    } else {
-                        Text("Delivered successfully")
-                    }
-                } else {
-                    Text(data.errorMessage ?? "Failed to deliver notification")
-                }
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-            .foregroundStyle(data.status == .sent ? .tronSuccess : .tronError)
+    private var errorSection: some View {
+        ToolDetailSection(title: "Error", accent: .tronError, tint: tint) {
+            Text(data.errorMessage ?? "Failed to deliver notification")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronError)
         }
     }
 }
@@ -127,17 +114,14 @@ struct NotifyAppDetailSheetFallback: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Title
                     Text(data.title)
                         .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
-                    // Body
                     Text(data.body)
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
                         .foregroundStyle(.tronTextSecondary)
 
-                    // Sheet content (markdown)
                     if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                         Divider()
                         VStack(alignment: .leading, spacing: 8) {
@@ -149,7 +133,6 @@ struct NotifyAppDetailSheetFallback: View {
                         .textSelection(.enabled)
                     }
 
-                    // Delivery status
                     if data.status == .sent || data.status == .failed {
                         Divider()
                         HStack(spacing: 8) {

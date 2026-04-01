@@ -146,8 +146,12 @@ struct ChatSheetContent: View {
             ComputerUseToolDetailSheet(data: liveData)
         case "display":
             DisplayToolDetailSheet(data: liveData)
-        case "remember":
-            RememberToolDetailSheet(data: liveData)
+        case "mcpsearch":
+            McpSearchToolDetailSheet(data: liveData)
+        case "mcpcall":
+            McpCallToolDetailSheet(data: liveData)
+        case "managejob":
+            ManageJobToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { _ in })
         }

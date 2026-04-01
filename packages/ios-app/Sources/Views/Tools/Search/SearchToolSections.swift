@@ -72,14 +72,18 @@ struct SearchMatchesSection: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(parsedResults.enumerated()), id: \.offset) { groupIdx, group in
                     if groupIdx > 0 {
-                        Divider()
-                            .background(Color.purple.opacity(0.1))
+                        Rectangle()
+                            .fill(Color.purple.opacity(0.1))
+                            .frame(height: 1)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 4)
                     }
                     SearchFileGroupView(group: group, tint: tint)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.purple)
         }
     }
@@ -188,7 +192,8 @@ struct SearchFileListSection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.purple)
         }
     }
@@ -237,14 +242,18 @@ struct SearchStreamingMatchesSection: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(groups.enumerated()), id: \.offset) { groupIdx, group in
                     if groupIdx > 0 {
-                        Divider()
-                            .background(Color.purple.opacity(0.1))
+                        Rectangle()
+                            .fill(Color.purple.opacity(0.1))
+                            .frame(height: 1)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 4)
                     }
                     SearchFileGroupView(group: group, tint: tint)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 6)
             .sectionFill(.purple)
         }
     }
