@@ -122,10 +122,6 @@ final class SheetCoordinator {
     }
 
     /// Show command tool detail sheet
-    func showWaitForAgentsDetail(_ data: WaitForAgentsChipData) {
-        present(.waitForAgentsDetail(data))
-    }
-
     func showCommandToolDetail(_ data: CommandToolChipData) {
         present(.commandToolDetail(data))
     }

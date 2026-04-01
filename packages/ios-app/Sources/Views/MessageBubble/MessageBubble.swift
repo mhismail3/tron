@@ -108,14 +108,6 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .waitForAgents:
-                if let chipData = ToolResultParser.parseWaitForAgents(from: tool) {
-                    WaitForAgentsChip(data: chipData) {
-                        onTap?(.waitForAgents(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
             case .askUserQuestion, .getConfirmation:
                 ToolResultRouter(tool: tool)
             default:

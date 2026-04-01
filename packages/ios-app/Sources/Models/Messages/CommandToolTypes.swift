@@ -131,22 +131,6 @@ extension CommandToolChipData {
         self.details = nil
     }
 
-    /// Create from WaitForAgentsChipData for detail sheet display
-    init(from data: WaitForAgentsChipData) {
-        self.id = data.toolCallId
-        self.toolName = "WaitForAgents"
-        self.normalizedName = "waitforagents"
-        self.icon = "hourglass"
-        self.iconColor = .tronTeal
-        self.displayName = "Wait For Agents"
-        self.summary = data.resultPreview ?? ""
-        self.status = data.status == .error ? .error : .success
-        self.durationMs = data.durationMs
-        self.arguments = ""
-        self.result = data.fullResult
-        self.isResultTruncated = false
-        self.details = nil
-    }
 }
 
 // MARK: - Command Tool Registry

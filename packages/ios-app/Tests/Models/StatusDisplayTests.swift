@@ -84,27 +84,4 @@ struct StatusDisplayTests {
         #expect(QueryAgentStatus.error.label == "Failed")
     }
 
-    // MARK: - WaitForAgentsStatus
-
-    @Test("WaitForAgentsStatus color returns expected values")
-    func waitForAgentsStatusColor() {
-        #expect(WaitForAgentsStatus.waiting.color == .tronTeal)
-        #expect(WaitForAgentsStatus.completed.color == .tronTeal)
-        #expect(WaitForAgentsStatus.timedOut.color == .tronAmber)
-        #expect(WaitForAgentsStatus.error.color == .tronError)
-    }
-
-    @Test("WaitForAgentsStatus label returns expected values")
-    func waitForAgentsStatusLabel() {
-        #expect(WaitForAgentsStatus.waiting.label == "Waiting")
-        #expect(WaitForAgentsStatus.completed.label == "Completed")
-        #expect(WaitForAgentsStatus.timedOut.label == "Timed Out")
-        #expect(WaitForAgentsStatus.error.label == "Failed")
-    }
-
-    @Test("WaitForAgentsStatus iconName includes custom timeout icon")
-    func waitForAgentsStatusIconName() {
-        #expect(WaitForAgentsStatus.timedOut.iconName == "clock.badge.exclamationmark")
-    }
-
 }

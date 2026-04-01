@@ -34,7 +34,7 @@ struct AccessibilityTests {
             ("Subagent", SubagentStatus.completed.label),
             ("Notify", NotifyAppStatus.sent.label),
             ("Query", QueryAgentStatus.success.label),
-            ("Wait", WaitForAgentsStatus.completed.label),
+            ("Wait", CommandToolStatus.success.label),
         ]
 
         for (tool, status) in statuses {

@@ -81,9 +81,6 @@ struct ChatSheetContent: View {
         case .thinkingDetail(let content):
             ThinkingDetailSheet(content: content)
 
-        case .waitForAgentsDetail(let data):
-            WaitForAgentsDetailSheet(data: data)
-
         case .commandToolDetail(let data):
             commandToolDetailSheet(fallback: data)
 
@@ -135,6 +132,8 @@ struct ChatSheetContent: View {
             EditToolDetailSheet(data: liveData)
         case "bash":
             BashToolDetailSheet(data: liveData, rpcClient: rpcClient, sessionId: sessionId)
+        case "wait":
+            WaitToolDetailSheet(data: liveData, viewModel: viewModel, rpcClient: rpcClient, sessionId: sessionId)
         case "glob", "find":
             GlobToolDetailSheet(data: liveData)
         case "search":

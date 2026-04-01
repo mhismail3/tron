@@ -437,8 +437,6 @@ struct ChatView: View {
             }
         case .queryAgent(let data):
             sheetCoordinator.showCommandToolDetail(CommandToolChipData(from: data))
-        case .waitForAgents(let data):
-            sheetCoordinator.showWaitForAgentsDetail(data)
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
         case .providerError(let data):

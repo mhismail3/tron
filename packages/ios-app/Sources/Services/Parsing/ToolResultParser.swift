@@ -27,7 +27,4 @@ enum ToolResultParser {
         AgentQueryResultParser.parseQueryAgent(from: tool)
     }
 
-    static func parseWaitForAgents(from tool: ToolUseData) -> WaitForAgentsChipData? {
-        AgentQueryResultParser.parseWaitForAgents(from: tool)
-    }
 }
