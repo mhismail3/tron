@@ -29,6 +29,7 @@ struct TypewriterText: View {
         Text(displayedText)
             .font(font)
             .foregroundStyle(color)
+            .fixedSize(horizontal: !hasSettled, vertical: false)
             .onChange(of: text) { _, newValue in
                 if hasSettled {
                     animate(to: newValue)

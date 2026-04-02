@@ -69,7 +69,7 @@ struct EventRow: View {
                     EmptyView()
                 case .active:
                     Button(action: onFork) {
-                        Image(systemName: "arrow.triangle.branch")
+                        Image(systemName: "tuningfork")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronPurple)
                             .frame(width: 28, height: 28)
@@ -78,7 +78,7 @@ struct EventRow: View {
                     }
                     .buttonStyle(.plain)
                 case .disabled:
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "tuningfork")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted.opacity(0.3))
                         .frame(width: 28, height: 28)
