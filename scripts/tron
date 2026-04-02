@@ -767,18 +767,6 @@ SENTINEL
         return 1
     fi
 
-    # Regenerate auto-deploy plist if installed (keeps paths in sync).
-    # When auto-deploy invoked this deploy, IT is the launchd job — so
-    # `launchctl unload` kills this process. We write the new plist first,
-    # then background the unload+load so the reload happens even if this
-    # process is terminated by the unload.
-    if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
-        print_status "Updating auto-deploy plist..."
-        create_auto_deploy_plist
-        (launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null; launchctl load "$AUTO_DEPLOY_PLIST_PATH") &
-        disown 2>/dev/null
-    fi
-
     echo ""
     echo -e "${GREEN}Deploy successful!${NC}"
     echo "  Commit: ${new_commit:0:7}"
