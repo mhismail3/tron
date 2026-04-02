@@ -207,21 +207,17 @@ struct CachedSessionSidebarRow: View {
         VStack(alignment: .leading, spacing: 8) {
             // Title row with message count
             HStack(spacing: 6) {
+                if session.isFork == true {
+                    Image(systemName: "arrow.triangle.branch")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 11, height: 11)
+                        .foregroundStyle(.tronPurple)
+                }
                 Text(session.displayTitle)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
-
-                // Forked badge
-                if session.isFork == true {
-                    Text("forked")
-                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                        .foregroundStyle(.tronEmerald.opacity(0.7))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.tronEmerald.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                }
 
                 Spacer()
 

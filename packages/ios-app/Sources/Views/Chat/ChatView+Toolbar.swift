@@ -35,12 +35,11 @@ extension ChatView {
             HStack(alignment: .center, spacing: 6) {
                 if eventStoreManager.activeSession?.isFork == true {
                     Image(systemName: "arrow.triangle.branch")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(.tronEmerald)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.tronEmerald.opacity(0.15))
-                        .clipShape(Capsule())
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 11, height: 11)
+                        .foregroundStyle(.tronPurple)
+                        .offset(y: 1)
                         .transition(.opacity)
                 }
                 if let worktree = viewModel.worktreeState.worktree {
@@ -50,7 +49,7 @@ extension ChatView {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: 15, height: 15)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tronCyan)
                         if worktree.hasUncommittedChanges == true {
                             Circle()
                                 .fill(.orange)
@@ -65,6 +64,8 @@ extension ChatView {
                     font: TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold),
                     color: .tronEmerald
                 )
+                .lineLimit(1)
+                .truncationMode(.tail)
             }
             .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
             .animation(.smooth(duration: 0.25), value: viewModel.worktreeState.worktree != nil)
