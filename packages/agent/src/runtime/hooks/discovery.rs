@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 
 use tracing::{debug, warn};
 
-use super::types::{DiscoveredHook, DiscoveryConfig, HookSource, HookType};
+use super::types::{DiscoveredHook, DiscoveryConfig, HookSource, HookType, PromptHookConfig};
 
-/// Default file extensions to consider as hook scripts.
-const DEFAULT_EXTENSIONS: &[&str] = &[".sh", ".ts", ".js"];
+/// Default file extensions to consider as hook files.
+const DEFAULT_EXTENSIONS: &[&str] = &[".sh", ".ts", ".js", ".prompt"];
 
 /// Project-level hook directories (relative to project root).
 const PROJECT_HOOK_DIRS: &[&str] = &[".agent/hooks", ".tron/hooks"];
 
 /// User-level hook directory (relative to home).
-const USER_HOOK_DIR: &str = ".config/tron/hooks";
+const USER_HOOK_DIR: &str = ".tron/hooks";
 
 /// Discover hook files from configured paths.
 ///
@@ -123,29 +123,45 @@ fn scan_directory(
 /// Parse a hook filename into a [`DiscoveredHook`].
 ///
 /// Supports formats:
-/// - `pre-tool-use.sh` → type=PreToolUse, priority=None
-/// - `100-pre-tool-use.sh` → type=PreToolUse, priority=Some(100)
+/// - `pre-tool-use.sh` → script hook, type=PreToolUse
+/// - `100-session-start.sh` → script hook, type=SessionStart, priority=100
+/// - `session-start-title.prompt` → LLM prompt hook, type=SessionStart
 fn parse_hook_filename(filename: &str, path: &Path, source: HookSource) -> Option<DiscoveredHook> {
+    let ext = Path::new(filename).extension()?.to_str()?;
     let stem = Path::new(filename).file_stem()?.to_str()?;
 
-    let is_shell = std::path::Path::new(filename)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("sh"));
+    let is_shell = ext.eq_ignore_ascii_case("sh");
+    let is_prompt = ext.eq_ignore_ascii_case("prompt");
 
     // Try to extract priority prefix: "100-pre-tool-use" → (Some(100), "pre-tool-use")
     let (priority, hook_name) = extract_priority(stem);
 
     let hook_type = parse_hook_type(hook_name)?;
 
-    let name = format!("{source}:{hook_name}");
+    let name = format!("{source}:{stem}");
+
+    // For .prompt files, parse the file content for frontmatter + prompt body
+    let prompt_config = if is_prompt {
+        match std::fs::read_to_string(path) {
+            Ok(content) => Some(parse_prompt_file(&content)),
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "Failed to read prompt hook file");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     Some(DiscoveredHook {
         name,
         path: path.to_path_buf(),
         hook_type,
         is_shell_script: is_shell,
+        is_prompt,
         source,
         priority,
+        prompt_config,
     })
 }
 
@@ -164,18 +180,114 @@ fn extract_priority(stem: &str) -> (Option<i32>, &str) {
 }
 
 /// Map a hook name to its [`HookType`].
+///
+/// Supports both exact matches (`session-start`) and prefix matches
+/// (`session-start-title`) so that multiple hooks can target the same
+/// event with descriptive filenames.
 fn parse_hook_type(name: &str) -> Option<HookType> {
+    // Exact matches first
     match name {
-        "pre-tool-use" | "pre-tool" => Some(HookType::PreToolUse),
-        "post-tool-use" | "post-tool" => Some(HookType::PostToolUse),
-        "session-start" => Some(HookType::SessionStart),
-        "session-end" => Some(HookType::SessionEnd),
-        "stop" => Some(HookType::Stop),
-        "subagent-stop" => Some(HookType::SubagentStop),
-        "user-prompt-submit" => Some(HookType::UserPromptSubmit),
-        "pre-compact" => Some(HookType::PreCompact),
-        "notification" => Some(HookType::Notification),
-        _ => None,
+        "pre-tool-use" | "pre-tool" => return Some(HookType::PreToolUse),
+        "post-tool-use" | "post-tool" => return Some(HookType::PostToolUse),
+        "session-start" => return Some(HookType::SessionStart),
+        "session-end" => return Some(HookType::SessionEnd),
+        "stop" => return Some(HookType::Stop),
+        "subagent-stop" => return Some(HookType::SubagentStop),
+        "user-prompt-submit" => return Some(HookType::UserPromptSubmit),
+        "pre-compact" => return Some(HookType::PreCompact),
+        "notification" => return Some(HookType::Notification),
+        _ => {}
+    }
+
+    // Prefix matches for compound names (e.g., "session-start-title")
+    // Check longest prefixes first to avoid false matches
+    if name.starts_with("pre-tool-use-") || name.starts_with("pre-tool-") {
+        return Some(HookType::PreToolUse);
+    }
+    if name.starts_with("post-tool-use-") || name.starts_with("post-tool-") {
+        return Some(HookType::PostToolUse);
+    }
+    if name.starts_with("user-prompt-submit-") {
+        return Some(HookType::UserPromptSubmit);
+    }
+    if name.starts_with("subagent-stop-") {
+        return Some(HookType::SubagentStop);
+    }
+    if name.starts_with("session-start-") {
+        return Some(HookType::SessionStart);
+    }
+    if name.starts_with("session-end-") {
+        return Some(HookType::SessionEnd);
+    }
+    if name.starts_with("pre-compact-") {
+        return Some(HookType::PreCompact);
+    }
+    if name.starts_with("notification-") {
+        return Some(HookType::Notification);
+    }
+    if name.starts_with("stop-") {
+        return Some(HookType::Stop);
+    }
+
+    None
+}
+
+/// Parse a `.prompt` file into a [`PromptHookConfig`].
+///
+/// Format:
+/// ```text
+/// ---
+/// label: Generate session title
+/// enabled: true
+/// ---
+/// Your prompt instruction here...
+/// ```
+///
+/// If no frontmatter is present, the entire content is the prompt
+/// with defaults for label (filename) and enabled (true).
+fn parse_prompt_file(content: &str) -> PromptHookConfig {
+    let trimmed = content.trim();
+
+    // Check for YAML frontmatter delimiters
+    if !trimmed.starts_with("---") {
+        return PromptHookConfig {
+            label: String::new(),
+            enabled: true,
+            prompt: trimmed.to_string(),
+        };
+    }
+
+    // Find the closing ---
+    let after_first = &trimmed[3..].trim_start_matches(['\n', '\r']);
+    let Some(end_pos) = after_first.find("\n---") else {
+        // No closing delimiter — treat entire content as prompt
+        return PromptHookConfig {
+            label: String::new(),
+            enabled: true,
+            prompt: trimmed.to_string(),
+        };
+    };
+
+    let frontmatter = &after_first[..end_pos];
+    let body = after_first[end_pos + 4..].trim(); // skip "\n---"
+
+    // Parse simple YAML key: value pairs
+    let mut label = String::new();
+    let mut enabled = true;
+
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix("label:") {
+            label = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("enabled:") {
+            enabled = value.trim().parse().unwrap_or(true);
+        }
+    }
+
+    PromptHookConfig {
+        label,
+        enabled,
+        prompt: body.to_string(),
     }
 }
 
@@ -259,9 +371,11 @@ mod tests {
         let hook = parse_hook_filename("pre-tool-use.sh", &path, HookSource::Project).unwrap();
         assert_eq!(hook.hook_type, HookType::PreToolUse);
         assert!(hook.is_shell_script);
+        assert!(!hook.is_prompt);
         assert_eq!(hook.source, HookSource::Project);
         assert!(hook.priority.is_none());
         assert_eq!(hook.name, "project:pre-tool-use");
+        assert!(hook.prompt_config.is_none());
     }
 
     #[test]
@@ -270,7 +384,7 @@ mod tests {
         let hook = parse_hook_filename("100-session-start.sh", &path, HookSource::User).unwrap();
         assert_eq!(hook.hook_type, HookType::SessionStart);
         assert_eq!(hook.priority, Some(100));
-        assert_eq!(hook.name, "user:session-start");
+        assert_eq!(hook.name, "user:100-session-start");
     }
 
     #[test]
@@ -464,5 +578,131 @@ mod tests {
         let hooks = discover_hooks(&config);
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0].hook_type, HookType::Stop);
+    }
+
+    // --- parse_hook_type prefix matching ---
+
+    #[test]
+    fn test_parse_hook_type_compound_names() {
+        assert_eq!(
+            parse_hook_type("session-start-title"),
+            Some(HookType::SessionStart)
+        );
+        assert_eq!(
+            parse_hook_type("session-start-summary"),
+            Some(HookType::SessionStart)
+        );
+        assert_eq!(
+            parse_hook_type("stop-cleanup"),
+            Some(HookType::Stop)
+        );
+        assert_eq!(
+            parse_hook_type("session-end-report"),
+            Some(HookType::SessionEnd)
+        );
+        assert_eq!(
+            parse_hook_type("user-prompt-submit-validate"),
+            Some(HookType::UserPromptSubmit)
+        );
+    }
+
+    // --- parse_prompt_file ---
+
+    #[test]
+    fn test_parse_prompt_file_with_frontmatter() {
+        let content = "---\nlabel: Generate title\nenabled: true\n---\nGenerate a 3-6 word title.";
+        let config = parse_prompt_file(content);
+        assert_eq!(config.label, "Generate title");
+        assert!(config.enabled);
+        assert_eq!(config.prompt, "Generate a 3-6 word title.");
+    }
+
+    #[test]
+    fn test_parse_prompt_file_disabled() {
+        let content = "---\nlabel: My hook\nenabled: false\n---\nDo something.";
+        let config = parse_prompt_file(content);
+        assert_eq!(config.label, "My hook");
+        assert!(!config.enabled);
+        assert_eq!(config.prompt, "Do something.");
+    }
+
+    #[test]
+    fn test_parse_prompt_file_no_frontmatter() {
+        let content = "Just a prompt with no frontmatter.";
+        let config = parse_prompt_file(content);
+        assert_eq!(config.label, "");
+        assert!(config.enabled);
+        assert_eq!(config.prompt, "Just a prompt with no frontmatter.");
+    }
+
+    #[test]
+    fn test_parse_prompt_file_empty() {
+        let config = parse_prompt_file("");
+        assert_eq!(config.prompt, "");
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn test_parse_prompt_file_multiline_prompt() {
+        let content = "---\nlabel: Complex\n---\nLine one.\nLine two.\nLine three.";
+        let config = parse_prompt_file(content);
+        assert_eq!(config.label, "Complex");
+        assert!(config.prompt.contains("Line one."));
+        assert!(config.prompt.contains("Line three."));
+    }
+
+    // --- prompt file discovery ---
+
+    #[test]
+    fn test_discover_prompt_hooks() {
+        let tmp = TempDir::new().unwrap();
+        let hooks_dir = tmp.path().join(".tron/hooks");
+        fs::create_dir_all(&hooks_dir).unwrap();
+
+        fs::write(
+            hooks_dir.join("session-start-title.prompt"),
+            "---\nlabel: Generate title\n---\nGenerate a title.",
+        )
+        .unwrap();
+
+        let config = DiscoveryConfig {
+            project_path: Some(tmp.path().to_string_lossy().into_owned()),
+            include_user_hooks: false,
+            ..Default::default()
+        };
+
+        let hooks = discover_hooks(&config);
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].hook_type, HookType::SessionStart);
+        assert!(hooks[0].is_prompt);
+        assert!(!hooks[0].is_shell_script);
+        let cfg = hooks[0].prompt_config.as_ref().unwrap();
+        assert_eq!(cfg.label, "Generate title");
+        assert_eq!(cfg.prompt, "Generate a title.");
+    }
+
+    #[test]
+    fn test_discover_mixed_script_and_prompt_hooks() {
+        let tmp = TempDir::new().unwrap();
+        let hooks_dir = tmp.path().join(".tron/hooks");
+        fs::create_dir_all(&hooks_dir).unwrap();
+
+        create_hook_file(&hooks_dir, "pre-tool-use.sh");
+        fs::write(
+            hooks_dir.join("session-start-title.prompt"),
+            "Generate a title.",
+        )
+        .unwrap();
+
+        let config = DiscoveryConfig {
+            project_path: Some(tmp.path().to_string_lossy().into_owned()),
+            include_user_hooks: false,
+            ..Default::default()
+        };
+
+        let hooks = discover_hooks(&config);
+        assert_eq!(hooks.len(), 2);
+        assert!(hooks.iter().any(|h| h.is_shell_script && h.hook_type == HookType::PreToolUse));
+        assert!(hooks.iter().any(|h| h.is_prompt && h.hook_type == HookType::SessionStart));
     }
 }

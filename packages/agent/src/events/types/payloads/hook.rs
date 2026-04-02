@@ -80,3 +80,36 @@ pub struct HookBackgroundCompletedPayload {
     /// Timestamp.
     pub timestamp: String,
 }
+
+/// Payload for `hook.llm_result` events.
+///
+/// Records the result of an LLM-based hook execution (prompt hook).
+/// Persisted to the parent session's event store as an audit trail.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmHookResultPayload {
+    /// Hook name/label.
+    pub hook_name: String,
+    /// Hook definition ID.
+    pub hook_id: String,
+    /// Lifecycle event that triggered this hook (e.g., "sessionStart").
+    pub hook_event: String,
+    /// LLM output text (truncated to 1KB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Duration of the LLM call in milliseconds.
+    pub duration_ms: u64,
+    /// Model used for the LLM call.
+    pub model: String,
+    /// Input tokens consumed.
+    pub input_tokens: u64,
+    /// Output tokens consumed.
+    pub output_tokens: u64,
+    /// Whether the hook completed successfully.
+    pub success: bool,
+    /// Error message if the hook failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Timestamp.
+    pub timestamp: String,
+}

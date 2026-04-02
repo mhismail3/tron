@@ -510,6 +510,16 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         ..Default::default()
     };
 
+    // Fire SessionStart hook (non-blocking, background)
+    if let Some(hook_engine) = &hooks {
+        let hook_ctx = crate::runtime::hooks::types::HookContext::SessionStart {
+            session_id: session_id.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            working_directory: working_dir.clone(),
+        };
+        let _ = hook_engine.execute(&hook_ctx).await;
+    }
+
     let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
 
     let _ = persister.flush().await;

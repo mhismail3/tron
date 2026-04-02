@@ -53,3 +53,12 @@ The codebase uses progressive disclosure — documentation lives in the code:
 - `packages/ios-app/docs/development.md` — Xcode setup, builds, testing
 - `packages/ios-app/docs/events.md` — event plugin system
 - `packages/ios-app/docs/apns.md` — push notification setup
+
+### Progressive Disclosure Upkeep
+
+After completing work in any area, update the progressive disclosure docs for that area before finishing. Scale the effort to the current state:
+
+- **Weak area** (stale `mod.rs`, missing submodule table, no invariants): Explore the surrounding modules, write a proper `mod.rs` doc block with submodule table, document key entry points and invariants. Look at neighboring modules too — if you're fixing `runtime/hooks/mod.rs`, glance at `runtime/agent/mod.rs` and `runtime/orchestrator/mod.rs`.
+- **Strong area** (already has good docs): Just update based on your changes — add new modules to the submodule table, update invariants, adjust descriptions that your changes invalidated.
+
+This is a standing task on every session, not a one-time effort. The goal is that the docs ratchet forward — every session leaves the area slightly better documented than it was found.

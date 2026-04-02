@@ -20,6 +20,10 @@ final class SettingsState {
     var isolationMode: String = "always"
     var cacheTtlSecs: Int = 3600
 
+    // MARK: - Hooks
+
+    var hooksLlmModel: String = "claude-haiku-4-5-20251001"
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -67,6 +71,7 @@ final class SettingsState {
             isolationMode = settings.isolationMode
             cacheTtlSecs = settings.cacheTtlSecs
             connectionPresets = settings.connectionPresets
+            hooksLlmModel = settings.hooksLlmModel
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
@@ -106,6 +111,7 @@ final class SettingsState {
         cacheTtlSecs = 3600
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
+        hooksLlmModel = "claude-haiku-4-5-20251001"
     }
 
     // MARK: - Server Update Builder
@@ -121,7 +127,8 @@ final class SettingsState {
                 ),
                 rules: .init(discoverStandaloneFiles: true)
             ),
-            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600)
+            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600),
+            hooks: .init(llmModel: "claude-haiku-4-5-20251001")
         )
     }
 }

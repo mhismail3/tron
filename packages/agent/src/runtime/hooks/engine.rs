@@ -24,8 +24,12 @@ use tracing::{debug, instrument, warn};
 
 use super::background::BackgroundTracker;
 use super::handler::HookHandler;
+use super::prompt_handler::PromptHookHandler;
 use super::registry::HookRegistry;
-use super::types::{HookAction, HookContext, HookExecutionMode, HookResult, HookType};
+use super::script_handler::ScriptHookHandler;
+use super::types::{
+    DiscoveredHook, HookAction, HookContext, HookExecutionMode, HookResult, HookType,
+};
 
 /// Hook execution engine.
 ///
@@ -252,6 +256,69 @@ impl HookEngine {
     /// Get a mutable reference to the hook registry.
     pub fn registry_mut(&mut self) -> &mut HookRegistry {
         &mut self.registry
+    }
+
+    /// Register hooks from discovered hook files.
+    ///
+    /// Script hooks (`.sh`, `.js`, `.ts`) become [`ScriptHookHandler`]s.
+    /// Prompt hooks (`.prompt`) become [`PromptHookHandler`]s.
+    pub fn load_discovered_hooks(
+        &mut self,
+        discovered: Vec<DiscoveredHook>,
+        default_timeout_ms: u64,
+        llm_model: &str,
+        subagent_manager: Option<&Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+        event_emitter: Option<&Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
+        session_id: &str,
+    ) {
+        for hook in discovered {
+            if hook.is_prompt {
+                // LLM prompt hook
+                let Some(manager) = subagent_manager else {
+                    warn!(name = %hook.name, "Skipping prompt hook: no subagent manager");
+                    continue;
+                };
+                let Some(emitter) = event_emitter else {
+                    warn!(name = %hook.name, "Skipping prompt hook: no event emitter");
+                    continue;
+                };
+                let config = hook.prompt_config.as_ref();
+                let label = config
+                    .map(|c| c.label.clone())
+                    .unwrap_or_default();
+                let enabled = config.map(|c| c.enabled).unwrap_or(true);
+                let prompt = config
+                    .map(|c| c.prompt.clone())
+                    .unwrap_or_default();
+                let priority = hook.priority.unwrap_or(0);
+
+                let handler = PromptHookHandler::new(
+                    hook.name.clone(),
+                    hook.name.clone(),
+                    label,
+                    hook.hook_type,
+                    prompt,
+                    enabled,
+                    priority,
+                    llm_model.to_string(),
+                    manager.clone(),
+                    emitter.clone(),
+                    session_id.to_string(),
+                );
+                self.registry.register(Arc::new(handler));
+            } else {
+                // Script hook
+                let priority = hook.priority.unwrap_or(0);
+                let handler = ScriptHookHandler::new(
+                    hook.name,
+                    hook.hook_type,
+                    hook.path,
+                    priority,
+                    default_timeout_ms,
+                );
+                self.registry.register(Arc::new(handler));
+            }
+        }
     }
 }
 
@@ -775,6 +842,98 @@ mod tests {
         let engine = HookEngine::new(HookRegistry::new());
         let debug = format!("{engine:?}");
         assert!(debug.contains("HookEngine"));
+    }
+
+    // --- load_discovered_hooks tests ---
+
+    fn make_script_hook(name: &str, hook_type: HookType, priority: Option<i32>) -> DiscoveredHook {
+        DiscoveredHook {
+            name: name.to_string(),
+            path: std::path::PathBuf::from(format!("/tmp/{name}.sh")),
+            hook_type,
+            is_shell_script: true,
+            is_prompt: false,
+            source: crate::runtime::hooks::types::HookSource::Project,
+            priority,
+            prompt_config: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_discovered_hooks_registers_script_handlers() {
+        let hooks = vec![
+            make_script_hook("project:session-start", HookType::SessionStart, None),
+            make_script_hook("project:post-tool-use", HookType::PostToolUse, Some(100)),
+        ];
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+        engine.load_discovered_hooks(hooks, 5000, "haiku", None, None, "s1");
+
+        assert_eq!(engine.registry().count(), 2);
+        assert!(engine
+            .registry()
+            .get_by_name("project:session-start")
+            .is_some());
+        assert!(engine
+            .registry()
+            .get_by_name("project:post-tool-use")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_load_discovered_hooks_respects_priority() {
+        let hooks = vec![
+            make_script_hook("low", HookType::SessionStart, Some(10)),
+            make_script_hook("high", HookType::SessionStart, Some(100)),
+        ];
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+        engine.load_discovered_hooks(hooks, 5000, "haiku", None, None, "s1");
+
+        let handlers = engine.registry().get_handlers(HookType::SessionStart);
+        assert_eq!(handlers[0].name(), "high");
+        assert_eq!(handlers[1].name(), "low");
+    }
+
+    #[tokio::test]
+    async fn test_load_discovered_hooks_empty_list() {
+        let mut engine = HookEngine::new(HookRegistry::new());
+        engine.load_discovered_hooks(vec![], 5000, "haiku", None, None, "s1");
+        assert_eq!(engine.registry().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_load_discovered_hooks_default_priority_zero() {
+        let hooks = vec![make_script_hook("test", HookType::Stop, None)];
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+        engine.load_discovered_hooks(hooks, 5000, "haiku", None, None, "s1");
+
+        let handler = engine.registry().get_by_name("test").unwrap();
+        assert_eq!(handler.priority(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_load_discovered_hooks_skips_prompt_without_manager() {
+        let hooks = vec![DiscoveredHook {
+            name: "user:session-start-title".to_string(),
+            path: std::path::PathBuf::from("/tmp/session-start-title.prompt"),
+            hook_type: HookType::SessionStart,
+            is_shell_script: false,
+            is_prompt: true,
+            source: crate::runtime::hooks::types::HookSource::User,
+            priority: None,
+            prompt_config: Some(crate::runtime::hooks::types::PromptHookConfig {
+                label: "Title".to_string(),
+                enabled: true,
+                prompt: "Generate title".to_string(),
+            }),
+        }];
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+        // No subagent_manager → prompt hooks skipped
+        engine.load_discovered_hooks(hooks, 5000, "haiku", None, None, "s1");
+        assert_eq!(engine.registry().count(), 0);
     }
 
     // --- merge_json tests ---

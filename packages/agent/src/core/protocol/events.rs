@@ -507,6 +507,28 @@ tron_events! {
         error: Option<String>,
     } => "hook.background_completed",
 
+    /// LLM-based hook result (prompt hook completed asynchronously).
+    LlmHookResult {
+        #[serde(rename = "hookName")]
+        hook_name: String,
+        #[serde(rename = "hookId")]
+        hook_id: String,
+        #[serde(rename = "hookEvent")]
+        hook_event: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(rename = "durationMs")]
+        duration_ms: u64,
+        model: String,
+        #[serde(rename = "inputTokens")]
+        input_tokens: u64,
+        #[serde(rename = "outputTokens")]
+        output_tokens: u64,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    } => "hook.llm_result",
+
     // -- Session --
 
     /// Session saved.
@@ -1525,6 +1547,19 @@ mod tests {
                 execution_id: "id".into(),
                 result: BackgroundHookResult::Continue,
                 duration: 0,
+                error: None,
+            },
+            TronEvent::LlmHookResult {
+                base: base.clone(),
+                hook_name: "test".into(),
+                hook_id: "test-id".into(),
+                hook_event: "sessionStart".into(),
+                output: Some("title".into()),
+                duration_ms: 100,
+                model: "m".into(),
+                input_tokens: 10,
+                output_tokens: 5,
+                success: true,
                 error: None,
             },
             TronEvent::SessionSaved {

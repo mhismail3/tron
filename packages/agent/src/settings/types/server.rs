@@ -165,6 +165,8 @@ pub struct HookSettings {
     pub user_dir: String,
     /// Allowed hook script file extensions.
     pub extensions: Vec<String>,
+    /// Default model for LLM-based hooks.
+    pub llm_model: String,
 }
 
 impl Default for HookSettings {
@@ -180,6 +182,7 @@ impl Default for HookSettings {
                 ".mjs".to_string(),
                 ".sh".to_string(),
             ],
+            llm_model: "claude-haiku-4-5-20251001".to_string(),
         }
     }
 }
@@ -434,6 +437,37 @@ mod tests {
         assert_eq!(h.default_timeout_ms, 5000);
         assert_eq!(h.extensions.len(), 4);
         assert!(h.extensions.contains(&".ts".to_string()));
+        assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn hook_settings_deserialize_without_llm_model() {
+        let json = serde_json::json!({
+            "defaultTimeoutMs": 3000,
+            "projectDir": ".hooks"
+        });
+        let h: HookSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(h.default_timeout_ms, 3000);
+        assert_eq!(h.project_dir, ".hooks");
+        assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn hook_settings_deserialize_with_llm_model() {
+        let json = serde_json::json!({
+            "llmModel": "custom-model"
+        });
+        let h: HookSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(h.llm_model, "custom-model");
+    }
+
+    #[test]
+    fn hook_settings_serialize_roundtrip() {
+        let h = HookSettings::default();
+        let json = serde_json::to_value(&h).unwrap();
+        let h2: HookSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(h.llm_model, h2.llm_model);
+        assert_eq!(h.default_timeout_ms, h2.default_timeout_ms);
     }
 
     #[test]

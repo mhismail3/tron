@@ -34,6 +34,7 @@ struct SettingsView: View {
     @State private var showProvidersPage = false
     @State private var showAppearancePage = false
     @State private var showMCPServersPage = false
+    @State private var showHooksPage = false
 
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
@@ -116,6 +117,11 @@ struct SettingsView: View {
                 .adaptivePresentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
         }
+        .sheet(isPresented: $showHooksPage) {
+            HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                .adaptivePresentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+        }
         .task {
             await settingsState.load(using: rpcClient)
             await settingsState.loadModels(using: rpcClient)
@@ -181,6 +187,12 @@ struct SettingsView: View {
 
             categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "External tool servers") {
                 showMCPServersPage = true
+            }
+
+            SettingsRowDivider()
+
+            categoryRow(icon: "bolt.horizontal", label: "Hooks", subtitle: "LLM lifecycle hooks") {
+                showHooksPage = true
             }
 
             if #available(iOS 26.0, *) {

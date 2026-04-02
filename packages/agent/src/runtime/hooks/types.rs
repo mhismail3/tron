@@ -400,10 +400,34 @@ pub struct DiscoveredHook {
     pub hook_type: HookType,
     /// Whether the file is a shell script.
     pub is_shell_script: bool,
+    /// Whether this is an LLM prompt hook (`.prompt` file).
+    pub is_prompt: bool,
     /// Where the hook was found.
     pub source: HookSource,
     /// Priority extracted from filename prefix (e.g., `100-pre-tool-use`).
     pub priority: Option<i32>,
+    /// Parsed prompt content (only set for `.prompt` files).
+    pub prompt_config: Option<PromptHookConfig>,
+}
+
+/// Parsed content of a `.prompt` hook file.
+///
+/// Format:
+/// ```text
+/// ---
+/// label: Generate session title
+/// enabled: true
+/// ---
+/// Your prompt instruction here...
+/// ```
+#[derive(Debug, Clone)]
+pub struct PromptHookConfig {
+    /// Human-readable label (from frontmatter).
+    pub label: String,
+    /// Whether this hook is active (from frontmatter, default true).
+    pub enabled: bool,
+    /// The prompt instruction (body after frontmatter).
+    pub prompt: String,
 }
 
 /// Configuration for hook discovery.

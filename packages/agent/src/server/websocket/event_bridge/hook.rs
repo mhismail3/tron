@@ -78,6 +78,33 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 Some(data),
             ))
         }
+        TronEvent::LlmHookResult {
+            hook_name,
+            hook_id,
+            hook_event,
+            output,
+            duration_ms,
+            model,
+            input_tokens,
+            output_tokens,
+            success,
+            error,
+            ..
+        } => {
+            let mut data = json!({
+                "hookName": hook_name,
+                "hookId": hook_id,
+                "hookEvent": hook_event,
+                "durationMs": duration_ms,
+                "model": model,
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+                "success": success,
+            });
+            set_opt(&mut data, "output", output);
+            set_opt(&mut data, "error", error);
+            Some(session_scoped(event, "hook.llm_result", Some(data)))
+        }
         _ => None,
     }
 }

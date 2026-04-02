@@ -18,9 +18,14 @@ struct ServerSettings: Decodable {
     let isolationMode: String
     let chatWorkingDirectory: String?
     let cacheTtlSecs: Int
+    let hooksLlmModel: String
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session
+        case models, server, context, session, hooks
+    }
+
+    private enum HooksKeys: String, CodingKey {
+        case llmModel
     }
 
     private enum SessionKeys: String, CodingKey {
@@ -95,6 +100,13 @@ struct ServerSettings: Decodable {
             chatWorkingDirectory = nil
             cacheTtlSecs = 3600
         }
+
+        // hooks.*
+        if let hooksContainer = try? container.nestedContainer(keyedBy: HooksKeys.self, forKey: .hooks) {
+            hooksLlmModel = (try? hooksContainer.decodeIfPresent(String.self, forKey: .llmModel)) ?? "claude-haiku-4-5-20251001"
+        } else {
+            hooksLlmModel = "claude-haiku-4-5-20251001"
+        }
     }
 
     struct CompactionSettings: Decodable {
@@ -152,6 +164,7 @@ struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
     var session: SessionUpdate?
+    var hooks: HooksUpdate?
 
     struct ServerUpdate: Encodable {
         var defaultModel: String?
@@ -186,6 +199,10 @@ struct ServerSettingsUpdate: Encodable {
         struct ChatUpdate: Encodable {
             var workingDirectory: String?
         }
+    }
+
+    struct HooksUpdate: Encodable {
+        var llmModel: String?
     }
 
 }

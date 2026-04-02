@@ -253,6 +253,17 @@ impl TronAgent {
 
         debug!(session_id = %self.session_id, turns = turn, stop_reason = ?final_stop_reason, "agent run completed");
 
+        // Fire Stop hook (non-blocking, background)
+        if let Some(hook_engine) = &self.hooks {
+            let hook_ctx = crate::runtime::hooks::types::HookContext::Stop {
+                session_id: self.session_id.clone(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                stop_reason: format!("{final_stop_reason:?}"),
+                final_message: None,
+            };
+            let _ = hook_engine.execute(&hook_ctx).await;
+        }
+
         // Emit AgentEnd
         let _ = self.emitter.emit(TronEvent::AgentEnd {
             base: BaseEvent::now(&self.session_id),

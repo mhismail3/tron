@@ -595,11 +595,39 @@ async fn main() -> Result<()> {
     // Break circular dep: SubagentManager needs tool_factory to spawn children
     subagent_manager.set_tool_factory(tool_factory.clone());
 
+    // Discover and register lifecycle hooks from ~/.tron/hooks/ and project dirs
+    let hook_engine = {
+        use tron::runtime::hooks::discovery::discover_hooks;
+        use tron::runtime::hooks::types::DiscoveryConfig;
+        use tron::runtime::hooks::engine::HookEngine;
+        use tron::runtime::hooks::registry::HookRegistry;
+
+        let hook_settings = &settings.hooks;
+        let discovered = discover_hooks(&DiscoveryConfig {
+            project_path: None, // Project hooks loaded per-session, not at server startup
+            user_home: None,    // Uses default home dir
+            include_user_hooks: true,
+            extensions: hook_settings.extensions.iter().map(|s| s.clone()).collect(),
+            ..Default::default()
+        });
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+        engine.load_discovered_hooks(
+            discovered,
+            hook_settings.default_timeout_ms,
+            &hook_settings.llm_model,
+            Some(&subagent_manager),
+            Some(&orchestrator.broadcast()),
+            "", // session_id filled per-session for prompt hooks
+        );
+        Arc::new(engine)
+    };
+
     let agent_deps = Some(AgentDeps {
         provider_factory,
         tool_factory,
         guardrails: None,
-        hooks: None,
+        hooks: Some(hook_engine),
     });
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
 

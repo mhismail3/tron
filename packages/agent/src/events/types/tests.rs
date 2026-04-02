@@ -495,12 +495,16 @@ mod session_event_tests {
                 json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
             ),
             (
+                EventType::LlmHookResult,
+                json!({"hookName": "title-gen", "hookId": "built-in-title-gen", "hookEvent": "sessionStart", "output": "Fix login bug", "durationMs": 450, "model": "claude-haiku-4-5-20251001", "inputTokens": 100, "outputTokens": 10, "success": true, "timestamp": "t"}),
+            ),
+            (
                 EventType::MemoryRetained,
                 json!({"sessionId": "s1", "turnNumber": 5, "title": "Implement auth", "summary": "Full summary text here", "timestamp": "2026-01-01T00:00:00Z"}),
             ),
         ];
 
-        assert_eq!(cases.len(), 50, "must cover all 50 event types");
+        assert_eq!(cases.len(), 51, "must cover all 51 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -600,6 +604,7 @@ mod type_guard_tests {
     fn hook_guards() {
         assert!(EventType::HookTriggered.is_hook_type());
         assert!(EventType::HookBackgroundCompleted.is_hook_type());
+        assert!(EventType::LlmHookResult.is_hook_type());
     }
 
     #[test]

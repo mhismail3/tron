@@ -117,6 +117,8 @@ define_events! {
         HookBackgroundStarted => "hook.background_started" => payloads::hook::HookBackgroundStartedPayload,
         /// Background hook completed.
         HookBackgroundCompleted => "hook.background_completed" => payloads::hook::HookBackgroundCompletedPayload,
+        /// LLM hook result (prompt-based hook completed).
+        LlmHookResult => "hook.llm_result" => payloads::hook::LlmHookResultPayload,
         /// Memory retained (marks boundary for next Retain operation).
         MemoryRetained => "memory.retained" => payloads::memory::MemoryRetainedPayload,
     }
@@ -138,7 +140,7 @@ define_events! {
         /// Whether this is a subagent event (`subagent.*`).
         is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
         /// Whether this is a hook event (`hook.*`).
-        is_hook_type => [HookTriggered, HookCompleted, HookBackgroundStarted, HookBackgroundCompleted],
+        is_hook_type => [HookTriggered, HookCompleted, HookBackgroundStarted, HookBackgroundCompleted, LlmHookResult],
         /// Whether this is a skill event (`skill.*`).
         is_skill_type => [SkillAdded, SkillRemoved],
         /// Whether this is a rules event (`rules.*`).
@@ -152,7 +154,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 51] = [
+    const EXPECTED: [(EventType, &str); 52] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -222,11 +224,12 @@ mod tests {
             EventType::HookBackgroundCompleted,
             "hook.background_completed",
         ),
+        (EventType::LlmHookResult, "hook.llm_result"),
     ];
 
     #[test]
-    fn all_event_types_constant_has_51_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 54);
+    fn all_event_types_constant_has_52_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 55);
     }
 
     #[test]
