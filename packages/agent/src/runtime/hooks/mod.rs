@@ -29,10 +29,10 @@
 //!
 //! ```text
 //! ---
-//! type: session-start
-//! label: Generate session title
+//! type: stop
+//! label: Session summary
 //! ---
-//! Generate a concise 3-6 word title for this session...
+//! Summarize what happened in this session in one sentence.
 //! ```
 //!
 //! # Frontmatter
@@ -60,7 +60,7 @@
 //! Platform hooks registered programmatically in [`builtin`]. Users can
 //! enable/disable them via `settings.hooks.builtinHooks`. Current builtins:
 //!
-//! - `builtin:title-gen` — auto-generates session titles on session start
+//! - `builtin:title-gen` — auto-generates session titles from user prompts
 //!
 //! # Hot Reload
 //!

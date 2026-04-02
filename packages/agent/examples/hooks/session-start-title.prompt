@@ -1,6 +1,0 @@
----
-type: session-start
-label: Generate session title
-enabled: true
----
-Generate a concise 3-6 word title for this session based on the user's first message. Return ONLY the title text, nothing else.
