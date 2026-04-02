@@ -11,6 +11,23 @@ use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 
+/// Release worktree for a session if one is active.
+///
+/// Logs and swallows errors — archive/delete must not fail due to worktree issues.
+/// Mirrors the invariant in `SessionManager::end_session()`: worktree is released
+/// BEFORE the session is marked as ended.
+async fn release_worktree_if_active(ctx: &RpcContext, session_id: &str) {
+    if let Some(ref coord) = ctx.worktree_coordinator {
+        if let Err(e) = coord.release(session_id).await {
+            tracing::warn!(
+                session_id,
+                error = %e,
+                "failed to release worktree during session cleanup"
+            );
+        }
+    }
+}
+
 pub(crate) struct CreateSessionRequest {
     pub(crate) working_directory: String,
     pub(crate) model: String,
@@ -66,6 +83,8 @@ impl SessionCommandService {
     }
 
     pub(crate) async fn delete(ctx: &RpcContext, session_id: String) -> Result<Value, RpcError> {
+        release_worktree_if_active(ctx, &session_id).await;
+
         let session_manager = ctx.session_manager.clone();
         let session_id_for_delete = session_id.clone();
         ctx.run_blocking("session.delete", move || {
@@ -133,6 +152,8 @@ impl SessionCommandService {
     }
 
     pub(crate) async fn archive(ctx: &RpcContext, session_id: String) -> Result<Value, RpcError> {
+        release_worktree_if_active(ctx, &session_id).await;
+
         let session_manager = ctx.session_manager.clone();
         let session_id_for_archive = session_id.clone();
         ctx.run_blocking("session.archive", move || {
@@ -251,6 +272,25 @@ impl SessionCommandService {
                 message: "Default chat mode is disabled".into(),
                 details: None,
             });
+        }
+
+        // Find the old chat session so we can release its worktree before the
+        // blocking reset call (which archives the old session synchronously).
+        let old_chat_id = {
+            let sm = ctx.session_manager.clone();
+            ctx.run_blocking("session.reset_chat.find_old", move || {
+                Ok(sm
+                    .event_store()
+                    .find_chat_session()
+                    .map_err(|e| RpcError::Internal {
+                        message: e.to_string(),
+                    })?
+                    .map(|s| s.id))
+            })
+            .await?
+        };
+        if let Some(ref old_id) = old_chat_id {
+            release_worktree_if_active(ctx, old_id).await;
         }
 
         let model = settings.server.default_model.clone();
@@ -427,4 +467,228 @@ fn emit_optimistic_context_events(
 struct OptimisticContextSummary {
     loaded_rules: bool,
     loaded_memory: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    use crate::events::EventStore;
+    use crate::runtime::Orchestrator;
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::skills::registry::SkillRegistry;
+    use crate::worktree::{WorktreeCoordinator, WorktreeConfig, AcquireResult};
+
+    async fn run_cmd(dir: &std::path::Path, args: &[&str]) {
+        let status = tokio::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "cmd {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    async fn init_repo(dir: &std::path::Path) {
+        run_cmd(dir, &["git", "init"]).await;
+        run_cmd(dir, &["git", "config", "user.email", "test@test.com"]).await;
+        run_cmd(dir, &["git", "config", "user.name", "Test"]).await;
+        std::fs::write(dir.join("README.md"), "# test").unwrap();
+        run_cmd(dir, &["git", "add", "-A"]).await;
+        run_cmd(dir, &["git", "commit", "-m", "init"]).await;
+    }
+
+    /// Build a test context with a worktree coordinator wired up.
+    fn make_context_with_worktree(store: Arc<EventStore>) -> (RpcContext, Arc<WorktreeCoordinator>) {
+        let mgr = Arc::new(crate::runtime::orchestrator::session_manager::SessionManager::new(
+            store.clone(),
+        ));
+        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
+
+        let ctx = RpcContext {
+            orchestrator: orch,
+            session_manager: mgr,
+            event_store: store,
+            skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: std::time::Instant::now(),
+            transcription_engine: Arc::new(std::sync::OnceLock::new()),
+            subagent_manager: None,
+            health_tracker: Arc::new(crate::llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
+            worktree_coordinator: Some(coord.clone()),
+            device_request_broker: None,
+            context_artifacts: Arc::new(
+                crate::server::rpc::session_context::ContextArtifactsService::new(),
+            ),
+            auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+            broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            mcp_router: None,
+            display_stream_registry: None,
+            process_manager: None,
+            job_manager: None,
+            output_buffer_registry: None,
+        };
+        (ctx, coord)
+    }
+
+    fn make_store() -> Arc<EventStore> {
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        Arc::new(EventStore::new(pool))
+    }
+
+    // ── Archive ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn archive_releases_worktree() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let (ctx, coord) = make_context_with_worktree(store.clone());
+
+        let sid = ctx
+            .session_manager
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"))
+            .unwrap();
+
+        // Acquire worktree
+        let result = coord.maybe_acquire(&sid, dir.path()).await.unwrap();
+        let wt_path = match result {
+            AcquireResult::Acquired(ref info) => info.worktree_path.clone(),
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+        assert!(wt_path.exists(), "worktree dir should exist after acquire");
+        assert!(coord.get_info(&sid).is_some(), "coordinator should track session");
+
+        // Archive via command service
+        SessionCommandService::archive(&ctx, sid.clone()).await.unwrap();
+
+        // Worktree should be released
+        assert!(coord.get_info(&sid).is_none(), "coordinator should no longer track session");
+        assert!(!wt_path.exists(), "worktree directory should be removed");
+
+        // worktree.released event should exist
+        let events = store
+            .get_events_by_type(&sid, &["worktree.released"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "should have exactly one worktree.released event");
+
+        // Session should be archived (ended_at set)
+        let session = store.get_session(&sid).unwrap().unwrap();
+        assert!(session.ended_at.is_some(), "session should be archived");
+    }
+
+    #[tokio::test]
+    async fn archive_without_worktree_succeeds() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("model", "/tmp", Some("test"))
+            .unwrap();
+
+        SessionCommandService::archive(&ctx, sid.clone()).await.unwrap();
+
+        let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
+        assert!(session.ended_at.is_some());
+    }
+
+    // ── Delete ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn delete_releases_worktree() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let (ctx, coord) = make_context_with_worktree(store.clone());
+
+        let sid = ctx
+            .session_manager
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"))
+            .unwrap();
+
+        let result = coord.maybe_acquire(&sid, dir.path()).await.unwrap();
+        let wt_path = match result {
+            AcquireResult::Acquired(ref info) => info.worktree_path.clone(),
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+        assert!(wt_path.exists());
+
+        SessionCommandService::delete(&ctx, sid.clone()).await.unwrap();
+
+        assert!(coord.get_info(&sid).is_none(), "coordinator should no longer track session");
+        assert!(!wt_path.exists(), "worktree directory should be removed");
+
+        // Session should be fully deleted
+        assert!(store.get_session(&sid).unwrap().is_none(), "session should be deleted");
+    }
+
+    #[tokio::test]
+    async fn delete_without_worktree_succeeds() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("model", "/tmp", Some("test"))
+            .unwrap();
+
+        SessionCommandService::delete(&ctx, sid.clone()).await.unwrap();
+
+        assert!(ctx.event_store.get_session(&sid).unwrap().is_none());
+    }
+
+    // ── Reset Chat ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reset_chat_releases_old_session_worktree() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let (ctx, coord) = make_context_with_worktree(store.clone());
+
+        // Create a chat session
+        let wd = dir.path().to_string_lossy().to_string();
+        let (chat_id, _) = ctx
+            .session_manager
+            .get_or_create_chat_session("model", &wd)
+            .unwrap();
+
+        // Acquire worktree for the chat session
+        let result = coord.maybe_acquire(&chat_id, dir.path()).await.unwrap();
+        let wt_path = match result {
+            AcquireResult::Acquired(ref info) => info.worktree_path.clone(),
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+        assert!(wt_path.exists());
+
+        // Reset chat — should release old session's worktree
+        SessionCommandService::reset_chat(&ctx).await.unwrap();
+
+        assert!(
+            coord.get_info(&chat_id).is_none(),
+            "old chat session worktree should be released"
+        );
+        assert!(
+            !wt_path.exists(),
+            "old chat session worktree directory should be removed"
+        );
+    }
 }
