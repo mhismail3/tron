@@ -38,7 +38,7 @@ struct TypewriterText: View {
                 }
             }
             .task {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(350))
                 hasSettled = true
             }
     }

@@ -32,6 +32,11 @@ struct ChatView: View {
     // preventing EXC_BREAKPOINT in SwiftUI.SDFStyle.distanceRange.getter
     @State private var isDisappearing = false
 
+    // MARK: - Toolbar Title Appearance
+    /// Controls the fade-in of the principal toolbar item after navigation transition settles.
+    @State var toolbarTitleOpacity: Double = 0
+    @State var toolbarTitleOffsetY: CGFloat = 4
+
     // MARK: - Scroll State (internal for extension access)
     @State var scrollProxy: ScrollViewProxy?
 

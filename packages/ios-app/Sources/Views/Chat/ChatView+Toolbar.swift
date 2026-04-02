@@ -66,6 +66,15 @@ extension ChatView {
                 .lineLimit(1)
                 .truncationMode(.tail)
             }
+            .opacity(toolbarTitleOpacity)
+            .offset(y: toolbarTitleOffsetY)
+            .task {
+                try? await Task.sleep(for: .milliseconds(400))
+                withAnimation(.easeOut(duration: 0.4)) {
+                    toolbarTitleOpacity = 1
+                    toolbarTitleOffsetY = 0
+                }
+            }
             .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
             .animation(.smooth(duration: 0.25), value: viewModel.worktreeState.worktree != nil)
         }
