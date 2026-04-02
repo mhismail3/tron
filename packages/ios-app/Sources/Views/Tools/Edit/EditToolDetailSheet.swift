@@ -354,8 +354,8 @@ enum EditError {
             summary: "App.swift",
             status: .success,
             durationMs: 18,
-            arguments: "{\"file_path\": \"/Users/moose/project/Sources/App.swift\", \"old_string\": \"let name = \\\"MyApp\\\"\", \"new_string\": \"let name = \\\"SuperApp\\\"\"}",
-            result: "Successfully replaced 1 occurrence in /Users/moose/project/Sources/App.swift\n\n@@ -8,5 +8,5 @@\n     override func viewDidLoad() {\n         super.viewDidLoad()\n-        let name = \"MyApp\"\n+        let name = \"SuperApp\"\n         setupUI()\n     }",
+            arguments: "{\"file_path\": \"/Users/dev/project/Sources/App.swift\", \"old_string\": \"let name = \\\"MyApp\\\"\", \"new_string\": \"let name = \\\"SuperApp\\\"\"}",
+            result: "Successfully replaced 1 occurrence in /Users/dev/project/Sources/App.swift\n\n@@ -8,5 +8,5 @@\n     override func viewDidLoad() {\n         super.viewDidLoad()\n-        let name = \"MyApp\"\n+        let name = \"SuperApp\"\n         setupUI()\n     }",
             isResultTruncated: false
         )
     )
@@ -374,7 +374,7 @@ enum EditError {
             summary: "helpers.ts",
             status: .error,
             durationMs: 4,
-            arguments: "{\"file_path\": \"/Users/moose/project/helpers.ts\", \"old_string\": \"return null\", \"new_string\": \"return undefined\"}",
+            arguments: "{\"file_path\": \"/Users/dev/project/helpers.ts\", \"old_string\": \"return null\", \"new_string\": \"return undefined\"}",
             result: "Error: old_string appears multiple times (4 occurrences). Use replace_all: true to replace all occurrences, or provide more context to make the match unique.",
             isResultTruncated: false
         )
@@ -394,7 +394,7 @@ enum EditError {
             summary: "index.ts",
             status: .running,
             durationMs: nil,
-            arguments: "{\"file_path\": \"/Users/moose/project/index.ts\", \"old_string\": \"v1\", \"new_string\": \"v2\"}",
+            arguments: "{\"file_path\": \"/Users/dev/project/index.ts\", \"old_string\": \"v1\", \"new_string\": \"v2\"}",
             result: nil,
             isResultTruncated: false
         )

@@ -162,8 +162,8 @@ struct WriteToolDetailSheet: View {
             summary: "config.json",
             status: .success,
             durationMs: 12,
-            arguments: "{\"file_path\": \"/Users/moose/project/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\",\\n  \\\"version\\\": \\\"1.0.0\\\",\\n  \\\"description\\\": \\\"A sample application\\\",\\n  \\\"main\\\": \\\"index.js\\\"\\n}\"}",
-            result: "Successfully wrote to /Users/moose/project/config.json",
+            arguments: "{\"file_path\": \"/Users/dev/project/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\",\\n  \\\"version\\\": \\\"1.0.0\\\",\\n  \\\"description\\\": \\\"A sample application\\\",\\n  \\\"main\\\": \\\"index.js\\\"\\n}\"}",
+            result: "Successfully wrote to /Users/dev/project/config.json",
             isResultTruncated: false
         )
     )
@@ -182,8 +182,8 @@ struct WriteToolDetailSheet: View {
             summary: "ViewController.swift",
             status: .success,
             durationMs: 35,
-            arguments: "{\"file_path\": \"/Users/moose/project/Sources/ViewController.swift\", \"content\": \"import UIKit\\n\\nclass ViewController: UIViewController {\\n    override func viewDidLoad() {\\n        super.viewDidLoad()\\n        setupUI()\\n    }\\n\\n    private func setupUI() {\\n        view.backgroundColor = .systemBackground\\n        title = \\\"Home\\\"\\n    }\\n}\"}",
-            result: "Successfully wrote to /Users/moose/project/Sources/ViewController.swift",
+            arguments: "{\"file_path\": \"/Users/dev/project/Sources/ViewController.swift\", \"content\": \"import UIKit\\n\\nclass ViewController: UIViewController {\\n    override func viewDidLoad() {\\n        super.viewDidLoad()\\n        setupUI()\\n    }\\n\\n    private func setupUI() {\\n        view.backgroundColor = .systemBackground\\n        title = \\\"Home\\\"\\n    }\\n}\"}",
+            result: "Successfully wrote to /Users/dev/project/Sources/ViewController.swift",
             isResultTruncated: false
         )
     )
@@ -242,7 +242,7 @@ struct WriteToolDetailSheet: View {
             summary: "output.ts",
             status: .running,
             durationMs: nil,
-            arguments: "{\"file_path\": \"/Users/moose/output.ts\", \"content\": \"export const x = 1\"}",
+            arguments: "{\"file_path\": \"/Users/dev/output.ts\", \"content\": \"export const x = 1\"}",
             result: nil,
             isResultTruncated: false
         )

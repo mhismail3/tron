@@ -74,10 +74,10 @@ struct SettingsView: View {
                 serverPort: $serverPort,
                 settingsState: settingsState,
                 onHostSubmit: {
-                    dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
+                    dependencies.updateServerSettings(host: serverHost, port: effectivePort)
                 },
                 onPortChange: { newPort in
-                    dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                    dependencies.updateServerSettings(host: serverHost, port: newPort)
                 },
                 updateServerSetting: updateServerSetting
             )
@@ -319,7 +319,7 @@ struct SettingsView: View {
         confirmArchive = true
         settingsState.resetToDefaults()
         updateServerSetting { settingsState.buildResetUpdate() }
-        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort, useTLS: false)
+        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
     }
 
     private func resetChatSession() {
@@ -349,11 +349,9 @@ struct SettingsView: View {
 struct ServerURLBuilder {
     static func buildURL(
         host: String,
-        port: String,
-        useTLS: Bool
+        port: String
     ) -> URL? {
-        let scheme = useTLS ? "wss" : "ws"
-        let urlString = "\(scheme)://\(host):\(port)/ws"
+        let urlString = "ws://\(host):\(port)/ws"
         return URL(string: urlString)
     }
 }

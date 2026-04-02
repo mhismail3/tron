@@ -177,7 +177,7 @@ struct ReadToolDetailSheet: View {
             summary: "ViewController.swift",
             status: .success,
             durationMs: 25,
-            arguments: "{\"file_path\": \"/Users/moose/Workspace/project/Sources/ViewController.swift\"}",
+            arguments: "{\"file_path\": \"/Users/dev/Workspace/project/Sources/ViewController.swift\"}",
             result: "     1\timport UIKit\n     2\t\n     3\tclass ViewController: UIViewController {\n     4\t    override func viewDidLoad() {\n     5\t        super.viewDidLoad()\n     6\t        setupUI()\n     7\t    }\n     8\t\n     9\t    private func setupUI() {\n    10\t        view.backgroundColor = .systemBackground\n    11\t    }\n    12\t}",
             isResultTruncated: false
         )
@@ -197,7 +197,7 @@ struct ReadToolDetailSheet: View {
             summary: "empty.txt",
             status: .success,
             durationMs: 5,
-            arguments: "{\"file_path\": \"/Users/moose/empty.txt\"}",
+            arguments: "{\"file_path\": \"/Users/dev/empty.txt\"}",
             result: "",
             isResultTruncated: false
         )
@@ -257,7 +257,7 @@ struct ReadToolDetailSheet: View {
             summary: "large_file.swift",
             status: .success,
             durationMs: 45,
-            arguments: "{\"file_path\": \"/Users/moose/large_file.swift\", \"offset\": 99, \"limit\": 50}",
+            arguments: "{\"file_path\": \"/Users/dev/large_file.swift\", \"offset\": 99, \"limit\": 50}",
             result: "   100\tfunc processData() {\n   101\t    let items = fetchItems()\n   102\t    for item in items {\n   103\t        transform(item)\n   104\t    }\n   105\t}",
             isResultTruncated: false
         )
@@ -277,7 +277,7 @@ struct ReadToolDetailSheet: View {
             summary: "huge_file.ts",
             status: .success,
             durationMs: 150,
-            arguments: "{\"file_path\": \"/Users/moose/huge_file.ts\"}",
+            arguments: "{\"file_path\": \"/Users/dev/huge_file.ts\"}",
             result: "     1\timport { something } from './module'\n     2\t\n     3\t// ... lots of content ...\n\n... [Output truncated for performance]",
             isResultTruncated: true
         )
@@ -297,7 +297,7 @@ struct ReadToolDetailSheet: View {
             summary: "loading.swift",
             status: .running,
             durationMs: nil,
-            arguments: "{\"file_path\": \"/Users/moose/loading.swift\"}",
+            arguments: "{\"file_path\": \"/Users/dev/loading.swift\"}",
             result: nil,
             isResultTruncated: false
         )
@@ -317,8 +317,8 @@ struct ReadToolDetailSheet: View {
             summary: "Sources",
             status: .error,
             durationMs: 2,
-            arguments: "{\"file_path\": \"/Users/moose/Sources\"}",
-            result: "Path is a directory, not a file: /Users/moose/Sources",
+            arguments: "{\"file_path\": \"/Users/dev/Sources\"}",
+            result: "Path is a directory, not a file: /Users/dev/Sources",
             isResultTruncated: false
         )
     )

@@ -32,9 +32,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     @AppStorage("serverPort") private var _serverPort = AppConstants.prodPort
 
-    @ObservationIgnored
-    @AppStorage("useTLS") private var _useTLS = false
-
     // MARK: - App Settings (Persisted)
 
     @ObservationIgnored
@@ -100,10 +97,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     var serverHost: String { _serverHost }
     var serverPort: String { _serverPort }
-    var useTLS: Bool { _useTLS }
 
     var serverURL: URL {
-        Self.buildServerURL(host: _serverHost, port: _serverPort, useTLS: _useTLS)
+        Self.buildServerURL(host: _serverHost, port: _serverPort)
     }
 
     var currentServerOrigin: String {
@@ -128,7 +124,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Read persisted values before initialization (workaround for @AppStorage in init)
         let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
         let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.prodPort
-        let tls = UserDefaults.standard.bool(forKey: "useTLS")
 
         // Initialize core services that persist across server changes
         guard let db = EventDatabase() else {
@@ -139,7 +134,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         deepLinkRouter = DeepLinkRouter()
 
         // Build initial server URL
-        let url = Self.buildServerURL(host: host, port: port, useTLS: tls)
+        let url = Self.buildServerURL(host: host, port: port)
 
         // Initialize RPC client
         let client = RPCClient(serverURL: url)
@@ -197,13 +192,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Server Settings Management
 
-    func updateServerSettings(host: String, port: String, useTLS: Bool) {
+    func updateServerSettings(host: String, port: String) {
         // Compare against the current RPCClient's actual URL, not @AppStorage.
         // SettingsView shares the same @AppStorage keys and updates them before
         // calling this method, so _serverPort already has the new value by the
         // time we check. Using the running client's origin avoids this race.
         let newOrigin = "\(host):\(port)"
-        guard newOrigin != rpcClient.serverOrigin || useTLS != _useTLS else {
+        guard newOrigin != rpcClient.serverOrigin else {
             TronLogger.shared.debug("Server settings unchanged, skipping update", category: .general)
             return
         }
@@ -219,10 +214,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Update stored settings
         _serverHost = host
         _serverPort = port
-        _useTLS = useTLS
 
         // Recreate RPC client with new URL
-        let url = Self.buildServerURL(host: host, port: port, useTLS: useTLS)
+        let url = Self.buildServerURL(host: host, port: port)
         let newClient = RPCClient(serverURL: url)
         rpcClient = newClient
 
@@ -312,9 +306,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Private Helpers
 
-    private static func buildServerURL(host: String, port: String, useTLS: Bool) -> URL {
-        let scheme = useTLS ? "wss" : "ws"
-        let urlString = "\(scheme)://\(host):\(port)/ws"
+    private static func buildServerURL(host: String, port: String) -> URL {
+        let urlString = "ws://\(host):\(port)/ws"
         guard let url = URL(string: urlString) else {
             TronLogger.shared.error("Invalid server URL '\(urlString)', falling back to localhost", category: .general)
             return AppConstants.fallbackServerURL

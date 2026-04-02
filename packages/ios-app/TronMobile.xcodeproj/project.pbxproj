@@ -297,6 +297,7 @@
 		7468D763F93087DFAE9DB984 /* ThinkingContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D4057C20D31DB761BB86A2 /* ThinkingContentView.swift */; };
 		74E6F33CE449E1CBF3B73B96 /* DatabaseSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9877164A09CA5834EAF8AE3 /* DatabaseSchema.swift */; };
 		7525C1112C72B7BBD48E70CB /* SectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAE52D48A5192612A7E9B20 /* SectionCard.swift */; };
+		75478C84CF739F65D13392ED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */; };
 		7550D0DC5121F356E6CFA465 /* ContextMetricsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE53A76069C59008CE5B3BC /* ContextMetricsViews.swift */; };
 		7608E8FA6C929CAB42720733 /* ConsolidatedAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAC187E5AD31DD3F3462F060 /* ConsolidatedAnalytics.swift */; };
 		760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6616CB1CDBC7DDA0513F88ED /* TurnLifecycleContext.swift */; };
@@ -1063,6 +1064,7 @@
 		A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageDeletedPlugin.swift; sourceTree = "<group>"; };
 		A23D9005BFAABD136EC9FDF2 /* MiscClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiscClient.swift; sourceTree = "<group>"; };
 		A2B9166F0FB52EFB6022B56A /* DashboardToolbarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardToolbarActions.swift; sourceTree = "<group>"; };
+		A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A31095A71425E246B49FD7EB /* ChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSheet.swift; sourceTree = "<group>"; };
 		A31812399558CA8516021F33 /* JetBrainsMono-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Variable.ttf"; sourceTree = "<group>"; };
 		A33D515C7609324FFC2A6A60 /* StreamingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingManager.swift; sourceTree = "<group>"; };
@@ -1520,6 +1522,7 @@
 			children = (
 				8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */,
 				6FF70E627268406FDA7DAC41 /* Info.plist */,
+				A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */,
 				A330FEB69A6F3221BC858FB4 /* App */,
 				04D51232A89E7FE4E4702D16 /* Core */,
 				EAFA47184FDFBA3FF055F9CB /* Database */,
@@ -3172,6 +3175,7 @@
 				CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */,
 				81A38C86B2332F2FA3A2087C /* Literata-Variable.ttf in Resources */,
 				BBF23F4B4673194B0B8C235C /* Lora-Variable.ttf in Resources */,
+				75478C84CF739F65D13392ED /* PrivacyInfo.xcprivacy in Resources */,
 				2310BE4C23993CC491219502 /* Recursive-Variable.ttf in Resources */,
 				DA0600911046DA617316A005 /* SourceSerif4-Variable.ttf in Resources */,
 				AF023F680EC37CF8C16E40FD /* background-dark.png in Resources */,

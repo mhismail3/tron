@@ -48,9 +48,6 @@ protocol ServerSettingsProvider: AnyObject {
     /// Current server port
     var serverPort: String { get }
 
-    /// Whether to use TLS
-    var useTLS: Bool { get }
-
     /// Computed WebSocket URL from current settings
     var serverURL: URL { get }
 
@@ -59,7 +56,7 @@ protocol ServerSettingsProvider: AnyObject {
 
     /// Update server connection settings.
     /// This will disconnect from the current server and recreate the RPC client.
-    func updateServerSettings(host: String, port: String, useTLS: Bool)
+    func updateServerSettings(host: String, port: String)
 }
 
 // MARK: - App Settings Provider Protocol
