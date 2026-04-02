@@ -48,7 +48,7 @@ extension ChatView {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: 11, height: 11)
-                            .foregroundStyle(.tronCyan)
+                            .foregroundStyle(.tronAmber)
                         if worktree.hasUncommittedChanges == true {
                             Circle()
                                 .fill(.orange)
