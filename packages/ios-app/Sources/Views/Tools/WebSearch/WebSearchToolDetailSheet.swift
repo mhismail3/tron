@@ -182,7 +182,7 @@ struct WebSearchToolDetailSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(.tronInfo)
+            .sectionFill(.tronInfo, compact: parsed.results.count < 100)
         }
     }
 
@@ -297,7 +297,7 @@ struct WebSearchToolDetailSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(.tronInfo)
+            .sectionFill(.tronInfo, compact: streaming.results.count < 100)
         }
     }
 

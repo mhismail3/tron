@@ -54,7 +54,7 @@ struct ToolCodeBlock: View {
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(accent)
+            .sectionFill(accent, compact: lines.count < 100)
         }
     }
 

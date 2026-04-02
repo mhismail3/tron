@@ -195,7 +195,7 @@ struct BashLineNumberedOutput: View {
         .padding(.vertical, 3)
         .padding(.vertical, 10)
         .padding(.horizontal, 6)
-        .sectionFill(.tronEmerald)
+        .sectionFill(.tronEmerald, compact: lines.count < 100)
     }
 }
 

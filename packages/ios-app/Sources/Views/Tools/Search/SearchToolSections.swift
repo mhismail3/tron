@@ -84,8 +84,12 @@ struct SearchMatchesSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(.purple)
+            .sectionFill(.purple, compact: totalMatchLines < 100)
         }
+    }
+
+    private var totalMatchLines: Int {
+        parsedResults.reduce(0) { $0 + $1.matches.count }
     }
 }
 
@@ -194,7 +198,7 @@ struct SearchFileListSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(.purple)
+            .sectionFill(.purple, compact: files.count < 100)
         }
     }
 
@@ -254,7 +258,11 @@ struct SearchStreamingMatchesSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(.purple)
+            .sectionFill(.purple, compact: totalMatchLines < 100)
         }
+    }
+
+    private var totalMatchLines: Int {
+        groups.reduce(0) { $0 + $1.matches.count }
     }
 }

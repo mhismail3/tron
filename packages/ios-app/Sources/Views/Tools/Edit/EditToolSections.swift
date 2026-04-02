@@ -40,7 +40,7 @@ struct EditDiffSection: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.vertical, 10)
             .padding(.horizontal, 6)
-            .sectionFill(accentColor)
+            .sectionFill(accentColor, compact: diffLines.count < 100)
         }
     }
 }

@@ -248,6 +248,7 @@ private struct SectionFillModifier: ViewModifier {
     let color: Color
     let cornerRadius: CGFloat
     let subtle: Bool
+    let compact: Bool
     @Environment(\.colorScheme) var colorScheme
 
     private var opacity: Double {
@@ -264,7 +265,7 @@ private struct SectionFillModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), compact {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glassEffect(
@@ -284,8 +285,9 @@ private struct SectionFillModifier: ViewModifier {
 extension View {
     /// Adaptive section background fill — uses higher opacity in dark mode, lower in light mode.
     /// `subtle: true` for nested/inner rows (half the standard intensity).
-    func sectionFill(_ color: Color, cornerRadius: CGFloat = 12, subtle: Bool = false) -> some View {
-        self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle))
+    /// `compact: false` forces plain fill instead of glass (for large content that causes rendering glitches).
+    func sectionFill(_ color: Color, cornerRadius: CGFloat = 12, subtle: Bool = false, compact: Bool = true) -> some View {
+        self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle, compact: compact))
     }
 
     /// Adaptive chip fill + stroke for capsule-shaped tool chips.
