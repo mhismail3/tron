@@ -44,14 +44,14 @@ async fn detect_default_branch(repo_root: &std::path::Path, git: &GitExecutor) -
 /// Recover orphaned worktrees in a single repository.
 ///
 /// 1. List all worktrees with branches matching the session prefix
-/// 2. For worktrees whose session ID is not in `active_sessions`:
+/// 2. For worktrees whose branch is not in `active_branches`:
 ///    - Auto-commit any changes with `[auto-recovered]` message
 ///    - Remove the worktree
 /// 3. Prune stale refs
 #[allow(clippy::implicit_hasher)]
 pub async fn recover_repo(
     repo_root: &std::path::Path,
-    active_sessions: &HashSet<String>,
+    active_branches: &HashSet<String>,
     config: &WorktreeConfig,
     git: &GitExecutor,
 ) -> Result<Vec<RecoveredWorktree>> {
@@ -70,16 +70,11 @@ pub async fn recover_repo(
             _ => continue,
         };
 
-        // Extract session prefix from branch name
-        let session_prefix = branch.strip_prefix(&config.branch_prefix).unwrap_or(branch);
-
-        // Check if any active session matches this prefix
-        let is_active = active_sessions
-            .iter()
-            .any(|sid| sid.starts_with(session_prefix));
+        // Check if the branch belongs to an active worktree
+        let is_active = active_branches.contains(branch.as_str());
 
         if is_active {
-            debug!(branch, "worktree belongs to active session, skipping");
+            debug!(branch, "worktree branch is active, skipping");
             continue;
         }
 
@@ -260,7 +255,7 @@ mod tests {
             .unwrap();
 
         let mut active: HashSet<String> = HashSet::new();
-        assert!(active.insert("active12-full-session-id".to_string()));
+        assert!(active.insert("session/active12".to_string()));
 
         let result = recover_repo(dir.path(), &active, &config, &git)
             .await
@@ -296,6 +291,42 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].auto_committed);
         assert!(!result[0].branch_deleted, "branch with auto-committed work should be preserved");
+    }
+
+    #[tokio::test]
+    async fn recover_skips_renamed_branch() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("abc123");
+        git.worktree_add(dir.path(), &wt_path, "session/abc123", "HEAD")
+            .await
+            .unwrap();
+
+        // Simulate rename: branch is now session/fuzzy-purple-elephant
+        git.branch_rename(
+            dir.path(),
+            "session/abc123",
+            "session/fuzzy-purple-elephant",
+        )
+        .await
+        .unwrap();
+
+        let mut active: HashSet<String> = HashSet::new();
+        active.insert("session/fuzzy-purple-elephant".to_string());
+
+        let result = recover_repo(dir.path(), &active, &config, &git)
+            .await
+            .unwrap();
+        assert!(
+            result.is_empty(),
+            "renamed active branch should not be treated as orphan"
+        );
     }
 
     #[tokio::test]

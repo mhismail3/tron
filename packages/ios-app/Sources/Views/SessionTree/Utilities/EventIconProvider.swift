@@ -65,6 +65,8 @@ enum EventIconProvider {
             return "arrow.uturn.backward.circle"
         case .worktreeMerged:
             return "arrow.triangle.merge"
+        case .worktreeRenamed:
+            return "pencil.line"
         case .notificationProcessResult:
             return "bell.badge.fill"
         case .processResultsConsumed:
@@ -126,7 +128,7 @@ enum EventIconProvider {
             return .tronTextMuted
         case .streamTurnStart, .streamTurnEnd:
             return .tronBlue
-        case .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged:
+        case .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged, .worktreeRenamed:
             return .tronCyan
         case .notificationProcessResult:
             return .tronWarning

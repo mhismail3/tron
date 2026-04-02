@@ -403,6 +403,17 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             set_opt(&mut data, "finalCommit", final_commit);
             Some(session_scoped(event, "worktree.released", Some(data)))
         }
+        TronEvent::WorktreeRenamed {
+            old_branch,
+            new_branch,
+            ..
+        } => {
+            let data = json!({
+                "oldBranch": old_branch,
+                "newBranch": new_branch,
+            });
+            Some(session_scoped(event, "worktree.renamed", Some(data)))
+        }
         TronEvent::SessionSaved { .. } | TronEvent::SessionLoaded { .. } => {
             Some(session_scoped(event, event.event_type(), Some(json!({}))))
         }

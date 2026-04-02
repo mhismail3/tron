@@ -494,6 +494,11 @@ extension UnifiedEventTransformer {
                     timestamp: parseTimestamp(event.timestamp)
                 ))
 
+            case .worktreeRenamed:
+                if let newBranch = event.payload["newBranch"]?.value as? String {
+                    state.worktree.currentBranch = newBranch
+                }
+
             case .compactBoundary:
                 if let message = transformPersistedEvent(event) {
                     state.messages.append(message)

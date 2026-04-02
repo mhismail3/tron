@@ -217,6 +217,10 @@ extension SessionEvent {
         case .worktreeMerged:
             return "Worktree merged"
 
+        case .worktreeRenamed:
+            let newBranch = payload.string("newBranch") ?? ""
+            return newBranch.isEmpty ? "Branch renamed" : "Branch: \(newBranch)"
+
         case .notificationProcessResult:
             let label = payload.string("label") ?? ""
             if !label.isEmpty {

@@ -73,6 +73,7 @@ enum PersistedEventType: String, CaseIterable {
     case worktreeCommit = "worktree.commit"
     case worktreeReleased = "worktree.released"
     case worktreeMerged = "worktree.merged"
+    case worktreeRenamed = "worktree.renamed"
 
     // Error events
     case errorAgent = "error.agent"
@@ -118,7 +119,7 @@ enum PersistedEventType: String, CaseIterable {
              .toolCall, .toolResult,
              .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
              .compactBoundary, .compactSummary,
-             .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged,
+             .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged, .worktreeRenamed,
              .subagentSpawned, .subagentCompleted, .subagentFailed,
              .errorAgent:
             return true
@@ -143,7 +144,7 @@ enum PersistedEventType: String, CaseIterable {
         case .sessionStart, .sessionEnd, .sessionFork, .sessionBranch,
              .compactBoundary, .compactSummary,
              .metadataUpdate, .metadataTag,
-             .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged,
+             .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
              .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
              .configPromptUpdate,
              .messageDeleted,
@@ -193,6 +194,7 @@ enum PersistedEventType: String, CaseIterable {
         case .worktreeCommit: return "Git commit"
         case .worktreeReleased: return "Worktree released"
         case .worktreeMerged: return "Worktree merged"
+        case .worktreeRenamed: return "Branch renamed"
         case .errorAgent: return "Agent error"
         case .errorTool: return "Tool error"
         case .errorProvider: return "Provider error"

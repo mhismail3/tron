@@ -148,6 +148,7 @@ extension ReconstructedState {
     struct WorktreeState {
         var isAcquired: Bool
         var currentWorktree: String?
+        var currentBranch: String?
         var commits: [Commit]
         var merges: [Merge]
 
@@ -165,6 +166,7 @@ extension ReconstructedState {
         init() {
             self.isAcquired = false
             self.currentWorktree = nil
+            self.currentBranch = nil
             self.commits = []
             self.merges = []
         }

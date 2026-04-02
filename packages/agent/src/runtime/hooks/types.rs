@@ -30,6 +30,8 @@ pub enum HookType {
     PreCompact,
     /// Notification event.
     Notification,
+    /// When a worktree is acquired for a session.
+    WorktreeAcquired,
 }
 
 impl HookType {
@@ -42,7 +44,7 @@ impl HookType {
     pub fn is_forced_blocking(self) -> bool {
         matches!(
             self,
-            Self::PreToolUse | Self::UserPromptSubmit | Self::PreCompact
+            Self::PreToolUse | Self::UserPromptSubmit | Self::PreCompact,
         )
     }
 
@@ -59,6 +61,7 @@ impl HookType {
             Self::UserPromptSubmit,
             Self::PreCompact,
             Self::Notification,
+            Self::WorktreeAcquired,
         ]
     }
 }
@@ -75,6 +78,7 @@ impl std::fmt::Display for HookType {
             Self::UserPromptSubmit => write!(f, "UserPromptSubmit"),
             Self::PreCompact => write!(f, "PreCompact"),
             Self::Notification => write!(f, "Notification"),
+            Self::WorktreeAcquired => write!(f, "WorktreeAcquired"),
         }
     }
 }
@@ -295,6 +299,22 @@ pub enum HookContext {
         /// Optional notification body.
         body: Option<String>,
     },
+    /// Context for [`HookType::WorktreeAcquired`].
+    #[serde(rename_all = "camelCase")]
+    WorktreeAcquired {
+        /// Session this hook fires in.
+        session_id: String,
+        /// ISO 8601 timestamp.
+        timestamp: String,
+        /// Branch name (e.g. `session/abc123`).
+        branch: String,
+        /// Root of the git repository.
+        repo_root: String,
+        /// Base branch (e.g. `main`).
+        base_branch: Option<String>,
+        /// Path to the worktree directory.
+        working_directory: String,
+    },
 }
 
 impl HookContext {
@@ -311,6 +331,7 @@ impl HookContext {
             Self::UserPromptSubmit { .. } => HookType::UserPromptSubmit,
             Self::PreCompact { .. } => HookType::PreCompact,
             Self::Notification { .. } => HookType::Notification,
+            Self::WorktreeAcquired { .. } => HookType::WorktreeAcquired,
         }
     }
 
@@ -326,7 +347,8 @@ impl HookContext {
             | Self::SessionEnd { session_id, .. }
             | Self::UserPromptSubmit { session_id, .. }
             | Self::PreCompact { session_id, .. }
-            | Self::Notification { session_id, .. } => session_id,
+            | Self::Notification { session_id, .. }
+            | Self::WorktreeAcquired { session_id, .. } => session_id,
         }
     }
 
@@ -342,7 +364,8 @@ impl HookContext {
             | Self::SessionEnd { timestamp, .. }
             | Self::UserPromptSubmit { timestamp, .. }
             | Self::PreCompact { timestamp, .. }
-            | Self::Notification { timestamp, .. } => timestamp,
+            | Self::Notification { timestamp, .. }
+            | Self::WorktreeAcquired { timestamp, .. } => timestamp,
         }
     }
 }
@@ -489,11 +512,12 @@ mod tests {
         assert!(!HookType::SessionStart.is_forced_blocking());
         assert!(!HookType::SessionEnd.is_forced_blocking());
         assert!(!HookType::Notification.is_forced_blocking());
+        assert!(!HookType::WorktreeAcquired.is_forced_blocking());
     }
 
     #[test]
-    fn test_hook_type_all_returns_nine_variants() {
-        assert_eq!(HookType::all().len(), 9);
+    fn test_hook_type_all_returns_ten_variants() {
+        assert_eq!(HookType::all().len(), 10);
     }
 
     #[test]
@@ -724,6 +748,42 @@ mod tests {
         let deserialized: HookContext = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.hook_type(), HookType::PreToolUse);
         assert_eq!(deserialized.session_id(), "s1");
+    }
+
+    #[test]
+    fn test_hook_context_worktree_acquired_type() {
+        let ctx = HookContext::WorktreeAcquired {
+            session_id: "s1".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            branch: "session/abc123".to_string(),
+            repo_root: "/repo".to_string(),
+            base_branch: Some("main".to_string()),
+            working_directory: "/repo/.worktrees/session/abc123".to_string(),
+        };
+        assert_eq!(ctx.hook_type(), HookType::WorktreeAcquired);
+        assert_eq!(ctx.session_id(), "s1");
+        assert_eq!(ctx.timestamp(), "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn test_hook_context_worktree_acquired_serde_roundtrip() {
+        let ctx = HookContext::WorktreeAcquired {
+            session_id: "s1".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            branch: "session/abc".to_string(),
+            repo_root: "/repo".to_string(),
+            base_branch: None,
+            working_directory: "/repo/.worktrees/session/abc".to_string(),
+        };
+        let json = serde_json::to_string(&ctx).unwrap();
+        assert!(json.contains("\"hookType\""));
+        let deserialized: HookContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.hook_type(), HookType::WorktreeAcquired);
+    }
+
+    #[test]
+    fn test_hook_type_worktree_acquired_display() {
+        assert_eq!(HookType::WorktreeAcquired.to_string(), "WorktreeAcquired");
     }
 
     #[test]

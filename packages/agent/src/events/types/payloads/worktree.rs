@@ -73,3 +73,13 @@ pub struct WorktreeMergedPayload {
     /// Merge strategy.
     pub strategy: String,
 }
+
+/// Payload for `worktree.renamed` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRenamedPayload {
+    /// Previous branch name.
+    pub old_branch: String,
+    /// New branch name.
+    pub new_branch: String,
+}

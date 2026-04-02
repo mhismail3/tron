@@ -877,6 +877,14 @@ tron_events! {
         deleted: bool,
     } => "worktree.released",
 
+    /// Worktree branch renamed by LLM hook.
+    WorktreeRenamed {
+        #[serde(rename = "oldBranch")]
+        old_branch: String,
+        #[serde(rename = "newBranch")]
+        new_branch: String,
+    } => "worktree.renamed",
+
     // -- Display streaming --
 
     /// A single frame in a display stream (transient, not persisted).
@@ -1769,6 +1777,11 @@ mod tests {
                 final_commit: Some("cafebabe".into()),
                 branch_preserved: true,
                 deleted: true,
+            },
+            TronEvent::WorktreeRenamed {
+                base: base.clone(),
+                old_branch: "session/abc123".into(),
+                new_branch: "session/fuzzy-purple-elephant".into(),
             },
             TronEvent::DisplayFrame {
                 base: base.clone(),

@@ -7,6 +7,7 @@ struct HooksSettingsPage: View {
     // Builtin hook metadata (matches Rust builtin::list_builtins())
     private let builtinMeta: [(id: String, label: String, description: String, event: String)] = [
         ("builtin:title-gen", "Generate Session Title", "Auto-generates a short title when a session starts", "session-start"),
+        ("builtin:branch-name-gen", "Generate Branch Name", "Renames worktree branches to memorable 3-word names", "worktree-acquired"),
     ]
 
     var body: some View {

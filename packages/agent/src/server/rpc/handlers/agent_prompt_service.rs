@@ -216,7 +216,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
         let mut engine = HookEngine::new(HookRegistry::new());
 
-        // Register built-in hooks (title gen, etc.)
+        // Register built-in hooks (title gen, branch name gen, etc.)
         if let Some(ref mgr) = subagent_manager {
             builtin::register_builtins(
                 &mut engine,
@@ -225,6 +225,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 mgr,
                 &broadcast,
                 Some(&event_store),
+                worktree_coordinator.as_ref(),
             );
         }
 
@@ -281,6 +282,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
+    let mut freshly_acquired_worktree = false;
     let worktree_info: Option<crate::worktree::WorktreeInfo> =
         if let Some(wt_path) = &state.worktree_path {
             worktree_coordinator
@@ -303,6 +305,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 .await
             {
                 Ok(crate::worktree::AcquireResult::Acquired(info)) => {
+                    freshly_acquired_worktree = true;
                     debug!(
                         session_id = %session_id,
                         worktree = %info.worktree_path.display(),
@@ -557,6 +560,23 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         user_content_override,
         ..Default::default()
     };
+
+    // Fire WorktreeAcquired hook for fresh acquisitions (background, non-blocking)
+    if freshly_acquired_worktree {
+        if let (Some(hook_engine), Some(wt_info)) = (&hooks, &worktree_info) {
+            debug!(session_id = %session_id, "[hooks] firing WorktreeAcquired");
+            let hook_ctx = crate::runtime::hooks::types::HookContext::WorktreeAcquired {
+                session_id: session_id.clone(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                branch: wt_info.branch.clone(),
+                repo_root: wt_info.repo_root.to_string_lossy().to_string(),
+                base_branch: wt_info.base_branch.clone(),
+                working_directory: wt_info.worktree_path.to_string_lossy().to_string(),
+            };
+            let _ = hook_engine.execute(&hook_ctx).await;
+            debug!(session_id = %session_id, "[hooks] WorktreeAcquired returned");
+        }
+    }
 
     // Fire SessionStart hook (non-blocking, background)
     if let Some(hook_engine) = &hooks {

@@ -1565,3 +1565,17 @@ fn converts_worktree_released() {
     assert_eq!(data["branchPreserved"], true);
     assert_eq!(data["deleted"], true);
 }
+
+#[test]
+fn converts_worktree_renamed() {
+    let event = TronEvent::WorktreeRenamed {
+        base: BaseEvent::now("s1"),
+        old_branch: "session/abc123".into(),
+        new_branch: "session/fuzzy-purple-elephant".into(),
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.event_type, "worktree.renamed");
+    let data = rpc.data.unwrap();
+    assert_eq!(data["oldBranch"], "session/abc123");
+    assert_eq!(data["newBranch"], "session/fuzzy-purple-elephant");
+}

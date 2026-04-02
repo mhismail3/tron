@@ -53,7 +53,7 @@
 //!
 //! `session-start`, `session-end`, `stop`, `user-prompt-submit`,
 //! `pre-tool-use`, `post-tool-use`, `pre-compact`, `subagent-stop`,
-//! `notification`
+//! `notification`, `worktree-acquired`
 //!
 //! # Built-in Hooks
 //!
@@ -61,6 +61,7 @@
 //! enable/disable them via `settings.hooks.builtinHooks`. Current builtins:
 //!
 //! - `builtin:title-gen` — auto-generates session titles from user prompts
+//! - `builtin:branch-name-gen` — renames worktree branches to memorable 3-word names
 //!
 //! # Hot Reload
 //!

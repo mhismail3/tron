@@ -81,6 +81,8 @@ define_events! {
         WorktreeReleased => "worktree.released" => payloads::worktree::WorktreeReleasedPayload,
         /// Worktree merged back.
         WorktreeMerged => "worktree.merged" => payloads::worktree::WorktreeMergedPayload,
+        /// Worktree branch renamed.
+        WorktreeRenamed => "worktree.renamed" => payloads::worktree::WorktreeRenamedPayload,
         /// Agent-level error.
         ErrorAgent => "error.agent" => payloads::error::ErrorAgentPayload,
         /// Tool execution error.
@@ -136,7 +138,7 @@ define_events! {
         /// Whether this is a config event (`config.*`).
         is_config_type => [ConfigModelSwitch, ConfigPromptUpdate, ConfigReasoningLevel],
         /// Whether this is a worktree event (`worktree.*`).
-        is_worktree_type => [WorktreeAcquired, WorktreeCommit, WorktreeReleased, WorktreeMerged],
+        is_worktree_type => [WorktreeAcquired, WorktreeCommit, WorktreeReleased, WorktreeMerged, WorktreeRenamed],
         /// Whether this is a subagent event (`subagent.*`).
         is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
         /// Whether this is a hook event (`hook.*`).
@@ -229,7 +231,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_52_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 55);
+        assert_eq!(ALL_EVENT_TYPES.len(), 56);
     }
 
     #[test]

@@ -114,6 +114,12 @@ impl GitExecutor {
         Ok(())
     }
 
+    /// Rename a branch.
+    pub async fn branch_rename(&self, repo: &Path, old_name: &str, new_name: &str) -> Result<()> {
+        let _ = self.run(repo, &["branch", "-m", old_name, new_name]).await?;
+        Ok(())
+    }
+
     /// Check if there are uncommitted changes.
     pub async fn has_changes(&self, dir: &Path) -> Result<bool> {
         let output = self.run(dir, &["status", "--porcelain"]).await?;
@@ -909,5 +915,71 @@ branch refs/heads/session/x
             .await
             .unwrap();
         assert!(entries.is_empty());
+    }
+
+    // ── branch_rename tests ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn branch_rename_success() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        run_cmd(dir.path(), &["git", "branch", "old-branch"]).await;
+
+        git.branch_rename(dir.path(), "old-branch", "new-branch")
+            .await
+            .unwrap();
+
+        let branches = git.list_branches_matching(dir.path(), "*").await.unwrap();
+        assert!(branches.contains(&"new-branch".to_string()));
+        assert!(!branches.contains(&"old-branch".to_string()));
+    }
+
+    #[tokio::test]
+    async fn branch_rename_nonexistent_fails() {
+        let dir = tempdir().unwrap();
+        let _git = init_repo(dir.path()).await;
+
+        let git = GitExecutor::new(30_000);
+        let result = git.branch_rename(dir.path(), "nonexistent", "new-name").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn branch_rename_to_existing_fails() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        run_cmd(dir.path(), &["git", "branch", "branch-a"]).await;
+        run_cmd(dir.path(), &["git", "branch", "branch-b"]).await;
+
+        let result = git.branch_rename(dir.path(), "branch-a", "branch-b").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn branch_rename_worktree_branch() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        let wt_path = dir.path().join(".worktrees").join("session").join("test");
+        git.worktree_add(dir.path(), &wt_path, "session/old-name", "HEAD")
+            .await
+            .unwrap();
+
+        git.branch_rename(dir.path(), "session/old-name", "session/new-name")
+            .await
+            .unwrap();
+
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
+        assert!(branches.contains(&"session/new-name".to_string()));
+        assert!(!branches.contains(&"session/old-name".to_string()));
+
+        // Worktree should still be functional
+        assert!(wt_path.exists());
+        std::fs::write(wt_path.join("test.txt"), "works").unwrap();
+        let has_changes = git.has_changes(&wt_path).await.unwrap();
+        assert!(has_changes);
     }
 }

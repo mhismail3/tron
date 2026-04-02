@@ -303,6 +303,7 @@ fn parse_type_value(value: &str) -> Option<HookType> {
         "user-prompt-submit" => Some(HookType::UserPromptSubmit),
         "pre-compact" => Some(HookType::PreCompact),
         "notification" => Some(HookType::Notification),
+        "worktree-acquired" => Some(HookType::WorktreeAcquired),
         _ => None,
     }
 }
@@ -699,6 +700,7 @@ mod tests {
         assert_eq!(parse_type_value("user-prompt-submit"), Some(HookType::UserPromptSubmit));
         assert_eq!(parse_type_value("pre-compact"), Some(HookType::PreCompact));
         assert_eq!(parse_type_value("notification"), Some(HookType::Notification));
+        assert_eq!(parse_type_value("worktree-acquired"), Some(HookType::WorktreeAcquired));
     }
 
     #[test]

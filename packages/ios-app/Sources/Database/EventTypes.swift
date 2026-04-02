@@ -147,6 +147,7 @@ enum SessionEventType: String, Codable {
     case worktreeCommit = "worktree.commit"
     case worktreeReleased = "worktree.released"
     case worktreeMerged = "worktree.merged"
+    case worktreeRenamed = "worktree.renamed"
 
     // Process management
     case notificationProcessResult = "notification.process_result"

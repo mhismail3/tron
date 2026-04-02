@@ -3,6 +3,9 @@
 //!
 //! The coordinator manages the lifecycle of worktrees across all sessions,
 //! tracks active worktrees, and delegates to specialized modules.
+//!
+//! Key operations: `maybe_acquire`, `release`, `rename_branch`, `commit`,
+//! `merge`, `get_status`, `rebuild_from_events`, `recover_orphans`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -273,6 +276,51 @@ impl WorktreeCoordinator {
             deleted: release_info.deleted,
         });
 
+        Ok(())
+    }
+
+    /// Rename the branch of an active worktree.
+    ///
+    /// Renames the git branch, updates coordinator state, emits `worktree.renamed`
+    /// event, and broadcasts to WebSocket clients. No-op if `new_branch` equals
+    /// the current branch name.
+    #[instrument(skip(self), fields(session_id, new_branch))]
+    pub async fn rename_branch(&self, session_id: &str, new_branch: &str) -> Result<()> {
+        let info = self.state.lock().active_info(session_id)
+            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+
+        let old_branch = info.branch.clone();
+
+        if old_branch == new_branch {
+            return Ok(());
+        }
+
+        self.git.branch_rename(&info.repo_root, &old_branch, new_branch).await?;
+
+        {
+            let mut state = self.state.lock();
+            if let Some(tracked) = state.active_by_session.get_mut(session_id) {
+                tracked.branch = new_branch.to_string();
+            }
+        }
+
+        let _ = self.event_store.append(&AppendOptions {
+            session_id,
+            event_type: EventType::WorktreeRenamed,
+            payload: json!({
+                "oldBranch": old_branch,
+                "newBranch": new_branch,
+            }),
+            parent_id: None,
+        });
+
+        self.broadcast(TronEvent::WorktreeRenamed {
+            base: BaseEvent::now(session_id),
+            old_branch: old_branch.clone(),
+            new_branch: new_branch.to_string(),
+        });
+
+        info!(session_id, old = %old_branch, new = %new_branch, "branch renamed");
         Ok(())
     }
 
@@ -551,6 +599,21 @@ impl WorktreeCoordinator {
             restored_infos.push(info);
         }
 
+        // Apply rename events to get final branch names
+        for info in &mut restored_infos {
+            let renamed = self
+                .event_store
+                .get_events_by_type(&info.session_id, &["worktree.renamed"], None)
+                .unwrap_or_default();
+            if let Some(last) = renamed.last() {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&last.payload) {
+                    if let Some(new_branch) = payload["newBranch"].as_str() {
+                        info.branch = new_branch.to_string();
+                    }
+                }
+            }
+        }
+
         let restored = restored_infos.len();
         self.state.lock().replace_active(restored_infos);
 
@@ -565,7 +628,13 @@ impl WorktreeCoordinator {
     /// IMPORTANT: Call `rebuild_from_events` first to avoid deleting valid worktrees.
     pub async fn recover_orphans(&self) -> usize {
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
-        let active_ids = self.state.lock().active_ids();
+        let active_branches: HashSet<String> = self
+            .state
+            .lock()
+            .active_by_session
+            .values()
+            .map(|info| info.branch.clone())
+            .collect();
 
         let mut total = 0;
         for ws in &workspaces {
@@ -573,7 +642,7 @@ impl WorktreeCoordinator {
             if !self.git.is_git_repo(&repo_root).await {
                 continue;
             }
-            match crate::worktree::recovery::recover_repo(&repo_root, &active_ids, &self.config, &self.git)
+            match crate::worktree::recovery::recover_repo(&repo_root, &active_branches, &self.config, &self.git)
                 .await
             {
                 Ok(recovered) => total += recovered.len(),
@@ -657,6 +726,9 @@ impl WorktreeCoordinator {
     }
 
     /// Build a `branch→base_branch` map by scanning `WorktreeAcquired` events.
+    ///
+    /// Also applies `worktree.renamed` events to re-key entries whose
+    /// branch name changed after acquisition.
     fn load_base_branches_from_events(&self) -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();
         let events = self
@@ -673,6 +745,25 @@ impl WorktreeCoordinator {
                 map.insert(branch.to_string(), base.to_string());
             }
         }
+
+        // Apply renames: move entries from old branch key to new branch key
+        let renames = self
+            .event_store
+            .get_all_events_by_types(&["worktree.renamed"], Some(500), None)
+            .unwrap_or_default();
+        for event in &renames {
+            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
+                && let (Some(old), Some(new)) = (
+                    payload.get("oldBranch").and_then(|v| v.as_str()),
+                    payload.get("newBranch").and_then(|v| v.as_str()),
+                )
+            {
+                if let Some(base) = map.remove(old) {
+                    map.insert(new.to_string(), base);
+                }
+            }
+        }
+
         map
     }
 
@@ -1920,5 +2011,336 @@ mod tests {
         // Verify tracked
         assert!(coord.get_info("test-mid").is_some());
         assert_eq!(coord.list_active().len(), 1);
+    }
+
+    // ── rename_branch tests ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rename_branch_updates_state_and_git() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+        let old_branch = info.branch.clone();
+
+        coord
+            .rename_branch(sid, "session/fuzzy-purple-elephant")
+            .await
+            .unwrap();
+
+        // State updated
+        let new_info = coord.get_info(sid).unwrap();
+        assert_eq!(new_info.branch, "session/fuzzy-purple-elephant");
+
+        // Git branch renamed
+        let git = GitExecutor::new(30_000);
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
+        assert!(branches.contains(&"session/fuzzy-purple-elephant".to_string()));
+        assert!(!branches.contains(&old_branch));
+
+        // Event emitted
+        let events = store
+            .get_events_by_type(sid, &["worktree.renamed"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["oldBranch"], old_branch);
+        assert_eq!(payload["newBranch"], "session/fuzzy-purple-elephant");
+    }
+
+    #[tokio::test]
+    async fn rename_branch_not_tracked_returns_error() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.rename_branch("nonexistent", "session/new-name").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rename_branch_collision_returns_error() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+
+        // Create a branch that will collide
+        run_cmd(dir.path(), &["git", "branch", "session/taken-name"]).await;
+
+        let result = coord
+            .rename_branch(sid, "session/taken-name")
+            .await;
+        assert!(result.is_err());
+
+        // Original state preserved on failure
+        let check = coord.get_info(sid).unwrap();
+        assert_eq!(check.branch, info.branch);
+    }
+
+    #[tokio::test]
+    async fn rename_branch_then_release_preserves_new_name() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+
+        std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
+        coord.commit(sid, "wip").await.unwrap();
+
+        coord
+            .rename_branch(sid, "session/cool-branch-name")
+            .await
+            .unwrap();
+        coord.release(sid).await.unwrap();
+
+        let git = GitExecutor::new(30_000);
+        let branches = git
+            .list_branches_matching(dir.path(), "session/*")
+            .await
+            .unwrap();
+        assert!(branches.contains(&"session/cool-branch-name".to_string()));
+    }
+
+    #[tokio::test]
+    async fn rename_branch_idempotent_same_name() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+
+        coord.rename_branch(sid, &info.branch).await.unwrap();
+        let new_info = coord.get_info(sid).unwrap();
+        assert_eq!(new_info.branch, info.branch);
+    }
+
+    // ── rebuild_from_events with renames ───────────────────────────
+
+    #[tokio::test]
+    async fn rebuild_from_events_applies_renames() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+
+        let seed_coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+        let result = seed_coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+        let old_branch = info.branch.clone();
+
+        seed_coord
+            .rename_branch(sid, "session/fuzzy-purple-elephant")
+            .await
+            .unwrap();
+
+        let new_coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+        new_coord.rebuild_from_events();
+
+        let rebuilt_info = new_coord.get_info(sid).unwrap();
+        assert_eq!(
+            rebuilt_info.branch, "session/fuzzy-purple-elephant",
+            "rebuild should apply rename"
+        );
+        assert_ne!(rebuilt_info.branch, old_branch);
+    }
+
+    #[tokio::test]
+    async fn rebuild_from_events_multiple_renames_uses_latest() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+
+        let seed_coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+        seed_coord.maybe_acquire(sid, dir.path()).await.unwrap();
+
+        seed_coord
+            .rename_branch(sid, "session/first-rename-attempt")
+            .await
+            .unwrap();
+        seed_coord
+            .rename_branch(sid, "session/final-branch-name")
+            .await
+            .unwrap();
+
+        let new_coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+        new_coord.rebuild_from_events();
+
+        let info = new_coord.get_info(sid).unwrap();
+        assert_eq!(info.branch, "session/final-branch-name");
+    }
+
+    // ── list_session_branches with renames ─────────────────────────
+
+    #[tokio::test]
+    async fn list_branches_after_rename_shows_correct_base_branch() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+
+        std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
+        coord.commit(sid, "wip").await.unwrap();
+
+        coord
+            .rename_branch(sid, "session/pretty-new-name")
+            .await
+            .unwrap();
+
+        let branches = coord.list_session_branches(dir.path()).await.unwrap();
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0].branch, "session/pretty-new-name");
+        assert!(branches[0].is_active);
+        assert!(branches[0].base_branch.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_branches_after_rename_and_release_shows_base_branch() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path()).await;
+
+        let store = make_store();
+        let sess = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some("test"),
+                None,
+                None,
+            )
+            .unwrap();
+        let sid = &sess.session.id;
+        let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+        let result = coord.maybe_acquire(sid, dir.path()).await.unwrap();
+        let AcquireResult::Acquired(info) = result else {
+            panic!("expected Acquired");
+        };
+
+        std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
+        coord.commit(sid, "wip").await.unwrap();
+
+        coord
+            .rename_branch(sid, "session/released-rename")
+            .await
+            .unwrap();
+        coord.release(sid).await.unwrap();
+
+        let branches = coord.list_session_branches(dir.path()).await.unwrap();
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0].branch, "session/released-rename");
+        assert!(!branches[0].is_active);
+        assert!(
+            branches[0].base_branch.is_some(),
+            "load_base_branches_from_events should rekey renamed branches"
+        );
     }
 }

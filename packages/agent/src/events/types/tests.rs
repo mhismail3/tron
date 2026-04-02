@@ -439,6 +439,10 @@ mod session_event_tests {
                 json!({"sourceBranch": "s", "targetBranch": "t", "mergeCommit": "m", "strategy": "merge"}),
             ),
             (
+                EventType::WorktreeRenamed,
+                json!({"oldBranch": "session/old", "newBranch": "session/new"}),
+            ),
+            (
                 EventType::ErrorAgent,
                 json!({"error": "e", "recoverable": true}),
             ),
@@ -504,7 +508,7 @@ mod session_event_tests {
             ),
         ];
 
-        assert_eq!(cases.len(), 51, "must cover all 51 event types");
+        assert_eq!(cases.len(), 52, "must cover all 52 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -592,6 +596,7 @@ mod type_guard_tests {
     fn worktree_guards() {
         assert!(EventType::WorktreeAcquired.is_worktree_type());
         assert!(EventType::WorktreeMerged.is_worktree_type());
+        assert!(EventType::WorktreeRenamed.is_worktree_type());
     }
 
     #[test]
