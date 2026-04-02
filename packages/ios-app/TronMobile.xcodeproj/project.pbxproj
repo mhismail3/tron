@@ -303,6 +303,7 @@
 		7550D0DC5121F356E6CFA465 /* ContextMetricsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE53A76069C59008CE5B3BC /* ContextMetricsViews.swift */; };
 		7608E8FA6C929CAB42720733 /* ConsolidatedAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAC187E5AD31DD3F3462F060 /* ConsolidatedAnalytics.swift */; };
 		760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6616CB1CDBC7DDA0513F88ED /* TurnLifecycleContext.swift */; };
+		762FC08424B88C8006C0E264 /* TypewriterText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2F2BF782B756D47E100F37 /* TypewriterText.swift */; };
 		76C2A01391412A3A070008DD /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAFA611B03297C4E8A5F765E /* ChatMessage.swift */; };
 		76D6799DF4CB609FC1087FC0 /* WebSearchResultViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183A315A999F640019135844 /* WebSearchResultViewer.swift */; };
 		770194B7E5A777C3DEC0D8BD /* RPCTypes+Auth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EA5598EC123DBC9717A35A7 /* RPCTypes+Auth.swift */; };
@@ -783,6 +784,7 @@
 		2CA946809C70489B4E68EBC3 /* DefaultAgentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultAgentRepository.swift; sourceTree = "<group>"; };
 		2CDECC5E6127C91917466DEC /* MessageFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFinder.swift; sourceTree = "<group>"; };
 		2E0965260D231AB02406E417 /* RPCTypes+Filesystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Filesystem.swift"; sourceTree = "<group>"; };
+		2E2F2BF782B756D47E100F37 /* TypewriterText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterText.swift; sourceTree = "<group>"; };
 		2EA5598EC123DBC9717A35A7 /* RPCTypes+Auth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Auth.swift"; sourceTree = "<group>"; };
 		2ED3322DDABB60F27852BE4C /* IBMPlexSerif-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexSerif-Medium.ttf"; sourceTree = "<group>"; };
 		2EE1EA756D77574BA5C34843 /* SettingsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCard.swift; sourceTree = "<group>"; };
@@ -2583,6 +2585,7 @@
 				BBF591FED5A63542C266BA2E /* ConnectionStatusPill.swift */,
 				6A728932D4055DD33082C067 /* LineNumberedContentView.swift */,
 				A86CDFE588E9C4A56E401D39 /* MultiLineTextView.swift */,
+				2E2F2BF782B756D47E100F37 /* TypewriterText.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -3649,6 +3652,7 @@
 				760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */,
 				0BBBA0C6949E8B4A7D92C354 /* TurnLifecycleCoordinator.swift in Sources */,
 				0EB1252C2D1DD49C7A70EC89 /* TurnStartPlugin.swift in Sources */,
+				762FC08424B88C8006C0E264 /* TypewriterText.swift in Sources */,
 				DFD1465183617D8EE8B69A5F /* UIUpdateQueue.swift in Sources */,
 				635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */,
 				BF42DD0709FA150C1963684B /* View+Accessibility.swift in Sources */,

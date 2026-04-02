@@ -201,7 +201,10 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     // Create per-session hook engine: builtins + discovered user/project hooks.
     // Fresh each session so new/modified hook files are picked up without restart.
-    let hooks = {
+    // Hooks only apply to user-created sessions — not chat mode or subagents.
+    let hooks = if is_chat {
+        None
+    } else {
         use crate::runtime::hooks::builtin;
         use crate::runtime::hooks::discovery::discover_hooks;
         use crate::runtime::hooks::engine::HookEngine;

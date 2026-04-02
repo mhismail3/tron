@@ -57,9 +57,11 @@ extension ChatView {
                         }
                     }
                 }
-                Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
+                TypewriterText(
+                    text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
+                    font: TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold),
+                    color: .tronEmerald
+                )
             }
         }
     }
