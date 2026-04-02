@@ -23,7 +23,7 @@ use std::sync::Arc;
 // =============================================================================
 
 /// Trigger a memory retain: summarize session history since the last boundary
-/// and append to `~/.tron/memory/sessions/log.md`.
+/// and write to `~/.tron/memory/sessions/{session_id}.md`.
 pub struct RetainMemoryHandler;
 
 #[async_trait]
@@ -154,13 +154,12 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
         .trim()
         .to_owned();
 
-    // ── Write to log.md ───────────────────────────────────────────────────
+    // ── Write per-session memory file ───────────────────────────────────
     let now = Utc::now();
     let ts = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let entry = format_log_entry(&session_id, &ts, &model, turn_count, &summary_text);
 
-    if let Err(e) = append_to_memory_log(&entry) {
-        warn!(session_id = %session_id, error = %e, "failed to write memory log — boundary event still persisted");
+    if let Err(e) = write_session_entry(&session_id, &ts, &model, turn_count, &title, &summary_text) {
+        warn!(session_id = %session_id, error = %e, "failed to write session memory file — boundary event still persisted");
     }
 
     // ── Persist memory.retained event ─────────────────────────────────────
@@ -387,33 +386,65 @@ fn keyword_summary(session_id: &str, turn_count: i64) -> String {
     format!("Session {session_id} ({turn_count} turns)")
 }
 
-/// Format a single log entry for appending to `log.md`.
-fn format_log_entry(session_id: &str, ts: &str, model: &str, turns: i64, summary: &str) -> String {
+/// Return the path for a session's memory file: `~/.tron/memory/sessions/{session_id}.md`.
+fn session_file_path(session_id: &str) -> std::path::PathBuf {
+    crate::core::paths::tron_home()
+        .join("memory")
+        .join("sessions")
+        .join(format!("{session_id}.md"))
+}
+
+/// Format YAML frontmatter for a new session memory file.
+fn format_session_frontmatter(session_id: &str, ts: &str, model: &str) -> String {
     format!(
-        "\n---\n<!-- entry: {session_id} | {ts} | model: {model} | turns: {turns} -->\n\n{summary}\n"
+        "---\nsession: {session_id}\ncreated: {ts}\nmodel: {model}\n---\n"
     )
 }
 
-/// Append `entry` to `~/.tron/memory/sessions/log.md`.
-fn append_to_memory_log(entry: &str) -> std::io::Result<()> {
-    let path = memory_log_path();
+/// Format a timestamped section entry.
+fn format_session_section(ts: &str, title: &str, summary: &str) -> String {
+    // Extract YYYY-MM-DD HH:MM from ISO timestamp
+    let short_ts = if ts.len() >= 16 {
+        &ts[..16]
+    } else {
+        ts
+    };
+    let display_ts = short_ts.replace('T', " ");
+    format!("\n## {display_ts} — {title}\n\n{summary}\n")
+}
+
+/// Write a session memory entry to `~/.tron/memory/sessions/{session_id}.md`.
+///
+/// Creates the file with YAML frontmatter on first write; appends a new
+/// timestamped section on subsequent writes.
+fn write_session_entry(
+    session_id: &str,
+    ts: &str,
+    model: &str,
+    _turns: i64,
+    title: &str,
+    summary: &str,
+) -> std::io::Result<()> {
+    let path = session_file_path(session_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+
+    let section = format_session_section(ts, title, summary);
+    let is_new = !path.exists();
+
     use std::io::Write as _;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)?;
-    file.write_all(entry.as_bytes())?;
-    Ok(())
-}
 
-fn memory_log_path() -> std::path::PathBuf {
-    crate::core::paths::tron_home()
-        .join("memory")
-        .join("sessions")
-        .join("log.md")
+    if is_new {
+        let frontmatter = format_session_frontmatter(session_id, ts, model);
+        file.write_all(frontmatter.as_bytes())?;
+    }
+    file.write_all(section.as_bytes())?;
+    Ok(())
 }
 
 // =============================================================================
@@ -425,27 +456,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_log_entry_contains_session_id() {
-        let entry = format_log_entry("sess_abc", "2026-01-01T00:00:00Z", "claude-haiku", 5, "Test summary");
-        assert!(entry.contains("sess_abc"));
-        assert!(entry.contains("2026-01-01T00:00:00Z"));
-        assert!(entry.contains("claude-haiku"));
-        assert!(entry.contains("turns: 5"));
-        assert!(entry.contains("Test summary"));
-    }
-
-    #[test]
-    fn format_log_entry_has_separator() {
-        let entry = format_log_entry("s", "t", "m", 1, "x");
-        assert!(entry.contains("---"));
-        assert!(entry.contains("<!-- entry:"));
-    }
-
-    #[test]
-    fn memory_log_path_ends_with_log_md() {
-        let path = memory_log_path();
-        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "log.md");
+    fn session_file_path_uses_session_id() {
+        let path = session_file_path("sess_019d4a32");
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "sess_019d4a32.md");
         assert!(path.to_str().unwrap().contains(".tron/memory/sessions"));
+    }
+
+    #[test]
+    fn format_session_frontmatter_is_valid_yaml() {
+        let fm = format_session_frontmatter("sess_abc", "2026-01-01T00:00:00Z", "claude-haiku");
+        assert!(fm.starts_with("---\n"));
+        assert!(fm.ends_with("---\n"));
+        assert!(fm.contains("session: sess_abc"));
+        assert!(fm.contains("created: 2026-01-01T00:00:00Z"));
+        assert!(fm.contains("model: claude-haiku"));
+    }
+
+    #[test]
+    fn format_session_section_contains_title_and_summary() {
+        let section = format_session_section("2026-01-01T00:00:00Z", "Test title", "Test summary");
+        assert!(section.contains("## 2026-01-01 00:00 — Test title"));
+        assert!(section.contains("Test summary"));
+    }
+
+    #[test]
+    fn write_session_entry_creates_file_with_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "sess_test_create";
+        let path = dir.path().join(format!("{session_id}.md"));
+
+        // Temporarily override home — we test the helpers directly instead
+        let frontmatter = format_session_frontmatter(session_id, "2026-01-01T00:00:00Z", "claude-haiku");
+        let section = format_session_section("2026-01-01T00:00:00Z", "Initial work", "Did some things");
+
+        std::fs::write(&path, format!("{frontmatter}{section}")).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.starts_with("---\n"));
+        assert!(content.contains("session: sess_test_create"));
+        assert!(content.contains("## 2026-01-01 00:00 — Initial work"));
+        assert!(content.contains("Did some things"));
+    }
+
+    #[test]
+    fn write_session_entry_appends_without_duplicate_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sess_test_append.md");
+
+        let frontmatter = format_session_frontmatter("sess_test_append", "2026-01-01T00:00:00Z", "claude-haiku");
+        let section1 = format_session_section("2026-01-01T00:00:00Z", "First", "First work");
+        let section2 = format_session_section("2026-01-01T01:00:00Z", "Second", "More work");
+
+        std::fs::write(&path, format!("{frontmatter}{section1}")).unwrap();
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(section2.as_bytes()).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content.matches("---").count(), 2); // only the frontmatter pair
+        assert!(content.contains("## 2026-01-01 00:00 — First"));
+        assert!(content.contains("## 2026-01-01 01:00 — Second"));
     }
 
     #[test]

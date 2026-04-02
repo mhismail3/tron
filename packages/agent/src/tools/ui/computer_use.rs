@@ -491,9 +491,11 @@ impl ComputerUseTool {
         // Save to persistent screenshots directory so Display tool can reference the file.
         // In tests, ctx.working_directory is /tmp — we save there instead of polluting ~/.tron/.
         let ext = if mime_type == "image/jpeg" { "jpg" } else { "png" };
-        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let now = chrono::Local::now();
+        let date = now.format("%Y-%m-%d");
+        let time = now.format("%H%M%S");
         let rand_suffix: u16 = rand::random();
-        let screenshot_filename = format!("screenshot-{ts}-{rand_suffix:04x}.{ext}");
+        let screenshot_filename = format!("{date}-{time}-screenshot-{rand_suffix:04x}.{ext}");
         let screenshots_dir = if cfg!(test) {
             std::path::PathBuf::from(&ctx.working_directory).join("screenshots")
         } else {
