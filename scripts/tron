@@ -4,7 +4,7 @@
 # Usage: tron <command> [options]
 #
 # Development:
-#   dev             Start dev server (takes over prod port, -b build, -t test)
+#   dev             Start dev server (dev-server profile, -b build, -t test, -d background)
 #   ci              Run CI checks (fmt, check, clippy, test, bench, doc)
 #   bench           Performance benchmarks (run, bless, compare)
 #   setup           First-time project setup
@@ -61,6 +61,7 @@ source "$SCRIPT_DIR/tron-lib.sh"
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
+DEV_SERVER_BINARY="$RUST_WORKSPACE/target/dev-server/tron"
 BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
 BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"
 BENCH_GATE_ITERATIONS=50
@@ -118,6 +119,12 @@ ensure_prod_binary() {
 build_rust() {
     print_status "Building Rust workspace (release)..."
     (cd "$RUST_WORKSPACE" && cargo build --release) || { print_error "Build failed"; exit 1; }
+    print_success "Build complete"
+}
+
+build_rust_dev() {
+    print_status "Building Rust workspace (dev-server)..."
+    (cd "$RUST_WORKSPACE" && cargo build --profile dev-server) || { print_error "Build failed"; exit 1; }
     print_success "Build complete"
 }
 
@@ -299,12 +306,13 @@ cmd_dev() {
                 echo -e "${CYAN}tron dev${NC} - Start dev server (takes over port $PROD_PORT from production)"
                 echo ""
                 echo "Stops the production service, runs local binary on port $PROD_PORT."
+                echo "Uses the dev-server profile (thin LTO, fast builds, debug backtraces)."
                 echo "Production restarts automatically when dev exits (Ctrl+C)."
                 echo ""
                 echo "Usage: tron dev [options]"
                 echo ""
                 echo "Options:"
-                echo "  -b, --build       Build before starting"
+                echo "  -b, --build       Build before starting (dev-server profile)"
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (logs to database only)"
                 echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
@@ -312,7 +320,7 @@ cmd_dev() {
                 echo "  --log             Tail the server log"
                 echo ""
                 echo "Examples:"
-                echo "  tron dev          # Take over prod port (cargo run, auto-builds)"
+                echo "  tron dev          # Take over prod port (auto-builds with dev-server profile)"
                 echo "  tron dev -b       # Explicit build then start"
                 echo "  tron dev -bt      # Build, test, then start"
                 echo "  tron dev -bd      # Build then start in background"
@@ -334,7 +342,7 @@ cmd_dev() {
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
 
     if [ "$do_build" = true ]; then
-        build_rust
+        build_rust_dev
     fi
 
     if [ "$do_test" = true ]; then
@@ -388,7 +396,7 @@ dev_start_foreground() {
     echo ""
     echo -e "${YELLOW}Prod stopped. Ctrl+C to stop dev and restart prod.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --release \
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --profile dev-server \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
         --bin tron -- --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
 }
@@ -416,7 +424,7 @@ dev_start_background() {
         fi
     fi
 
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --release \
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --profile dev-server \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
         --bin tron -- --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
         >/dev/null 2>&1 &
@@ -1403,8 +1411,8 @@ cmd_help() {
     echo "Usage: tron <command> [options]"
     echo ""
     echo -e "${BOLD}Development (workspace only):${NC}"
-    echo "  dev             Start server (-b build, -t test, -d background)"
-    echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
+    echo "  dev             Start server (dev-server profile; -b build, -t test, -d background)"
+    echo "  ci              Run CI checks (fmt, check, clippy, test, bench, doc)"
     echo "  bench           Performance benchmarks (run, bless, compare)"
     echo "  setup           First-time project setup"
     echo ""
@@ -1425,10 +1433,10 @@ cmd_help() {
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""
-    echo "Direct cargo commands:"
-    echo "  cd packages/agent && cargo build --release"
-    echo "  cd packages/agent && cargo test --workspace"
-    echo "  cd packages/agent && cargo clippy --workspace -- -D warnings"
+    echo -e "${BOLD}Build profiles:${NC}"
+    echo "  cargo check                        # Fast correctness check (no binary)"
+    echo "  cargo build --profile dev-server   # Dev server (thin LTO, fast)"
+    echo "  cargo build --release              # Production (fat LTO, comprehensive)"
     echo ""
 }
 

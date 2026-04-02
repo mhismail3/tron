@@ -11,7 +11,7 @@
 
 ```bash
 # REQUIRED before completing any task
-cd packages/agent && cargo build --release && cargo test -- --quiet
+cd packages/agent && cargo check && cargo test -- --quiet
 
 # iOS
 cd packages/ios-app && xcodegen generate
@@ -32,7 +32,7 @@ No setting should exist only on the server or only in the iOS UI.
 
 - **NEVER run `tron deploy`** — production deployments are manual-only by the user.
 - Use `tron dev` variants to manage the beta server during development.
-- You may run `tron dev`, `tron dev-build`, etc. but never `tron deploy` or any production deployment command.
+- You may run `tron dev`, `tron ci`, etc. but never `tron deploy` or any production deployment command.
 
 ## Documentation
 

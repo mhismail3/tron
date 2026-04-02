@@ -154,3 +154,9 @@ lto = "fat"
 opt-level = 3
 strip = true
 codegen-units = 1
+
+[profile.dev-server]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = false
