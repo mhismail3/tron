@@ -27,7 +27,8 @@ const MAX_TITLE_LENGTH: usize = 80;
 const MAX_OUTPUT_LENGTH: usize = 1024;
 
 /// Hook names containing this substring trigger title generation.
-const TITLE_GEN_MARKER: &str = "session-start-title";
+/// Matches both builtin (`builtin:title-gen`) and user file (`user:title-gen`) hooks.
+const TITLE_GEN_MARKER: &str = "title-gen";
 
 /// LLM prompt-based hook handler.
 ///
@@ -44,8 +45,12 @@ pub struct PromptHookHandler {
     model: String,
     subagent_manager: Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>,
     event_emitter: Arc<crate::runtime::agent::event_emitter::EventEmitter>,
-    session_id: String,
+    /// Optional event store for schedule-based hooks (e.g., title gen).
+    event_store: Option<Arc<crate::events::EventStore>>,
 }
+
+/// How many user prompts between automatic title regeneration.
+const TITLE_REGEN_INTERVAL: usize = 6;
 
 impl PromptHookHandler {
     #[allow(clippy::too_many_arguments)]
@@ -60,7 +65,6 @@ impl PromptHookHandler {
         model: String,
         subagent_manager: Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>,
         event_emitter: Arc<crate::runtime::agent::event_emitter::EventEmitter>,
-        session_id: String,
     ) -> Self {
         Self {
             id,
@@ -73,8 +77,78 @@ impl PromptHookHandler {
             model,
             subagent_manager,
             event_emitter,
-            session_id,
+            event_store: None,
         }
+    }
+
+    /// Attach an event store for schedule-based hooks (title gen).
+    pub fn with_event_store(mut self, store: Arc<crate::events::EventStore>) -> Self {
+        self.event_store = Some(store);
+        self
+    }
+
+    /// Check whether the title-gen hook should fire for this session.
+    ///
+    /// Schedule:
+    /// 1. First prompt → always fire
+    /// 2. Then fire when: 6+ prompts since last title gen, OR a
+    ///    compaction/memory event occurred since last title gen
+    /// 3. Whichever comes first, then reset
+    fn should_generate_title(&self, session_id: &str) -> bool {
+        let Some(store) = &self.event_store else {
+            return true; // No store → can't check, fire anyway
+        };
+
+        // Count user messages in this session
+        let user_msgs = store
+            .get_events_by_type(session_id, &["message.user"], None)
+            .unwrap_or_default();
+
+        // First prompt → always fire
+        if user_msgs.len() <= 1 {
+            return true;
+        }
+
+        // Find the last title-gen event
+        let title_events = store
+            .get_events_by_type(session_id, &["hook.llm_result"], None)
+            .unwrap_or_default();
+
+        let last_title_gen = title_events
+            .iter()
+            .rev()
+            .find(|e| e.payload.contains("title-gen"));
+
+        let Some(last_gen) = last_title_gen else {
+            return true; // No previous title gen → fire
+        };
+
+        let last_gen_seq = last_gen.sequence;
+
+        // Count user messages since last title gen
+        let msgs_since = user_msgs
+            .iter()
+            .filter(|e| e.sequence > last_gen_seq)
+            .count();
+
+        if msgs_since >= TITLE_REGEN_INTERVAL {
+            return true;
+        }
+
+        // Check for compaction or memory events since last title gen
+        let trigger_events = store
+            .get_events_by_type(
+                session_id,
+                &["compact.summary", "memory.retained"],
+                None,
+            )
+            .unwrap_or_default();
+
+        let has_trigger = trigger_events
+            .iter()
+            .any(|e| e.sequence > last_gen_seq);
+
+        has_trigger
     }
 
     /// Build the task string from the prompt template and hook context.
@@ -158,15 +232,22 @@ impl HookHandler for PromptHookHandler {
     async fn handle(&self, context: &HookContext) -> Result<HookResult, HookError> {
         use crate::runtime::orchestrator::subagent_manager::SubsessionConfig;
 
+        let is_title_gen = self.id.contains(TITLE_GEN_MARKER);
+
+        // Title-gen has a schedule: first prompt, then every N prompts
+        // or after compaction/memory events.
+        if is_title_gen && !self.should_generate_title(context.session_id()) {
+            return Ok(HookResult::continue_());
+        }
+
         let task = self.build_task(context);
         let hook_id = self.id.clone();
         let hook_name = self.label.clone();
         let hook_event = self.hook_type.to_string();
         let model = self.model.clone();
-        let session_id = self.session_id.clone();
+        let session_id = context.session_id().to_owned();
         let manager = self.subagent_manager.clone();
         let emitter = self.event_emitter.clone();
-        let is_title_gen = self.id.contains(TITLE_GEN_MARKER);
 
         // Fire-and-forget: spawn the subsession in the background
         tokio::spawn(async move {

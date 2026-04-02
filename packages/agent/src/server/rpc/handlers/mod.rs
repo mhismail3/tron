@@ -449,7 +449,6 @@ pub(crate) mod test_helpers {
             provider_factory: Arc::new(MockProviderFactory),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
-            hooks: None,
         }
     }
 

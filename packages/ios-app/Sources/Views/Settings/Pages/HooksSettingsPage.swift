@@ -4,11 +4,64 @@ struct HooksSettingsPage: View {
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
+    // Builtin hook metadata (matches Rust builtin::list_builtins())
+    private let builtinMeta: [(id: String, label: String, description: String, event: String)] = [
+        ("builtin:title-gen", "Generate Session Title", "Auto-generates a short title when a session starts", "session-start"),
+    ]
+
     var body: some View {
         SettingsPageContainer(title: "Hooks") {
+            builtinHooksCard
             modelCard
-            hooksDirectoryCard
-            hookTypesCard
+            userHooksCard
+        }
+    }
+
+    // MARK: - Built-in Hooks
+
+    private var builtinHooksCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Built-in Hooks")
+
+            SettingsCard {
+                ForEach(Array(builtinMeta.enumerated()), id: \.element.id) { index, meta in
+                    if index > 0 {
+                        SettingsRowDivider()
+                    }
+                    builtinHookRow(meta: meta)
+                }
+            }
+
+            SettingsCaption(text: "Platform hooks that run automatically. Toggle to enable or disable.")
+        }
+    }
+
+    private func builtinHookRow(meta: (id: String, label: String, description: String, event: String)) -> some View {
+        let isEnabled = settingsState.builtinHooks.first(where: { $0.id == meta.id })?.enabled ?? true
+
+        return SettingsRow(icon: "bolt.fill", label: meta.label) {
+            Toggle("", isOn: Binding(
+                get: { isEnabled },
+                set: { newValue in
+                    toggleBuiltin(id: meta.id, enabled: newValue)
+                }
+            ))
+            .toggleStyle(.switch)
+            .tint(.tronEmerald)
+            .labelsHidden()
+        }
+    }
+
+    private func toggleBuiltin(id: String, enabled: Bool) {
+        var hooks = settingsState.builtinHooks
+        if let index = hooks.firstIndex(where: { $0.id == id }) {
+            hooks[index].enabled = enabled
+        } else {
+            hooks.append(BuiltinHookSetting(id: id, enabled: enabled))
+        }
+        settingsState.builtinHooks = hooks
+        updateServerSetting {
+            ServerSettingsUpdate(hooks: .init(builtinHooks: settingsState.builtinHooks))
         }
     }
 
@@ -26,15 +79,15 @@ struct HooksSettingsPage: View {
                 }
             }
 
-            SettingsCaption(text: "The model used for all .prompt hooks. Defaults to Haiku for speed.")
+            SettingsCaption(text: "The model used for built-in and .prompt hooks. Defaults to Haiku for speed.")
         }
     }
 
-    // MARK: - Hooks Directory Card
+    // MARK: - User Hooks Info
 
-    private var hooksDirectoryCard: some View {
+    private var userHooksCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Hook Files")
+            SettingsSectionHeader(title: "User Hooks")
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -46,7 +99,7 @@ struct HooksSettingsPage: View {
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 }
 
-                Text("Place hook files in this directory. Script hooks (.sh, .js, .ts) execute shell commands. Prompt hooks (.prompt) run LLM calls.")
+                Text("Place .prompt or script files (.sh, .js, .ts) with YAML frontmatter. Hooks are discovered fresh each session \u{2014} no restart needed.")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -55,45 +108,6 @@ struct HooksSettingsPage: View {
             .padding(.vertical, 12)
             .sectionFill(.tronEmerald)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-    }
-
-    // MARK: - Hook Types Reference
-
-    private var hookTypesCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Hook Types")
-
-            VStack(alignment: .leading, spacing: 8) {
-                hookTypeRow(name: "session-start", description: "When a session begins")
-                Divider()
-                hookTypeRow(name: "stop", description: "When the agent completes")
-                Divider()
-                hookTypeRow(name: "session-end", description: "When a session is cleaned up")
-                Divider()
-                hookTypeRow(name: "user-prompt-submit", description: "When user sends a message")
-                Divider()
-                hookTypeRow(name: "pre-tool-use", description: "Before a tool executes")
-                Divider()
-                hookTypeRow(name: "post-tool-use", description: "After a tool executes")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            SettingsCaption(text: "Name files as {hook-type}.sh or {hook-type}-{name}.prompt. Example: session-start-title.prompt")
-        }
-    }
-
-    private func hookTypeRow(name: String, description: String) -> some View {
-        HStack {
-            Text(name)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-            Spacer()
-            Text(description)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.secondary)
         }
     }
 

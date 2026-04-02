@@ -37,7 +37,6 @@ struct PromptRunPlan {
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
     tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
     guardrails: Option<Arc<parking_lot::Mutex<crate::runtime::guardrails::GuardrailEngine>>>,
-    hooks: Option<Arc<crate::runtime::hooks::engine::HookEngine>>,
     health_tracker: Arc<crate::llm::ProviderHealthTracker>,
     event_store: Arc<crate::events::EventStore>,
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
@@ -135,7 +134,6 @@ pub fn spawn_prompt_run(
         provider_factory: agent_deps.provider_factory.clone(),
         tool_factory: agent_deps.tool_factory.clone(),
         guardrails: agent_deps.guardrails.clone(),
-        hooks: agent_deps.hooks.clone(),
         health_tracker: ctx.health_tracker.clone(),
         event_store: ctx.event_store.clone(),
         context_artifacts: ctx.context_artifacts.clone(),
@@ -171,7 +169,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         provider_factory,
         tool_factory,
         guardrails,
-        hooks,
         health_tracker,
         event_store,
         context_artifacts,
@@ -201,6 +198,54 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         raw_skills_json,
         raw_spells_json,
     } = request;
+
+    // Create per-session hook engine: builtins + discovered user/project hooks.
+    // Fresh each session so new/modified hook files are picked up without restart.
+    let hooks = {
+        use crate::runtime::hooks::builtin;
+        use crate::runtime::hooks::discovery::discover_hooks;
+        use crate::runtime::hooks::engine::HookEngine;
+        use crate::runtime::hooks::registry::HookRegistry;
+        use crate::runtime::hooks::types::DiscoveryConfig;
+
+        let settings = crate::settings::get_settings();
+        let hook_settings = &settings.hooks;
+
+        let mut engine = HookEngine::new(HookRegistry::new());
+
+        // Register built-in hooks (title gen, etc.)
+        if let Some(ref mgr) = subagent_manager {
+            builtin::register_builtins(
+                &mut engine,
+                &hook_settings.llm_model,
+                &hook_settings.builtin_hooks,
+                mgr,
+                &broadcast,
+                Some(&event_store),
+            );
+        }
+
+        // Discover user + project hooks from disk
+        let discovered = discover_hooks(&DiscoveryConfig {
+            project_path: Some(working_dir.clone()),
+            user_home: None,
+            include_user_hooks: true,
+            extensions: hook_settings.extensions.iter().cloned().collect(),
+            ..Default::default()
+        });
+
+        if !discovered.is_empty() {
+            engine.load_discovered_hooks(
+                discovered,
+                hook_settings.default_timeout_ms,
+                &hook_settings.llm_model,
+                subagent_manager.as_ref(),
+                Some(&broadcast),
+            );
+        }
+
+        Some(Arc::new(engine))
+    };
 
     let _ = session_manager.mark_processing(&session_id);
     let mut run_cleanup =
@@ -516,6 +561,18 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             session_id: session_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             working_directory: working_dir.clone(),
+        };
+        let _ = hook_engine.execute(&hook_ctx).await;
+    }
+
+    // Fire UserPromptSubmit hook (PromptHookHandlers return immediately;
+    // the actual LLM work runs in tokio::spawn, so no latency impact
+    // despite UserPromptSubmit being forced-blocking at the engine level)
+    if let Some(hook_engine) = &hooks {
+        let hook_ctx = crate::runtime::hooks::types::HookContext::UserPromptSubmit {
+            session_id: session_id.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            prompt: prompt.clone(),
         };
         let _ = hook_engine.execute(&hook_ctx).await;
     }

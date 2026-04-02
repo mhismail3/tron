@@ -10,7 +10,6 @@ use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
 use crate::runtime::guardrails::GuardrailEngine;
-use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::subagent_manager::SubagentManager;
@@ -32,8 +31,6 @@ pub struct AgentDeps {
     pub tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
     /// Guardrail engine (optional).
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    /// Hook engine (optional).
-    pub hooks: Option<Arc<HookEngine>>,
 }
 
 /// Shared context passed to every RPC handler.

@@ -19,13 +19,14 @@ struct ServerSettings: Decodable {
     let chatWorkingDirectory: String?
     let cacheTtlSecs: Int
     let hooksLlmModel: String
+    let builtinHooks: [BuiltinHookSetting]
 
     private enum CodingKeys: String, CodingKey {
         case models, server, context, session, hooks
     }
 
     private enum HooksKeys: String, CodingKey {
-        case llmModel
+        case llmModel, builtinHooks
     }
 
     private enum SessionKeys: String, CodingKey {
@@ -104,8 +105,10 @@ struct ServerSettings: Decodable {
         // hooks.*
         if let hooksContainer = try? container.nestedContainer(keyedBy: HooksKeys.self, forKey: .hooks) {
             hooksLlmModel = (try? hooksContainer.decodeIfPresent(String.self, forKey: .llmModel)) ?? "claude-haiku-4-5-20251001"
+            builtinHooks = (try? hooksContainer.decodeIfPresent([BuiltinHookSetting].self, forKey: .builtinHooks)) ?? []
         } else {
             hooksLlmModel = "claude-haiku-4-5-20251001"
+            builtinHooks = []
         }
     }
 
@@ -203,8 +206,15 @@ struct ServerSettingsUpdate: Encodable {
 
     struct HooksUpdate: Encodable {
         var llmModel: String?
+        var builtinHooks: [BuiltinHookSetting]?
     }
 
+}
+
+/// Enable/disable toggle for a built-in hook.
+struct BuiltinHookSetting: Codable, Identifiable, Equatable {
+    var id: String
+    var enabled: Bool
 }
 
 /// A connection preset for quick-connect from the Connections settings page.

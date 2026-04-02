@@ -23,6 +23,7 @@ final class SettingsState {
     // MARK: - Hooks
 
     var hooksLlmModel: String = "claude-haiku-4-5-20251001"
+    var builtinHooks: [BuiltinHookSetting] = []
 
     // MARK: - Connection Presets
 
@@ -72,6 +73,7 @@ final class SettingsState {
             cacheTtlSecs = settings.cacheTtlSecs
             connectionPresets = settings.connectionPresets
             hooksLlmModel = settings.hooksLlmModel
+            builtinHooks = settings.builtinHooks
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
@@ -112,6 +114,7 @@ final class SettingsState {
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
         hooksLlmModel = "claude-haiku-4-5-20251001"
+        builtinHooks = []
     }
 
     // MARK: - Server Update Builder
@@ -128,7 +131,7 @@ final class SettingsState {
                 rules: .init(discoverStandaloneFiles: true)
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600),
-            hooks: .init(llmModel: "claude-haiku-4-5-20251001")
+            hooks: .init(llmModel: "claude-haiku-4-5-20251001", builtinHooks: [])
         )
     }
 }

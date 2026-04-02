@@ -2,7 +2,7 @@
 //!
 //! # Hook Files
 //!
-//! All hooks are defined as files in `~/.tron/hooks/` (user-level) or
+//! User hooks live as files in `~/.tron/hooks/` (user-level) or
 //! `.tron/hooks/` (project-level). Two kinds:
 //!
 //! ## Script Hooks (`.sh`, `.js`, `.ts`)
@@ -12,66 +12,80 @@
 //! all error paths (timeout, bad exit, parse failure).
 //!
 //! ```text
-//! ~/.tron/hooks/
-//! ├── session-start.sh            # fires on session start
-//! ├── 100-pre-tool-use.sh         # priority 100 (higher = runs first)
-//! └── post-tool-use.js            # node script
+//! # ---
+//! # type: session-start
+//! # label: Log session info
+//! # ---
+//! #!/bin/bash
+//! CONTEXT=$(cat)
+//! echo '{"action":"continue"}'
 //! ```
 //!
 //! ## LLM Prompt Hooks (`.prompt`)
 //!
-//! Optional YAML frontmatter (`label`, `enabled`) + prompt body.
+//! YAML frontmatter (`type`, `label`, `enabled`, `priority`) + prompt body.
 //! Spawned as async subsessions via [`SubagentManager`]. Always
 //! background, never blocks the main agent.
 //!
 //! ```text
 //! ---
+//! type: session-start
 //! label: Generate session title
-//! enabled: true
 //! ---
 //! Generate a concise 3-6 word title for this session...
 //! ```
 //!
-//! # Naming Convention
+//! # Frontmatter
 //!
-//! Filename prefix determines the lifecycle event:
+//! All metadata lives in YAML frontmatter. Filenames are descriptive only.
 //!
-//! | Prefix | Event | Blocking? |
-//! |--------|-------|-----------|
-//! | `session-start` | Session begins | No |
-//! | `stop` | Agent completes | No |
-//! | `session-end` | Session cleanup | No |
-//! | `user-prompt-submit` | User sends message | Yes |
-//! | `pre-tool-use` | Before tool execution | Yes |
-//! | `post-tool-use` | After tool execution | No |
-//! | `pre-compact` | Before compaction | Yes |
+//! | Field | Required | Default | Description |
+//! |-------|----------|---------|-------------|
+//! | `type` | **Yes** | — | Lifecycle event (see below) |
+//! | `label` | No | `""` | Human-readable name |
+//! | `enabled` | No | `true` | Toggle on/off |
+//! | `priority` | No | `0` | Higher runs first |
 //!
-//! Compound names are allowed: `session-start-title.prompt` and
-//! `session-start-tags.prompt` both fire on `SessionStart`.
+//! Script files use `# ` or `// ` comment-prefixed frontmatter.
+//! Files without valid frontmatter (missing `type:`) are skipped.
 //!
-//! Priority prefix: `100-pre-tool-use.sh` runs before `50-pre-tool-use.sh`.
+//! # Valid `type` Values
 //!
-//! # Special: Title Generation
+//! `session-start`, `session-end`, `stop`, `user-prompt-submit`,
+//! `pre-tool-use`, `post-tool-use`, `pre-compact`, `subagent-stop`,
+//! `notification`
 //!
-//! Any `.prompt` file with `session-start-title` in its name auto-updates
-//! the session title via [`TronEvent::SessionUpdated`].
+//! # Built-in Hooks
+//!
+//! Platform hooks registered programmatically in [`builtin`]. Users can
+//! enable/disable them via `settings.hooks.builtinHooks`. Current builtins:
+//!
+//! - `builtin:title-gen` — auto-generates session titles on session start
+//!
+//! # Hot Reload
+//!
+//! Hooks are discovered fresh each session in [`agent_prompt_service`].
+//! Adding, removing, or editing hook files takes effect on the next session
+//! without server restart.
 //!
 //! # Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | [`builtin`] | Built-in hook definitions + registration |
 //! | [`engine`] | `HookEngine` — dispatch, blocking/background partitioning |
 //! | [`registry`] | Priority-sorted handler storage per event type |
 //! | [`handler`] | `HookHandler` trait all implementations satisfy |
-//! | [`script_handler`] | Executes `.sh`/`.js`/`.ts` files via `tokio::process` |
+//! | [`script_handler`] | Executes script files via `tokio::process` |
 //! | [`prompt_handler`] | Executes `.prompt` files via LLM subsession |
-//! | [`discovery`] | Filesystem scanning and `.prompt` file parsing |
+//! | [`discovery`] | Filesystem scanning + frontmatter parsing |
 //! | [`background`] | Background hook task tracking with drain semantics |
 //! | [`context`] | `HookContext` factory for each lifecycle event |
 //! | [`errors`] | Hook-specific error types |
 //! | [`types`] | Shared types (config, results, discovered hooks) |
 
 pub mod background;
+pub mod builtin;
 pub mod context;
 pub mod discovery;
 pub mod engine;

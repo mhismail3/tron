@@ -341,7 +341,6 @@ async fn boot_server_with_provider_and_handles(
             provider_factory: Arc::new(FixedProviderFactory(provider)),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
-            hooks: None,
         }),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),

@@ -106,7 +106,6 @@ fn make_text_context(text: &str) -> RpcContext {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(TextProvider::new(text)))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
     ctx
 }
@@ -220,7 +219,6 @@ fn make_slow_context() -> RpcContext {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(SlowProvider))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
     ctx
 }
@@ -272,7 +270,6 @@ fn make_signalled_slow_context(ready: Arc<tokio::sync::Notify>) -> RpcContext {
         }))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
     ctx
 }
@@ -1060,7 +1057,6 @@ async fn prompt_complete_run_on_error() {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(ErrorProvider))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
 
     let sid = ctx
@@ -1103,7 +1099,6 @@ async fn prompt_cleans_run_on_panic() {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(PanicProvider))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
 
     let sid = ctx
@@ -1149,7 +1144,6 @@ async fn prompt_error_emits_agent_error_event() {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(ErrorProvider))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
 
     let sid = ctx
@@ -1215,7 +1209,6 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
         provider_factory: Arc::new(FixedProviderFactory(Arc::new(RateLimitProvider))),
         tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
-        hooks: None,
     });
 
     let sid = ctx

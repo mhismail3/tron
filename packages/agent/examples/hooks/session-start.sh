@@ -1,10 +1,11 @@
+# ---
+# type: session-start
+# label: Log session start
+# ---
 #!/bin/bash
-# Sample session-start hook.
-#
-# Place in .tron/hooks/ or ~/.config/tron/hooks/ to activate.
+# Sample script hook: logs session start info.
+# Place in ~/.tron/hooks/ to activate.
 # Receives HookContext JSON on stdin, returns HookResult JSON on stdout.
-#
-# This hook logs session start info and returns Continue.
 
 CONTEXT=$(cat)
 

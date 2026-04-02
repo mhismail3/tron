@@ -167,6 +167,8 @@ pub struct HookSettings {
     pub extensions: Vec<String>,
     /// Default model for LLM-based hooks.
     pub llm_model: String,
+    /// Enable/disable state for built-in hooks.
+    pub builtin_hooks: Vec<BuiltinHookSetting>,
 }
 
 impl Default for HookSettings {
@@ -177,13 +179,45 @@ impl Default for HookSettings {
             project_dir: ".agent/hooks".to_string(),
             user_dir: ".config/tron/hooks".to_string(),
             extensions: vec![
+                ".prompt".to_string(),
                 ".ts".to_string(),
                 ".js".to_string(),
                 ".mjs".to_string(),
                 ".sh".to_string(),
             ],
             llm_model: "claude-haiku-4-5-20251001".to_string(),
+            builtin_hooks: BuiltinHookSetting::defaults(),
         }
+    }
+}
+
+/// Enable/disable toggle for a built-in hook.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinHookSetting {
+    /// Built-in hook identifier (e.g., `"builtin:title-gen"`).
+    pub id: String,
+    /// Whether this built-in hook is active.
+    pub enabled: bool,
+}
+
+impl BuiltinHookSetting {
+    /// Default built-in hook settings.
+    pub fn defaults() -> Vec<Self> {
+        vec![Self {
+            id: "builtin:title-gen".to_string(),
+            enabled: true,
+        }]
+    }
+
+    /// Look up whether a builtin hook is enabled in a settings list.
+    /// Returns `true` if the hook is not found (default enabled).
+    pub fn is_enabled(settings: &[Self], id: &str) -> bool {
+        settings
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.enabled)
+            .unwrap_or(true)
     }
 }
 
@@ -435,30 +469,37 @@ mod tests {
     fn hook_defaults() {
         let h = HookSettings::default();
         assert_eq!(h.default_timeout_ms, 5000);
-        assert_eq!(h.extensions.len(), 4);
+        assert_eq!(h.extensions.len(), 5);
+        assert!(h.extensions.contains(&".prompt".to_string()));
         assert!(h.extensions.contains(&".ts".to_string()));
         assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
+        assert_eq!(h.builtin_hooks.len(), 1);
+        assert_eq!(h.builtin_hooks[0].id, "builtin:title-gen");
+        assert!(h.builtin_hooks[0].enabled);
     }
 
     #[test]
-    fn hook_settings_deserialize_without_llm_model() {
+    fn hook_settings_deserialize_without_builtin_hooks() {
         let json = serde_json::json!({
             "defaultTimeoutMs": 3000,
             "projectDir": ".hooks"
         });
         let h: HookSettings = serde_json::from_value(json).unwrap();
         assert_eq!(h.default_timeout_ms, 3000);
-        assert_eq!(h.project_dir, ".hooks");
         assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
+        // Defaults populated
+        assert_eq!(h.builtin_hooks.len(), 1);
+        assert_eq!(h.builtin_hooks[0].id, "builtin:title-gen");
     }
 
     #[test]
-    fn hook_settings_deserialize_with_llm_model() {
+    fn hook_settings_deserialize_with_builtin_hooks_disabled() {
         let json = serde_json::json!({
-            "llmModel": "custom-model"
+            "builtinHooks": [{"id": "builtin:title-gen", "enabled": false}]
         });
         let h: HookSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(h.llm_model, "custom-model");
+        assert_eq!(h.builtin_hooks.len(), 1);
+        assert!(!h.builtin_hooks[0].enabled);
     }
 
     #[test]
@@ -467,7 +508,18 @@ mod tests {
         let json = serde_json::to_value(&h).unwrap();
         let h2: HookSettings = serde_json::from_value(json).unwrap();
         assert_eq!(h.llm_model, h2.llm_model);
-        assert_eq!(h.default_timeout_ms, h2.default_timeout_ms);
+        assert_eq!(h.builtin_hooks.len(), h2.builtin_hooks.len());
+        assert_eq!(h.builtin_hooks[0].id, h2.builtin_hooks[0].id);
+        assert_eq!(h.builtin_hooks[0].enabled, h2.builtin_hooks[0].enabled);
+    }
+
+    #[test]
+    fn builtin_hook_is_enabled_lookup() {
+        let settings = vec![
+            BuiltinHookSetting { id: "builtin:title-gen".into(), enabled: false },
+        ];
+        assert!(!BuiltinHookSetting::is_enabled(&settings, "builtin:title-gen"));
+        assert!(BuiltinHookSetting::is_enabled(&settings, "builtin:unknown")); // not found → default true
     }
 
     #[test]

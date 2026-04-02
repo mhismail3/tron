@@ -392,42 +392,65 @@ impl std::fmt::Display for HookSource {
 /// A discovered hook file from filesystem scanning.
 #[derive(Debug, Clone)]
 pub struct DiscoveredHook {
-    /// Hook name (e.g., `project:pre-tool-use`).
+    /// Hook name (e.g., `user:title-gen`).
     pub name: String,
     /// Absolute path to the hook file.
     pub path: std::path::PathBuf,
-    /// Inferred hook type from filename.
-    pub hook_type: HookType,
-    /// Whether the file is a shell script.
-    pub is_shell_script: bool,
-    /// Whether this is an LLM prompt hook (`.prompt` file).
-    pub is_prompt: bool,
+    /// File extension (e.g., `"sh"`, `"prompt"`, `"js"`).
+    pub extension: String,
     /// Where the hook was found.
     pub source: HookSource,
-    /// Priority extracted from filename prefix (e.g., `100-pre-tool-use`).
-    pub priority: Option<i32>,
-    /// Parsed prompt content (only set for `.prompt` files).
-    pub prompt_config: Option<PromptHookConfig>,
+    /// Parsed metadata from frontmatter.
+    pub config: HookFileConfig,
 }
 
-/// Parsed content of a `.prompt` hook file.
+impl DiscoveredHook {
+    /// Whether this is an LLM prompt hook (`.prompt` file).
+    pub fn is_prompt(&self) -> bool {
+        self.extension == "prompt"
+    }
+
+    /// Whether this is a script hook (`.sh`, `.js`, `.ts`, `.mjs`).
+    pub fn is_script(&self) -> bool {
+        !self.is_prompt()
+    }
+}
+
+/// Parsed metadata from a hook file's frontmatter.
 ///
-/// Format:
+/// All hook files (scripts and prompts) use frontmatter for metadata.
+/// `type` is required; all other fields have defaults.
+///
+/// `.prompt` files use standard `---` delimiters:
 /// ```text
 /// ---
-/// label: Generate session title
-/// enabled: true
+/// type: session-start
+/// label: Generate title
 /// ---
-/// Your prompt instruction here...
+/// Prompt body here...
+/// ```
+///
+/// Script files use comment-prefixed frontmatter (`# `, `// `):
+/// ```text
+/// # ---
+/// # type: pre-tool-use
+/// # label: Safety check
+/// # ---
+/// #!/bin/bash
+/// ...
 /// ```
 #[derive(Debug, Clone)]
-pub struct PromptHookConfig {
-    /// Human-readable label (from frontmatter).
+pub struct HookFileConfig {
+    /// Lifecycle event this hook fires on (from `type:` field).
+    pub hook_type: HookType,
+    /// Human-readable label (from `label:` field, default: empty).
     pub label: String,
-    /// Whether this hook is active (from frontmatter, default true).
+    /// Whether this hook is active (from `enabled:` field, default: true).
     pub enabled: bool,
-    /// The prompt instruction (body after frontmatter).
-    pub prompt: String,
+    /// Execution priority — higher runs first (from `priority:` field, default: 0).
+    pub priority: i32,
+    /// The prompt body (only for `.prompt` files — content after frontmatter).
+    pub prompt: Option<String>,
 }
 
 /// Configuration for hook discovery.
