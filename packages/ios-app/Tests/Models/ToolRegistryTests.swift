@@ -71,17 +71,17 @@ struct ToolRegistryTests {
         #expect(d.displayName == "Web Search")
     }
 
-    @Test("ManageProcess tool has correct icon and display name")
-    func testManageProcessDescriptor() {
-        let d = ToolRegistry.descriptor(for: "manageprocess")
+    @Test("ManageJob tool has correct icon and display name")
+    func testManageJobDescriptor() {
+        let d = ToolRegistry.descriptor(for: "managejob")
         #expect(d.icon == "gearshape.2")
-        #expect(d.displayName == "Process")
+        #expect(d.displayName == "Jobs")
         #expect(d.completedDisplayName == "Managed")
     }
 
-    @Test("ManageProcess summary extracts action")
-    func testManageProcessSummary() {
-        let d = ToolRegistry.descriptor(for: "manageprocess")
+    @Test("ManageJob summary extracts action")
+    func testManageJobSummary() {
+        let d = ToolRegistry.descriptor(for: "managejob")
         let summary = d.summaryExtractor("{\"action\": \"list\"}")
         #expect(summary == "list")
     }
@@ -203,7 +203,7 @@ struct ToolRegistryTests {
 
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch", "computeruse", "display", "manageprocess", "mcpsearch", "mcpcall"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "webfetch", "websearch", "computeruse", "display", "managejob", "wait", "mcpsearch", "mcpcall"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 
@@ -225,7 +225,7 @@ struct ToolRegistryTests {
 
     @Test("Command tools have viewer factories")
     func testViewerFactories() {
-        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch", "computeruse", "manageprocess"] {
+        for name in ["read", "write", "edit", "bash", "search", "find", "glob", "webfetch", "websearch", "computeruse"] {
             let d = ToolRegistry.descriptor(for: name)
             #expect(d.viewerFactory != nil, "Expected viewer factory for \(name)")
         }

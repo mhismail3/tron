@@ -16,6 +16,10 @@ final class GetConfirmationState {
     /// Whether the last submitted confirmation was an approval (for MessagingCoordinator chip)
     var lastDecisionWasApproval = false
 
+    /// Pending confirmation prompt to send after sheet dismissal completes.
+    /// Set during prepareSubmission(), consumed by executePendingSubmission().
+    var pendingConfirmationPrompt: String?
+
     init() {}
 
     /// Reset turn-specific state (called at turn start)
@@ -28,5 +32,6 @@ final class GetConfirmationState {
         showSheet = false
         currentData = nil
         calledInTurn = false
+        pendingConfirmationPrompt = nil
     }
 }

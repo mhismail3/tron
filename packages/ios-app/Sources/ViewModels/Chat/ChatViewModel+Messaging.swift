@@ -90,6 +90,15 @@ extension ChatViewModel: MessagingContext {
 
 extension ChatViewModel {
 
+    /// Execute pending source changes prompt (deferred from sheet dismiss).
+    /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
+    func executePendingSourceChangesSubmission() {
+        guard let prompt = pendingSourceChangesPrompt else { return }
+        pendingSourceChangesPrompt = nil
+        inputText = prompt
+        sendMessage()
+    }
+
     /// Send a message to the agent
     func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil, spells: [Skill]? = nil) {
         Task {

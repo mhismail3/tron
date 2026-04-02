@@ -87,34 +87,9 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
     }
 
-    // MARK: - Answer Submission Tests
+    // MARK: - Prepare Submission Tests (Phase 1: before sheet dismiss)
 
-    func testSubmitAnswersValidatesPendingStatus() async {
-        // Given: No current data
-        mockContext.askUserQuestionState.currentData = nil
-
-        // When: Submitting answers
-        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
-        await coordinator.submitAnswers(answers, context: mockContext)
-
-        // Then: Should not send prompt (no current data)
-        XCTAssertNil(mockContext.lastSentPrompt)
-    }
-
-    func testSubmitAnswersRejectsNonPendingQuestion() async {
-        // Given: Question is already answered
-        mockContext.askUserQuestionState.currentData = createTestToolData(status: .answered)
-
-        // When: Submitting answers
-        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
-        await coordinator.submitAnswers(answers, context: mockContext)
-
-        // Then: Should show error and not send
-        XCTAssertTrue(mockContext.showErrorCalled)
-        XCTAssertNil(mockContext.lastSentPrompt)
-    }
-
-    func testSubmitAnswersUpdatesMessageToAnswered() async {
+    func testPrepareSubmissionUpdatesChipToAnswered() {
         // Given: A pending question with message in context
         let data = createTestToolData(status: .pending)
         mockContext.askUserQuestionState.currentData = data
@@ -122,9 +97,9 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
             ChatMessage(role: .assistant, content: .askUserQuestion(data))
         ]
 
-        // When: Submitting answers
+        // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
-        await coordinator.submitAnswers(answers, context: mockContext)
+        coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: Message should be updated to answered status
         if case .askUserQuestion(let updatedData) = mockContext.messages.first?.content {
@@ -135,55 +110,198 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testSubmitAnswersSendsFormattedPrompt() async {
+    func testPrepareSubmissionStoresPendingPrompt() {
         // Given: A pending question
         let data = createTestToolData(status: .pending)
         mockContext.askUserQuestionState.currentData = data
 
-        // When: Submitting answers
+        // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
-        await coordinator.submitAnswers(answers, context: mockContext)
+        coordinator.prepareSubmission(answers, context: mockContext)
 
-        // Then: Formatted prompt should be sent
-        XCTAssertNotNil(mockContext.lastSentPrompt)
-        XCTAssertTrue(mockContext.lastSentPrompt?.contains("[Answers to your questions]") ?? false)
-        XCTAssertTrue(mockContext.lastSentPrompt?.contains("Option A") ?? false)
+        // Then: Pending prompt should be stored with formatted content
+        XCTAssertNotNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+        XCTAssertTrue(mockContext.askUserQuestionState.pendingAnswerPrompt?.contains("[Answers to your questions]") ?? false)
+        XCTAssertTrue(mockContext.askUserQuestionState.pendingAnswerPrompt?.contains("Option A") ?? false)
     }
 
-    func testSubmitAnswersClearsState() async {
+    func testPrepareSubmissionDoesNotSendPrompt() {
+        // Given: A pending question
+        let data = createTestToolData(status: .pending)
+        mockContext.askUserQuestionState.currentData = data
+
+        // When: Preparing submission
+        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
+        coordinator.prepareSubmission(answers, context: mockContext)
+
+        // Then: No prompt should be sent yet (deferred to execute phase)
+        XCTAssertNil(mockContext.lastSentPrompt)
+    }
+
+    func testPrepareSubmissionClearsSheetStateButKeepsCurrentData() {
         // Given: A pending question with state
         let data = createTestToolData(status: .pending)
         mockContext.askUserQuestionState.currentData = data
         mockContext.askUserQuestionState.showSheet = true
         mockContext.askUserQuestionState.answers["q1"] = createTestAnswer(questionId: "q1", selectedValues: ["A"])
 
-        // When: Submitting answers
+        // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
-        await coordinator.submitAnswers(answers, context: mockContext)
+        coordinator.prepareSubmission(answers, context: mockContext)
 
-        // Then: State should be cleared
+        // Then: Sheet flag and answers cleared, but currentData kept alive
+        // (sheet reads currentData during dismiss animation — clearing it causes white flash)
         XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
-        XCTAssertNil(mockContext.askUserQuestionState.currentData)
+        XCTAssertNotNil(mockContext.askUserQuestionState.currentData)
         XCTAssertTrue(mockContext.askUserQuestionState.answers.isEmpty)
     }
 
-    func testSubmitAnswersWithOtherValue() async {
+    func testPrepareSubmissionSetsQuestionCount() {
         // Given: A pending question
         let data = createTestToolData(status: .pending)
         mockContext.askUserQuestionState.currentData = data
 
-        // When: Submitting answer with "Other" value
+        // When: Preparing submission
+        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
+        coordinator.prepareSubmission(answers, context: mockContext)
+
+        // Then: Question count should be set
+        XCTAssertEqual(mockContext.askUserQuestionState.lastAnsweredQuestionCount, 1)
+    }
+
+    func testPrepareSubmissionRejectsNilCurrentData() {
+        // Given: No current data
+        mockContext.askUserQuestionState.currentData = nil
+
+        // When: Preparing submission
+        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
+        coordinator.prepareSubmission(answers, context: mockContext)
+
+        // Then: No pending prompt stored
+        XCTAssertNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+    }
+
+    func testPrepareSubmissionRejectsNonPendingStatus() {
+        // Given: Question is already answered
+        mockContext.askUserQuestionState.currentData = createTestToolData(status: .answered)
+
+        // When: Preparing submission
+        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
+        coordinator.prepareSubmission(answers, context: mockContext)
+
+        // Then: Should show error, clear state, no pending prompt
+        XCTAssertTrue(mockContext.showErrorCalled)
+        XCTAssertNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+        XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
+    }
+
+    func testPrepareSubmissionWithOtherValue() {
+        // Given: A pending question
+        let data = createTestToolData(status: .pending)
+        mockContext.askUserQuestionState.currentData = data
+
+        // When: Preparing submission with "Other" value
         let answers = [AskUserQuestionAnswer(
             questionId: "q1",
             selectedValues: [],
             otherValue: "My custom response"
         )]
-        await coordinator.submitAnswers(answers, context: mockContext)
+        coordinator.prepareSubmission(answers, context: mockContext)
 
-        // Then: Prompt should include the other value
+        // Then: Pending prompt should include the other value
+        XCTAssertNotNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+        XCTAssertTrue(mockContext.askUserQuestionState.pendingAnswerPrompt?.contains("[Other]") ?? false)
+        XCTAssertTrue(mockContext.askUserQuestionState.pendingAnswerPrompt?.contains("My custom response") ?? false)
+    }
+
+    // MARK: - Execute Pending Submission Tests (Phase 2: after sheet dismiss)
+
+    func testExecutePendingSubmissionSendsPrompt() {
+        // Given: A pending prompt was stored during prepare
+        mockContext.askUserQuestionState.pendingAnswerPrompt = "[Answers to your questions]\n\n**Test?**\nAnswer: Option A\n"
+
+        // When: Executing pending submission
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: Prompt should be sent
         XCTAssertNotNil(mockContext.lastSentPrompt)
-        XCTAssertTrue(mockContext.lastSentPrompt?.contains("[Other]") ?? false)
-        XCTAssertTrue(mockContext.lastSentPrompt?.contains("My custom response") ?? false)
+        XCTAssertTrue(mockContext.lastSentPrompt?.contains("Option A") ?? false)
+    }
+
+    func testExecutePendingSubmissionClearsPendingStateAndCurrentData() {
+        // Given: A pending prompt and currentData still alive from prepare phase
+        mockContext.askUserQuestionState.pendingAnswerPrompt = "some prompt"
+        mockContext.askUserQuestionState.currentData = createTestToolData(status: .answered)
+
+        // When: Executing pending submission
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: Both pending prompt and currentData should be cleared
+        XCTAssertNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+        XCTAssertNil(mockContext.askUserQuestionState.currentData)
+    }
+
+    func testExecutePendingSubmissionNoOpWhenNothingPending() {
+        // Given: No pending prompt
+        mockContext.askUserQuestionState.pendingAnswerPrompt = nil
+
+        // When: Executing pending submission (e.g., swipe dismiss without submit)
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: No prompt sent, no crash
+        XCTAssertNil(mockContext.lastSentPrompt)
+    }
+
+    func testFullPrepareAndExecuteFlow() {
+        // Given: A pending question with message
+        let data = createTestToolData(status: .pending)
+        mockContext.askUserQuestionState.currentData = data
+        mockContext.messages = [
+            ChatMessage(role: .assistant, content: .askUserQuestion(data))
+        ]
+
+        // When: Full two-phase flow (prepare then execute)
+        let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
+        coordinator.prepareSubmission(answers, context: mockContext)
+
+        // Verify intermediate state: chip updated but no send yet
+        if case .askUserQuestion(let updatedData) = mockContext.messages.first?.content {
+            XCTAssertEqual(updatedData.status, .answered)
+        }
+        XCTAssertNil(mockContext.lastSentPrompt)
+        XCTAssertNotNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+
+        // Execute (simulates onDismiss callback)
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: Prompt should now be sent and pending cleared
+        XCTAssertNotNil(mockContext.lastSentPrompt)
+        XCTAssertTrue(mockContext.lastSentPrompt?.contains("Option A") ?? false)
+        XCTAssertNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
+    }
+
+    func testSwipeDismissWithoutSubmitDoesNotTriggerSubmission() {
+        // Given: Sheet was opened but user swiped to dismiss (no prepareSubmission called)
+        let data = createTestToolData(status: .pending)
+        mockContext.askUserQuestionState.currentData = data
+        mockContext.askUserQuestionState.showSheet = true
+
+        // When: Execute is called (from onDismiss) without prior prepare
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: No prompt sent
+        XCTAssertNil(mockContext.lastSentPrompt)
+    }
+
+    func testClearAllClearsPendingPrompt() {
+        // Given: A pending prompt exists
+        mockContext.askUserQuestionState.pendingAnswerPrompt = "pending prompt"
+
+        // When: clearAll is called
+        mockContext.askUserQuestionState.clearAll()
+
+        // Then: Pending prompt should be cleared
+        XCTAssertNil(mockContext.askUserQuestionState.pendingAnswerPrompt)
     }
 
     // MARK: - Mark Superseded Tests

@@ -3,15 +3,9 @@ import XCTest
 
 final class AppConstantsTests: XCTestCase {
 
-    func testDefaultWorkspace_usesHomeDirectory() {
-        let home = NSHomeDirectory()
-        XCTAssertTrue(AppConstants.defaultWorkspace.hasPrefix(home),
-                       "Should start with actual home dir, got: \(AppConstants.defaultWorkspace)")
-    }
-
-    func testDefaultWorkspace_endsWithWorkspace() {
-        XCTAssertTrue(AppConstants.defaultWorkspace.hasSuffix("/Workspace"),
-                       "Should end with /Workspace, got: \(AppConstants.defaultWorkspace)")
+    func testDefaultWorkspace_isEmpty() {
+        // defaultWorkspace is empty — workspace is selected dynamically at runtime
+        XCTAssertEqual(AppConstants.defaultWorkspace, "")
     }
 
     func testProdPort_is9847() {

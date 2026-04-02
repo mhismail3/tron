@@ -67,14 +67,25 @@ final class AskUserQuestionCoordinator {
         context.logInfo("AskUserQuestion sheet dismissed without submitting")
     }
 
-    // MARK: - Answer Submission
+    // MARK: - Two-Phase Answer Submission
+    //
+    // Submission is split into prepare + execute to avoid a SwiftUI rendering bug:
+    // Calling sendAnswerPrompt() while the sheet dismiss animation is in flight causes
+    // concurrent state mutations (isProcessing, inputText, keyboard resign) that glitch
+    // the safeAreaInset layout, making the InputBar disappear permanently.
+    //
+    // Phase 1 (prepareSubmission): Updates chip, formats prompt, stores pending. Called
+    //   BEFORE dismiss() so the chip updates while the sheet is still visible.
+    // Phase 2 (executePendingSubmission): Sends the stored prompt. Called from the
+    //   sheet's onDismiss callback AFTER the dismiss animation completes.
 
-    /// Handle AskUserQuestion answers submission (sends as new prompt).
+    /// Phase 1: Prepare submission — updates chip, formats prompt, stores as pending.
+    /// Called BEFORE sheet dismiss. Does NOT send the prompt.
     ///
     /// - Parameters:
     ///   - answers: The answers to submit
     ///   - context: The context providing access to state and dependencies
-    func submitAnswers(_ answers: [AskUserQuestionAnswer], context: AskUserQuestionContext) async {
+    func prepareSubmission(_ answers: [AskUserQuestionAnswer], context: AskUserQuestionContext) {
         guard let data = context.askUserQuestionState.currentData else {
             context.logError("Cannot submit answers - no current question data")
             return
@@ -97,9 +108,9 @@ final class AskUserQuestionCoordinator {
             submittedAt: DateParser.now
         )
 
-        context.logInfo("Submitting AskUserQuestion answers as prompt for toolCallId=\(data.toolCallId)")
+        context.logInfo("Preparing AskUserQuestion submission for toolCallId=\(data.toolCallId)")
 
-        // Update the chip status to .answered BEFORE sending
+        // Update the chip status to .answered immediately (visible while sheet animates away)
         updateMessageToAnswered(
             toolCallId: data.toolCallId,
             result: result,
@@ -107,20 +118,32 @@ final class AskUserQuestionCoordinator {
             context: context
         )
 
-        // Format answers as a user prompt
+        // Format answers as a user prompt and store for deferred send
         let answerPrompt = formatAnswersAsPrompt(data: data, answers: answers)
+        context.askUserQuestionState.pendingAnswerPrompt = answerPrompt
 
         // Store question count so MessagingCoordinator doesn't need to re-parse
         context.askUserQuestionState.lastAnsweredQuestionCount = data.params.questions.count
 
-        // Clear state before sending
+        // Clear answers but keep currentData alive — the sheet reads it during
+        // its dismiss animation. Setting currentData = nil here would switch the
+        // sheet content to EmptyView(), causing a white flash. currentData is
+        // cleared in executePendingSubmission after the animation completes.
         context.askUserQuestionState.showSheet = false
-        context.askUserQuestionState.currentData = nil
         context.askUserQuestionState.answers = [:]
 
-        // Send as a new prompt (this triggers a new agent turn)
-        context.sendAnswerPrompt(answerPrompt)
+        context.logInfo("AskUserQuestion submission prepared, awaiting sheet dismiss")
+    }
 
+    /// Phase 2: Execute pending submission — sends the stored prompt.
+    /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
+    ///
+    /// - Parameter context: The context providing access to state and dependencies
+    func executePendingSubmission(context: AskUserQuestionContext) {
+        guard let answerPrompt = context.askUserQuestionState.pendingAnswerPrompt else { return }
+        context.askUserQuestionState.pendingAnswerPrompt = nil
+        context.askUserQuestionState.currentData = nil
+        context.sendAnswerPrompt(answerPrompt)
         context.logInfo("AskUserQuestion answers submitted as prompt")
     }
 

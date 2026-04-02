@@ -54,6 +54,15 @@ struct ChatSheetModifier: ViewModifier {
     }
 
     private func onDismiss() {
+        // Execute deferred submissions AFTER sheet dismiss animation completes.
+        // These were prepared synchronously before dismiss() was called, ensuring
+        // chip status updates are visible during the dismiss animation. The actual
+        // prompt send (which triggers isProcessing, keyboard resign, etc.) happens
+        // here to avoid concurrent state mutations that glitch the InputBar layout.
+        viewModel.executePendingAskUserQuestionSubmission()
+        viewModel.executePendingGetConfirmationSubmission()
+        viewModel.executePendingSourceChangesSubmission()
+
         viewModel.askUserQuestionState.showSheet = false
         viewModel.getConfirmationState.showSheet = false
         viewModel.subagentState.showDetailSheet = false

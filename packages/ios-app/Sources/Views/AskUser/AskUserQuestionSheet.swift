@@ -187,8 +187,12 @@ struct AskUserQuestionSheet: View {
         let answersList = questions.compactMap { question in
             answers[question.id]
         }
-        dismiss()
+        // Prepare first (updates chip status synchronously), then dismiss.
+        // The actual prompt send happens in ChatSheetModifier.onDismiss
+        // AFTER the dismiss animation completes, preventing a SwiftUI layout
+        // glitch that hides the InputBar.
         onSubmit(answersList)
+        dismiss()
     }
 }
 

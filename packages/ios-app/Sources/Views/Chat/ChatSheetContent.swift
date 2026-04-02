@@ -103,9 +103,8 @@ struct ChatSheetContent: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 onAskAgent: { message in
+                    viewModel.pendingSourceChangesPrompt = message
                     sheetCoordinator?.dismiss()
-                    viewModel.inputText = message
-                    viewModel.sendMessage()
                 }
             )
         }
@@ -172,9 +171,7 @@ struct ChatSheetContent: View {
             AskUserQuestionSheet(
                 toolData: data,
                 onSubmit: { answers in
-                    Task {
-                        await viewModel.submitAskUserQuestionAnswers(answers)
-                    }
+                    viewModel.prepareAskUserQuestionSubmission(answers)
                 },
                 onDismiss: {
                     viewModel.dismissAskUserQuestionSheet()
@@ -192,9 +189,7 @@ struct ChatSheetContent: View {
             GetConfirmationSheet(
                 toolData: data,
                 onSubmit: { decision, note in
-                    Task {
-                        await viewModel.submitGetConfirmationDecision(decision, note: note)
-                    }
+                    viewModel.prepareGetConfirmationSubmission(decision, note: note)
                 },
                 onDismiss: {
                     viewModel.dismissGetConfirmationSheet()

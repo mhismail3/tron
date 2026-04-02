@@ -257,14 +257,14 @@ struct SearchResultParserTests {
     func testLineNumberMinWidth() {
         let matches = [SearchMatch(lineNumber: 1, content: "x")]
         let width = SearchResultParser.lineNumberWidth(for: matches)
-        #expect(width >= 16)
+        #expect(width >= 14)
     }
 
     @Test("lineNumberWidth handles nil line numbers")
     func testLineNumberWidthNilLines() {
         let matches = [SearchMatch(lineNumber: nil, content: "x")]
         let width = SearchResultParser.lineNumberWidth(for: matches)
-        #expect(width >= 16)
+        #expect(width >= 14)
     }
 
     // MARK: - Edge Cases

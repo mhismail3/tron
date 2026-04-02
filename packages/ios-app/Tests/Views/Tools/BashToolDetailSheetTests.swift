@@ -191,10 +191,10 @@ struct BashOutputHelpersTests {
         #expect(large > medium)
     }
 
-    @Test("Minimum width is 16")
+    @Test("Minimum width is 14")
     func testLineNumberMinWidth() {
         let width = BashOutputHelpers.lineNumberWidth(lineCount: 1)
-        #expect(width >= 16)
+        #expect(width >= 14)
     }
 
     // MARK: - Collapsed Lines

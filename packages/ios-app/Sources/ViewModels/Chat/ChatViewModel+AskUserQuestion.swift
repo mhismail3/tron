@@ -27,11 +27,18 @@ extension ChatViewModel {
         askUserQuestionCoordinator.dismissSheet(context: self)
     }
 
-    // MARK: - Answer Submission
+    // MARK: - Answer Submission (Two-Phase)
 
-    /// Handle AskUserQuestion answers submission (async mode: sends as new prompt)
-    func submitAskUserQuestionAnswers(_ answers: [AskUserQuestionAnswer]) async {
-        await askUserQuestionCoordinator.submitAnswers(answers, context: self)
+    /// Phase 1: Prepare submission — updates chip and stores pending prompt.
+    /// Called synchronously from sheet's onSubmit BEFORE dismiss.
+    func prepareAskUserQuestionSubmission(_ answers: [AskUserQuestionAnswer]) {
+        askUserQuestionCoordinator.prepareSubmission(answers, context: self)
+    }
+
+    /// Phase 2: Execute pending submission — sends stored prompt.
+    /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
+    func executePendingAskUserQuestionSubmission() {
+        askUserQuestionCoordinator.executePendingSubmission(context: self)
     }
 
     // MARK: - Question State Management

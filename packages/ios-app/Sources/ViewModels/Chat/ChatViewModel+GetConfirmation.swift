@@ -25,11 +25,18 @@ extension ChatViewModel {
         getConfirmationCoordinator.dismissSheet(context: self)
     }
 
-    // MARK: - Decision Submission
+    // MARK: - Decision Submission (Two-Phase)
 
-    /// Handle GetConfirmation decision submission (sends as new prompt)
-    func submitGetConfirmationDecision(_ decision: ConfirmationDecision, note: String?) async {
-        await getConfirmationCoordinator.submitDecision(decision, note: note, context: self)
+    /// Phase 1: Prepare submission — updates chip and stores pending prompt.
+    /// Called synchronously from sheet's onSubmit BEFORE dismiss.
+    func prepareGetConfirmationSubmission(_ decision: ConfirmationDecision, note: String?) {
+        getConfirmationCoordinator.prepareSubmission(decision, note: note, context: self)
+    }
+
+    /// Phase 2: Execute pending submission — sends stored prompt.
+    /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
+    func executePendingGetConfirmationSubmission() {
+        getConfirmationCoordinator.executePendingSubmission(context: self)
     }
 
     // MARK: - State Management

@@ -48,14 +48,22 @@ final class GetConfirmationCoordinator {
         context.logInfo("GetConfirmation sheet dismissed without submitting")
     }
 
-    // MARK: - Decision Submission
+    // MARK: - Two-Phase Decision Submission
+    //
+    // Split into prepare + execute to avoid a SwiftUI rendering bug where concurrent
+    // sheet dismiss animation + state mutations (isProcessing, inputText, keyboard resign)
+    // glitches the safeAreaInset layout, making the InputBar disappear permanently.
+    //
+    // Phase 1 (prepareSubmission): Updates chip, formats prompt, stores pending.
+    // Phase 2 (executePendingSubmission): Sends stored prompt after sheet dismiss completes.
 
-    /// Handle GetConfirmation decision submission (sends as new prompt).
-    func submitDecision(
+    /// Phase 1: Prepare submission — updates chip, formats prompt, stores as pending.
+    /// Called BEFORE sheet dismiss. Does NOT send the prompt.
+    func prepareSubmission(
         _ decision: ConfirmationDecision,
         note: String?,
         context: GetConfirmationContext
-    ) async {
+    ) {
         guard let data = context.getConfirmationState.currentData else {
             context.logError("Cannot submit decision - no current confirmation data")
             return
@@ -75,9 +83,9 @@ final class GetConfirmationCoordinator {
             submittedAt: DateParser.now
         )
 
-        context.logInfo("Submitting GetConfirmation decision=\(decision.rawValue) for toolCallId=\(data.toolCallId)")
+        context.logInfo("Preparing GetConfirmation decision=\(decision.rawValue) for toolCallId=\(data.toolCallId)")
 
-        // Update the chip status BEFORE sending
+        // Update the chip status immediately (visible while sheet animates away)
         updateMessageToDecided(
             toolCallId: data.toolCallId,
             decision: decision,
@@ -86,19 +94,28 @@ final class GetConfirmationCoordinator {
             context: context
         )
 
-        // Format decision as a user prompt
+        // Format decision and store for deferred send
         let prompt = formatDecisionAsPrompt(data: data, decision: decision, note: note)
+        context.getConfirmationState.pendingConfirmationPrompt = prompt
 
         // Track decision for MessagingCoordinator chip
         context.getConfirmationState.lastDecisionWasApproval = (decision == .approved)
 
-        // Clear state before sending
+        // Keep currentData alive — the sheet reads it during its dismiss animation.
+        // Setting currentData = nil here would switch content to EmptyView(), causing
+        // a white flash. Cleared in executePendingSubmission after animation completes.
         context.getConfirmationState.showSheet = false
+
+        context.logInfo("GetConfirmation submission prepared, awaiting sheet dismiss")
+    }
+
+    /// Phase 2: Execute pending submission — sends the stored prompt.
+    /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
+    func executePendingSubmission(context: GetConfirmationContext) {
+        guard let prompt = context.getConfirmationState.pendingConfirmationPrompt else { return }
+        context.getConfirmationState.pendingConfirmationPrompt = nil
         context.getConfirmationState.currentData = nil
-
-        // Send as a new prompt (this triggers a new agent turn)
         context.sendConfirmationPrompt(prompt)
-
         context.logInfo("GetConfirmation decision submitted as prompt")
     }
 

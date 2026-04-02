@@ -97,6 +97,8 @@ final class ChatViewModel {
     let messageQueueState = MessageQueueState()
     /// Whether the abort confirmation dialog should be shown (queue has items)
     var showAbortConfirmation = false
+    /// Pending source changes prompt to send after sheet dismissal completes.
+    var pendingSourceChangesPrompt: String?
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)

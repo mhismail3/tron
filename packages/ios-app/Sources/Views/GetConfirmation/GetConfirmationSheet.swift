@@ -169,9 +169,9 @@ struct GetConfirmationSheet: View {
         HStack(spacing: 12) {
             // Deny button
             Button {
-                dismiss()
                 let note = noteText.isEmpty ? nil : noteText
                 onSubmit(.denied, note)
+                dismiss()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "xmark")
@@ -195,9 +195,9 @@ struct GetConfirmationSheet: View {
 
             // Approve button
             Button {
-                dismiss()
                 let note = noteText.isEmpty ? nil : noteText
                 onSubmit(.approved, note)
+                dismiss()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark")
