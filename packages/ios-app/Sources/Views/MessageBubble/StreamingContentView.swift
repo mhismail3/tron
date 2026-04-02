@@ -16,7 +16,7 @@ struct StreamingContentView: View {
             // Dynamic text content
             textContent
         }
-        .padding(.vertical, 4)
+        .padding(.top, 4)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }

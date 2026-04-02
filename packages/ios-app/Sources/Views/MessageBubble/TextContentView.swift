@@ -87,7 +87,7 @@ struct TextContentView: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.top, 4)
         .padding(.horizontal, isUser ? 0 : 4)
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
     }

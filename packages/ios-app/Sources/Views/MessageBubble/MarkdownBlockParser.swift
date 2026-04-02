@@ -163,7 +163,24 @@ enum MarkdownBlockParser {
             }
         }
 
-        return blocks
+        return blocks.filter { block in
+            switch block {
+            case .paragraph(let content):
+                return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .blockquote(let content):
+                return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .header(_, let content):
+                return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .codeBlock(_, let code):
+                return !code.isEmpty
+            case .unorderedList(let items):
+                return !items.isEmpty
+            case .orderedList(let items):
+                return !items.isEmpty
+            case .table, .horizontalRule:
+                return true
+            }
+        }
     }
 
     // MARK: - Line Classification Helpers
