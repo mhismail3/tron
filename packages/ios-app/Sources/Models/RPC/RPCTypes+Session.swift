@@ -78,9 +78,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     var totalInputTokens: Int { (inputTokens ?? 0) + (cacheReadTokens ?? 0) }
 
     var formattedTokens: String {
-        let result = TokenFormatter.formatPair(input: totalInputTokens, output: outputTokens ?? 0)
-        logger.debug("[SESSION-TOKENS] \(sessionId.prefix(12)): in=\(inputTokens ?? 0) out=\(outputTokens ?? 0) cacheRead=\(cacheReadTokens ?? 0) cacheWrite=\(cacheCreationTokens ?? 0) -> \(result)", category: .session)
-        return result
+        TokenFormatter.formatPair(input: totalInputTokens, output: outputTokens ?? 0)
     }
 
     /// Formatted cache tokens - separate read/creation for visibility

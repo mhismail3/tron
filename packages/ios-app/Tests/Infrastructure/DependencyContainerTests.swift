@@ -90,7 +90,7 @@ final class DependencyContainerTests: XCTestCase {
         // Test URL construction logic by setting known values
         let container = DependencyContainer()
         // Reset to known defaults
-        container.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
+        container.updateServerSettings(host: "localhost", port: "8082")
         let url = container.serverURL
 
         XCTAssertEqual(url.scheme, "ws")
@@ -101,8 +101,8 @@ final class DependencyContainerTests: XCTestCase {
     func test_currentServerOrigin_formatsCorrectly() async throws {
         // Test origin formatting with known values
         let container = DependencyContainer()
-        container.updateServerSettings(host: "testhost", port: "9999", useTLS: false)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "testhost", port: "9999")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
         let origin = container.currentServerOrigin
 
         XCTAssertEqual(origin, "testhost:9999")
@@ -116,8 +116,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalClient = container.rpcClient
 
-        container.updateServerSettings(host: "test-server.example.com", port: "19001", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "test-server.example.com", port: "19001")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         XCTAssert(originalClient !== container.rpcClient, "RPC client should be recreated after settings change")
     }
@@ -126,8 +126,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalDB = container.eventDatabase
 
-        container.updateServerSettings(host: "test.example.com", port: "19002", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "test.example.com", port: "19002")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         XCTAssert(originalDB === container.eventDatabase, "EventDatabase should NOT be recreated after settings change")
     }
@@ -136,8 +136,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalService = container.pushNotificationService
 
-        container.updateServerSettings(host: "test.example.com", port: "19003", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "test.example.com", port: "19003")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         XCTAssert(originalService === container.pushNotificationService, "PushNotificationService should NOT be recreated")
     }
@@ -146,8 +146,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalRouter = container.deepLinkRouter
 
-        container.updateServerSettings(host: "test.example.com", port: "19004", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "test.example.com", port: "19004")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         XCTAssert(originalRouter === container.deepLinkRouter, "DeepLinkRouter should NOT be recreated")
     }
@@ -156,8 +156,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalVersion = container.serverSettingsVersion
 
-        container.updateServerSettings(host: "test.example.com", port: "19005", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "test.example.com", port: "19005")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         XCTAssertEqual(container.serverSettingsVersion, originalVersion + 1, "serverSettingsVersion should increment")
     }
@@ -168,8 +168,7 @@ final class DependencyContainerTests: XCTestCase {
         // Update with same settings - should be a no-op
         Self.sharedContainer.updateServerSettings(
             host: Self.sharedContainer.serverHost,
-            port: Self.sharedContainer.serverPort,
-            useTLS: Self.sharedContainer.useTLS
+            port: Self.sharedContainer.serverPort
         )
 
         XCTAssertEqual(Self.sharedContainer.serverSettingsVersion, originalVersion, "Version should NOT increment when unchanged")
@@ -178,11 +177,11 @@ final class DependencyContainerTests: XCTestCase {
     func test_updateServerSettings_updatesServerURL() async throws {
         let container = DependencyContainer()
 
-        container.updateServerSettings(host: "newhost.example.com", port: "19006", useTLS: true)
-        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
+        container.updateServerSettings(host: "newhost.example.com", port: "19006")
+        defer { container.updateServerSettings(host: "localhost", port: "8082") }
 
         let url = container.serverURL
-        XCTAssertEqual(url.scheme, "wss")
+        XCTAssertEqual(url.scheme, "ws")
         XCTAssertTrue(url.host?.contains("newhost") ?? false)
     }
 

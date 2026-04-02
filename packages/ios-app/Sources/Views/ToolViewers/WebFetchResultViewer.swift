@@ -393,6 +393,7 @@ struct WebFetchMetadata {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview("WebFetch - Summarization") {
     VStack(spacing: 16) {
         WebFetchResultViewer(
@@ -439,3 +440,4 @@ struct WebFetchMetadata {
     .padding()
     .background(Color.tronBackground)
 }
+#endif

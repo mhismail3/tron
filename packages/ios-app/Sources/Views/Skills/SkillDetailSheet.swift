@@ -351,6 +351,7 @@ func isCompactContent(_ content: String) -> Bool {
 
 // MARK: - Preview
 
+#if DEBUG
 @available(iOS 26.0, *)
 #Preview {
     SkillDetailSheet(
@@ -364,3 +365,4 @@ func isCompactContent(_ content: String) -> Bool {
         skillStore: SkillStore()
     )
 }
+#endif

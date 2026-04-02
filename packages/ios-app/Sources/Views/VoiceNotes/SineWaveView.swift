@@ -107,6 +107,7 @@ struct SineWaveView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     if #available(iOS 26.0, *) {
         ZStack {
@@ -117,3 +118,4 @@ struct SineWaveView: View {
         }
     }
 }
+#endif

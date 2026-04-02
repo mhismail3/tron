@@ -107,6 +107,7 @@ final class MiscClient {
         }
     }
 
+    #if DEBUG || BETA
     // MARK: - Logs Methods
 
     /// Ingest structured client logs into the server database.
@@ -122,4 +123,5 @@ final class MiscClient {
         logger.info("Ingested \(result.inserted) log entries into server database", category: .general)
         return result
     }
+    #endif
 }

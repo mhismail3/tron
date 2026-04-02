@@ -562,6 +562,7 @@ extension Notification.Name {
 
 // MARK: - Preview
 
+#if DEBUG
 @available(iOS 26.0, *)
 #Preview {
     @Previewable @State var previewState = InputBarState()
@@ -593,3 +594,4 @@ extension Notification.Name {
         previewState.text = "Hello world"
     }
 }
+#endif

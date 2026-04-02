@@ -161,6 +161,7 @@ struct WorktreeBadge: View {
     }
 }
 
+#if DEBUG
 #Preview("WorktreeStatusView - Active") {
     VStack(spacing: 20) {
         WorktreeStatusView(
@@ -221,3 +222,4 @@ struct WorktreeBadge: View {
     )
     .padding()
 }
+#endif

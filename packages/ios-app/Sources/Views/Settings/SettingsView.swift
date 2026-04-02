@@ -24,7 +24,9 @@ struct SettingsView: View {
     }
 
     @State private var showingResetAlert = false
+    #if DEBUG || BETA
     @State private var showLogViewer = false
+    #endif
     @State private var showArchiveAllConfirmation = false
     @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
@@ -55,20 +57,24 @@ struct SettingsView: View {
 
     var body: some View {
         SettingsPageContainer(title: "Settings") {
+            #if DEBUG || BETA
             Button { showLogViewer = true } label: {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(TronTypography.buttonSM)
                     .foregroundStyle(.tronEmerald)
             }
+            #endif
         } content: {
             categoriesCard
             notificationsCard
             dangerZoneCard
             footerView
         }
+        #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
             LogViewer()
         }
+        #endif
         .sheet(isPresented: $showConnectionPage) {
             ConnectionSettingsPage(
                 serverHost: $serverHost,
@@ -370,7 +376,9 @@ struct ServerURLBuilder {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview {
     SettingsView()
         .environment(\.dependencies, DependencyContainer())
 }
+#endif

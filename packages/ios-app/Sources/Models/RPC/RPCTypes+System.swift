@@ -40,6 +40,7 @@ struct DeviceTokenUnregisterResult: Decodable {
 
 // MARK: - Logs Methods
 
+#if DEBUG || BETA
 /// A single log entry for ingestion into the server database.
 struct ClientLogEntry: Encodable {
     let timestamp: String   // ISO 8601 with millis ("2026-03-03T14:30:05.123Z")
@@ -58,3 +59,4 @@ struct LogsIngestResult: Decodable {
     let success: Bool
     let inserted: Int
 }
+#endif

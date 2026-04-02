@@ -207,6 +207,7 @@ struct FloatingBrowserView: View {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview {
     if #available(iOS 26.0, *) {
         ZStack {
@@ -220,3 +221,4 @@ struct FloatingBrowserView: View {
         }
     }
 }
+#endif

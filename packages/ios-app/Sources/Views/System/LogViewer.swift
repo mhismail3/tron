@@ -1,3 +1,4 @@
+#if DEBUG || BETA
 import SwiftUI
 
 // MARK: - Log Viewer
@@ -320,3 +321,4 @@ struct LogRow: View {
 #Preview {
     LogViewer()
 }
+#endif

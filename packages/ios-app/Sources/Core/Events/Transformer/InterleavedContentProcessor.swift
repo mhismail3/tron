@@ -53,11 +53,12 @@ enum InterleavedContentProcessor {
         let effectiveTokenRecord = parsed.tokenRecord
 
         if let record = effectiveTokenRecord {
+            #if DEBUG || BETA
             TronLogger.shared.debug("[TOKEN-FLOW] iOS: message.assistant reconstruction", category: .events)
             TronLogger.shared.debug("  turn=\(parsed.turn), blocks=\(blocks.count)", category: .events)
             TronLogger.shared.debug("  tokenRecord: newInput=\(record.computed.newInputTokens), contextWindow=\(record.computed.contextWindowTokens), output=\(record.source.rawOutputTokens)", category: .events)
+            #endif
         } else {
-            // Server should provide tokenRecord - stats may be missing without it
             TronLogger.shared.warning("[TOKEN-FLOW] iOS: message.assistant MISSING tokenRecord (turn=\(parsed.turn))", category: .events)
         }
 

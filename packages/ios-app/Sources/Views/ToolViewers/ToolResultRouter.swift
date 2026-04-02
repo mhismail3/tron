@@ -99,6 +99,7 @@ struct ToolResultRouter: View {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview("Core Tools") {
     ScrollView {
         VStack(spacing: 16) {
@@ -196,3 +197,4 @@ struct ToolResultRouter: View {
     }
     .background(Color.tronBackground)
 }
+#endif

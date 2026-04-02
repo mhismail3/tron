@@ -43,6 +43,18 @@ struct ContentView: View {
         mainContent
             .tronScreenBackground()
             .tint(.tronEmerald)
+            #if BETA
+            .overlay(alignment: .bottomTrailing) {
+                Text("BETA")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.tronEmerald.opacity(0.5), in: .capsule)
+                    .padding(8)
+                    .allowsHitTesting(false)
+            }
+            #endif
             .sheet(isPresented: $showNewSessionSheet) {
                 newSessionFlowSheet
             }

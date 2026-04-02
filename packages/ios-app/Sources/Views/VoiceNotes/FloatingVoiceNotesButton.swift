@@ -26,6 +26,7 @@ struct FloatingVoiceNotesButton: View {
     }
 }
 
+#if DEBUG
 #Preview {
     if #available(iOS 26.0, *) {
         ZStack {
@@ -34,3 +35,4 @@ struct FloatingVoiceNotesButton: View {
         }
     }
 }
+#endif

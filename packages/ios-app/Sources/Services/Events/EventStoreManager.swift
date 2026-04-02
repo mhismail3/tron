@@ -85,6 +85,7 @@ final class EventStoreManager {
     var processingSessionIds: Set<String> = [] {
         didSet {
             if processingSessionIds != oldValue {
+                #if DEBUG || BETA
                 let added = processingSessionIds.subtracting(oldValue)
                 let removed = oldValue.subtracting(processingSessionIds)
                 if !added.isEmpty {
@@ -93,6 +94,7 @@ final class EventStoreManager {
                 if !removed.isEmpty {
                     logger.debug("Processing completed for sessions: \(removed.map { String($0.prefix(12)) + "..." }.joined(separator: ", "))", category: .session)
                 }
+                #endif
             }
             UserDefaults.standard.set(Array(processingSessionIds), forKey: "tron.processingSessionIds")
         }

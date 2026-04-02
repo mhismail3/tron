@@ -356,6 +356,7 @@ struct SearchResult {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview("WebSearch Results") {
     ScrollView {
         VStack(spacing: 16) {
@@ -395,3 +396,4 @@ struct SearchResult {
     }
     .background(Color.tronBackground)
 }
+#endif

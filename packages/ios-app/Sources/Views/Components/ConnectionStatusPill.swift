@@ -202,6 +202,7 @@ struct ConnectionStatusPill: View {
 
 // MARK: - Preview
 
+#if DEBUG
 @available(iOS 26.0, *)
 #Preview("Connection States") {
     VStack(spacing: 16) {
@@ -216,3 +217,4 @@ struct ConnectionStatusPill: View {
     .padding()
     .background(Color.tronBackground)
 }
+#endif

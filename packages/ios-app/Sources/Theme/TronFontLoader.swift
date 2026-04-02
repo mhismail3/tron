@@ -42,6 +42,7 @@ enum TronFontLoader {
         }
     }
 
+    #if DEBUG
     /// Print matching font families (for debugging)
     static func printAvailableFonts(matching query: String? = nil) {
         logger.debug("=== Available Font Families ===", category: .ui)
@@ -53,6 +54,7 @@ enum TronFontLoader {
             }
         }
     }
+    #endif
 
     // MARK: - Variable Font Creation
 

@@ -43,7 +43,9 @@ final class TurnContentCache {
         if cache[sessionId] == nil && cache.count >= maxEntries {
             if let oldest = cache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
                 cache.removeValue(forKey: oldest)
+                #if DEBUG || BETA
                 logger.debug("Evicted oldest cache entry for session \(oldest) to stay within limit")
+                #endif
             }
         }
 
@@ -51,7 +53,7 @@ final class TurnContentCache {
         cache[sessionId] = CacheEntry(messages: messages, timestamp: now)
         logger.info("Cached turn \(turnNumber) content for session \(sessionId): \(messages.count) messages")
 
-        // Log content block types for debugging
+        #if DEBUG || BETA
         for (idx, msg) in messages.enumerated() {
             let role = msg["role"] as? String ?? "unknown"
             if let content = msg["content"] as? [[String: Any]] {
@@ -61,6 +63,7 @@ final class TurnContentCache {
                 logger.debug("  Message \(idx) (\(role)): text (\(text.count) chars)")
             }
         }
+        #endif
     }
 
     /// Get cached turn content for a session.
@@ -71,7 +74,9 @@ final class TurnContentCache {
         // Check if expired
         if Date().timeIntervalSince(entry.timestamp) > expiry {
             cache.removeValue(forKey: sessionId)
+            #if DEBUG || BETA
             logger.debug("Cache entry for session \(sessionId) expired, removed")
+            #endif
             return nil
         }
 
@@ -81,7 +86,9 @@ final class TurnContentCache {
     /// Clear cached turn content for a session.
     func clear(sessionId: String) {
         cache.removeValue(forKey: sessionId)
+        #if DEBUG || BETA
         logger.debug("Cleared turn content cache for session \(sessionId)")
+        #endif
     }
 
     /// Clean all expired cache entries.
@@ -93,7 +100,9 @@ final class TurnContentCache {
             for key in expiredKeys {
                 cache.removeValue(forKey: key)
             }
+            #if DEBUG || BETA
             logger.debug("Cleaned \(expiredKeys.count) expired cache entries")
+            #endif
         }
     }
 

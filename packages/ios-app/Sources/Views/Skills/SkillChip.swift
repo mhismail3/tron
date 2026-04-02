@@ -161,6 +161,7 @@ struct MessageSpellChips: View {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview {
     VStack(spacing: 20) {
         HStack {
@@ -205,3 +206,4 @@ struct MessageSpellChips: View {
     .padding()
     .background(Color.tronBackground)
 }
+#endif

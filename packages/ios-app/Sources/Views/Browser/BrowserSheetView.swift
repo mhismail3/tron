@@ -66,6 +66,7 @@ struct BrowserSheetView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     if #available(iOS 26.0, *) {
         BrowserSheetView(
@@ -75,3 +76,4 @@ struct BrowserSheetView: View {
         )
     }
 }
+#endif

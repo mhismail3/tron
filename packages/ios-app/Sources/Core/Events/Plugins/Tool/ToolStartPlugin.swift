@@ -28,6 +28,7 @@ enum ToolStartPlugin: DispatchableEventPlugin {
         let arguments: [String: AnyCodable]?
 
         var formattedArguments: String {
+            #if DEBUG || BETA
             guard let args = arguments else { return "" }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -38,6 +39,9 @@ enum ToolStartPlugin: DispatchableEventPlugin {
                 logger.warning("Failed to format tool arguments for \(toolName): \(error.localizedDescription)", category: .events)
                 return ""
             }
+            #else
+            return ""
+            #endif
         }
     }
 

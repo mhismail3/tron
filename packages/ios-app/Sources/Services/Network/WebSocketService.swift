@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 // MARK: - Connection State
 
@@ -290,8 +289,10 @@ final class WebSocketService {
             throw WebSocketError.encodingError
         }
 
+        #if DEBUG || BETA
         logger.logRPCRequest(method: method, params: params, id: Int(requestId) ?? 0)
         logger.logWebSocketMessage(direction: "→ SEND", type: method, size: data.count, preview: String(data: data, encoding: .utf8))
+        #endif
 
         let message = URLSessionWebSocketTask.Message.data(data)
         do {
@@ -323,14 +324,9 @@ final class WebSocketService {
         }
 
         let duration = CFAbsoluteTimeGetCurrent() - startTime
+        #if DEBUG || BETA
         logger.logWebSocketMessage(direction: "← RECV", type: method, size: responseData.count, preview: String(data: responseData, encoding: .utf8))
-
-        // DEBUG: Log raw JSON for session.list to debug cache tokens
-        if method == "session.list" {
-            if let rawJson = String(data: responseData, encoding: .utf8) {
-                logger.debug("[SESSION-LIST-JSON] Raw response (first 2000 chars): \(String(rawJson.prefix(2000)))", category: .rpc)
-            }
-        }
+        #endif
 
         let decoder = JSONDecoder()
         do {
@@ -416,18 +412,21 @@ final class WebSocketService {
 
             if let continuation = pendingRequests.removeValue(forKey: id) {
                 continuation.resume(returning: data)
+                #if DEBUG || BETA
                 logger.debug("Resolved RPC response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
+                #endif
             } else {
                 logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
             }
         } else if let type = json["type"] as? String {
-            // This is an event — pass pre-extracted type and sessionId to avoid re-parsing
             let sessionId = json["sessionId"] as? String
+            #if DEBUG || BETA
             let eventData = json["data"]
             logger.logEvent(type: type, sessionId: sessionId, data: eventData.map { String(describing: $0).prefix(300).description })
+            #endif
             onEvent?(data, type, sessionId)
         } else {
-            logger.debug("Received message without id or type: \(String(describing: json.keys))", category: .websocket)
+            logger.warning("Received message without id or type", category: .websocket)
         }
     }
 

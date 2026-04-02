@@ -225,6 +225,7 @@ struct ConfirmedActionChipView: View {
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview {
     ScrollView {
         VStack(spacing: 12) {
@@ -253,3 +254,4 @@ struct ConfirmedActionChipView: View {
     }
     .background(Color.tronBackground)
 }
+#endif

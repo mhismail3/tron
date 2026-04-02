@@ -61,7 +61,13 @@ final class TronLogger: @unchecked Sendable {
     static let shared = TronLogger()
 
     // Thread-safe configuration properties — protected by bufferLock
-    private var _minimumLevel: LogLevel = .verbose
+    private var _minimumLevel: LogLevel = {
+        #if DEBUG || BETA
+        return .verbose
+        #else
+        return .info
+        #endif
+    }()
     private var _categoryLevels: [LogCategory: LogLevel] = [:]
     private var _enabledCategories: Set<LogCategory> = Set(LogCategory.allCases)
 
@@ -114,12 +120,12 @@ final class TronLogger: @unchecked Sendable {
 
     func setLevel(_ level: LogLevel) {
         minimumLevel = level
-        log(.info, category: .general, "Log level set to \(level)")
+        info("Log level set to \(level)")
     }
 
     func setLevel(_ level: LogLevel, for category: LogCategory) {
         categoryLevels[category] = level
-        log(.info, category: .general, "Log level for \(category.rawValue) set to \(level)")
+        info("Log level for \(category.rawValue) set to \(level)")
     }
 
     func enableCategory(_ category: LogCategory) {
@@ -132,7 +138,7 @@ final class TronLogger: @unchecked Sendable {
 
     // MARK: - Logging Methods
 
-    func log(_ level: LogLevel, category: LogCategory = .general, _ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+    func log(_ level: LogLevel, category: LogCategory = .general, _ message: () -> String, file: String = #file, function: String = #function, line: Int = #line) {
         // Read config atomically under lock
         let (isEnabled, effectiveLevel) = bufferLock.withLock {
             (_enabledCategories.contains(category), _categoryLevels[category] ?? _minimumLevel)
@@ -140,49 +146,53 @@ final class TronLogger: @unchecked Sendable {
         guard isEnabled else { return }
         guard level >= effectiveLevel else { return }
 
+        let msg = message()
         let fileName = file.filename
         let timestamp = Self.isoFormatter.string(from: Date())
-        let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(message)"
+        let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(msg)"
 
         // Log to OS unified logging (also appears in Xcode console)
         loggers[category]?.log(level: level.osLogType, "\(formattedMessage)")
 
-        // Add to category-specific buffer
+        #if DEBUG || BETA
+        // Add to category-specific buffer (only needed for LogViewer)
         bufferLock.lock()
         var buffer = categoryBuffers[category] ?? []
-        buffer.append((Date(), category, level, message))
+        buffer.append((Date(), category, level, msg))
         let maxSize = maxBufferSize(for: category)
         if buffer.count > maxSize {
             buffer.removeFirst(buffer.count - maxSize)
         }
         categoryBuffers[category] = buffer
         bufferLock.unlock()
+        #endif
     }
 
-    // Convenience methods
-    func verbose(_ message: String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    // Convenience methods — @autoclosure defers string evaluation until after level check
+    func verbose(_ message: @autoclosure () -> String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(.verbose, category: category, message, file: file, function: function, line: line)
     }
 
-    func debug(_ message: String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    func debug(_ message: @autoclosure () -> String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(.debug, category: category, message, file: file, function: function, line: line)
     }
 
-    func info(_ message: String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    func info(_ message: @autoclosure () -> String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(.info, category: category, message, file: file, function: function, line: line)
     }
 
-    func warning(_ message: String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    func warning(_ message: @autoclosure () -> String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(.warning, category: category, message, file: file, function: function, line: line)
     }
 
-    func error(_ message: String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    func error(_ message: @autoclosure () -> String, category: LogCategory = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(.error, category: category, message, file: file, function: function, line: line)
     }
 
     // MARK: - Specialized Logging
 
     func logRPCRequest(method: String, params: Any?, id: Int) {
+        #if DEBUG || BETA
         let paramsStr: String
         if let p = params {
             let full = String(describing: p)
@@ -195,11 +205,13 @@ final class TronLogger: @unchecked Sendable {
             paramsStr = "nil"
         }
         verbose("→ RPC Request [\(id)] \(method): \(paramsStr)", category: .rpc)
+        #endif
     }
 
     func logRPCResponse(method: String, id: Int, success: Bool, duration: TimeInterval, result: Any? = nil, error: String? = nil) {
         let durationMs = String(format: "%.1fms", duration * 1000)
         if success {
+            #if DEBUG || BETA
             let resultStr: String
             if let r = result {
                 let full = String(describing: r)
@@ -212,6 +224,7 @@ final class TronLogger: @unchecked Sendable {
                 resultStr = "nil"
             }
             debug("← RPC Response [\(id)] \(method) ✓ (\(durationMs)): \(resultStr)", category: .rpc)
+            #endif
         } else {
             self.error("← RPC Response [\(id)] \(method) ✗ (\(durationMs)): \(error ?? "unknown error")", category: .rpc)
         }
@@ -223,14 +236,17 @@ final class TronLogger: @unchecked Sendable {
     }
 
     func logWebSocketMessage(direction: String, type: String, size: Int, preview: String? = nil) {
+        #if DEBUG || BETA
         var msg = "\(direction) [\(type)] \(size) bytes"
         if let preview = preview {
             msg += " - \(preview.prefix(200))"
         }
         verbose(msg, category: .websocket)
+        #endif
     }
 
     func logEvent(type: String, sessionId: String?, data: String? = nil) {
+        #if DEBUG || BETA
         var msg = "Event: \(type)"
         if let sid = sessionId {
             msg += " [session: \(sid.prefix(8))...]"
@@ -239,15 +255,12 @@ final class TronLogger: @unchecked Sendable {
             msg += " - \(data.prefix(300))"
         }
         debug(msg, category: .events)
-    }
-
-    func logUIAction(_ action: String, details: String? = nil) {
-        let msg = details.map { "\(action): \($0)" } ?? action
-        verbose(msg, category: .ui)
+        #endif
     }
 
     // MARK: - Buffer Access
 
+    #if DEBUG || BETA
     func getRecentLogs(count: Int = 100, level: LogLevel? = nil, category: LogCategory? = nil) -> [(Date, LogCategory, LogLevel, String)] {
         bufferLock.lock()
         defer { bufferLock.unlock() }
@@ -255,27 +268,24 @@ final class TronLogger: @unchecked Sendable {
         var result: [(Date, LogCategory, LogLevel, String)]
 
         if let category = category {
-            // Get from specific category buffer only
             result = categoryBuffers[category] ?? []
         } else {
-            // Merge all category buffers
             result = categoryBuffers.values.flatMap { $0 }
         }
 
-        // Filter by level
         if let level = level {
             result = result.filter { $0.2 >= level }
         }
 
-        // Sort by timestamp and return most recent
         return Array(result.sorted { $0.0 < $1.0 }.suffix(count))
     }
 
-    func clearBuffer() {
+    func clearBufferForCategory(_ category: LogCategory) {
         bufferLock.lock()
-        categoryBuffers.removeAll()
+        categoryBuffers[category] = []
         bufferLock.unlock()
     }
+    #endif
 
 }
 

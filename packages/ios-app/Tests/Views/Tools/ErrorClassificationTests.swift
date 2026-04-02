@@ -81,18 +81,6 @@ struct ErrorClassificationTests {
         #expect(quota.title == "Quota Exceeded")
     }
 
-    // MARK: - Remember Classifier
-
-    @Test("Remember classifies database errors")
-    func testRememberErrors() {
-        let invalidAction = RememberDetailParser.classifyError("Invalid action: xyz")
-        #expect(invalidAction.title == "Invalid Action")
-        #expect(invalidAction.code == "INVALID_ACTION")
-
-        let notFound = RememberDetailParser.classifyError("Session not found")
-        #expect(notFound.title == "Not Found")
-    }
-
     // MARK: - Search Classifier
 
     @Test("Search classifies invalid regex")

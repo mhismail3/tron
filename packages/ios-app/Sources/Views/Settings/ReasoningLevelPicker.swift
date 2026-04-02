@@ -201,6 +201,7 @@ struct InlineReasoningControl: View {
 
 // MARK: - Preview
 
+#if DEBUG
 @available(iOS 26.0, *)
 #Preview {
     VStack(spacing: 20) {
@@ -251,3 +252,4 @@ struct InlineReasoningControl: View {
     }
     .padding()
 }
+#endif

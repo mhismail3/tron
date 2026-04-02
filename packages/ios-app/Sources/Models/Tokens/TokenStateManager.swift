@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 // MARK: - Token State Manager
 
@@ -17,10 +16,7 @@ import os
 @Observable
 @MainActor
 final class TokenStateManager {
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "com.tron",
-        category: "TokenStateManager"
-    )
+    private static let maxHistorySize = 200
 
     // MARK: - State
 
@@ -47,29 +43,28 @@ final class TokenStateManager {
 
     /// Update from server's turn_end event with TokenRecord
     func updateFromTurnEnd(_ record: TokenRecord) {
-        // Validate: log warning if tokens are 0
         if record.source.rawInputTokens == 0 && record.source.rawOutputTokens == 0 {
-            logger.warning("[TOKEN-ANOMALY] Received zero tokens in turn_end (turn=\(record.meta.turn))")
+            logger.warning("[TOKEN-ANOMALY] Received zero tokens in turn_end (turn=\(record.meta.turn))", category: .session)
         }
 
-        // Update current
         current = record
 
-        // Accumulate
         accumulated.inputTokens += record.source.rawInputTokens
         accumulated.outputTokens += record.source.rawOutputTokens
         accumulated.cacheReadTokens += record.source.rawCacheReadTokens
         accumulated.cacheCreationTokens += record.source.rawCacheCreationTokens
 
-        // Update context window
         contextWindow.currentSize = record.computed.contextWindowTokens
         updateCalculatedValues()
 
-        // Track history
         history.append(record)
+        if history.count > Self.maxHistorySize {
+            history.removeFirst(history.count - Self.maxHistorySize)
+        }
 
-        let contextSize = self.contextWindow.currentSize
-        logger.debug("[TOKEN-STATE] Updated from turn_end: turn=\(record.meta.turn) contextWindow=\(contextSize) newInput=\(record.computed.newInputTokens)")
+        #if DEBUG || BETA
+        logger.debug("[TOKEN-STATE] Updated from turn_end: turn=\(record.meta.turn) contextWindow=\(self.contextWindow.currentSize) newInput=\(record.computed.newInputTokens)", category: .session)
+        #endif
     }
 
     // MARK: - State Restoration
@@ -85,8 +80,7 @@ final class TokenStateManager {
         }
         updateCalculatedValues()
 
-        let contextSize = self.contextWindow.currentSize
-        logger.info("[TOKEN-RESTORE] Restored \(records.count) records, contextWindow=\(contextSize)")
+        logger.info("[TOKEN-RESTORE] Restored \(records.count) records, contextWindow=\(self.contextWindow.currentSize)", category: .session)
     }
 
     /// Restore accumulated values from session data
@@ -141,11 +135,8 @@ final class TokenStateManager {
         let maxSize = contextWindow.maxSize
         let currentSize = contextWindow.currentSize
 
-        // Calculate percentage (cap at 100)
         let rawPercent = maxSize > 0 ? Double(currentSize) / Double(maxSize) * 100 : 0
         contextWindow.percentUsed = min(100, Int(rawPercent.rounded()))
-
-        // Calculate tokens remaining (floor at 0)
         contextWindow.tokensRemaining = max(0, maxSize - currentSize)
     }
 }
