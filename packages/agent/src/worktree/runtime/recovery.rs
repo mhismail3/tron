@@ -21,6 +21,24 @@ pub struct RecoveredWorktree {
     pub branch: String,
     /// Whether changes were auto-committed before removal.
     pub auto_committed: bool,
+    /// Whether the branch was deleted (no commits over base).
+    pub branch_deleted: bool,
+}
+
+/// Detect the default branch for a repo (tries main, then master, then HEAD).
+async fn detect_default_branch(repo_root: &std::path::Path, git: &GitExecutor) -> String {
+    let branches = git
+        .list_branches_matching(repo_root, "*")
+        .await
+        .unwrap_or_default();
+    for candidate in &["main", "master"] {
+        if branches.iter().any(|b| b == candidate) {
+            return candidate.to_string();
+        }
+    }
+    git.current_branch(repo_root)
+        .await
+        .unwrap_or_else(|_| "main".to_string())
 }
 
 /// Recover orphaned worktrees in a single repository.
@@ -100,10 +118,42 @@ pub async fn recover_repo(
             }
         }
 
+        // Delete branch if it has no commits over the default branch.
+        // Branches with work (committed or auto-committed) are preserved.
+        let has_commits = if auto_committed {
+            true
+        } else {
+            let default_branch = detect_default_branch(repo_root, git).await;
+            match git.merge_base(repo_root, &default_branch, branch).await {
+                Ok(mb) => git
+                    .commit_count_between(repo_root, &mb, branch)
+                    .await
+                    .unwrap_or(0)
+                    > 0,
+                Err(_) => false,
+            }
+        };
+
+        let branch_deleted = if !has_commits {
+            match git.branch_delete(repo_root, branch, true).await {
+                Ok(()) => {
+                    info!(branch, "deleted empty orphan branch");
+                    true
+                }
+                Err(e) => {
+                    warn!(branch, error = %e, "failed to delete orphan branch");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
         recovered.push(RecoveredWorktree {
             path: entry.path.clone(),
             branch: branch.clone(),
             auto_committed,
+            branch_deleted,
         });
     }
 
@@ -191,6 +241,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].branch, "session/orphaned");
         assert!(!result[0].auto_committed);
+        assert!(result[0].branch_deleted, "empty orphan branch should be deleted");
     }
 
     #[tokio::test]
@@ -244,5 +295,35 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].auto_committed);
+        assert!(!result[0].branch_deleted, "branch with auto-committed work should be preserved");
+    }
+
+    #[tokio::test]
+    async fn recover_preserves_branch_with_committed_work() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("committed1");
+        git.worktree_add(dir.path(), &wt_path, "session/committed1", "HEAD")
+            .await
+            .unwrap();
+
+        // Make a commit in the worktree (simulating agent work)
+        std::fs::write(wt_path.join("work.txt"), "committed work").unwrap();
+        let _ = git.commit_all(&wt_path, "agent work").await.unwrap();
+
+        let active: HashSet<String> = HashSet::new();
+        let result = recover_repo(dir.path(), &active, &config, &git)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].auto_committed);
+        assert!(!result[0].branch_deleted, "branch with committed work should be preserved");
     }
 }
