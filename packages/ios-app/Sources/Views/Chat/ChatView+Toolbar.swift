@@ -28,28 +28,38 @@ extension ChatView {
         }
     }
 
-    /// Principal toolbar item (title + worktree badge)
+    /// Principal toolbar item (title with optional fork + worktree icons)
     @ToolbarContentBuilder
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            VStack(spacing: 2) {
-                HStack(spacing: 6) {
-                    if eventStoreManager.activeSession?.isFork == true {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.tronEmerald)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(.tronEmerald.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                    Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+            HStack(spacing: 6) {
+                if eventStoreManager.activeSession?.isFork == true {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.caption2)
                         .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.tronEmerald.opacity(0.15))
+                        .clipShape(Capsule())
                 }
                 if let worktree = viewModel.worktreeState.worktree {
-                    WorktreeBadge(worktree: worktree)
+                    HStack(spacing: 2) {
+                        Image("IconGit")
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 12, height: 12)
+                            .foregroundStyle(.secondary)
+                        if worktree.hasUncommittedChanges == true {
+                            Circle()
+                                .fill(.orange)
+                                .frame(width: 5, height: 5)
+                        }
+                    }
                 }
+                Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
+                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(.tronEmerald)
             }
         }
     }
