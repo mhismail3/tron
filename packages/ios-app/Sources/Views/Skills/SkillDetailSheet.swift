@@ -240,8 +240,14 @@ struct SkillDetailSheet: View {
             }
             .padding(14)
             .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(accentColor.opacity(0.06))
+                if isCompactContent(metadata.content) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(accentColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(accentColor.opacity(0.06))
+                }
             }
         }
     }
@@ -328,6 +334,19 @@ struct SkillDetailSheet: View {
 
         isLoading = false
     }
+}
+
+// MARK: - Content Compactness
+
+/// Whether skill content is compact enough for liquid glass rendering.
+/// Long content (>= 100 lines) causes glass rendering glitches on iOS 26.
+func isCompactContent(_ content: String) -> Bool {
+    var count = 0
+    for char in content where char == "\n" {
+        count += 1
+        if count >= 100 { return false }
+    }
+    return true
 }
 
 // MARK: - Preview
