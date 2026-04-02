@@ -32,7 +32,7 @@ extension ChatView {
     @ToolbarContentBuilder
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            HStack(spacing: 6) {
+            HStack(alignment: .center, spacing: 6) {
                 if eventStoreManager.activeSession?.isFork == true {
                     Image(systemName: "arrow.triangle.branch")
                         .font(TronTypography.caption2)
@@ -41,6 +41,7 @@ extension ChatView {
                         .padding(.vertical, 3)
                         .background(.tronEmerald.opacity(0.15))
                         .clipShape(Capsule())
+                        .transition(.opacity)
                 }
                 if let worktree = viewModel.worktreeState.worktree {
                     HStack(spacing: 2) {
@@ -48,7 +49,7 @@ extension ChatView {
                             .renderingMode(.template)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 15, height: 15)
                             .foregroundStyle(.secondary)
                         if worktree.hasUncommittedChanges == true {
                             Circle()
@@ -56,6 +57,8 @@ extension ChatView {
                                 .frame(width: 5, height: 5)
                         }
                     }
+                    .offset(y: 1)
+                    .transition(.opacity)
                 }
                 TypewriterText(
                     text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
@@ -63,6 +66,8 @@ extension ChatView {
                     color: .tronEmerald
                 )
             }
+            .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
+            .animation(.smooth(duration: 0.25), value: viewModel.worktreeState.worktree != nil)
         }
     }
 

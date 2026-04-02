@@ -2,6 +2,9 @@ import SwiftUI
 
 /// Text view that animates changes with a typewriter effect:
 /// deletes the old text character by character, then types the new text.
+///
+/// Changes during the settle window (first 500ms after appear) snap
+/// instantly so async-loaded titles don't trigger a stale animation.
 @available(iOS 26.0, *)
 struct TypewriterText: View {
     let text: String
@@ -9,24 +12,34 @@ struct TypewriterText: View {
     let color: Color
     var characterDelay: Duration = .milliseconds(30)
 
-    @State private var displayedText: String = ""
+    @State private var displayedText: String
     @State private var animationTask: Task<Void, Never>?
-    @State private var hasAppeared = false
+    /// True once the settle window has elapsed and animations are allowed.
+    @State private var hasSettled = false
+
+    init(text: String, font: Font, color: Color, characterDelay: Duration = .milliseconds(30)) {
+        self.text = text
+        self.font = font
+        self.color = color
+        self.characterDelay = characterDelay
+        self._displayedText = State(initialValue: text)
+    }
 
     var body: some View {
-        Text(displayedText.isEmpty ? text : displayedText)
+        Text(displayedText)
             .font(font)
             .foregroundStyle(color)
+            .fixedSize(horizontal: true, vertical: false)
             .onChange(of: text) { _, newValue in
-                if hasAppeared {
+                if hasSettled {
                     animate(to: newValue)
                 } else {
                     displayedText = newValue
                 }
             }
-            .onAppear {
-                displayedText = text
-                hasAppeared = true
+            .task {
+                try? await Task.sleep(for: .milliseconds(500))
+                hasSettled = true
             }
     }
 
