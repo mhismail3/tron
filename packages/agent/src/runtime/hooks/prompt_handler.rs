@@ -237,8 +237,11 @@ impl HookHandler for PromptHookHandler {
         // Title-gen has a schedule: first prompt, then every N prompts
         // or after compaction/memory events.
         if is_title_gen && !self.should_generate_title(context.session_id()) {
+            debug!(id = %self.id, "[prompt_hook] skipping (schedule says not yet)");
             return Ok(HookResult::continue_());
         }
+
+        debug!(id = %self.id, session_id = %context.session_id(), "[prompt_hook] spawning background subsession");
 
         let task = self.build_task(context);
         let hook_id = self.id.clone();
@@ -251,6 +254,7 @@ impl HookHandler for PromptHookHandler {
 
         // Fire-and-forget: spawn the subsession in the background
         tokio::spawn(async move {
+            debug!(hook_id = %hook_id, "[prompt_hook] background task started, calling spawn_subsession");
             let start = Instant::now();
 
             let result = manager
@@ -269,6 +273,7 @@ impl HookHandler for PromptHookHandler {
                 .await;
 
             let duration_ms = start.elapsed().as_millis() as u64;
+            debug!(hook_id = %hook_id, duration_ms = duration_ms, "[prompt_hook] subsession completed");
 
             match result {
                 Ok(output) => {
@@ -347,7 +352,7 @@ impl HookHandler for PromptHookHandler {
             }
         });
 
-        // Always return Continue immediately — never block the main agent
+        debug!(id = %self.id, "[prompt_hook] handle() returning Continue (subsession running in background)");
         Ok(HookResult::continue_())
     }
 }

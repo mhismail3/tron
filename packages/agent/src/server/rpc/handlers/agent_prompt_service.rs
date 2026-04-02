@@ -557,26 +557,29 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     // Fire SessionStart hook (non-blocking, background)
     if let Some(hook_engine) = &hooks {
+        debug!(session_id = %session_id, "[hooks] firing SessionStart");
         let hook_ctx = crate::runtime::hooks::types::HookContext::SessionStart {
             session_id: session_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             working_directory: working_dir.clone(),
         };
         let _ = hook_engine.execute(&hook_ctx).await;
+        debug!(session_id = %session_id, "[hooks] SessionStart returned");
     }
 
-    // Fire UserPromptSubmit hook (PromptHookHandlers return immediately;
-    // the actual LLM work runs in tokio::spawn, so no latency impact
-    // despite UserPromptSubmit being forced-blocking at the engine level)
+    // Fire UserPromptSubmit hook
     if let Some(hook_engine) = &hooks {
+        debug!(session_id = %session_id, "[hooks] firing UserPromptSubmit");
         let hook_ctx = crate::runtime::hooks::types::HookContext::UserPromptSubmit {
             session_id: session_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             prompt: prompt.clone(),
         };
         let _ = hook_engine.execute(&hook_ctx).await;
+        debug!(session_id = %session_id, "[hooks] UserPromptSubmit returned");
     }
 
+    debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
     let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
 
     let _ = persister.flush().await;

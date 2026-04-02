@@ -74,6 +74,14 @@ impl HookEngine {
             .into_iter()
             .partition(|h| Self::effective_mode(h, hook_type) == HookExecutionMode::Blocking);
 
+        debug!(
+            hook_type = %hook_type,
+            blocking_count = blocking.len(),
+            background_count = background.len(),
+            blocking_names = ?blocking.iter().map(|h| h.name()).collect::<Vec<_>>(),
+            "[engine] partitioned handlers"
+        );
+
         // Execute blocking hooks sequentially
         let result = self.execute_blocking(&blocking, context).await;
 
@@ -166,12 +174,19 @@ impl HookEngine {
         context: &HookContext,
     ) -> HookResult {
         let timeout_ms = handler.timeout_ms().unwrap_or(30_000);
+        let handler_name = handler.name().to_string();
+        let start = Instant::now();
+
+        debug!(name = %handler_name, "[engine] calling handler.handle()");
 
         let result = tokio::time::timeout(
             std::time::Duration::from_millis(timeout_ms),
             handler.handle(context),
         )
         .await;
+
+        let elapsed_ms = start.elapsed().as_millis();
+        debug!(name = %handler_name, elapsed_ms = elapsed_ms, "[engine] handler.handle() returned");
 
         match result {
             Ok(Ok(hook_result)) => hook_result,

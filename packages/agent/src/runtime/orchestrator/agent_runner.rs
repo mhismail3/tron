@@ -39,8 +39,10 @@ pub async fn run_agent(
     // INVARIANT: drain background hooks before accepting a new prompt — prevents
     // stale hook state from previous run interfering with the new run.
     if let Some(hook_engine) = hooks {
+        let pending = hook_engine.pending_background_count();
+        debug!(pending = pending, "[agent_runner] draining background hooks");
         hook_engine.wait_for_background().await;
-        debug!("background hooks drained");
+        debug!("[agent_runner] background hooks drained");
     }
 
     // 2. Forward agent events to broadcast channel
