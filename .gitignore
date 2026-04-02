@@ -13,6 +13,7 @@
 *.xcuserstate
 project.xcworkspace/
 xcuserdata/
+packages/ios-app/.build/
 
 # OS
 .DS_Store
