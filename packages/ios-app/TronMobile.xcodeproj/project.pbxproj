@@ -1069,7 +1069,7 @@
 		A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageDeletedPlugin.swift; sourceTree = "<group>"; };
 		A23D9005BFAABD136EC9FDF2 /* MiscClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiscClient.swift; sourceTree = "<group>"; };
 		A2B9166F0FB52EFB6022B56A /* DashboardToolbarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardToolbarActions.swift; sourceTree = "<group>"; };
-		A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A31095A71425E246B49FD7EB /* ChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSheet.swift; sourceTree = "<group>"; };
 		A31812399558CA8516021F33 /* JetBrainsMono-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Variable.ttf"; sourceTree = "<group>"; };
 		A33D515C7609324FFC2A6A60 /* StreamingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingManager.swift; sourceTree = "<group>"; };
@@ -1164,7 +1164,7 @@
 		C8D8FFEFE3AFC29958CF8D47 /* ContentLineParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentLineParserTests.swift; sourceTree = "<group>"; };
 		C8E9B387EA2225D1C60386C6 /* ProcessCompletedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessCompletedPlugin.swift; sourceTree = "<group>"; };
 		C940E394586353E994B37A82 /* WebToolViewerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebToolViewerTests.swift; sourceTree = "<group>"; };
-		C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TronMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TronMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CACCE43ACD5950824F4E40C0 /* ModelClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelClientTests.swift; sourceTree = "<group>"; };
 		CB0E959F4879B94E70335798 /* RPCTypes+Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Session.swift"; sourceTree = "<group>"; };
 		CB15F90F9F4060BF054E2D5C /* ModelPickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerStateTests.swift; sourceTree = "<group>"; };
@@ -1270,14 +1270,14 @@
 		EF5C0D5D49C644E37207CA96 /* ChatViewModelProcessingIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelProcessingIndicatorTests.swift; sourceTree = "<group>"; };
 		EFC14EF0FDE28C78BDF20CA9 /* ChatViewModel+Pagination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Pagination.swift"; sourceTree = "<group>"; };
 		EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTrackingState.swift; sourceTree = "<group>"; };
-		F0AA1A9F9B42CCBC0E6BD0EB /* TronShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TronShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0AA1A9F9B42CCBC0E6BD0EB /* TronShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TronShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1833211CA2FD795125F527C /* WebFetchToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchToolDetailSheet.swift; sourceTree = "<group>"; };
 		F189F52E753C66DA1390BDAC /* WorktreeClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeClientTests.swift; sourceTree = "<group>"; };
 		F1C3717ED891C0CEA74C73E7 /* BashToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		F1D4057C20D31DB761BB86A2 /* ThinkingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingContentView.swift; sourceTree = "<group>"; };
 		F1F8D60CEFD0E621EB2D564D /* SubagentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentDetailSheet.swift; sourceTree = "<group>"; };
 		F25EA9767ADB2C8628135491 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
-		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3198853F56167392171167E /* RPCClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClientTests.swift; sourceTree = "<group>"; };
 		F381FBEF94536C12E3CCF85E /* SettingsPageContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPageContainer.swift; sourceTree = "<group>"; };
 		F3984D131F07C099480816DD /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
@@ -3121,7 +3121,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					2423FA22FBA724E77DCB5381 = {
 						DevelopmentTeam = MYGKXH6TY4;
@@ -3866,6 +3866,7 @@
 			baseConfigurationReference = E5EEB23745EE83971ACA471B /* Release-Beta.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -3915,6 +3916,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = "Release-Beta";
@@ -4040,6 +4042,7 @@
 			baseConfigurationReference = 8278D4FAE4AF8E10B720D11C /* Release-Prod.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -4089,6 +4092,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = "Release-Prod";
@@ -4196,6 +4200,7 @@
 			baseConfigurationReference = F691F683EB48D159D2665845 /* Debug-Prod.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -4251,6 +4256,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = "Debug-Prod";
@@ -4260,6 +4266,7 @@
 			baseConfigurationReference = C5E09421076542759CF7BB11 /* Debug-Beta.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -4315,6 +4322,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = "Debug-Beta";
