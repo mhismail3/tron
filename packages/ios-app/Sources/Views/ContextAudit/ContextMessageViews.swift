@@ -238,7 +238,7 @@ struct MessagesContainer: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronEmerald)
+        .sectionFill(.tronEmerald, compact: totalMessages < 20)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -314,7 +314,7 @@ struct AddedSkillsContainer: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronCyan)
+        .sectionFill(.tronCyan, compact: skills.count < 20)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

@@ -67,7 +67,7 @@ struct TurnBreakdownContainer: View {
                 }
             }
         }
-        .sectionFill(.tronAmberLight)
+        .sectionFill(.tronAmberLight, compact: turns.count < 20)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
