@@ -34,7 +34,7 @@ extension ChatView {
         ToolbarItem(placement: .principal) {
             HStack(alignment: .center, spacing: 6) {
                 if eventStoreManager.activeSession?.isFork == true {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "tuningfork")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 11, height: 11)
@@ -44,11 +44,10 @@ extension ChatView {
                 }
                 if let worktree = viewModel.worktreeState.worktree {
                     HStack(spacing: 2) {
-                        Image("IconGit")
-                            .renderingMode(.template)
+                        Image(systemName: "arrow.triangle.branch")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 15, height: 15)
+                            .frame(width: 11, height: 11)
                             .foregroundStyle(.tronCyan)
                         if worktree.hasUncommittedChanges == true {
                             Circle()
@@ -94,12 +93,7 @@ extension ChatView {
                     Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
                 }
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.changes.rawValue) } label: {
-                    Label {
-                        Text("Source Control")
-                    } icon: {
-                        Image("IconGit")
-                            .renderingMode(.template)
-                    }
+                    Label("Source Control", systemImage: "arrow.triangle.branch")
                 }
                 if viewModel.processState.hasActiveProcesses {
                     Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.processes.rawValue) } label: {

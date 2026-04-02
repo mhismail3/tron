@@ -13,7 +13,7 @@ struct ForkPointIndicator: View {
                 .frame(height: 1)
 
             HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "tuningfork")
                     .font(TronTypography.sans(size: TronTypography.sizeSM))
                 Text("FORKED HERE")
                     .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .bold))

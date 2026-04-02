@@ -111,8 +111,7 @@ struct SourceChangesSheet: View {
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
-                        Image("IconGit")
-                            .renderingMode(.template)
+                        Image(systemName: "arrow.triangle.branch")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: 16, height: 16)

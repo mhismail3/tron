@@ -208,7 +208,7 @@ struct CachedSessionSidebarRow: View {
             // Title row with message count
             HStack(spacing: 6) {
                 if session.isFork == true {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "tuningfork")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 11, height: 11)

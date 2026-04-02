@@ -13,7 +13,7 @@ enum EventIconProvider {
         case .sessionEnd:
             return "stop.circle.fill"
         case .sessionFork, .sessionBranch:
-            return "arrow.triangle.branch"
+            return "tuningfork"
         case .messageUser:
             return "person.fill"
         case .messageAssistant:

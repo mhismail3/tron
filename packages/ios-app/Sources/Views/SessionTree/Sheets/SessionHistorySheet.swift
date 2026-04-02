@@ -103,7 +103,7 @@ struct ForkConfirmationSheet: View {
                 Spacer()
 
                 // Icon
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "tuningfork")
                     .font(TronTypography.sans(size: 44, weight: .light))
                     .foregroundStyle(.tronPurple)
                     .frame(width: 72, height: 72)
