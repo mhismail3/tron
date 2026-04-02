@@ -155,7 +155,7 @@ extension ChatViewModel {
         for item in items {
             // Load the image data
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let uiImage = UIImage(data: data) else {
+                  UIImage(data: data) != nil else {
                 continue
             }
 
