@@ -1600,6 +1600,7 @@ fn register_test_skill(ctx: &RpcContext, name: &str, content: &str) {
         content: content.to_string(),
         frontmatter: crate::skills::types::SkillFrontmatter::default(),
         source: crate::skills::types::SkillSource::Global,
+        scope_dir: String::new(),
         path: String::new(),
         skill_md_path: String::new(),
         additional_files: Vec::new(),

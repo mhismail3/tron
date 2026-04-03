@@ -131,6 +131,10 @@ pub struct SkillMetadata {
     pub frontmatter: SkillFrontmatter,
     /// Where this skill was loaded from.
     pub source: SkillSource,
+    /// Relative path from project root to the package containing this skill.
+    /// Empty string for root-level skills. E.g. "packages/ios-app".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope_dir: String,
     /// Absolute path to skill folder.
     pub path: String,
     /// Absolute path to SKILL.md file.
@@ -153,6 +157,9 @@ pub struct SkillInfo {
     pub description: String,
     /// Source location.
     pub source: SkillSource,
+    /// Relative path from project root to the package containing this skill.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope_dir: String,
     /// Tags from frontmatter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
@@ -165,6 +172,7 @@ impl From<&SkillMetadata> for SkillInfo {
             display_name: meta.display_name.clone(),
             description: meta.description.clone(),
             source: meta.source,
+            scope_dir: meta.scope_dir.clone(),
             tags: meta.frontmatter.tags.clone(),
         }
     }
@@ -240,4 +248,61 @@ pub struct ToolDenialConfig {
     pub denied_tools: Vec<String>,
     /// Granular pattern-based deny rules.
     pub denied_patterns: Vec<SkillDeniedPatternRule>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_metadata(scope: &str) -> SkillMetadata {
+        SkillMetadata {
+            name: "test".to_string(),
+            display_name: "Test".to_string(),
+            description: "A test skill".to_string(),
+            content: "content".to_string(),
+            frontmatter: SkillFrontmatter::default(),
+            source: SkillSource::Project,
+            scope_dir: scope.to_string(),
+            path: "/tmp/test".to_string(),
+            skill_md_path: "/tmp/test/SKILL.md".to_string(),
+            additional_files: Vec::new(),
+            last_modified: 0,
+        }
+    }
+
+    #[test]
+    fn scope_dir_default_empty() {
+        let json = r#"{"name":"x","displayName":"x","description":"","content":"","frontmatter":{},"source":"global","path":"","skillMdPath":"","additionalFiles":[],"lastModified":0}"#;
+        let meta: SkillMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.scope_dir, "");
+    }
+
+    #[test]
+    fn scope_dir_serializes_when_set() {
+        let meta = make_metadata("packages/foo");
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains(r#""scopeDir":"packages/foo""#));
+    }
+
+    #[test]
+    fn scope_dir_skipped_when_empty() {
+        let meta = make_metadata("");
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(!json.contains("scopeDir"));
+    }
+
+    #[test]
+    fn skill_info_from_metadata_copies_scope() {
+        let meta = make_metadata("packages/ios-app");
+        let info = SkillInfo::from(&meta);
+        assert_eq!(info.scope_dir, "packages/ios-app");
+    }
+
+    #[test]
+    fn skill_info_scope_dir_skipped_when_empty() {
+        let meta = make_metadata("");
+        let info = SkillInfo::from(&meta);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(!json.contains("scopeDir"));
+    }
 }

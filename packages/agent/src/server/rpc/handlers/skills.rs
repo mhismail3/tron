@@ -11,7 +11,7 @@ use crate::server::rpc::registry::MethodHandler;
 
 /// Shape skill for the wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
 fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
-    serde_json::json!({
+    let mut v = serde_json::json!({
         "name": skill.name,
         "displayName": skill.display_name,
         "description": skill.description,
@@ -20,7 +20,27 @@ fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
         "content": skill.content,
         "path": skill.path,
         "additionalFiles": skill.additional_files,
-    })
+    });
+    if !skill.scope_dir.is_empty() {
+        v["scopeDir"] = serde_json::json!(skill.scope_dir);
+    }
+    v
+}
+
+/// Resolve the working directory for skill operations.
+///
+/// Tries `workingDirectory` param first, then falls back to the session's
+/// working directory if `sessionId` is provided, then `/tmp`.
+fn resolve_working_dir(params: Option<&Value>, ctx: &RpcContext) -> String {
+    if let Some(wd) = opt_string(params, "workingDirectory") {
+        return wd;
+    }
+    if let Some(sid) = opt_string(params, "sessionId") {
+        if let Ok(Some(session)) = ctx.session_manager.get_session(&sid) {
+            return session.working_directory;
+        }
+    }
+    "/tmp".to_string()
 }
 
 fn remove_skill_name(params: Option<&Value>) -> Result<&str, RpcError> {
@@ -38,8 +58,10 @@ pub struct ListSkillsHandler;
 #[async_trait]
 impl MethodHandler for ListSkillsHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.list"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let registry = ctx.skill_registry.read();
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let working_dir = resolve_working_dir(params.as_ref(), ctx);
+        let mut registry = ctx.skill_registry.write();
+        registry.refresh_if_stale(&working_dir);
         let skills = registry.list(None);
         Ok(serde_json::json!({ "skills": skills }))
     }
@@ -53,14 +75,16 @@ impl MethodHandler for GetSkillHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let name = require_string_param(params.as_ref(), "name")?;
-        let registry = ctx.skill_registry.read();
+        let working_dir = resolve_working_dir(params.as_ref(), ctx);
+
+        let mut registry = ctx.skill_registry.write();
+        registry.refresh_if_stale(&working_dir);
 
         let skill = registry.get(&name).ok_or_else(|| RpcError::NotFound {
             code: errors::NOT_FOUND.into(),
             message: format!("Skill '{name}' not found"),
         })?;
 
-        // Wire format: { skill: SkillMetadata, found: bool } wrapper
         Ok(serde_json::json!({
             "skill": skill_to_wire(skill),
             "found": true,
@@ -75,11 +99,9 @@ pub struct RefreshSkillsHandler;
 impl MethodHandler for RefreshSkillsHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.refresh"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let working_dir = opt_string(params.as_ref(), "workingDirectory");
-        let working_dir = working_dir.as_deref().unwrap_or("/tmp");
+        let working_dir = resolve_working_dir(params.as_ref(), ctx);
 
         let skill_registry = ctx.skill_registry.clone();
-        let working_dir = working_dir.to_string();
         let count = ctx
             .run_blocking("skill.refresh", move || {
                 let mut registry = skill_registry.write();
@@ -146,6 +168,7 @@ mod tests {
             content: format!("{name} content"),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Global,
+            scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
             additional_files: Vec::new(),
@@ -154,11 +177,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_skills_empty() {
+    async fn list_skills_returns_array() {
         let ctx = make_test_context();
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["skills"].is_array());
-        assert!(result["skills"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -269,6 +291,8 @@ mod tests {
     #[tokio::test]
     async fn get_skill_returns_wrapped_response() {
         let ctx = make_test_context();
+        // Pre-refresh so refresh_if_stale is a no-op, then insert our test skill
+        ctx.skill_registry.write().refresh("/tmp");
         ctx.skill_registry.write().insert(make_skill("my-skill"));
 
         let result = GetSkillHandler
@@ -286,8 +310,21 @@ mod tests {
     #[tokio::test]
     async fn list_skills_sorted_alphabetically() {
         let ctx = make_test_context();
+        // Pre-refresh so refresh_if_stale is a no-op, then insert test skills
+        ctx.skill_registry.write().refresh("/tmp");
+        ctx.skill_registry.write().insert(make_skill("zebra"));
+        ctx.skill_registry.write().insert(make_skill("alpha"));
+
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["skills"].as_array().unwrap().is_empty());
+        let names: Vec<&str> = result["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        let alpha_idx = names.iter().position(|n| *n == "alpha").unwrap();
+        let zebra_idx = names.iter().position(|n| *n == "zebra").unwrap();
+        assert!(alpha_idx < zebra_idx);
     }
 
     #[tokio::test]
@@ -311,11 +348,15 @@ mod tests {
     #[tokio::test]
     async fn list_skills_returns_canonical_shape() {
         let ctx = make_test_context();
+        // Pre-refresh so refresh_if_stale is a no-op, then insert test skills
+        ctx.skill_registry.write().refresh("/tmp");
         ctx.skill_registry.write().insert(make_skill("alpha"));
         ctx.skill_registry.write().insert(make_skill("beta"));
 
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
-        assert_eq!(result["skills"].as_array().map_or(0, Vec::len), 2);
+        let skills = result["skills"].as_array().unwrap();
+        assert!(skills.iter().any(|s| s["name"] == "alpha"));
+        assert!(skills.iter().any(|s| s["name"] == "beta"));
         assert!(result.get("totalCount").is_none());
     }
 }

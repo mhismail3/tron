@@ -76,6 +76,129 @@ struct SkillReferencesSection: View {
     }
 }
 
+// MARK: - Project Skills Section (auto-loaded project skills, scoped to sub-packages)
+
+@available(iOS 26.0, *)
+struct ProjectSkillsSection: View {
+    let skills: [Skill]
+    var serverTokens: Int?
+    @State private var isExpanded = false
+
+    private var displayTokens: Int {
+        if let server = serverTokens, server > 0 {
+            return server
+        }
+        return skills.reduce(0) { total, skill in
+            let descriptionTokens = skill.description.count / 4
+            let metadataTokens = 20
+            return total + descriptionTokens + metadataTokens
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 18)
+                Text("Project Skills")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
+
+                Text("\(skills.count)")
+                    .font(TronTypography.pillValue)
+                    .countBadge(.tronEmerald)
+
+                Spacer()
+
+                Text(TokenFormatter.format(displayTokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(skills) { skill in
+                        ProjectSkillRow(skill: skill)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .sectionFill(.tronEmerald)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Project Skill Row (shows scope directory)
+
+@available(iOS 26.0, *)
+struct ProjectSkillRow: View {
+    let skill: Skill
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronEmerald)
+
+                Text("@\(skill.name)")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronEmerald)
+
+                Spacer()
+
+                if let scope = skill.scopeDir, !scope.isEmpty {
+                    Text(scope)
+                        .font(TronTypography.pill)
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                }
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                    .foregroundStyle(.tronTextDisabled)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded {
+                ContextMarkdownContent(content: skill.description)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+            }
+        }
+        .sectionFill(.tronEmerald, cornerRadius: 6, subtle: true)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
 // MARK: - Skill Reference Row (lightweight, no delete option)
 
 @available(iOS 26.0, *)

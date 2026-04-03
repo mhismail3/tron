@@ -302,10 +302,16 @@ struct ContextAuditView: View {
                                     tokens: snapshot.breakdown.tools
                                 )
 
-                                if let skills = skillStore?.skills, !skills.isEmpty {
+                                if let globalSkills = skillStore?.globalSkills, !globalSkills.isEmpty {
                                     SkillReferencesSection(
-                                        skills: skills,
+                                        skills: globalSkills,
                                         serverTokens: snapshot.breakdown.skillIndex
+                                    )
+                                }
+
+                                if let projectSkills = skillStore?.projectSkills, !projectSkills.isEmpty {
+                                    ProjectSkillsSection(
+                                        skills: projectSkills
                                     )
                                 }
 

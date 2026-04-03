@@ -42,8 +42,8 @@ impl SkillFingerprint {
         let global_dir = loader::global_skills_dir();
         Self::scan_dir(&global_dir, &mut entries);
 
-        for dir in loader::project_skills_dirs(working_dir) {
-            Self::scan_dir(&dir, &mut entries);
+        for psd in loader::discover_project_skills_dirs(working_dir) {
+            Self::scan_dir(&psd.path, &mut entries);
         }
 
         Self { entries }
@@ -122,9 +122,23 @@ impl SkillRegistry {
     pub fn initialize(&mut self, working_dir: &str) {
         let (global_result, project_result) = loader::scan_all(working_dir);
 
-        // Add project skills first (they take precedence)
+        // Add project skills — root-level skills come first in scan order and
+        // shadow nested skills with the same name (first-write-wins).
         for skill in project_result.skills {
-            let _ = self.skills.insert(skill.name.clone(), skill);
+            let name = skill.name.clone();
+            match self.skills.entry(name) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let _ = e.insert(skill);
+                }
+                std::collections::hash_map::Entry::Occupied(e) => {
+                    debug!(
+                        name = %e.key(),
+                        existing_scope = %e.get().scope_dir,
+                        shadowed_scope = %skill.scope_dir,
+                        "Project skill shadowed by earlier-discovered skill with same name"
+                    );
+                }
+            }
         }
 
         for err in &project_result.errors {
@@ -276,6 +290,7 @@ mod tests {
             content: format!("{display_name} content"),
             frontmatter: SkillFrontmatter::default(),
             source,
+            scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
             additional_files: Vec::new(),
@@ -531,5 +546,143 @@ mod tests {
         registry.refresh(wd);
         assert!(registry.last_fingerprint.is_some());
         assert_eq!(registry.last_working_dir.as_deref(), Some(wd));
+    }
+
+    // --- Nested discovery: fingerprint ---
+
+    #[test]
+    fn fingerprint_includes_nested_skills_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("packages/foo/.claude/skills");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let fp = SkillFingerprint::compute(dir.path().to_str().unwrap());
+        // Should have an entry for the nested skills dir
+        let has_nested = fp
+            .entries
+            .keys()
+            .any(|k| k.contains("packages/foo/.claude/skills"));
+        assert!(has_nested, "Fingerprint should include nested skills dir");
+    }
+
+    #[test]
+    fn fingerprint_detects_nested_skill_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("packages/foo/.claude/skills");
+        std::fs::create_dir_all(&nested).unwrap();
+        let wd = dir.path().to_str().unwrap();
+
+        let fp_before = SkillFingerprint::compute(wd);
+
+        // Add a skill in the nested dir
+        let skill = nested.join("new-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "---\nname: New\n---\nBody").unwrap();
+
+        let fp_after = SkillFingerprint::compute(wd);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn fingerprint_detects_nested_dir_created() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create the parent structure but NOT the .claude/skills/ dir
+        std::fs::create_dir_all(dir.path().join("packages/bar")).unwrap();
+        let wd = dir.path().to_str().unwrap();
+
+        let fp_before = SkillFingerprint::compute(wd);
+
+        // Now create .claude/skills/ in the sub-package
+        std::fs::create_dir_all(dir.path().join("packages/bar/.claude/skills")).unwrap();
+
+        let fp_after = SkillFingerprint::compute(wd);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    // --- Nested discovery: shadowing ---
+
+    #[test]
+    fn root_project_skill_shadows_nested() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Root-level skill
+        let root_skills = dir.path().join(".claude/skills");
+        std::fs::create_dir_all(root_skills.join("browser")).unwrap();
+        std::fs::write(
+            root_skills.join("browser/SKILL.md"),
+            "---\nname: Root Browser\n---\nRoot version.",
+        )
+        .unwrap();
+
+        // Nested skill with same name
+        let nested_skills = dir.path().join("packages/foo/.claude/skills");
+        std::fs::create_dir_all(nested_skills.join("browser")).unwrap();
+        std::fs::write(
+            nested_skills.join("browser/SKILL.md"),
+            "---\nname: Nested Browser\n---\nNested version.",
+        )
+        .unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.refresh(dir.path().to_str().unwrap());
+
+        // Only one "browser" should exist — the root-level one
+        assert!(registry.has("browser"));
+        let skill = registry.get("browser").unwrap();
+        assert_eq!(skill.display_name, "Root Browser");
+        assert!(skill.scope_dir.is_empty());
+    }
+
+    #[test]
+    fn nested_skill_not_shadowed_when_name_differs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let root_skills = dir.path().join(".claude/skills");
+        std::fs::create_dir_all(root_skills.join("browser")).unwrap();
+        std::fs::write(
+            root_skills.join("browser/SKILL.md"),
+            "---\nname: Browser\n---\nBrowse.",
+        )
+        .unwrap();
+
+        let nested_skills = dir.path().join("packages/foo/.claude/skills");
+        std::fs::create_dir_all(nested_skills.join("deploy")).unwrap();
+        std::fs::write(
+            nested_skills.join("deploy/SKILL.md"),
+            "---\nname: Deploy\n---\nDeploy.",
+        )
+        .unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.refresh(dir.path().to_str().unwrap());
+
+        // Both project skills coexist (global skills may also be present)
+        assert!(registry.has("browser"));
+        assert!(registry.has("deploy"));
+        assert_eq!(registry.get("deploy").unwrap().scope_dir, "packages/foo");
+    }
+
+    #[test]
+    fn refresh_if_stale_detects_nested_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("packages/foo/.claude/skills");
+        std::fs::create_dir_all(&nested).unwrap();
+        let wd = dir.path().to_str().unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.refresh_if_stale(wd);
+        assert!(!registry.has("new-skill"));
+
+        // Add a skill in the nested dir
+        let skill = nested.join("new-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "---\nname: New\n---\nBody").unwrap();
+
+        assert!(registry.refresh_if_stale(wd));
+        assert!(registry.has("new-skill"));
+        assert_eq!(
+            registry.get("new-skill").unwrap().scope_dir,
+            "packages/foo"
+        );
     }
 }

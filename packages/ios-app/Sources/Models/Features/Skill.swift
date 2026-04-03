@@ -22,8 +22,20 @@ struct Skill: Identifiable, Codable, Equatable {
     let source: SkillSource
     /// Tags for categorization
     let tags: [String]?
+    /// Relative path from project root to the package containing this skill.
+    /// Nil for root-level skills. E.g. "packages/ios-app".
+    let scopeDir: String?
 
     var id: String { name }
+
+    init(name: String, displayName: String, description: String, source: SkillSource, tags: [String]?, scopeDir: String? = nil) {
+        self.name = name
+        self.displayName = displayName
+        self.description = description
+        self.source = source
+        self.tags = tags
+        self.scopeDir = scopeDir
+    }
 }
 
 // MARK: - Skill Metadata (Full Details)
@@ -46,6 +58,8 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
     let path: String
     /// List of additional files in the skill folder
     let additionalFiles: [String]
+    /// Relative path from project root to the package containing this skill.
+    let scopeDir: String?
 
     var id: String { name }
 
@@ -56,7 +70,8 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
             displayName: displayName,
             description: description,
             source: source,
-            tags: tags
+            tags: tags,
+            scopeDir: scopeDir
         )
     }
 }

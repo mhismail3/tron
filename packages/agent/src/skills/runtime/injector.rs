@@ -269,6 +269,7 @@ mod tests {
             content: content.to_string(),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Global,
+            scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
             additional_files: Vec::new(),
@@ -293,6 +294,7 @@ mod tests {
                 ..Default::default()
             },
             source: SkillSource::Global,
+            scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
             additional_files: Vec::new(),
@@ -489,6 +491,7 @@ mod tests {
             display_name: name.to_string(),
             description: description.to_string(),
             source: SkillSource::Global,
+            scope_dir: String::new(),
             tags: None,
         }
     }
