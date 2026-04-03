@@ -15,7 +15,25 @@ enum FontCategory: String, CaseIterable, Sendable {
     }
 }
 
-/// Available font families for the app's UI text
+/// Available font families for the app's UI text.
+///
+/// # Adding New Fonts
+///
+/// Before adding a font, check its vertical metrics at the target size (e.g. 14pt):
+///
+///     let font = UIFont(descriptor: UIFontDescriptor(fontAttributes: [.family: "FontName"]), size: 14)
+///     let excessAbove = font.ascender - font.capHeight  // invisible space above capitals
+///     let excessBelow = -font.descender                 // space below baseline
+///     let ratio = excessAbove / excessBelow              // should be ≈ 1.0
+///
+/// **Reject fonts where `excessAbove / excessBelow > 1.2`.** These fonts have disproportionate
+/// ascender headroom (for diacritics/accents) baked into the font file. SwiftUI's `Font(UIFont)`
+/// preserves these metrics, causing visible extra whitespace above all text — proportional to font
+/// size and affecting every UI element. This cannot be fixed without modifying the font file.
+///
+/// Known rejected fonts:
+/// - **Literata**: ratio 1.55 (ascender 16.48 at 14pt vs other serifs ~14)
+/// - **Crimson Pro**: ratio 1.50
 enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     // Sans
     case recursive
@@ -26,10 +44,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     case donegalOne
     case ibmPlexSerif
     case libreBaskerville
-    case literata
     case sourceSerif4
     case lora
-    case crimsonPro
 
     // Mono
     case jetBrainsMono
@@ -42,7 +58,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .recursive, .alanSans, .comme: .sans
         case .donegalOne, .ibmPlexSerif, .libreBaskerville,
-             .literata, .sourceSerif4, .lora, .crimsonPro: .serif
+             .sourceSerif4, .lora: .serif
         case .jetBrainsMono, .ibmPlexMono, .geistMono: .mono
         }
     }
@@ -55,10 +71,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "Donegal One"
         case .ibmPlexSerif: "IBM Plex Serif"
         case .libreBaskerville: "Libre Baskerville"
-        case .literata: "Literata"
         case .sourceSerif4: "Source Serif 4"
         case .lora: "Lora"
-        case .crimsonPro: "Crimson Pro"
         case .jetBrainsMono: "JetBrains Mono"
         case .ibmPlexMono: "IBM Plex Mono"
         case .geistMono: "Geist Mono"
@@ -73,10 +87,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "Sturdy transitional serif"
         case .ibmPlexSerif: "Contemporary slab serif"
         case .libreBaskerville: "Classic transitional serif"
-        case .literata: "Warm reading serif"
         case .sourceSerif4: "Contemporary text serif"
         case .lora: "Calligraphic transitional serif"
-        case .crimsonPro: "Elegant old-style serif"
         case .jetBrainsMono: "Tall x-height code font"
         case .ibmPlexMono: "Contemporary code font"
         case .geistMono: "Modern geometric mono"
@@ -101,10 +113,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "DonegalOne-Regular"
         case .ibmPlexSerif: "IBMPlexSerif-Regular"
         case .libreBaskerville: "LibreBaskerville-Regular"
-        case .literata: "Literata-Regular"
         case .sourceSerif4: "SourceSerif4Variable-Roman"
         case .lora: "Lora-Regular"
-        case .crimsonPro: "CrimsonPro-Regular"
         case .jetBrainsMono: "JetBrainsMono-Regular"
         case .ibmPlexMono: "IBMPlexMono"
         case .geistMono: "GeistMono-Regular"
@@ -118,8 +128,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var isVariable: Bool {
         switch self {
         case .recursive, .alanSans, .comme, .libreBaskerville,
-             .literata, .sourceSerif4, .lora, .crimsonPro,
-             .jetBrainsMono, .geistMono:
+             .sourceSerif4, .lora, .jetBrainsMono, .geistMono:
             true
         case .donegalOne, .ibmPlexSerif, .ibmPlexMono:
             false
@@ -130,8 +139,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var customAxes: [FontAxis] {
         switch self {
         case .recursive: [.weight, .casual]
-        case .literata, .sourceSerif4: [.weight, .opticalSize]
-        case .alanSans, .comme, .libreBaskerville, .lora, .crimsonPro,
+        case .sourceSerif4: [.weight, .opticalSize]
+        case .alanSans, .comme, .libreBaskerville, .lora,
              .jetBrainsMono, .geistMono:
             [.weight]
         case .donegalOne, .ibmPlexSerif, .ibmPlexMono:
@@ -148,10 +157,8 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: 400...400
         case .ibmPlexSerif: 300...700
         case .libreBaskerville: 400...700
-        case .literata: 200...900
         case .sourceSerif4: 200...900
         case .lora: 400...700
-        case .crimsonPro: 200...900
         case .jetBrainsMono: 100...800
         case .ibmPlexMono: 300...700
         case .geistMono: 100...900
@@ -203,7 +210,6 @@ enum FontAxis: String, CaseIterable, Sendable, Identifiable {
         case .casual: return 0...1
         case .opticalSize:
             switch family {
-            case .literata: return 7...72
             case .sourceSerif4: return 8...60
             default: return 8...60
             }

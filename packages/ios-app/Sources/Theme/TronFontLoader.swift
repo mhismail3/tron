@@ -139,15 +139,11 @@ enum TronFontLoader {
             variations[AxisTag.slant] = 0.0
             variations[AxisTag.cursive] = 0.0
 
-        case .literata:
-            let range = FontAxis.opticalSize.range(for: .literata)
-            variations[AxisTag.opticalSize] = min(max(CGFloat(range.lowerBound), size), CGFloat(range.upperBound))
-
         case .sourceSerif4:
             let range = FontAxis.opticalSize.range(for: .sourceSerif4)
             variations[AxisTag.opticalSize] = min(max(CGFloat(range.lowerBound), size), CGFloat(range.upperBound))
 
-        case .alanSans, .comme, .libreBaskerville, .lora, .crimsonPro,
+        case .alanSans, .comme, .libreBaskerville, .lora,
              .jetBrainsMono, .geistMono:
             break // weight-only variable fonts
 

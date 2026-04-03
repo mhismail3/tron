@@ -328,7 +328,6 @@
 		7EE42C93DD3772DA20EFD61E /* ToolEndPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A74BC20146AF6AD09D808C /* ToolEndPlugin.swift */; };
 		7F7D345DD8F9F3342F630360 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7EDD80984A35BD5A2D64E22 /* DateParser.swift */; };
 		80BE6981CB995BAD2F9CAAA8 /* ChatViewModel+GetConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 062CC8B33A9D59C8820A54B3 /* ChatViewModel+GetConfirmation.swift */; };
-		81A38C86B2332F2FA3A2087C /* Literata-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 326B0EB2632E6020760E8A2B /* Literata-Variable.ttf */; };
 		8262909B97AA787D3938755D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED0C1BBA0825C927DC8A345A /* ChatView.swift */; };
 		829887338DE66A444E3371F8 /* JobClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBF9A41214258457DE4D6C4 /* JobClient.swift */; };
 		82A111246FAE7CFB0EBA7B2D /* ManageProcessDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F16751D1FEA670D1739E5AE /* ManageProcessDetailSheet.swift */; };
@@ -600,7 +599,6 @@
 		ECBB40661FD1D4894EC7AA30 /* AuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC4D8415F891AA6E1D9BFF6 /* AuthClient.swift */; };
 		ED8BA0615A7A2176C243E084 /* ChatViewModelFindMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4399074B1EA0E047BA57077 /* ChatViewModelFindMessageTests.swift */; };
 		EDD1E63AD8B4C85206FB80A8 /* WriteToolDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272CFD5FF021F314737B8249 /* WriteToolDetailSheetTests.swift */; };
-		EE5895ECE004C9FA0146FC4F /* CrimsonPro-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CC136F7AB46AAC458D62B096 /* CrimsonPro-Variable.ttf */; };
 		EE6AF3EC6356EEF2D20145E9 /* ErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7450E3BB7E98F9D547C4CBB6 /* ErrorHandler.swift */; };
 		EE7DE430D906A459FC61B623 /* ContextClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1263E4FA515B0BF3D6CFCCF0 /* ContextClient.swift */; };
 		EF1D574D334AC28C065AF7CA /* MultiLineTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86CDFE588E9C4A56E401D39 /* MultiLineTextView.swift */; };
@@ -799,7 +797,6 @@
 		2FBEBEAC0EF8A0231FD185B7 /* ErrorClassification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorClassification.swift; sourceTree = "<group>"; };
 		30B832B56DE0E975AF9306CE /* EditToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		3255F390C70DFC36557BA457 /* AskUserQuestionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionCoordinator.swift; sourceTree = "<group>"; };
-		326B0EB2632E6020760E8A2B /* Literata-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Literata-Variable.ttf"; sourceTree = "<group>"; };
 		3277644B3F7710885BE3A120 /* SearchErrorClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchErrorClassifier.swift; sourceTree = "<group>"; };
 		32EDE54E825DED7E7E2FD034 /* FileToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileToolViewer.swift; sourceTree = "<group>"; };
 		3350EAE069F022FC42E9AD16 /* RPCTypes+Media.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Media.swift"; sourceTree = "<group>"; };
@@ -1181,7 +1178,6 @@
 		CB15F90F9F4060BF054E2D5C /* ModelPickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerStateTests.swift; sourceTree = "<group>"; };
 		CB366E399C3166CDD80589C9 /* WebToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		CB98000DFDD7BD8FA48B164A /* SubagentResultNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentResultNotificationView.swift; sourceTree = "<group>"; };
-		CC136F7AB46AAC458D62B096 /* CrimsonPro-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "CrimsonPro-Variable.ttf"; sourceTree = "<group>"; };
 		CC1C325D5E32EDF3D5B0CED0 /* ContextSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextSettingsPage.swift; sourceTree = "<group>"; };
 		CC21A1203E8FCB320E98446E /* GlobToolSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobToolSections.swift; sourceTree = "<group>"; };
 		CC475667BC6878E548D29BB1 /* LoggingContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoggingContext.swift; sourceTree = "<group>"; };
@@ -2037,7 +2033,6 @@
 			children = (
 				4665FD394D5F63951D8B2012 /* AlanSans-Variable.ttf */,
 				2BFF5606F19446978F9B9BF5 /* Comme-Variable.ttf */,
-				CC136F7AB46AAC458D62B096 /* CrimsonPro-Variable.ttf */,
 				1B4015C0F0BEDCF2EE9F5FF6 /* DonegalOne-Regular.ttf */,
 				A942A75F48120A8C3EB1490E /* GeistMono-Variable.ttf */,
 				939A3488AA4CB2BE67D5FD1E /* IBMPlexMono-Bold.ttf */,
@@ -2052,7 +2047,6 @@
 				F72E8400474CDFE4BA272302 /* IBMPlexSerif-SemiBold.ttf */,
 				A31812399558CA8516021F33 /* JetBrainsMono-Variable.ttf */,
 				6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */,
-				326B0EB2632E6020760E8A2B /* Literata-Variable.ttf */,
 				B5A3DB5AC2086A0D9E86275F /* Lora-Variable.ttf */,
 				5E837774214A074AC646428E /* Recursive-Variable.ttf */,
 				56EF05A2A64A061711A0238A /* SourceSerif4-Variable.ttf */,
@@ -3184,7 +3178,6 @@
 				671C4CACBB0DF7C3AEA59A0D /* AlanSans-Variable.ttf in Resources */,
 				FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */,
 				5FEA34E3EB5AB89D977A8404 /* Comme-Variable.ttf in Resources */,
-				EE5895ECE004C9FA0146FC4F /* CrimsonPro-Variable.ttf in Resources */,
 				6C033E43C462E07F4F546476 /* DonegalOne-Regular.ttf in Resources */,
 				B88F6EEB81F285616AFE665B /* Fonts in Resources */,
 				7454A3174918DF3D040071D8 /* GeistMono-Variable.ttf in Resources */,
@@ -3200,7 +3193,6 @@
 				A49D1B18FB4452B215A7BF05 /* IBMPlexSerif-SemiBold.ttf in Resources */,
 				5352D2F9E3E34493EC157753 /* JetBrainsMono-Variable.ttf in Resources */,
 				CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */,
-				81A38C86B2332F2FA3A2087C /* Literata-Variable.ttf in Resources */,
 				BBF23F4B4673194B0B8C235C /* Lora-Variable.ttf in Resources */,
 				75478C84CF739F65D13392ED /* PrivacyInfo.xcprivacy in Resources */,
 				2310BE4C23993CC491219502 /* Recursive-Variable.ttf in Resources */,
