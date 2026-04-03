@@ -74,7 +74,7 @@ struct HooksSettingsPage: View {
 
             SettingsCard {
                 SettingsRow(icon: "cpu", label: "Model") {
-                    Text(shortModelName(settingsState.hooksLlmModel))
+                    Text(ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short))
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.secondary)
                 }
@@ -112,10 +112,4 @@ struct HooksSettingsPage: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private func shortModelName(_ model: String) -> String {
-        model.replacingOccurrences(of: "claude-", with: "")
-            .replacingOccurrences(of: "-20251001", with: "")
-    }
 }
