@@ -639,6 +639,7 @@ impl ContextManager {
             rules_content: self.get_rules_content().map(String::from),
             memory_content: self.get_full_memory_content(),
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,

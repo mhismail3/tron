@@ -215,6 +215,39 @@ pub fn build_message_with_skill_context(prompt: &str, skill_context: &str) -> St
     format!("{skill_context}\n\n{prompt}")
 }
 
+/// Build an activation directive for the model to follow active skills and spells.
+///
+/// Returns `None` when no skills or spells are active. The directive is injected
+/// as a volatile system prompt part, placed immediately before the `<skills>` XML block.
+pub fn build_activation_directive(
+    skill_names: &[String],
+    spell_names: &[String],
+) -> Option<String> {
+    if skill_names.is_empty() && spell_names.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+
+    if !skill_names.is_empty() {
+        let names: Vec<String> = skill_names.iter().map(|n| format!("@{n}")).collect();
+        parts.push(format!(
+            "The following skills are active. Follow their instructions: {}.",
+            names.join(", ")
+        ));
+    }
+
+    if !spell_names.is_empty() {
+        let names: Vec<String> = spell_names.iter().map(|n| format!("@{n}")).collect();
+        parts.push(format!(
+            "The following spells apply to this response only. Follow their instructions, then stop: {}.",
+            names.join(", ")
+        ));
+    }
+
+    Some(parts.join("\n"))
+}
+
 /// Build tool preference/restriction XML blocks for a skill.
 fn build_tool_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
@@ -570,5 +603,67 @@ mod tests {
         assert!(index.contains("- `@with-desc` \u{2014} Has a description"));
         assert!(index.contains("- `@no-desc`\n"));
         assert!(index.contains("- `@also-desc` \u{2014} Also described"));
+    }
+
+    // --- build_activation_directive ---
+
+    #[test]
+    fn activation_directive_no_skills_no_spells() {
+        let directive = build_activation_directive(&[], &[]);
+        assert!(directive.is_none());
+    }
+
+    #[test]
+    fn activation_directive_single_skill() {
+        let directive =
+            build_activation_directive(&["browser".to_string()], &[]).unwrap();
+        assert!(directive.contains("@browser"));
+        assert!(directive.contains("skills are active"));
+        assert!(directive.contains("Follow their instructions"));
+        assert!(!directive.contains("spells"));
+    }
+
+    #[test]
+    fn activation_directive_multiple_skills() {
+        let directive = build_activation_directive(
+            &["browser".to_string(), "git".to_string()],
+            &[],
+        )
+        .unwrap();
+        assert!(directive.contains("@browser"));
+        assert!(directive.contains("@git"));
+    }
+
+    #[test]
+    fn activation_directive_spells_only() {
+        let directive =
+            build_activation_directive(&[], &["commit".to_string()]).unwrap();
+        assert!(directive.contains("@commit"));
+        assert!(directive.contains("this response only"));
+        assert!(!directive.contains("skills are active"));
+    }
+
+    #[test]
+    fn activation_directive_skills_and_spells() {
+        let directive = build_activation_directive(
+            &["browser".to_string()],
+            &["commit".to_string()],
+        )
+        .unwrap();
+        assert!(directive.contains("skills are active"));
+        assert!(directive.contains("spells apply"));
+        assert!(directive.contains("@browser"));
+        assert!(directive.contains("@commit"));
+    }
+
+    #[test]
+    fn activation_directive_multiple_spells() {
+        let directive = build_activation_directive(
+            &[],
+            &["commit".to_string(), "review".to_string()],
+        )
+        .unwrap();
+        assert!(directive.contains("@commit"));
+        assert!(directive.contains("@review"));
     }
 }

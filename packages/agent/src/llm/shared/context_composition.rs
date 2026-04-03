@@ -56,6 +56,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         parts.push(skill_index.clone());
     }
 
+    if let Some(ref activation) = context.skill_activation_context
+        && !activation.is_empty()
+    {
+        parts.push(activation.clone());
+    }
+
     if let Some(ref skills) = context.skill_context
         && !skills.is_empty()
     {
@@ -158,6 +164,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         volatile.push(format!("# Active Rules\n\n{dynamic}"));
     }
 
+    if let Some(ref activation) = context.skill_activation_context
+        && !activation.is_empty()
+    {
+        volatile.push(activation.clone());
+    }
+
     if let Some(ref skills) = context.skill_context
         && !skills.is_empty()
     {
@@ -196,6 +208,7 @@ mod tests {
             rules_content: Some("Always use Rust.".into()),
             memory_content: Some("User prefers concise responses.".into()),
             skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
+            skill_activation_context: None,
             skill_context: Some("Available skill: /commit".into()),
             skill_removal_context: None,
             job_results_context: None,
@@ -233,6 +246,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,
@@ -253,6 +267,7 @@ mod tests {
             rules_content: Some(String::new()),
             memory_content: Some("memory".into()),
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,
@@ -274,6 +289,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,
@@ -319,6 +335,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,
@@ -340,6 +357,7 @@ mod tests {
             rules_content: Some("Rules".into()),
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,
@@ -394,6 +412,7 @@ mod tests {
     fn skill_index_before_skill_context_in_flat() {
         let ctx = Context {
             skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
+            skill_activation_context: None,
             skill_context: Some("<skills>full content</skills>".into()),
             ..Default::default()
         };
@@ -426,6 +445,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: Some("Skill".into()),
             skill_removal_context: None,
             job_results_context: None,
@@ -442,6 +462,7 @@ mod tests {
     #[test]
     fn skill_removal_context_in_flat_ordering() {
         let ctx = Context {
+            skill_activation_context: None,
             skill_context: Some("<skills>browser</skills>".into()),
             skill_removal_context: Some(
                 "The following skills have been deactivated: @old-skill".into(),
@@ -485,5 +506,69 @@ mod tests {
         };
         let parts2 = compose_context_parts(&ctx2);
         assert!(parts2.is_empty());
+    }
+
+    // ── skill_activation_context ───────────────────────────────────
+
+    #[test]
+    fn activation_context_before_skill_context_in_flat() {
+        let ctx = Context {
+            skill_activation_context: Some("Follow @browser".into()),
+            skill_context: Some("<skills>browser content</skills>".into()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert_eq!(parts.len(), 2);
+        let activation_idx = parts
+            .iter()
+            .position(|p| p.contains("Follow @browser"))
+            .unwrap();
+        let skill_idx = parts
+            .iter()
+            .position(|p| p.contains("<skills>"))
+            .unwrap();
+        assert!(activation_idx < skill_idx);
+    }
+
+    #[test]
+    fn activation_context_in_volatile_group() {
+        let ctx = Context {
+            skill_activation_context: Some("Follow @browser".into()),
+            system_prompt: Some("System".into()),
+            ..Default::default()
+        };
+        let grouped = compose_context_parts_grouped(&ctx);
+        assert!(
+            grouped
+                .volatile
+                .iter()
+                .any(|p| p.contains("Follow @browser"))
+        );
+        assert!(
+            !grouped
+                .stable
+                .iter()
+                .any(|p| p.contains("Follow @browser"))
+        );
+    }
+
+    #[test]
+    fn activation_context_none_skipped() {
+        let ctx = Context {
+            skill_activation_context: None,
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn activation_context_empty_string_skipped() {
+        let ctx = Context {
+            skill_activation_context: Some(String::new()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert!(parts.is_empty());
     }
 }

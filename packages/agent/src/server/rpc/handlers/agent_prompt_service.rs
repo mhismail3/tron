@@ -537,6 +537,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 "failed to build skill context from session"
             );
             super::prompt_runtime::SkillContextResult {
+                skill_activation_context: None,
                 skill_context: None,
                 skill_removal_context: None,
             }
@@ -589,6 +590,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         reasoning_level: reasoning_level
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
         skill_index_context,
+        skill_activation_context: skill_result.skill_activation_context,
         skill_context: skill_result.skill_context,
         skill_removal_context: skill_result.skill_removal_context,
         job_results: job_results_context,

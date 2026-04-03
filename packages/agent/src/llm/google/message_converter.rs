@@ -295,6 +295,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,

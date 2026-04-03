@@ -214,6 +214,9 @@ pub struct RunContext {
     /// Lightweight skill index context (auto-generated from registry).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_index_context: Option<String>,
+    /// Skill activation directive ("follow these active skills/spells").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_activation_context: Option<String>,
     /// Skill context to inject (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,

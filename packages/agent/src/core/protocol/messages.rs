@@ -399,6 +399,9 @@ pub struct Context {
     /// Lightweight skill index (name + description for all available skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_index_context: Option<String>,
+    /// Skill activation directive ("follow these active skills/spells").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_activation_context: Option<String>,
     /// Skill context (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
@@ -791,6 +794,7 @@ mod tests {
             rules_content: None,
             memory_content: None,
             skill_index_context: None,
+            skill_activation_context: None,
             skill_context: None,
             skill_removal_context: None,
             job_results_context: None,

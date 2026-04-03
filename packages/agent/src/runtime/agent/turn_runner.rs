@@ -433,6 +433,9 @@ fn build_turn_context(
     context
         .skill_index_context
         .clone_from(&run_context.skill_index_context);
+    context
+        .skill_activation_context
+        .clone_from(&run_context.skill_activation_context);
     context.skill_context.clone_from(&run_context.skill_context);
     context
         .skill_removal_context

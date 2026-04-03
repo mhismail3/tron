@@ -693,6 +693,9 @@ pub async fn build_skill_context_from_session(
             "[skills] reconstructed tracker for session {session_id}"
         );
 
+        // Save skill-only names for the activation directive (before merge)
+        let skill_only_names = active_names.clone();
+
         // Merge active skills + spell names (dedup)
         let mut all_names: Vec<String> = active_names;
         for name in &spell_names {
@@ -744,6 +747,10 @@ pub async fn build_skill_context_from_session(
             });
         }
 
+        // Build activation directive for active skills + spells
+        let skill_activation_context =
+            crate::skills::injector::build_activation_directive(&skill_only_names, &spell_names);
+
         // Build removal notice for deactivated skills
         let pending_removals = tracker.pending_removal_notices();
         let removal_notice = if pending_removals.is_empty() {
@@ -760,6 +767,7 @@ pub async fn build_skill_context_from_session(
         };
 
         Ok(SkillContextResult {
+            skill_activation_context,
             skill_context,
             skill_removal_context: removal_notice,
         })
@@ -769,6 +777,8 @@ pub async fn build_skill_context_from_session(
 
 /// Result of building skill context from session state.
 pub struct SkillContextResult {
+    /// Activation directive ("follow these active skills/spells").
+    pub skill_activation_context: Option<String>,
     /// The `<skills>` XML block for active skills + consumed spells.
     pub skill_context: Option<String>,
     /// One-turn removal notice for recently deactivated skills.
