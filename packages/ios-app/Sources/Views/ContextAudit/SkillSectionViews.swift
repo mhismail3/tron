@@ -6,21 +6,8 @@ import SwiftUI
 struct SkillReferencesSection: View {
     let skills: [Skill]
     /// Server-reported token count for the skill index (from breakdown.skillIndex).
-    /// When nil, falls back to a rough estimate.
-    var serverTokens: Int?
+    let tokens: Int
     @State private var isExpanded = false
-
-    /// Token count: use server-reported value when available, else estimate
-    private var displayTokens: Int {
-        if let server = serverTokens, server > 0 {
-            return server
-        }
-        return skills.reduce(0) { total, skill in
-            let descriptionTokens = skill.description.count / 4
-            let metadataTokens = 20
-            return total + descriptionTokens + metadataTokens
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,7 +29,7 @@ struct SkillReferencesSection: View {
                 Spacer()
 
                 // Token count
-                Text(TokenFormatter.format(displayTokens))
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
@@ -81,19 +68,9 @@ struct SkillReferencesSection: View {
 @available(iOS 26.0, *)
 struct ProjectSkillsSection: View {
     let skills: [Skill]
-    var serverTokens: Int?
+    /// Server-reported token count for project skills.
+    let tokens: Int
     @State private var isExpanded = false
-
-    private var displayTokens: Int {
-        if let server = serverTokens, server > 0 {
-            return server
-        }
-        return skills.reduce(0) { total, skill in
-            let descriptionTokens = skill.description.count / 4
-            let metadataTokens = 20
-            return total + descriptionTokens + metadataTokens
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -113,7 +90,7 @@ struct ProjectSkillsSection: View {
 
                 Spacer()
 
-                Text(TokenFormatter.format(displayTokens))
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 

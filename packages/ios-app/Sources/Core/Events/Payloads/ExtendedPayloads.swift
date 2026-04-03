@@ -204,7 +204,12 @@ struct ContextSnapshotResult: Codable {
         let systemPrompt: Int
         let tools: Int
         let rules: Int
-        let skillIndex: Int?
+        let memory: Int
+        let skillIndex: Int
+        let skillContext: Int
+        let skillRemoval: Int
+        let jobResults: Int
+        let environment: Int
         let messages: Int
     }
 }

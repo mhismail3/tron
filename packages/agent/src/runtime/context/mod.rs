@@ -5,7 +5,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `context_manager` | Entry point — owns context lifecycle, compaction triggers |
-//! | `context_snapshot_builder` | Builds the final context snapshot for LLM calls |
+//! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
 //! | `compaction_engine` | Executes compaction: summarize old messages, trim context |
 //! | `llm_summarizer` | Subagent-based summarization for compaction |
 //! | `summarizer` | Summarizer trait and fallback implementations |

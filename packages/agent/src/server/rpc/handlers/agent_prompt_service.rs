@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 use crate::runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use crate::runtime::orchestrator::agent_runner::run_agent;
 use crate::runtime::orchestrator::orchestrator::StartedRun;
-use crate::runtime::types::{AgentConfig, RunContext};
+use crate::runtime::types::{AgentConfig, RunContext, VolatileTokens};
 use crate::skills::registry::SkillRegistry;
 
 use crate::server::rpc::context::{AgentDeps, RpcContext};
@@ -564,6 +564,27 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
+    // Estimate volatile token counts for context breakdown accounting
+    let volatile_tokens = {
+        let chars_per_token = 4u64;
+        let skill_ctx = skill_result
+            .skill_context
+            .as_ref()
+            .map_or(0, |s| s.len() as u64 / chars_per_token);
+        let removal = skill_result
+            .skill_removal_context
+            .as_ref()
+            .map_or(0, |s| s.len() as u64 / chars_per_token);
+        let jobs = job_results_context
+            .as_ref()
+            .map_or(0, |s| s.len() as u64 / chars_per_token);
+        VolatileTokens {
+            skill_context: skill_ctx,
+            skill_removal: removal,
+            job_results: jobs,
+        }
+    };
+
     let run_context = RunContext {
         reasoning_level: reasoning_level
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
@@ -572,6 +593,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         skill_removal_context: skill_result.skill_removal_context,
         job_results: job_results_context,
         user_content_override,
+        volatile_tokens,
         ..Default::default()
     };
 

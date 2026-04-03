@@ -418,6 +418,15 @@ fn build_turn_context(
     run_context: &RunContext,
     server_origin: Option<&str>,
 ) -> Context {
+    // Set volatile token estimates for accurate snapshots
+    context_manager.set_volatile_tokens(
+        run_context.volatile_tokens.skill_context,
+        run_context.volatile_tokens.skill_removal,
+        run_context.volatile_tokens.job_results,
+    );
+    // Set server origin for environment token estimation
+    context_manager.set_server_origin(server_origin.map(String::from));
+
     let mut context = context_manager.build_base_context();
     context.messages = context_manager.get_messages_arc();
     context.tools = Some(registry.definitions());

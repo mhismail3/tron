@@ -248,19 +248,12 @@ struct MessagesContainer: View {
 @available(iOS 26.0, *)
 struct AddedSkillsContainer: View {
     let skills: [AddedSkillInfo]
+    /// Server-reported token count for active skill context (from breakdown.skillContext).
+    let tokens: Int
     var onDelete: ((String) -> Void)?
     var onFetchContent: ((String) async -> String?)?
 
     @State private var isExpanded = false
-
-    private var totalTokens: Int {
-        let actual = skills.reduce(0) { $0 + ($1.tokens ?? 0) }
-        return actual > 0 ? actual : skills.count * 200
-    }
-
-    private var isEstimate: Bool {
-        !skills.contains { ($0.tokens ?? 0) > 0 }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -281,7 +274,7 @@ struct AddedSkillsContainer: View {
 
                 Spacer()
 
-                Text("\(isEstimate ? "~" : "")\(TokenFormatter.format(totalTokens))")
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 

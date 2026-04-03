@@ -55,6 +55,14 @@ pub struct ContextManager {
     rules_tracker: RulesTracker,
     /// Latest extracted data from compaction (for checkpoint payloads).
     last_extracted_data: Option<super::types::ExtractedData>,
+    /// Server origin (e.g. "localhost:9847") for environment token estimation.
+    server_origin: Option<String>,
+    /// Volatile token estimate: active skill content (set per-turn by prompt handler).
+    volatile_skill_context_tokens: u64,
+    /// Volatile token estimate: skill deactivation notice.
+    volatile_skill_removal_tokens: u64,
+    /// Volatile token estimate: background job results.
+    volatile_job_results_tokens: u64,
 }
 
 impl ContextManager {
@@ -85,6 +93,10 @@ impl ContextManager {
             on_compaction_needed: None,
             rules_tracker: RulesTracker::new(),
             last_extracted_data: None,
+            server_origin: None,
+            volatile_skill_context_tokens: 0,
+            volatile_skill_removal_tokens: 0,
+            volatile_job_results_tokens: 0,
         }
     }
 
@@ -291,7 +303,12 @@ impl ContextManager {
         self.estimate_system_prompt_tokens()
             + self.estimate_tools_tokens()
             + self.estimate_rules_tokens()
+            + self.estimate_memory_tokens()
             + self.estimate_skill_index_tokens()
+            + self.volatile_skill_context_tokens
+            + self.volatile_skill_removal_tokens
+            + self.volatile_job_results_tokens
+            + self.estimate_environment_tokens()
             + self.get_messages_tokens()
     }
 
@@ -380,6 +397,48 @@ impl ContextManager {
     /// Estimate tokens for a single message.
     pub fn get_message_tokens(&self, msg: &Message) -> u64 {
         u64::from(token_estimator::estimate_message_tokens(msg))
+    }
+
+    #[must_use]
+    /// Estimate memory tokens (workspace memory + session memories).
+    pub fn estimate_memory_tokens(&self) -> u64 {
+        let base = u64::from(token_estimator::estimate_rules_tokens(
+            self.memory_content.as_deref(),
+        ));
+        let session: u64 = self.session_memories.iter().map(|m| m.tokens).sum();
+        base + session
+    }
+
+    #[must_use]
+    /// Estimate environment metadata tokens (working directory + server origin).
+    pub fn estimate_environment_tokens(&self) -> u64 {
+        let wd = self
+            .config
+            .working_directory
+            .as_ref()
+            .map_or(0, |wd| (wd.len() + 30) as u64 / CHARS_PER_TOKEN as u64);
+        let origin = self
+            .server_origin
+            .as_ref()
+            .map_or(0, |o| (o.len() + 10) as u64 / CHARS_PER_TOKEN as u64);
+        wd + origin
+    }
+
+    /// Set server origin for environment token estimation.
+    pub fn set_server_origin(&mut self, origin: Option<String>) {
+        self.server_origin = origin;
+    }
+
+    /// Set volatile token estimates (called per-turn by the prompt handler).
+    pub fn set_volatile_tokens(
+        &mut self,
+        skill_context: u64,
+        skill_removal: u64,
+        job_results: u64,
+    ) {
+        self.volatile_skill_context_tokens = skill_context;
+        self.volatile_skill_removal_tokens = skill_removal;
+        self.volatile_job_results_tokens = job_results;
     }
 
     // ── Snapshot & validation ───────────────────────────────────────────
@@ -645,6 +704,21 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
     }
     fn estimate_skill_index_tokens(&self) -> u64 {
         self.manager.estimate_skill_index_tokens()
+    }
+    fn estimate_memory_tokens(&self) -> u64 {
+        self.manager.estimate_memory_tokens()
+    }
+    fn estimate_environment_tokens(&self) -> u64 {
+        self.manager.estimate_environment_tokens()
+    }
+    fn get_volatile_skill_context_tokens(&self) -> u64 {
+        self.manager.volatile_skill_context_tokens
+    }
+    fn get_volatile_skill_removal_tokens(&self) -> u64 {
+        self.manager.volatile_skill_removal_tokens
+    }
+    fn get_volatile_job_results_tokens(&self) -> u64 {
+        self.manager.volatile_job_results_tokens
     }
     fn get_messages_tokens(&self) -> u64 {
         self.manager.get_messages_tokens()
@@ -1233,6 +1307,82 @@ mod tests {
             max_size,
             (TOOL_RESULT_MIN_TOKENS as usize) * (CHARS_PER_TOKEN as usize)
         );
+    }
+
+    // -- memory & environment estimation --
+
+    #[test]
+    fn estimate_memory_tokens_empty() {
+        let cm = ContextManager::new(test_config());
+        assert_eq!(cm.estimate_memory_tokens(), 0);
+    }
+
+    #[test]
+    fn estimate_memory_tokens_with_content() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_memory_content(Some("a".repeat(400)));
+        assert!(cm.estimate_memory_tokens() > 0);
+    }
+
+    #[test]
+    fn estimate_memory_tokens_includes_session() {
+        let mut cm = ContextManager::new(test_config());
+        cm.add_session_memory("title".into(), "content".into());
+        let with_session = cm.estimate_memory_tokens();
+        assert!(with_session > 0);
+    }
+
+    #[test]
+    fn estimate_environment_tokens_with_wd_only() {
+        let cm = ContextManager::new(test_config());
+        // test_config has working_directory = Some("/tmp")
+        let tokens = cm.estimate_environment_tokens();
+        assert!(tokens > 0);
+    }
+
+    #[test]
+    fn estimate_environment_tokens_with_server_origin() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_server_origin(Some("localhost:9847".into()));
+        let tokens = cm.estimate_environment_tokens();
+        assert!(tokens > 0);
+    }
+
+    #[test]
+    fn volatile_tokens_default_zero() {
+        let cm = ContextManager::new(test_config());
+        let snap = cm.get_snapshot();
+        assert_eq!(snap.breakdown.skill_context, 0);
+        assert_eq!(snap.breakdown.skill_removal, 0);
+        assert_eq!(snap.breakdown.job_results, 0);
+    }
+
+    #[test]
+    fn volatile_tokens_set_and_reflected_in_snapshot() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_volatile_tokens(100, 50, 75);
+        let snap = cm.get_snapshot();
+        assert_eq!(snap.breakdown.skill_context, 100);
+        assert_eq!(snap.breakdown.skill_removal, 50);
+        assert_eq!(snap.breakdown.job_results, 75);
+    }
+
+    #[test]
+    fn get_current_tokens_includes_memory_and_environment() {
+        let mut cm = ContextManager::new(test_config());
+        let base = cm.get_current_tokens();
+        cm.set_memory_content(Some("a".repeat(400)));
+        let with_memory = cm.get_current_tokens();
+        assert!(with_memory > base);
+    }
+
+    #[test]
+    fn get_current_tokens_includes_volatile() {
+        let mut cm = ContextManager::new(test_config());
+        let base = cm.get_current_tokens();
+        cm.set_volatile_tokens(100, 50, 75);
+        let with_volatile = cm.get_current_tokens();
+        assert_eq!(with_volatile, base + 225);
     }
 
     // -- compaction config --

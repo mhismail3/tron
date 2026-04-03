@@ -104,12 +104,39 @@ pub struct TokenBreakdown {
     pub system_prompt: u64,
     /// Tool definition tokens.
     pub tools: u64,
-    /// Rules content tokens.
+    /// Rules content tokens (static + dynamic combined).
     pub rules: u64,
+    /// Workspace memory tokens.
+    pub memory: u64,
     /// Skill index tokens (lightweight listing of available skills).
     pub skill_index: u64,
+    /// Active skill content tokens.
+    pub skill_context: u64,
+    /// Skill deactivation notice tokens.
+    pub skill_removal: u64,
+    /// Background job results tokens (processes + subagents).
+    pub job_results: u64,
+    /// Environment metadata tokens (server origin + working directory).
+    pub environment: u64,
     /// Message tokens.
     pub messages: u64,
+}
+
+impl TokenBreakdown {
+    /// Sum of all component estimates.
+    #[must_use]
+    pub fn total(&self) -> u64 {
+        self.system_prompt
+            + self.tools
+            + self.rules
+            + self.memory
+            + self.skill_index
+            + self.skill_context
+            + self.skill_removal
+            + self.job_results
+            + self.environment
+            + self.messages
+    }
 }
 
 /// Snapshot of current context state.
@@ -558,7 +585,12 @@ mod tests {
                 system_prompt: 1000,
                 tools: 2000,
                 rules: 500,
+                memory: 100,
                 skill_index: 0,
+                skill_context: 200,
+                skill_removal: 0,
+                job_results: 50,
+                environment: 30,
                 messages: 1500,
             },
             rules: None,
@@ -567,6 +599,38 @@ mod tests {
         assert_eq!(json["currentTokens"], 5000);
         assert_eq!(json["thresholdLevel"], "normal");
         assert_eq!(json["breakdown"]["systemPrompt"], 1000);
+        assert_eq!(json["breakdown"]["memory"], 100);
+        assert_eq!(json["breakdown"]["skillContext"], 200);
+        assert_eq!(json["breakdown"]["environment"], 30);
+    }
+
+    #[test]
+    fn token_breakdown_default_all_zeros() {
+        let b = TokenBreakdown::default();
+        assert_eq!(b.total(), 0);
+        assert_eq!(b.system_prompt, 0);
+        assert_eq!(b.memory, 0);
+        assert_eq!(b.skill_context, 0);
+        assert_eq!(b.skill_removal, 0);
+        assert_eq!(b.job_results, 0);
+        assert_eq!(b.environment, 0);
+    }
+
+    #[test]
+    fn token_breakdown_total_sums_all() {
+        let b = TokenBreakdown {
+            system_prompt: 100,
+            tools: 200,
+            rules: 300,
+            memory: 50,
+            skill_index: 25,
+            skill_context: 75,
+            skill_removal: 10,
+            job_results: 40,
+            environment: 15,
+            messages: 500,
+        };
+        assert_eq!(b.total(), 1315);
     }
 
     #[test]

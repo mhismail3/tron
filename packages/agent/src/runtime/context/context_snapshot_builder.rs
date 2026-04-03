@@ -40,6 +40,16 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_message_tokens(&self, msg: &Message) -> u64;
     /// The effective system prompt text.
     fn get_system_prompt(&self) -> String;
+    /// Estimated memory tokens (workspace + session).
+    fn estimate_memory_tokens(&self) -> u64;
+    /// Estimated environment metadata tokens.
+    fn estimate_environment_tokens(&self) -> u64;
+    /// Volatile: active skill content tokens.
+    fn get_volatile_skill_context_tokens(&self) -> u64;
+    /// Volatile: skill deactivation notice tokens.
+    fn get_volatile_skill_removal_tokens(&self) -> u64;
+    /// Volatile: background job results tokens.
+    fn get_volatile_job_results_tokens(&self) -> u64;
     /// Tool clarification text (Codex mode).
     fn get_tool_clarification(&self) -> Option<String>;
     /// Tool summaries for the detailed snapshot.
@@ -85,7 +95,12 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
                 system_prompt: self.deps.estimate_system_prompt_tokens(),
                 tools: self.deps.estimate_tools_tokens(),
                 rules: self.deps.estimate_rules_tokens(),
+                memory: self.deps.estimate_memory_tokens(),
                 skill_index: self.deps.estimate_skill_index_tokens(),
+                skill_context: self.deps.get_volatile_skill_context_tokens(),
+                skill_removal: self.deps.get_volatile_skill_removal_tokens(),
+                job_results: self.deps.get_volatile_job_results_tokens(),
+                environment: self.deps.estimate_environment_tokens(),
                 messages: self.deps.get_messages_tokens(),
             },
             rules: None,
@@ -276,6 +291,21 @@ mod tests {
             self.rules_tokens
         }
         fn estimate_skill_index_tokens(&self) -> u64 {
+            0
+        }
+        fn estimate_memory_tokens(&self) -> u64 {
+            0
+        }
+        fn estimate_environment_tokens(&self) -> u64 {
+            0
+        }
+        fn get_volatile_skill_context_tokens(&self) -> u64 {
+            0
+        }
+        fn get_volatile_skill_removal_tokens(&self) -> u64 {
+            0
+        }
+        fn get_volatile_job_results_tokens(&self) -> u64 {
             0
         }
         fn get_messages_tokens(&self) -> u64 {

@@ -305,13 +305,14 @@ struct ContextAuditView: View {
                                 if let globalSkills = skillStore?.globalSkills, !globalSkills.isEmpty {
                                     SkillReferencesSection(
                                         skills: globalSkills,
-                                        serverTokens: snapshot.breakdown.skillIndex
+                                        tokens: snapshot.breakdown.skillIndex
                                     )
                                 }
 
                                 if let projectSkills = skillStore?.projectSkills, !projectSkills.isEmpty {
                                     ProjectSkillsSection(
-                                        skills: projectSkills
+                                        skills: projectSkills,
+                                        tokens: snapshot.breakdown.skillIndex
                                     )
                                 }
 
@@ -343,6 +344,7 @@ struct ContextAuditView: View {
                                     if !displayedSkills.isEmpty {
                                         AddedSkillsContainer(
                                             skills: displayedSkills,
+                                            tokens: snapshot.breakdown.skillContext,
                                             onDelete: readOnly ? nil : { skillName in
                                                 Task { await removeSkillFromContext(skillName: skillName) }
                                             },

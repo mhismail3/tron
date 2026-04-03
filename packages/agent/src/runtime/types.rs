@@ -195,6 +195,18 @@ impl Default for AgentConfig {
     }
 }
 
+/// Per-turn volatile token estimates for context accounting.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolatileTokens {
+    /// Active skill content tokens.
+    pub skill_context: u64,
+    /// Skill deactivation notice tokens.
+    pub skill_removal: u64,
+    /// Background job results tokens.
+    pub job_results: u64,
+}
+
 /// Per-prompt execution context.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,6 +233,9 @@ pub struct RunContext {
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<crate::core::messages::UserMessageContent>,
+    /// Volatile token estimates for context breakdown accounting.
+    #[serde(default)]
+    pub volatile_tokens: VolatileTokens,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

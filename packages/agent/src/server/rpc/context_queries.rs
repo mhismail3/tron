@@ -43,6 +43,19 @@ impl ContextQueryService {
                     if index.is_empty() { None } else { Some(index) }
                 };
                 prepared.context_manager.set_skill_index_content(skill_index_content);
+
+                // Reconstruct volatile token estimates from session state
+                let added_skills = build_added_skills(
+                    event_store.as_ref(),
+                    &session_id_for_query,
+                )?;
+                set_volatile_tokens_from_session(
+                    &mut prepared.context_manager,
+                    &added_skills,
+                    &skill_registry,
+                    prepared.session.origin.as_deref(),
+                );
+
                 let snapshot = prepared.context_manager.get_snapshot();
                 Ok(snapshot_response(&snapshot))
             })
@@ -183,6 +196,25 @@ pub(crate) async fn prepare_session_context(
     .await
 }
 
+/// Reconstruct volatile token estimates from session state so snapshots
+/// queried between turns reflect active skills accurately.
+fn set_volatile_tokens_from_session(
+    context_manager: &mut crate::runtime::context::context_manager::ContextManager,
+    added_skills: &[Value],
+    skill_registry: &Arc<RwLock<SkillRegistry>>,
+    server_origin: Option<&str>,
+) {
+    let active_skill_names: Vec<String> = added_skills
+        .iter()
+        .filter_map(|skill| skill.get("name").and_then(Value::as_str).map(String::from))
+        .collect();
+    let skill_context = build_active_skill_context(&active_skill_names, skill_registry);
+    let skill_context_tokens = skill_context.as_ref().map_or(0, |s| s.len() as u64 / 4);
+
+    context_manager.set_volatile_tokens(skill_context_tokens, 0, 0);
+    context_manager.set_server_origin(server_origin.map(String::from));
+}
+
 fn snapshot_response(snapshot: &crate::runtime::context::types::ContextSnapshot) -> Value {
     json!({
         "currentTokens": snapshot.current_tokens,
@@ -193,7 +225,12 @@ fn snapshot_response(snapshot: &crate::runtime::context::types::ContextSnapshot)
             "systemPrompt": snapshot.breakdown.system_prompt,
             "tools": snapshot.breakdown.tools,
             "rules": snapshot.breakdown.rules,
+            "memory": snapshot.breakdown.memory,
             "skillIndex": snapshot.breakdown.skill_index,
+            "skillContext": snapshot.breakdown.skill_context,
+            "skillRemoval": snapshot.breakdown.skill_removal,
+            "jobResults": snapshot.breakdown.job_results,
+            "environment": snapshot.breakdown.environment,
             "messages": snapshot.breakdown.messages,
         },
     })
@@ -221,8 +258,17 @@ fn build_detailed_snapshot_response(
     };
     context_manager.set_skill_index_content(skill_index_content);
 
-    let detailed = context_manager.get_detailed_snapshot();
+    // Reconstruct volatile token estimates from session state so the snapshot
+    // reflects active skills even when queried between turns.
     let added_skills = build_added_skills(event_store, session_id)?;
+    set_volatile_tokens_from_session(
+        &mut context_manager,
+        &added_skills,
+        skill_registry,
+        session.origin.as_deref(),
+    );
+
+    let detailed = context_manager.get_detailed_snapshot();
     let composed_system_prompt =
         build_composed_system_prompt(&context_manager, &session, &added_skills, skill_registry);
 
@@ -235,7 +281,12 @@ fn build_detailed_snapshot_response(
             "systemPrompt": detailed.snapshot.breakdown.system_prompt,
             "tools": detailed.snapshot.breakdown.tools,
             "rules": detailed.snapshot.breakdown.rules,
+            "memory": detailed.snapshot.breakdown.memory,
             "skillIndex": detailed.snapshot.breakdown.skill_index,
+            "skillContext": detailed.snapshot.breakdown.skill_context,
+            "skillRemoval": detailed.snapshot.breakdown.skill_removal,
+            "jobResults": detailed.snapshot.breakdown.job_results,
+            "environment": detailed.snapshot.breakdown.environment,
             "messages": detailed.snapshot.breakdown.messages,
         },
         "messages": build_detailed_messages(&detailed.messages),
