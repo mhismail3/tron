@@ -170,7 +170,13 @@ impl SkillTracker {
     }
 
     /// Mark a spell as consumed by a prompt.
+    ///
+    /// Adds the spell name to pending removal notices so the next turn
+    /// gets a "stop following" directive to counteract in-context learning.
     pub fn consume_spell(&mut self, cast_event_id: &str) {
+        if let Some(spell) = self.pending_spells.iter().find(|s| s.event_id == cast_event_id) {
+            let _ = self.pending_removal_notices.insert(spell.name.clone());
+        }
         self.pending_spells
             .retain(|s| s.event_id != cast_event_id);
     }
@@ -575,6 +581,19 @@ mod tests {
     }
 
     #[test]
+    fn test_consume_spell_adds_removal_notice() {
+        let mut tracker = SkillTracker::new();
+        tracker.add_spell(
+            "evt-1".to_string(),
+            "old-english".to_string(),
+            SkillSource::Global,
+        );
+        assert!(tracker.pending_removal_notices().is_empty());
+        tracker.consume_spell("evt-1");
+        assert!(tracker.pending_removal_notices().contains("old-english"));
+    }
+
+    #[test]
     fn test_consume_spell_nonexistent_noop() {
         let mut tracker = SkillTracker::new();
         tracker.add_spell(
@@ -688,6 +707,8 @@ mod tests {
         ];
         let tracker = SkillTracker::from_events(&events);
         assert!(tracker.unconsumed_spells().is_empty());
+        // Consumed spell generates a removal notice
+        assert!(tracker.pending_removal_notices().contains("commit"));
     }
 
     #[test]
