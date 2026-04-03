@@ -19,6 +19,7 @@ struct ChatView: View {
     // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout
     // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
     @State var sheetCoordinator = SheetCoordinator()
+    @State var pullUpPanelState = PullUpPanelState()
 
     // Note: Model state (cachedModels, isLoadingModels, optimisticModelName)
     // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
@@ -338,68 +339,96 @@ struct ChatView: View {
     // MARK: - Input Area Content (extracted for type-checker)
 
     private var inputAreaContent: some View {
-        VStack(spacing: 8) {
-            InputBar(
-                state: viewModel.inputBarState,
-                config: InputBarConfig(
-                    agentPhase: viewModel.agentPhase,
-                    isCompacting: viewModel.isCompacting,
-                    isRecording: viewModel.isRecording,
-                    isTranscribing: viewModel.isTranscribing,
-                    modelName: displayModelName,
-                    tokenUsage: viewModel.contextState.totalTokenUsage,
-                    contextPercentage: viewModel.contextState.contextPercentage,
-                    contextWindow: viewModel.contextState.currentContextWindow,
-                    lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
-                    cachedModels: cachedModels,
-                    isLoadingModels: isLoadingModels,
-                    currentModelInfo: currentModelInfo,
-                    skillStore: skillStore,
-                    inputHistory: inputHistory,
-                    animationCoordinator: viewModel.animationCoordinator,
-                    readOnly: workspaceDeleted || !isInteractionEnabled,
-                    queuedMessages: viewModel.messageQueueState.queue
-                ),
-                actions: InputBarActions(
-                    onSend: { [viewModel, inputHistory, scrollCoordinator] in
-                        inputHistory.addToHistory(viewModel.inputText)
-                        scrollCoordinator.userSentMessage()
-                        UIApplication.shared.sendAction(
-                            #selector(UIResponder.resignFirstResponder),
-                            to: nil, from: nil, for: nil
-                        )
-                        if viewModel.agentPhase.isIdle {
-                            let skillsToSend = viewModel.inputBarState.selectedSkills
-                            let spellsToSend = viewModel.inputBarState.selectedSpells
-                            viewModel.inputBarState.selectedSkills = []
-                            viewModel.inputBarState.selectedSpells = []
-                            viewModel.sendMessage(
-                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                spells: spellsToSend.isEmpty ? nil : spellsToSend
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                InputBar(
+                    state: viewModel.inputBarState,
+                    config: InputBarConfig(
+                        agentPhase: viewModel.agentPhase,
+                        isCompacting: viewModel.isCompacting,
+                        isRecording: viewModel.isRecording,
+                        isTranscribing: viewModel.isTranscribing,
+                        modelName: displayModelName,
+                        tokenUsage: viewModel.contextState.totalTokenUsage,
+                        contextPercentage: viewModel.contextState.contextPercentage,
+                        contextWindow: viewModel.contextState.currentContextWindow,
+                        lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
+                        cachedModels: cachedModels,
+                        isLoadingModels: isLoadingModels,
+                        currentModelInfo: currentModelInfo,
+                        skillStore: skillStore,
+                        inputHistory: inputHistory,
+                        animationCoordinator: viewModel.animationCoordinator,
+                        readOnly: workspaceDeleted || !isInteractionEnabled,
+                        queuedMessages: viewModel.messageQueueState.queue
+                    ),
+                    actions: InputBarActions(
+                        onSend: { [viewModel, inputHistory, scrollCoordinator] in
+                            inputHistory.addToHistory(viewModel.inputText)
+                            scrollCoordinator.userSentMessage()
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder),
+                                to: nil, from: nil, for: nil
                             )
-                        } else {
-                            viewModel.enqueueCurrentInput()
-                        }
-                    },
-                    onAbort: viewModel.abortAgent,
-                    onMicTap: viewModel.toggleRecording,
-                    onAddAttachment: viewModel.addAttachment,
-                    onRemoveAttachment: viewModel.removeAttachment,
-                    onHistoryNavigate: { newText in viewModel.inputText = newText },
-                    onModelSelect: { model in switchModel(to: model) },
-                    onReasoningLevelChange: { newLevel in viewModel.inputBarState.reasoningLevel = newLevel },
-                    onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
-                    onModelPickerTap: { [sheetCoordinator] in sheetCoordinator.showModelPicker() },
-                    onSkillSelect: nil,
-                    onSkillRemove: { _ in },
-                    onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
-                    onSpellRemove: { _ in },
-                    onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },
-                    onQueueRemove: { [viewModel] id in viewModel.messageQueueState.remove(id: id) }
+                            if viewModel.agentPhase.isIdle {
+                                let skillsToSend = viewModel.inputBarState.selectedSkills
+                                let spellsToSend = viewModel.inputBarState.selectedSpells
+                                viewModel.inputBarState.selectedSkills = []
+                                viewModel.inputBarState.selectedSpells = []
+                                viewModel.sendMessage(
+                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                    skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                    spells: spellsToSend.isEmpty ? nil : spellsToSend
+                                )
+                            } else {
+                                viewModel.enqueueCurrentInput()
+                            }
+                        },
+                        onAbort: viewModel.abortAgent,
+                        onMicTap: viewModel.toggleRecording,
+                        onAddAttachment: viewModel.addAttachment,
+                        onRemoveAttachment: viewModel.removeAttachment,
+                        onHistoryNavigate: { newText in viewModel.inputText = newText },
+                        onModelSelect: { model in switchModel(to: model) },
+                        onReasoningLevelChange: { newLevel in viewModel.inputBarState.reasoningLevel = newLevel },
+                        onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
+                        onModelPickerTap: { [sheetCoordinator] in sheetCoordinator.showModelPicker() },
+                        onSkillSelect: nil,
+                        onSkillRemove: { _ in },
+                        onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
+                        onSpellRemove: { _ in },
+                        onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },
+                        onQueueRemove: { [viewModel] id in viewModel.messageQueueState.remove(id: id) }
+                    )
                 )
-            )
-            .id(sessionId)
+                .id(sessionId)
+            }
+
+            // Pull-up panel content
+            if pullUpPanelState.isExpanded {
+                PullUpPanelView(panelState: pullUpPanelState)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .modifier(InputAreaDragModifier(
+            panelState: pullUpPanelState,
+            onWillExpand: { [viewModel] in
+                // Dismiss keyboard and mention popups when expanding
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil
+                )
+                viewModel.inputBarState.isMentionPopupVisible = false
+            }
+        ))
+        .animation(.tronSnap, value: pullUpPanelState.isExpanded)
+        .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
+            // Collapse panel when keyboard appears (mutual exclusion)
+            if !wasVisible && isVisible && pullUpPanelState.isExpanded {
+                withAnimation(.tronSnap) {
+                    pullUpPanelState.position = .collapsed
+                }
+            }
         }
     }
 

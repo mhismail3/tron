@@ -511,6 +511,9 @@ extension Animation {
 
     /// Fast Tron UI animation
     static let tronFast = Animation.spring(response: 0.25, dampingFraction: 0.85)
+
+    /// Snap animation for pull-up panel transitions
+    static let tronSnap = Animation.spring(response: 0.30, dampingFraction: 0.82)
 }
 
 // MARK: - Animation Timing Constants
