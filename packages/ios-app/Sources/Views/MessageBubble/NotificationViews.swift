@@ -131,15 +131,15 @@ struct ReasoningLevelChangeNotificationView: View {
 
 struct InterruptedNotificationView: View {
     var body: some View {
-        NotificationPill(tint: .red) {
+        NotificationPill(tint: .tronError) {
             HStack(spacing: 8) {
                 Image(systemName: "stop.circle.fill")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.tronError)
 
                 Text("Session interrupted")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.red.opacity(0.9))
+                    .foregroundStyle(.tronError.opacity(0.9))
             }
         }
     }
@@ -149,15 +149,15 @@ struct InterruptedNotificationView: View {
 
 struct CatchingUpNotificationView: View {
     var body: some View {
-        NotificationPill(tint: .gray) {
+        NotificationPill(tint: .tronSlate) {
             HStack(spacing: 8) {
                 ProgressView()
                     .scaleEffect(0.7)
-                    .tint(.gray)
+                    .tint(.tronSlate)
 
                 Text("Loading latest messages...")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.gray)
+                    .foregroundStyle(.tronSlate)
             }
         }
     }
@@ -167,15 +167,15 @@ struct CatchingUpNotificationView: View {
 
 struct TranscriptionFailedNotificationView: View {
     var body: some View {
-        NotificationPill(tint: .red) {
+        NotificationPill(tint: .tronError) {
             HStack(spacing: 8) {
                 Image(systemName: "mic.slash.fill")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.tronError)
 
                 Text("Transcription failed")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.red.opacity(0.9))
+                    .foregroundStyle(.tronError.opacity(0.9))
             }
         }
     }
@@ -185,15 +185,15 @@ struct TranscriptionFailedNotificationView: View {
 
 struct TranscriptionNoSpeechNotificationView: View {
     var body: some View {
-        NotificationPill(tint: .orange) {
+        NotificationPill(tint: .tronAmber) {
             HStack(spacing: 8) {
                 Image(systemName: "waveform")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(Color.tronAmber)
 
                 Text("No speech detected")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(Color.orange.opacity(0.9))
+                    .foregroundStyle(Color.tronAmber.opacity(0.9))
             }
         }
     }
@@ -227,18 +227,18 @@ struct CompactionNotificationView: View {
     }
 
     var body: some View {
-        NotificationPill(tint: .cyan, interactive: !isInProgress, onTap: isInProgress ? nil : onTap) {
+        NotificationPill(tint: .tronSky, interactive: !isInProgress, onTap: isInProgress ? nil : onTap) {
             HStack(spacing: 8) {
                 ZStack {
                     if isInProgress {
                         ProgressView()
                             .scaleEffect(0.7)
-                            .tint(.cyan)
+                            .tint(.tronSky)
                             .transition(.blurReplace)
                     } else {
                         Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                             .font(TronTypography.codeSM)
-                            .foregroundStyle(.cyan)
+                            .foregroundStyle(.tronSky)
                             .transition(.blurReplace)
                     }
                 }
@@ -246,23 +246,23 @@ struct CompactionNotificationView: View {
 
                 Text(isInProgress ? "Compacting context..." : "Context compacted")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.cyan.opacity(0.9))
+                    .foregroundStyle(.tronSky.opacity(0.9))
                     .contentTransition(.interpolate)
 
                 if !isInProgress && tokensSaved > 0 {
                     Text("\u{2022}")
                         .font(TronTypography.badge)
-                        .foregroundStyle(.cyan.opacity(0.5))
+                        .foregroundStyle(.tronSky.opacity(0.5))
                         .transition(.blurReplace)
 
                     Text("\(formattedSaved) tokens saved")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.cyan.opacity(0.7))
+                        .foregroundStyle(.tronSky.opacity(0.7))
                         .transition(.blurReplace)
 
                     Text("(\(compressionPercent)%)")
                         .font(TronTypography.codeSM)
-                        .foregroundStyle(.cyan.opacity(0.5))
+                        .foregroundStyle(.tronSky.opacity(0.5))
                         .transition(.blurReplace)
                 }
             }
@@ -289,23 +289,23 @@ struct ContextClearedNotificationView: View {
     }
 
     var body: some View {
-        NotificationPill(tint: .teal) {
+        NotificationPill(tint: .tronSky) {
             HStack(spacing: 8) {
                 Image(systemName: "xmark.circle.fill")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(.tronSky)
 
                 Text("Context cleared")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.teal.opacity(0.9))
+                    .foregroundStyle(.tronSky.opacity(0.9))
 
                 Text("\u{2022}")
                     .font(TronTypography.badge)
-                    .foregroundStyle(.teal.opacity(0.5))
+                    .foregroundStyle(.tronSky.opacity(0.5))
 
                 Text("\(formattedFreed) tokens freed")
                     .font(TronTypography.codeCaption)
-                    .foregroundStyle(.teal.opacity(0.7))
+                    .foregroundStyle(.tronSky.opacity(0.7))
             }
         }
     }
@@ -343,15 +343,15 @@ struct MessageDeletedNotificationView: View {
     }
 
     var body: some View {
-        NotificationPill(tint: .tronAmber) {
+        NotificationPill(tint: .tronSky) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronSky)
 
                 Text("Deleted \(typeLabel) from context")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.tronAmber.opacity(0.9))
+                    .foregroundStyle(.tronSky.opacity(0.9))
             }
         }
     }
@@ -426,15 +426,15 @@ struct RulesActivatedNotificationView: View {
 
 struct WorkspaceDeletedNotificationView: View {
     var body: some View {
-        NotificationPill(tint: .red) {
+        NotificationPill(tint: .tronError) {
             HStack(spacing: 8) {
                 Image(systemName: "folder.badge.questionmark")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.tronError)
 
                 Text("Workspace deleted \u{2013} session in read-only mode")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.red.opacity(0.9))
+                    .foregroundStyle(.tronError.opacity(0.9))
             }
         }
     }
@@ -448,16 +448,16 @@ struct TurnFailedNotificationView: View {
     let recoverable: Bool
 
     var body: some View {
-        NotificationPill(tint: .red) {
+        NotificationPill(tint: .tronError) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.tronError)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Request failed")
                         .font(TronTypography.filePath)
-                        .foregroundStyle(.red.opacity(0.9))
+                        .foregroundStyle(.tronError.opacity(0.9))
 
                     Text(error)
                         .font(TronTypography.codeCaption)
@@ -476,19 +476,19 @@ struct ProviderErrorNotificationView: View {
     var onTap: (() -> Void)? = nil
 
     var body: some View {
-        NotificationPill(tint: .red, interactive: true, onTap: onTap) {
+        NotificationPill(tint: .tronError, interactive: true, onTap: onTap) {
             HStack(spacing: 8) {
                 Image(systemName: ErrorCategoryDisplay.icon(for: data.category))
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.tronError)
 
                 Text(ErrorCategoryDisplay.label(for: data.category, provider: data.provider))
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.red.opacity(0.9))
+                    .foregroundStyle(.tronError.opacity(0.9))
 
                 Text("\u{2022}")
                     .font(TronTypography.badge)
-                    .foregroundStyle(.red.opacity(0.5))
+                    .foregroundStyle(.tronError.opacity(0.5))
 
                 Text(data.message)
                     .font(TronTypography.codeCaption)

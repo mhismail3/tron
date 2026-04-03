@@ -33,7 +33,6 @@ struct AccessibilityTests {
             ("Bash", CommandToolStatus.success.label),
             ("Subagent", SubagentStatus.completed.label),
             ("Notify", NotifyAppStatus.sent.label),
-            ("Query", QueryAgentStatus.success.label),
             ("Wait", CommandToolStatus.success.label),
         ]
 

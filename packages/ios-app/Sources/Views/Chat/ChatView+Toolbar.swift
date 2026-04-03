@@ -51,7 +51,7 @@ extension ChatView {
                             .foregroundStyle(.tronAmber)
                         if worktree.hasUncommittedChanges == true {
                             Circle()
-                                .fill(.orange)
+                                .fill(.tronAmber)
                                 .frame(width: 5, height: 5)
                         }
                     }

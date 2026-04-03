@@ -13,7 +13,6 @@ enum ToolKind: Sendable, Equatable {
     case glob
     case spawnSubagent
     case waitForSubagent
-    case queryAgent
     case notifyApp
     case manageAutomations
     case mcpSearch
@@ -32,7 +31,6 @@ enum ToolKind: Sendable, Equatable {
         case "glob", "find":      self = .glob
         case "spawnsubagent":     self = .spawnSubagent
         case "waitforsubagent":   self = .waitForSubagent
-        case "queryagent":        self = .queryAgent
         case "notifyapp":         self = .notifyApp
         case "manageautomations": self = .manageAutomations
         case "mcpsearch":         self = .mcpSearch

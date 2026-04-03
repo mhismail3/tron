@@ -100,14 +100,6 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .queryAgent:
-                if let chipData = ToolResultParser.parseQueryAgent(from: tool) {
-                    QueryAgentChip(data: chipData) {
-                        onTap?(.queryAgent(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
             case .askUserQuestion, .getConfirmation:
                 ToolResultRouter(tool: tool)
             default:

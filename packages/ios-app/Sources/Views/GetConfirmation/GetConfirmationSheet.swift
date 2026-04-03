@@ -156,7 +156,7 @@ struct GetConfirmationSheet: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(.clear)
                         .glassEffect(
-                            .regular.tint(Color.orange.opacity(noteText.isEmpty ? 0.06 : 0.15)),
+                            .regular.tint(accentColor.opacity(noteText.isEmpty ? 0.06 : 0.15)),
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
                 }
@@ -226,7 +226,7 @@ struct GetConfirmationSheet: View {
 
     private var accentColor: Color {
         switch toolData.status {
-        case .generating, .pending: return .orange
+        case .generating, .pending: return .tronAmber
         case .approved: return .tronSuccess
         case .denied: return .tronError
         case .superseded: return .tronTextMuted
@@ -260,7 +260,7 @@ struct GetConfirmationSheet: View {
     private var riskColor: Color {
         switch toolData.params.riskLevel {
         case .low: return .tronEmerald
-        case .medium: return .orange
+        case .medium: return .tronAmber
         case .high: return .tronError
         }
     }

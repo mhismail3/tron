@@ -68,20 +68,4 @@ struct StatusDisplayTests {
         #expect(NotifyAppStatus.failed.iconName == "bell.slash.fill")
     }
 
-    // MARK: - QueryAgentStatus
-
-    @Test("QueryAgentStatus color returns expected values")
-    func queryAgentStatusColor() {
-        #expect(QueryAgentStatus.querying.color == .tronIndigo)
-        #expect(QueryAgentStatus.success.color == .tronIndigo)
-        #expect(QueryAgentStatus.error.color == .tronError)
-    }
-
-    @Test("QueryAgentStatus label returns expected values")
-    func queryAgentStatusLabel() {
-        #expect(QueryAgentStatus.querying.label == "Querying")
-        #expect(QueryAgentStatus.success.label == "Completed")
-        #expect(QueryAgentStatus.error.label == "Failed")
-    }
-
 }

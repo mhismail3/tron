@@ -43,7 +43,7 @@ struct StandaloneToolResultView: View {
         case "write":
             return ("doc.badge.plus", .tronSuccess)
         case "edit":
-            return ("pencil.line", .orange)
+            return ("pencil.line", .tronAmber)
         case "bash":
             return ("terminal", .tronEmerald)
         case "search":

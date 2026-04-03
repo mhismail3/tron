@@ -113,26 +113,6 @@ struct CommandToolChipData: Equatable, Identifiable {
 
 }
 
-extension CommandToolChipData {
-    /// Create from QueryAgentChipData for detail sheet display
-    init(from data: QueryAgentChipData) {
-        self.id = data.toolCallId
-        self.toolName = "QueryAgent"
-        self.normalizedName = "queryagent"
-        self.icon = data.queryType.icon
-        self.iconColor = .tronIndigo
-        self.displayName = "Query Agent (\(data.queryType.displayName))"
-        self.summary = data.resultPreview ?? ""
-        self.status = data.status == .error ? .error : .success
-        self.durationMs = data.durationMs
-        self.arguments = ""
-        self.result = data.fullResult
-        self.isResultTruncated = false
-        self.details = nil
-    }
-
-}
-
 // MARK: - Command Tool Registry
 
 /// Registry for tool configurations and routing.

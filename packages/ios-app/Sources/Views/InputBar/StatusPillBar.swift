@@ -46,14 +46,7 @@ struct StatusPillsColumn: View {
     }
 
     private func reasoningLevelIcon(_ level: String) -> String {
-        switch level.lowercased() {
-        case "low": return "hare"
-        case "medium": return "brain"
-        case "high": return "brain.fill"
-        case "xhigh": return "sparkles"
-        case "max": return "flame"
-        default: return "brain"
-        }
+        Color.reasoningLevelIcon(level)
     }
 
     /// Available reasoning levels from the current model, or default set
@@ -62,26 +55,16 @@ struct StatusPillsColumn: View {
     }
 
     private func reasoningLevelColor(_ level: String) -> Color {
-        let levels = availableReasoningLevels
-        let index = levels.firstIndex(of: level.lowercased()) ?? 0
-        let progress = Double(index) / Double(max(levels.count - 1, 1))
-        // Interpolate from #1F5E3F to #00A69B
-        let lowR = 31.0 / 255.0, lowG = 94.0 / 255.0, lowB = 63.0 / 255.0
-        let highR = 0.0 / 255.0, highG = 166.0 / 255.0, highB = 155.0 / 255.0
-        return Color(
-            red: lowR + (progress * (highR - lowR)),
-            green: lowG + (progress * (highG - lowG)),
-            blue: lowB + (progress * (highB - lowB))
-        )
+        Color.reasoningLevel(level, levels: availableReasoningLevels)
     }
 
     // MARK: - Context Helpers
 
     private var contextPercentageColor: Color {
         if contextPercentage >= 95 {
-            return .red
+            return .tronError
         } else if contextPercentage >= 80 {
-            return .orange
+            return .tronAmber
         }
         return .tronEmerald
     }
@@ -263,9 +246,9 @@ struct TokenStatsPill: View {
 
     private var contextPercentageColor: Color {
         if contextPercentage >= 95 {
-            return .red
+            return .tronError
         } else if contextPercentage >= 80 {
-            return .orange
+            return .tronAmber
         }
         return .tronEmerald
     }

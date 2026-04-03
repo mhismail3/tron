@@ -36,20 +36,20 @@ struct GetConfirmationFallbackView: View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.shield")
                 .font(TronTypography.codeSM)
-                .foregroundStyle(.orange)
+                .foregroundStyle(.tronAmber)
 
             Text("Confirm: \(action.prefix(40))")
                 .font(TronTypography.filePath)
-                .foregroundStyle(.orange.opacity(0.9))
+                .foregroundStyle(.tronAmber.opacity(0.9))
                 .lineLimit(1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.1))
+        .background(Color.tronAmber.opacity(0.1))
         .clipShape(Capsule())
         .overlay(
             Capsule()
-                .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+                .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

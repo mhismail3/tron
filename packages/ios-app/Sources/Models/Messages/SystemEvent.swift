@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - System Event (Notifications)
 
@@ -44,7 +45,33 @@ enum SystemEvent: Equatable, Hashable {
     /// Memory retain was requested but there was nothing new since the last boundary
     case memoryRetainedNothingNew
 
-/// Human-readable description for the event
+/// Tint color for the notification pill — single source of truth.
+    var tintColor: Color {
+        switch self {
+        case .modelChange:                return .tronEmerald
+        case .reasoningLevelChange:       return .tronEmerald
+        case .interrupted:                return .tronError
+        case .transcriptionFailed:        return .tronError
+        case .transcriptionNoSpeech:      return .tronAmber
+        case .compactionInProgress:       return .tronSky
+        case .compaction:                 return .tronSky
+        case .contextCleared:             return .tronSky
+        case .messageDeleted:             return .tronSky
+        case .skillRemoved:               return .tronCyan
+        case .rulesLoaded:                return .tronIndigo
+        case .rulesActivated:             return .tronIndigo
+        case .catchingUp:                 return .tronSlate
+        case .turnFailed:                 return .tronError
+        case .subagentResultAvailable(_, _, let success):
+            return success ? .tronSuccess : .tronError
+        case .providerError:              return .tronError
+        case .memoryRetainInProgress:     return .tronPink
+        case .memoryRetained:             return .tronPink
+        case .memoryRetainedNothingNew:   return .tronPink
+        }
+    }
+
+    /// Human-readable description for the event
     var textContent: String {
         switch self {
         case .modelChange(let from, let to):

@@ -48,11 +48,11 @@ struct GetConfirmationToolViewer: View {
         case .generating:
             ProgressView()
                 .controlSize(.small)
-                .tint(.orange)
+                .tint(.tronAmber)
         case .pending:
             Image(systemName: "checkmark.shield")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.orange)
+                .foregroundStyle(.tronAmber)
         case .approved:
             Image(systemName: "checkmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -99,14 +99,14 @@ struct GetConfirmationToolViewer: View {
     private var riskColor: Color {
         switch data.params.riskLevel {
         case .low: return .tronEmerald
-        case .medium: return .orange
+        case .medium: return .tronAmber
         case .high: return .tronError
         }
     }
 
     private var textColor: Color {
         switch data.status {
-        case .generating, .pending: return .orange
+        case .generating, .pending: return .tronAmber
         case .approved: return .tronSuccess
         case .denied: return .tronError
         case .superseded: return .tronTextMuted
@@ -115,7 +115,7 @@ struct GetConfirmationToolViewer: View {
 
     private var tintColor: Color {
         switch data.status {
-        case .generating, .pending: return .orange
+        case .generating, .pending: return .tronAmber
         case .approved: return .tronSuccess
         case .denied: return .tronError
         case .superseded: return .tronTextMuted

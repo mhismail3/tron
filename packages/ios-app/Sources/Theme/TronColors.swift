@@ -38,6 +38,8 @@ extension Color {
     static let tronPurple = Color(lightHex: "#7C3AED", darkHex: "#8B5CF6")
     static let tronBlue = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
+    /// Sky - context operations accent (between tronInfo and tronCyan in hue)
+    static let tronSky = Color(lightHex: "#0284C7", darkHex: "#38BDF8")
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
@@ -458,6 +460,38 @@ struct TintedColors {
     }
 }
 
+// MARK: - Reasoning Level Colors
+
+extension Color {
+    /// Reasoning level gradient — deep green (#1F5E3F) to bright teal (#00A69B).
+    /// Interpolated linearly across available levels.
+    private static let reasoningLowRGB: (CGFloat, CGFloat, CGFloat) = (31.0 / 255.0, 94.0 / 255.0, 63.0 / 255.0)
+    private static let reasoningHighRGB: (CGFloat, CGFloat, CGFloat) = (0.0 / 255.0, 166.0 / 255.0, 155.0 / 255.0)
+
+    static func reasoningLevel(_ level: String, levels: [String] = ["low", "medium", "high", "xhigh"]) -> Color {
+        let index = levels.firstIndex(of: level.lowercased()) ?? 0
+        let progress = Double(index) / Double(max(levels.count - 1, 1))
+        let (lr, lg, lb) = reasoningLowRGB
+        let (hr, hg, hb) = reasoningHighRGB
+        return Color(
+            red: lr + progress * (hr - lr),
+            green: lg + progress * (hg - lg),
+            blue: lb + progress * (hb - lb)
+        )
+    }
+
+    static func reasoningLevelIcon(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "hare"
+        case "medium": return "brain"
+        case "high": return "brain.fill"
+        case "xhigh": return "sparkles"
+        case "max": return "flame"
+        default: return "brain"
+        }
+    }
+}
+
 // MARK: - Gradient Definitions
 
 extension LinearGradient {
@@ -534,6 +568,7 @@ extension ShapeStyle where Self == Color {
     static var tronPurple: Color { .tronPurple }
     static var tronBlue: Color { .tronBlue }
     static var tronCyan: Color { .tronCyan }
+    static var tronSky: Color { .tronSky }
     static var tronIndigo: Color { .tronIndigo }
     static var tronTeal: Color { .tronTeal }
     static var tronCoral: Color { .tronCoral }

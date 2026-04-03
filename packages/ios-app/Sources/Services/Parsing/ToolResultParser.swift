@@ -21,10 +21,4 @@ enum ToolResultParser {
         NotifyAppResultParser.parseNotifyApp(from: tool)
     }
 
-    // MARK: - Agent Query
-
-    static func parseQueryAgent(from tool: ToolUseData) -> QueryAgentChipData? {
-        AgentQueryResultParser.parseQueryAgent(from: tool)
-    }
-
 }
