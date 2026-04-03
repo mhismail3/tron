@@ -195,9 +195,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // 6. Process stream
+    // 6. Process stream (drain after turn-stopping tools to capture token usage cleanly)
+    let turn_stopping_tools = registry.turn_stopping_tool_names();
     let stream_result =
-        match stream_processor::process_stream(stream, session_id, emitter, cancel).await {
+        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools).await {
             Ok(r) => {
                 if let Some(ht) = health_tracker {
                     ht.record_success(provider_name);

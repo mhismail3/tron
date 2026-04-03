@@ -21,10 +21,10 @@ import Foundation
 /// - `text`: Regular text response
 /// - `tool_use`: Tool invocation (combined with tool.call/tool.result data)
 ///
-/// ## AskUserQuestion Handling
-/// When an `AskUserQuestion` tool is encountered:
-/// 1. It's transformed using `AskUserQuestionTransformer` for proper status detection
-/// 2. Subsequent text blocks are skipped (AskUserQuestion replaces the response)
+/// ## Interactive Tool Handling
+/// `AskUserQuestion` and `GetConfirmation` tools are transformed via dedicated
+/// transformers for proper status detection. The server's stream processor drains
+/// content after these tools, so no trailing text blocks arrive.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.
@@ -63,17 +63,9 @@ enum InterleavedContentProcessor {
         }
 
         var messages: [ChatMessage] = []
-        var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
-        var sawGetConfirmation = false  // Track if GetConfirmation was seen
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
-
-            // If AskUserQuestion or GetConfirmation was already processed, skip subsequent text blocks
-            // (the interactive UI replaces the text response)
-            if (sawAskUserQuestion || sawGetConfirmation) && blockType == ContentBlockType.text.rawValue {
-                continue
-            }
 
             if blockType == ContentBlockType.thinking.rawValue {
                 if let message = processThinkingBlock(block, timestamp: timestamp) {
@@ -94,7 +86,6 @@ enum InterleavedContentProcessor {
 
                 // Check if this is AskUserQuestion - handle specially
                 if toolName == "AskUserQuestion" {
-                    sawAskUserQuestion = true
                     if let askUserMessage = AskUserQuestionTransformer.transform(
                         toolUseId: toolUseId,
                         toolCall: toolCall,
@@ -112,7 +103,6 @@ enum InterleavedContentProcessor {
 
                 // Check if this is GetConfirmation - handle specially
                 if toolName == "GetConfirmation" {
-                    sawGetConfirmation = true
                     if let confirmMessage = GetConfirmationTransformer.transform(
                         toolUseId: toolUseId,
                         toolCall: toolCall,

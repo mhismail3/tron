@@ -1,5 +1,6 @@
 //! Stream processor — consumes `StreamEventStream`, accumulates content blocks.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -26,6 +27,9 @@ struct StreamState {
     thinking_signature: Option<String>,
     stream_start: Instant,
     ttft_ms: Option<u64>,
+    /// When true, skip all content events (text, thinking, tool calls) but keep
+    /// reading the stream to capture token usage from the Done event.
+    draining: bool,
 }
 
 impl StreamState {
@@ -41,6 +45,7 @@ impl StreamState {
             thinking_signature: None,
             stream_start: Instant::now(),
             ttft_ms: None,
+            draining: false,
         }
     }
 
@@ -192,11 +197,19 @@ impl StreamState {
 }
 
 /// Process an LLM stream, accumulating content and emitting events.
+///
+/// When a tool in `turn_stopping_tools` completes (via `ToolCallEnd`), the
+/// processor enters **drain mode**: it stops accumulating content (text,
+/// thinking, further tool calls) but keeps reading the stream to capture
+/// accurate token usage from the `Done` event. The result is built from
+/// accumulators (which contain only pre-drain content), not from the
+/// provider's final message.
 pub async fn process_stream(
     mut stream: StreamEventStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
+    turn_stopping_tools: &HashSet<String>,
 ) -> Result<StreamResult, RuntimeError> {
     let mut state = StreamState::new();
     #[allow(unused_assignments)]
@@ -226,90 +239,139 @@ pub async fn process_stream(
             Some(Err(e)) => {
                 return Err(RuntimeError::Provider(e));
             }
-            Some(Ok(stream_event)) => match stream_event {
-                StreamEvent::TextDelta { delta } => {
-                    state.handle_text_delta(delta, session_id, emitter);
+            Some(Ok(stream_event)) => {
+                // Drain mode: skip content accumulation, wait for Done/Error
+                if state.draining {
+                    match stream_event {
+                        StreamEvent::Done { message, .. } => {
+                            // Capture token usage but NOT the message (has drained content)
+                            state.token_usage.clone_from(&message.token_usage);
+                            stop_reason = "tool_use".into();
+                            break;
+                        }
+                        StreamEvent::Error { error } => {
+                            return Err(RuntimeError::Internal(error));
+                        }
+                        StreamEvent::SafetyBlock {
+                            blocked_categories,
+                            error,
+                        } => {
+                            return Err(RuntimeError::Internal(format!(
+                                "Safety block: {error} (categories: {})",
+                                blocked_categories.join(", ")
+                            )));
+                        }
+                        StreamEvent::Retry {
+                            attempt,
+                            max_retries,
+                            delay_ms,
+                            error,
+                        } => {
+                            let _ = emitter.emit(TronEvent::ApiRetry {
+                                base: BaseEvent::now(session_id),
+                                attempt,
+                                max_retries,
+                                delay_ms,
+                                error_category: error.category,
+                                error_message: error.message,
+                            });
+                        }
+                        _ => {} // Skip all content events
+                    }
+                    continue;
                 }
 
-                StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
+                match stream_event {
+                    StreamEvent::TextDelta { delta } => {
+                        state.handle_text_delta(delta, session_id, emitter);
+                    }
 
-                StreamEvent::ThinkingStart => {
-                    let _ = emitter.emit(TronEvent::ThinkingStart {
-                        base: BaseEvent::now(session_id),
-                    });
-                }
+                    StreamEvent::Start
+                    | StreamEvent::TextStart
+                    | StreamEvent::TextEnd { .. } => {}
 
-                StreamEvent::ThinkingDelta { delta } => {
-                    state.handle_thinking_delta(delta, session_id, emitter);
-                }
+                    StreamEvent::ThinkingStart => {
+                        let _ = emitter.emit(TronEvent::ThinkingStart {
+                            base: BaseEvent::now(session_id),
+                        });
+                    }
 
-                StreamEvent::ThinkingEnd {
-                    thinking,
-                    signature,
-                } => {
-                    state.handle_thinking_end(thinking, signature, session_id, emitter);
-                }
+                    StreamEvent::ThinkingDelta { delta } => {
+                        state.handle_thinking_delta(delta, session_id, emitter);
+                    }
 
-                StreamEvent::ToolCallStart { tool_call_id, name } => {
-                    state.handle_tool_call_start(tool_call_id, name, session_id, emitter);
-                }
+                    StreamEvent::ThinkingEnd {
+                        thinking,
+                        signature,
+                    } => {
+                        state.handle_thinking_end(thinking, signature, session_id, emitter);
+                    }
 
-                StreamEvent::ToolCallDelta {
-                    tool_call_id,
-                    arguments_delta,
-                } => {
-                    state.handle_tool_call_delta(
+                    StreamEvent::ToolCallStart { tool_call_id, name } => {
+                        state.handle_tool_call_start(tool_call_id, name, session_id, emitter);
+                    }
+
+                    StreamEvent::ToolCallDelta {
                         tool_call_id,
                         arguments_delta,
-                        session_id,
-                        emitter,
-                    );
-                }
+                    } => {
+                        state.handle_tool_call_delta(
+                            tool_call_id,
+                            arguments_delta,
+                            session_id,
+                            emitter,
+                        );
+                    }
 
-                StreamEvent::ToolCallEnd { tool_call } => {
-                    state.handle_tool_call_end(tool_call);
-                }
+                    StreamEvent::ToolCallEnd { tool_call } => {
+                        let name = tool_call.name.clone();
+                        state.handle_tool_call_end(tool_call);
+                        if turn_stopping_tools.contains(&name) {
+                            state.draining = true;
+                        }
+                    }
 
-                StreamEvent::Done {
-                    message,
-                    stop_reason: sr,
-                } => {
-                    stop_reason = sr;
-                    state.token_usage.clone_from(&message.token_usage);
-                    final_message = Some(message);
-                    break;
-                }
+                    StreamEvent::Done {
+                        message,
+                        stop_reason: sr,
+                    } => {
+                        stop_reason = sr;
+                        state.token_usage.clone_from(&message.token_usage);
+                        final_message = Some(message);
+                        break;
+                    }
 
-                StreamEvent::Error { error } => {
-                    return Err(RuntimeError::Internal(error));
-                }
+                    StreamEvent::Error { error } => {
+                        return Err(RuntimeError::Internal(error));
+                    }
 
-                StreamEvent::Retry {
-                    attempt,
-                    max_retries,
-                    delay_ms,
-                    error,
-                } => {
-                    let _ = emitter.emit(TronEvent::ApiRetry {
-                        base: BaseEvent::now(session_id),
+                    StreamEvent::Retry {
                         attempt,
                         max_retries,
                         delay_ms,
-                        error_category: error.category,
-                        error_message: error.message,
-                    });
-                }
+                        error,
+                    } => {
+                        let _ = emitter.emit(TronEvent::ApiRetry {
+                            base: BaseEvent::now(session_id),
+                            attempt,
+                            max_retries,
+                            delay_ms,
+                            error_category: error.category,
+                            error_message: error.message,
+                        });
+                    }
 
-                StreamEvent::SafetyBlock {
-                    blocked_categories,
-                    error,
-                } => {
-                    return Err(RuntimeError::Internal(format!(
-                        "Safety block: {error} (categories: {})",
-                        blocked_categories.join(", ")
-                    )));
+                    StreamEvent::SafetyBlock {
+                        blocked_categories,
+                        error,
+                    } => {
+                        return Err(RuntimeError::Internal(format!(
+                            "Safety block: {error} (categories: {})",
+                            blocked_categories.join(", ")
+                        )));
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -389,11 +451,16 @@ fn build_message(
 mod tests {
     use super::*;
     use async_stream::stream;
+    use std::collections::HashSet;
     use std::pin::Pin;
     use crate::core::events::RetryErrorInfo;
 
     fn make_emitter() -> Arc<EventEmitter> {
         Arc::new(EventEmitter::new())
+    }
+
+    fn no_stopping_tools() -> HashSet<String> {
+        HashSet::new()
     }
 
     fn text_stream(text: &str) -> StreamEventStream {
@@ -487,7 +554,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel)
+        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -505,7 +572,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel)
+        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -534,7 +601,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel)
+        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -567,7 +634,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -591,7 +658,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools()).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), RuntimeError::Provider(_)));
@@ -615,7 +682,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -653,7 +720,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
         assert!(!result.interrupted);
@@ -679,7 +746,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools()).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -698,7 +765,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -712,7 +779,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel)
+        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -727,7 +794,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel)
+        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -747,7 +814,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel)
+        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -842,7 +909,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -946,7 +1013,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
             .await
             .unwrap();
 
@@ -961,5 +1028,345 @@ mod tests {
         if let AssistantContent::Thinking { signature, .. } = thinking_block.unwrap() {
             assert_eq!(signature.as_deref(), Some("sig-xyz"));
         }
+    }
+
+    // -- drain mode tests --
+
+    fn ask_user_stopping_tools() -> HashSet<String> {
+        HashSet::from(["AskUserQuestion".to_string()])
+    }
+
+    fn both_stopping_tools() -> HashSet<String> {
+        HashSet::from([
+            "AskUserQuestion".to_string(),
+            "GetConfirmation".to_string(),
+        ])
+    }
+
+    /// Helper: build a Done event with token usage.
+    fn done_with_usage(content: Vec<AssistantContent>, stop_reason: &str) -> StreamEvent {
+        StreamEvent::Done {
+            message: AssistantMessage {
+                content,
+                token_usage: Some(TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 42,
+                    ..Default::default()
+                }),
+            },
+            stop_reason: stop_reason.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_after_interactive_tool_drops_trailing_text() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
+            yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
+            yield Ok(StreamEvent::ToolCallStart {
+                tool_call_id: "tc-ask".into(),
+                name: "AskUserQuestion".into(),
+            });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-ask".into(),
+                arguments_delta: r#"{"questions":["q1"]}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+                    let mut m = Map::new();
+                    let _ = m.insert("questions".into(), serde_json::json!(["q1"]));
+                    m
+                }),
+            });
+            // Trailing text — should be drained
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: " trailing garbage".into() });
+            yield Ok(StreamEvent::TextEnd { text: " trailing garbage".into(), signature: None });
+            yield Ok(done_with_usage(vec![], "end_turn"));
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+            .await
+            .unwrap();
+
+        assert!(!result.interrupted);
+        assert_eq!(result.stop_reason, "tool_use");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
+
+        // Token usage captured from Done event
+        let usage = result.token_usage.expect("should have token usage");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 42);
+
+        // Message should have text + tool use, no trailing text
+        let text_blocks: Vec<_> = result.message.content.iter().filter(|c| matches!(c, AssistantContent::Text { .. })).collect();
+        assert_eq!(text_blocks.len(), 1);
+        if let AssistantContent::Text { text, .. } = &text_blocks[0] {
+            assert_eq!(text, "hello");
+        }
+        let tool_blocks: Vec<_> = result.message.content.iter().filter(|c| matches!(c, AssistantContent::ToolUse { .. })).collect();
+        assert_eq!(tool_blocks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn drain_preserves_thinking_and_text_before_interactive() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::ThinkingStart);
+            yield Ok(StreamEvent::ThinkingDelta { delta: "deep thought".into() });
+            yield Ok(StreamEvent::ThinkingEnd { thinking: "deep thought".into(), signature: Some("sig-1".into()) });
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: "answer".into() });
+            yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
+            yield Ok(StreamEvent::ToolCallStart {
+                tool_call_id: "tc-conf".into(),
+                name: "GetConfirmation".into(),
+            });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-conf".into(),
+                arguments_delta: r#"{"action":"delete"}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-conf", "GetConfirmation", {
+                    let mut m = Map::new();
+                    let _ = m.insert("action".into(), serde_json::json!("delete"));
+                    m
+                }),
+            });
+            // Trailing text — drained
+            yield Ok(StreamEvent::TextDelta { delta: "extra".into() });
+            yield Ok(done_with_usage(vec![], "end_turn"));
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools())
+            .await
+            .unwrap();
+
+        assert!(!result.interrupted);
+        // Thinking preserved
+        let thinking = result.message.content.iter().find(|c| matches!(c, AssistantContent::Thinking { .. }));
+        assert!(thinking.is_some());
+        if let AssistantContent::Thinking { thinking: t, signature } = thinking.unwrap() {
+            assert_eq!(t, "deep thought");
+            assert_eq!(signature.as_deref(), Some("sig-1"));
+        }
+        // Text preserved
+        let text = result.message.content.iter().find(|c| matches!(c, AssistantContent::Text { .. }));
+        assert!(text.is_some());
+        if let AssistantContent::Text { text: t, .. } = text.unwrap() {
+            assert_eq!(t, "answer");
+        }
+        // Tool preserved
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "GetConfirmation");
+    }
+
+    #[tokio::test]
+    async fn drain_with_preceding_tools_keeps_all_before_interactive() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-bash".into(), name: "Bash".into() });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-bash".into(),
+                arguments_delta: r#"{"command":"ls"}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-bash", "Bash", {
+                    let mut m = Map::new();
+                    let _ = m.insert("command".into(), serde_json::json!("ls"));
+                    m
+                }),
+            });
+            yield Ok(StreamEvent::ToolCallStart {
+                tool_call_id: "tc-ask".into(),
+                name: "AskUserQuestion".into(),
+            });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-ask".into(),
+                arguments_delta: r#"{"questions":["q"]}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+                    let mut m = Map::new();
+                    let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                    m
+                }),
+            });
+            // Tool after interactive — should be drained
+            yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-edit".into(), name: "Edit".into() });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-edit".into(),
+                arguments_delta: r#"{"file":"x"}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-edit", "Edit", Map::new()),
+            });
+            yield Ok(done_with_usage(vec![], "tool_use"));
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+            .await
+            .unwrap();
+
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0].name, "Bash");
+        assert_eq!(result.tool_calls[1].name, "AskUserQuestion");
+        // Edit should NOT be in tool_calls
+        assert!(!result.tool_calls.iter().any(|tc| tc.name == "Edit"));
+    }
+
+    #[tokio::test]
+    async fn no_drain_for_non_stopping_tools() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
+            yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
+            yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "Bash".into() });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-1".into(),
+                arguments_delta: r#"{"command":"ls"}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-1", "Bash", {
+                    let mut m = Map::new();
+                    let _ = m.insert("command".into(), serde_json::json!("ls"));
+                    m
+                }),
+            });
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: " world".into() });
+            yield Ok(StreamEvent::TextEnd { text: " world".into(), signature: None });
+            yield Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![
+                        AssistantContent::text("hello world"),
+                        AssistantContent::ToolUse {
+                            id: "tc-1".into(),
+                            name: "Bash".into(),
+                            arguments: Map::new(),
+                            thought_signature: None,
+                        },
+                    ],
+                    token_usage: Some(TokenUsage { input_tokens: 50, output_tokens: 20, ..Default::default() }),
+                },
+                stop_reason: "tool_use".into(),
+            });
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        // AskUserQuestion is in the set, but Bash is not — no drain
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+            .await
+            .unwrap();
+
+        assert!(!result.interrupted);
+        assert_eq!(result.stop_reason, "tool_use");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "Bash");
+        // Message should come from final_message (has combined text)
+        let usage = result.token_usage.unwrap();
+        assert_eq!(usage.input_tokens, 50);
+    }
+
+    #[tokio::test]
+    async fn cancel_during_drain_returns_interrupted() {
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::ToolCallStart {
+                tool_call_id: "tc-ask".into(),
+                name: "AskUserQuestion".into(),
+            });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-ask".into(),
+                arguments_delta: r#"{"questions":["q"]}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+                    let mut m = Map::new();
+                    let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                    m
+                }),
+            });
+            // Now draining — cancel before Done arrives
+            cancel_clone.cancel();
+            yield Ok(StreamEvent::TextDelta { delta: "never seen".into() });
+            yield Ok(done_with_usage(vec![], "end_turn"));
+        };
+
+        let emitter = make_emitter();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+            .await
+            .unwrap();
+
+        assert!(result.interrupted);
+        assert_eq!(result.stop_reason, "interrupted");
+        // Tool call should still be in the result (was finalized before drain)
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
+    }
+
+    #[tokio::test]
+    async fn drain_empty_stopping_set_no_change() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
+            yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
+            yield Ok(StreamEvent::ToolCallStart {
+                tool_call_id: "tc-ask".into(),
+                name: "AskUserQuestion".into(),
+            });
+            yield Ok(StreamEvent::ToolCallDelta {
+                tool_call_id: "tc-ask".into(),
+                arguments_delta: r#"{"questions":["q"]}"#.into(),
+            });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+                    let mut m = Map::new();
+                    let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                    m
+                }),
+            });
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: " trailing".into() });
+            yield Ok(StreamEvent::TextEnd { text: " trailing".into(), signature: None });
+            yield Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text("hello trailing")],
+                    token_usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
+                },
+                stop_reason: "tool_use".into(),
+            });
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        // Empty set — no drain should happen
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+            .await
+            .unwrap();
+
+        // Trailing text should be present (from final_message)
+        assert_eq!(result.stop_reason, "tool_use");
+        assert_eq!(result.tool_calls.len(), 1);
+        // Message comes from final_message which has combined text
+        let has_text = result.message.content.iter().any(|c| {
+            matches!(c, AssistantContent::Text { text, .. } if text.contains("trailing"))
+        });
+        assert!(has_text, "trailing text should be preserved when no drain");
     }
 }

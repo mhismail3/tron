@@ -4,6 +4,7 @@
 //! The runtime registers tools at startup and queries the registry to dispatch
 //! tool calls and to generate the LLM tool schema.
 
+use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
@@ -83,6 +84,18 @@ impl ToolRegistry {
         self.tools.contains_key(name)
     }
 
+    /// Return names of all tools where `stops_turn()` is true.
+    ///
+    /// Used by the stream processor to detect interactive tools during streaming
+    /// and enter drain mode (stop accumulating content but keep reading for token usage).
+    pub fn turn_stopping_tool_names(&self) -> HashSet<String> {
+        self.tools
+            .iter()
+            .filter(|(_, t)| t.stops_turn())
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Register multiple tools at once (e.g., from MCP server discovery).
     pub fn register_many(&mut self, tools: Vec<Arc<dyn TronTool>>) {
         for tool in tools {
@@ -133,6 +146,47 @@ mod tests {
 
         fn definition(&self) -> Tool {
             ToolSchemaBuilder::new(self.tool_name.clone(), format!("Stub {}", self.tool_name))
+                .build()
+        }
+
+        async fn execute(
+            &self,
+            _params: Value,
+            _ctx: &ToolContext,
+        ) -> Result<TronToolResult, ToolError> {
+            Ok(crate::core::tools::text_result("ok", false))
+        }
+    }
+
+    /// Stub tool that stops the turn (like AskUserQuestion).
+    struct StoppingStubTool {
+        tool_name: String,
+    }
+
+    impl StoppingStubTool {
+        fn new(name: &str) -> Self {
+            Self {
+                tool_name: name.into(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TronTool for StoppingStubTool {
+        fn name(&self) -> &str {
+            &self.tool_name
+        }
+
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+
+        fn stops_turn(&self) -> bool {
+            true
+        }
+
+        fn definition(&self) -> Tool {
+            ToolSchemaBuilder::new(self.tool_name.clone(), format!("Stopping {}", self.tool_name))
                 .build()
         }
 
@@ -301,5 +355,31 @@ mod tests {
         let defs2 = reg.definitions();
         assert_eq!(defs2.len(), 1);
         assert_eq!(defs2[0].name, "Read");
+    }
+
+    #[test]
+    fn turn_stopping_tool_names_returns_correct_set() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        reg.register(Arc::new(StubTool::new("Bash")));
+        reg.register(Arc::new(StoppingStubTool::new("AskUserQuestion")));
+        reg.register(Arc::new(StoppingStubTool::new("GetConfirmation")));
+        reg.register(Arc::new(StubTool::new("Write")));
+
+        let stopping = reg.turn_stopping_tool_names();
+        assert_eq!(stopping.len(), 2);
+        assert!(stopping.contains("AskUserQuestion"));
+        assert!(stopping.contains("GetConfirmation"));
+        assert!(!stopping.contains("Read"));
+    }
+
+    #[test]
+    fn turn_stopping_tool_names_empty_when_none_stop() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        reg.register(Arc::new(StubTool::new("Write")));
+
+        let stopping = reg.turn_stopping_tool_names();
+        assert!(stopping.is_empty());
     }
 }

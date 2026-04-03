@@ -127,13 +127,13 @@ final class TurnLifecycleCoordinator {
             context.logDebug("Using streaming message for turn metadata at index \(index)")
         } else if let startIndex = context.turnStartMessageIndex,
                   startIndex < context.messages.count {
-            // Find the LAST assistant message (.text or .toolUse) in this turn.
+            // Find the LAST assistant message in this turn.
             // This ensures the stats line appears after all parallel tool chips,
             // not between the first and second tool call.
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text, .toolUse:
+                    case .text, .toolUse, .askUserQuestion, .getConfirmation:
                         targetIndex = i
                     default:
                         break
