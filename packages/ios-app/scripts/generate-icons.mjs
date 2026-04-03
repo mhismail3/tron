@@ -10,8 +10,8 @@ const IOS_ROOT = join(__dirname, "..");
 const ASSETS = join(IOS_ROOT, "Sources", "Assets.xcassets");
 const ICON_LAYERS = join(IOS_ROOT, "Sources", "IconLayers");
 
-const SOURCE_SVG = "/Users/moose/Downloads/mhismail3.svg";
-const ORIGINAL_FILL = "#3d7f4d";
+const SOURCE_SVG = join(ASSETS, "TronLogoVector.imageset", "tron-logo.svg");
+const ORIGINAL_FILL = "#000000";
 
 const COLORS = {
   emerald: "#10B981",
@@ -24,6 +24,7 @@ const COLORS = {
 const BG = {
   dark: "#090909",
   white: "#FFFFFF",
+  cream: "#F3EDE3",
 };
 
 function recolorSvg(fromColor, toColor) {
@@ -121,8 +122,10 @@ async function main() {
 
   console.log("Generating app icons...");
 
-  // Production icon: white moose on emerald bg (iOS auto-generates dark/tinted)
-  await generateAppIcon(whiteSvg, COLORS.emerald, join(ASSETS, "AppIcon.appiconset", "icon-1024.png"));
+  // Production icon: explicit light + dark variants
+  const deepEmeraldSvg = recolorSvg(ORIGINAL_FILL, "#059669");
+  await generateAppIcon(deepEmeraldSvg, BG.cream, join(ASSETS, "AppIcon.appiconset", "icon-1024-light.png"));
+  await generateAppIcon(whiteSvg, BG.dark, join(ASSETS, "AppIcon.appiconset", "icon-1024-dark.png"));
 
   // Beta icon: white moose on amber bg (iOS auto-generates dark/tinted)
   await generateAppIcon(whiteSvg, COLORS.amber, join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"));
@@ -151,7 +154,8 @@ async function main() {
   let allOk = true;
   const checks = [
     // App icons (1024x1024, no alpha needed)
-    [join(ASSETS, "AppIcon.appiconset", "icon-1024.png"), 1024, 1024],
+    [join(ASSETS, "AppIcon.appiconset", "icon-1024-light.png"), 1024, 1024],
+    [join(ASSETS, "AppIcon.appiconset", "icon-1024-dark.png"), 1024, 1024],
     [join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"), 1024, 1024],
     // In-app logos (transparent)
     [join(logoDir, "tron-logo.png"), 100, 100, true],
@@ -171,7 +175,7 @@ async function main() {
   }
 
   if (allOk) {
-    console.log("\nAll 11 files generated and verified successfully.");
+    console.log("\nAll 12 files generated and verified successfully.");
   } else {
     console.error("\nSome verifications failed!");
     process.exit(1);

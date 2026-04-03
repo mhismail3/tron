@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.tron
   deploymentTarget:
     iOS: "18.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "2640"
   developmentLanguage: en
   generateEmptyDirectories: true
   createIntermediateGroups: true
@@ -30,6 +30,8 @@ settings:
     INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
     INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
     INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
 
 targets:
