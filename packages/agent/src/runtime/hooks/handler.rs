@@ -23,8 +23,10 @@ use super::types::{HookContext, HookExecutionMode, HookResult, HookType};
 /// # Execution Mode
 ///
 /// Handlers declare whether they should run in blocking or background mode.
-/// Note that forced-blocking hook types (`PreToolUse`, `UserPromptSubmit`,
-/// `PreCompact`) always run in blocking mode regardless of the declared mode.
+/// Forced-blocking hook types (`PreToolUse`, `UserPromptSubmit`,
+/// `PreCompact`) override to blocking by default. Handlers that return
+/// `true` from [`bypass_forced_blocking`](HookHandler::bypass_forced_blocking)
+/// keep their declared mode instead.
 ///
 /// # Filtering
 ///
@@ -45,8 +47,9 @@ pub trait HookHandler: Send + Sync {
 
     /// Preferred execution mode. Default: Blocking.
     ///
-    /// Note: forced-blocking hook types always run in blocking mode
-    /// regardless of this setting.
+    /// For forced-blocking hook types, this is overridden to `Blocking`
+    /// unless [`bypass_forced_blocking`](Self::bypass_forced_blocking)
+    /// returns `true`.
     fn execution_mode(&self) -> HookExecutionMode {
         HookExecutionMode::Blocking
     }
@@ -59,6 +62,16 @@ pub trait HookHandler: Send + Sync {
     /// Optional timeout in milliseconds.
     fn timeout_ms(&self) -> Option<u64> {
         None
+    }
+
+    /// Whether this handler should run in its declared [`execution_mode`](Self::execution_mode)
+    /// even when the hook type is forced-blocking.
+    ///
+    /// Default: `false` — forced-blocking types override to `Blocking`.
+    /// Return `true` only for handlers that structurally cannot `Block` or
+    /// `Modify` (e.g., fire-and-forget LLM subsession hooks).
+    fn bypass_forced_blocking(&self) -> bool {
+        false
     }
 
     /// Execute the handler with the given context.
@@ -154,6 +167,12 @@ mod tests {
     async fn test_handler_default_timeout() {
         let handler = make_handler("test", HookType::PreToolUse);
         assert!(handler.timeout_ms().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handler_default_bypass_forced_blocking() {
+        let handler = make_handler("test", HookType::UserPromptSubmit);
+        assert!(!handler.bypass_forced_blocking());
     }
 
     #[tokio::test]

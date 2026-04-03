@@ -234,10 +234,11 @@ impl HookEngine {
 
     /// Determine the effective execution mode for a handler.
     ///
-    /// Forced-blocking hook types always run in blocking mode regardless
-    /// of the handler's declared mode.
+    /// Forced-blocking hook types default to blocking mode, but handlers
+    /// that return `true` from [`HookHandler::bypass_forced_blocking`]
+    /// keep their declared mode.
     fn effective_mode(handler: &Arc<dyn HookHandler>, hook_type: HookType) -> HookExecutionMode {
-        if hook_type.is_forced_blocking() {
+        if hook_type.is_forced_blocking() && !handler.bypass_forced_blocking() {
             HookExecutionMode::Blocking
         } else {
             handler.execution_mode()
@@ -791,6 +792,136 @@ mod tests {
     async fn test_pending_background_count() {
         let engine = HookEngine::new(HookRegistry::new());
         assert_eq!(engine.pending_background_count(), 0);
+    }
+
+    // --- bypass_forced_blocking tests ---
+
+    struct BypassHandler {
+        name: String,
+        hook_type: HookType,
+        mode: HookExecutionMode,
+        bypass: bool,
+        called: Arc<AtomicBool>,
+        result: HookResult,
+    }
+
+    #[async_trait]
+    impl HookHandler for BypassHandler {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn hook_type(&self) -> HookType {
+            self.hook_type
+        }
+        fn execution_mode(&self) -> HookExecutionMode {
+            self.mode
+        }
+        fn bypass_forced_blocking(&self) -> bool {
+            self.bypass
+        }
+        async fn handle(&self, _ctx: &HookContext) -> Result<HookResult, HookError> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(self.result.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bypass_forced_blocking_runs_in_background() {
+        let called = Arc::new(AtomicBool::new(false));
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(BypassHandler {
+            name: "bypass-bg".to_string(),
+            hook_type: HookType::UserPromptSubmit,
+            mode: HookExecutionMode::Background,
+            bypass: true,
+            called: Arc::clone(&called),
+            result: HookResult::continue_(),
+        }));
+
+        let engine = HookEngine::new(registry);
+        let ctx = HookContext::UserPromptSubmit {
+            session_id: "s1".to_string(),
+            timestamp: "t".to_string(),
+            prompt: "test".to_string(),
+        };
+        let result = engine.execute(&ctx).await;
+
+        // No blocking handlers → Continue
+        assert_eq!(result.action, HookAction::Continue);
+
+        // Background handler should eventually run
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        engine.wait_for_background().await;
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_no_bypass_still_forced_blocking() {
+        let called = Arc::new(AtomicBool::new(false));
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(BypassHandler {
+            name: "no-bypass".to_string(),
+            hook_type: HookType::UserPromptSubmit,
+            mode: HookExecutionMode::Background,
+            bypass: false,
+            called: Arc::clone(&called),
+            result: HookResult::block("blocked prompt"),
+        }));
+
+        let engine = HookEngine::new(registry);
+        let ctx = HookContext::UserPromptSubmit {
+            session_id: "s1".to_string(),
+            timestamp: "t".to_string(),
+            prompt: "test".to_string(),
+        };
+        let result = engine.execute(&ctx).await;
+
+        // Should be blocked because bypass=false → forced to blocking
+        assert!(result.is_blocked());
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_mixed_bypass_and_blocking_on_same_event() {
+        let blocking_called = Arc::new(AtomicBool::new(false));
+        let background_called = Arc::new(AtomicBool::new(false));
+
+        let mut registry = HookRegistry::new();
+        // Script-like: no bypass, forced to blocking
+        registry.register(Arc::new(BypassHandler {
+            name: "script-hook".to_string(),
+            hook_type: HookType::UserPromptSubmit,
+            mode: HookExecutionMode::Blocking,
+            bypass: false,
+            called: Arc::clone(&blocking_called),
+            result: HookResult::continue_(),
+        }));
+        // Prompt-like: bypass, runs in background
+        registry.register(Arc::new(BypassHandler {
+            name: "prompt-hook".to_string(),
+            hook_type: HookType::UserPromptSubmit,
+            mode: HookExecutionMode::Background,
+            bypass: true,
+            called: Arc::clone(&background_called),
+            result: HookResult::continue_(),
+        }));
+
+        let engine = HookEngine::new(registry);
+        let ctx = HookContext::UserPromptSubmit {
+            session_id: "s1".to_string(),
+            timestamp: "t".to_string(),
+            prompt: "test".to_string(),
+        };
+        let result = engine.execute(&ctx).await;
+
+        assert_eq!(result.action, HookAction::Continue);
+        // Blocking handler ran synchronously
+        assert!(blocking_called.load(Ordering::SeqCst));
+
+        // Background handler should run after waiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        engine.wait_for_background().await;
+        assert!(background_called.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

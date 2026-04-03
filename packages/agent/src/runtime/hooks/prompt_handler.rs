@@ -229,6 +229,10 @@ impl HookHandler for PromptHookHandler {
         HookExecutionMode::Background
     }
 
+    fn bypass_forced_blocking(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> Option<&str> {
         Some(&self.label)
     }

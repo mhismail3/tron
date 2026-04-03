@@ -25,7 +25,7 @@
 //!
 //! YAML frontmatter (`type`, `label`, `enabled`, `priority`) + prompt body.
 //! Spawned as async subsessions via [`SubagentManager`]. Always
-//! background, never blocks the main agent.
+//! background — bypasses forced-blocking to never delay the main agent.
 //!
 //! ```text
 //! ---

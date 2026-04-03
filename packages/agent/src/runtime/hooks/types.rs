@@ -35,11 +35,17 @@ pub enum HookType {
 }
 
 impl HookType {
-    /// Returns `true` if this hook type is always executed in blocking mode.
+    /// Returns `true` if this hook type defaults to blocking mode for all
+    /// handlers.
     ///
     /// Forced-blocking hooks can affect agent flow (block a tool call,
     /// modify a prompt, prevent compaction). Running them in the background
     /// would create race conditions.
+    ///
+    /// Handlers can opt out by returning `true` from
+    /// [`HookHandler::bypass_forced_blocking()`], keeping their declared
+    /// execution mode. Only handlers that structurally cannot `Block` or
+    /// `Modify` should do this.
     #[must_use]
     pub fn is_forced_blocking(self) -> bool {
         matches!(
