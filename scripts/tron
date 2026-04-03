@@ -166,6 +166,39 @@ run_coverage() {
     print_success "Coverage report: $RUST_WORKSPACE/target/coverage/tarpaulin-report.html"
 }
 
+sync_managed_skills() {
+    local src_dir="$PROJECT_DIR/packages/agent/skills"
+    local dst_dir="$HOME/.tron/skills"
+
+    if [ ! -d "$src_dir" ]; then
+        return 0
+    fi
+
+    local synced=0
+    local skipped=0
+
+    for skill_src in "$src_dir"/*/; do
+        [ -d "$skill_src" ] || continue
+        local name
+        name=$(basename "$skill_src")
+        local skill_dst="$dst_dir/$name"
+
+        # Skip if target exists and is NOT managed (user-owned)
+        if [ -d "$skill_dst" ] && [ ! -f "$skill_dst/.managed" ]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        mkdir -p "$skill_dst"
+        rsync -a --delete --exclude='node_modules' --exclude='.DS_Store' "$skill_src" "$skill_dst/"
+        synced=$((synced + 1))
+    done
+
+    if [ "$synced" -gt 0 ] || [ "$skipped" -gt 0 ]; then
+        print_success "Skills: $synced synced, $skipped user-owned (skipped)"
+    fi
+}
+
 bench_baseline_triplet() {
     local os arch
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -340,6 +373,9 @@ cmd_dev() {
     mkdir -p "$HOME/.tron/system/mods/transcribe"
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
+
+    # Sync managed skills from repo
+    sync_managed_skills
 
     if [ "$do_build" = true ]; then
         build_rust_dev
@@ -687,6 +723,10 @@ cmd_deploy() {
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
 
+    # Sync managed skills from repo
+    print_status "Syncing managed skills..."
+    sync_managed_skills
+
     # Install runtime CLI and shared library (only if changed)
     for f in tron-cli tron-lib.sh; do
         if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$DEPLOY_DIR/$f"; then
@@ -805,6 +845,10 @@ cmd_install() {
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
     cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
     print_success "Deployed transcription sidecar"
+
+    # Sync managed skills from repo
+    print_status "Syncing managed skills..."
+    sync_managed_skills
 
     # Create launchd plist
     print_status "Creating launchd service..."

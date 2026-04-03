@@ -1,0 +1,13 @@
+{
+  "name": "tron-json-render",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@json-render/core": "^0.16.0",
+    "@json-render/react": "^0.16.0",
+    "@json-render/shadcn": "^0.16.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
