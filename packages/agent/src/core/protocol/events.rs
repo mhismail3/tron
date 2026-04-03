@@ -744,11 +744,25 @@ tron_events! {
         total_activated: u32,
     } => "rules_activated",
 
-    /// Skill removed.
-    SkillRemoved {
+    /// Skill activated in session.
+    SkillActivated {
         #[serde(rename = "skillName")]
         skill_name: String,
-    } => "skill_removed",
+        source: String,
+    } => "skill_activated",
+
+    /// Skill deactivated from session.
+    SkillDeactivated {
+        #[serde(rename = "skillName")]
+        skill_name: String,
+    } => "skill_deactivated",
+
+    /// Ephemeral spell cast.
+    SpellCast {
+        #[serde(rename = "spellName")]
+        spell_name: String,
+        source: String,
+    } => "spell_cast",
 
     // -- Subagents --
 
@@ -1694,9 +1708,19 @@ mod tests {
                 }],
                 total_activated: 1,
             },
-            TronEvent::SkillRemoved {
+            TronEvent::SkillActivated {
                 base: base.clone(),
-                skill_name: "n".into(),
+                skill_name: "browser".into(),
+                source: "global".into(),
+            },
+            TronEvent::SkillDeactivated {
+                base: base.clone(),
+                skill_name: "browser".into(),
+            },
+            TronEvent::SpellCast {
+                base: base.clone(),
+                spell_name: "commit".into(),
+                source: "global".into(),
             },
             TronEvent::SubagentSpawned {
                 base: base.clone(),
@@ -1917,17 +1941,6 @@ mod tests {
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["totalFiles"], 3);
         assert_eq!(json["dynamicRulesCount"], 1);
-    }
-
-    #[test]
-    fn skill_removed_event_type() {
-        let e = TronEvent::SkillRemoved {
-            base: BaseEvent::now("s1"),
-            skill_name: "web-search".into(),
-        };
-        assert_eq!(e.event_type(), "skill_removed");
-        let json = serde_json::to_value(&e).unwrap();
-        assert_eq!(json["skillName"], "web-search");
     }
 
     #[test]

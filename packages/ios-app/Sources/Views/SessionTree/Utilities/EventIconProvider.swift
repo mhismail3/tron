@@ -35,7 +35,7 @@ enum EventIconProvider {
             return "doc.text.badge.plus"
         case .contextCleared:
             return "clear.fill"
-        case .skillAdded, .skillRemoved:
+        case .skillActivated, .skillDeactivated:
             return "sparkles"
         case .compactBoundary, .compactSummary:
             return "arrow.down.right.and.arrow.up.left"
@@ -106,9 +106,9 @@ enum EventIconProvider {
             return .tronPurple
         case .contextCleared:
             return .tronCyan
-        case .skillAdded:
+        case .skillActivated:
             return .tronSuccess
-        case .skillRemoved:
+        case .skillDeactivated:
             return .tronWarning
         case .compactBoundary, .compactSummary:
             return .tronCyan

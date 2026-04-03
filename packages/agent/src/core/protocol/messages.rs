@@ -402,6 +402,9 @@ pub struct Context {
     /// Skill context (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
+    /// Skill removal notice (one-turn "stop following" instruction for deactivated skills).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_removal_context: Option<String>,
     /// Completed background job results (unified processes + subagents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_results_context: Option<String>,
@@ -789,6 +792,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,

@@ -237,17 +237,26 @@ extension ChatViewModel {
         appendToMessages(deletedMessage)
     }
 
-    func handleSkillRemoved(_ pluginResult: SkillRemovedPlugin.Result) {
-        logger.info("Skill removed: \(pluginResult.skillName)", category: .events)
+    func handleSkillActivated(_ pluginResult: SkillActivatedPlugin.Result) {
+        logger.info("Skill activated: \(pluginResult.skillName) (\(pluginResult.source))", category: .events)
 
-        // Add skill removed notification pill to chat
-        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: pluginResult.skillName)
-        appendToMessages(skillRemovedMessage)
-
-        // Refresh context from server - skill removal changes context size
+        // Refresh context from server - skill activation changes context size
         launchBackground { [weak self] in
             await self?.refreshContextFromServer()
         }
+    }
+
+    func handleSkillDeactivated(_ pluginResult: SkillDeactivatedPlugin.Result) {
+        logger.info("Skill deactivated: \(pluginResult.skillName)", category: .events)
+
+        // Refresh context from server - skill deactivation changes context size
+        launchBackground { [weak self] in
+            await self?.refreshContextFromServer()
+        }
+    }
+
+    func handleSpellCast(_ pluginResult: SpellCastPlugin.Result) {
+        logger.info("Spell cast: \(pluginResult.spellName) (\(pluginResult.source))", category: .events)
     }
 
     func handleRulesActivated(_ pluginResult: RulesActivatedPlugin.Result) {

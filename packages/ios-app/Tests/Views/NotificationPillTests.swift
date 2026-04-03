@@ -71,8 +71,8 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    func testSkillRemovedNotificationCreation() {
-        let view = SkillRemovedNotificationView(skillName: "test-skill")
+    func testSkillDeactivatedNotificationCreation() {
+        let view = SkillDeactivatedNotificationView(skillName: "test-skill")
         XCTAssertNotNil(view)
     }
 

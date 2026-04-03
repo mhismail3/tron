@@ -300,12 +300,12 @@ fn build_added_skills(
     session_id: &str,
 ) -> Result<Vec<Value>, RpcError> {
     let added_events = event_store
-        .get_events_by_type(session_id, &["skill.added"], None)
+        .get_events_by_type(session_id, &["skill.activated"], None)
         .map_err(|error| RpcError::Internal {
             message: error.to_string(),
         })?;
     let removed_events = event_store
-        .get_events_by_type(session_id, &["skill.removed"], None)
+        .get_events_by_type(session_id, &["skill.deactivated"], None)
         .map_err(|error| RpcError::Internal {
             message: error.to_string(),
         })?;

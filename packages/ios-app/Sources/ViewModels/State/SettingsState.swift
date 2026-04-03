@@ -25,6 +25,11 @@ final class SettingsState {
     var hooksLlmModel: String = "claude-haiku-4-5-20251001"
     var builtinHooks: [BuiltinHookSetting] = []
 
+    // MARK: - Skills
+
+    var skillsCompactionPolicy: String = "clearAll"
+    var skillsShowIndex: String = "always"
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -78,6 +83,8 @@ final class SettingsState {
                 quickSessionWorkspace = workspace
             }
             chatWorkspace = settings.chatWorkingDirectory ?? ""
+            skillsCompactionPolicy = settings.skillsCompactionPolicy
+            skillsShowIndex = settings.skillsShowIndex
             isLoaded = true
         } catch {
             loadError = error.localizedDescription
@@ -115,6 +122,8 @@ final class SettingsState {
         chatWorkspace = ""
         hooksLlmModel = "claude-haiku-4-5-20251001"
         builtinHooks = []
+        skillsCompactionPolicy = "clearAll"
+        skillsShowIndex = "always"
     }
 
     // MARK: - Server Update Builder
@@ -131,7 +140,8 @@ final class SettingsState {
                 rules: .init(discoverStandaloneFiles: true)
             ),
             session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600),
-            hooks: .init(llmModel: "claude-haiku-4-5-20251001", builtinHooks: [])
+            hooks: .init(llmModel: "claude-haiku-4-5-20251001", builtinHooks: []),
+            skills: .init(compactionPolicy: "clearAll", showIndex: "always")
         )
     }
 }

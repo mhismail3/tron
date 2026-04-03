@@ -20,9 +20,15 @@ struct ServerSettings: Decodable {
     let cacheTtlSecs: Int
     let hooksLlmModel: String
     let builtinHooks: [BuiltinHookSetting]
+    let skillsCompactionPolicy: String
+    let skillsShowIndex: String
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks
+        case models, server, context, session, hooks, skills
+    }
+
+    private enum SkillsKeys: String, CodingKey {
+        case compactionPolicy, showIndex
     }
 
     private enum HooksKeys: String, CodingKey {
@@ -109,6 +115,15 @@ struct ServerSettings: Decodable {
         } else {
             hooksLlmModel = "claude-haiku-4-5-20251001"
             builtinHooks = []
+        }
+
+        // skills.*
+        if let skillsContainer = try? container.nestedContainer(keyedBy: SkillsKeys.self, forKey: .skills) {
+            skillsCompactionPolicy = (try? skillsContainer.decodeIfPresent(String.self, forKey: .compactionPolicy)) ?? "clearAll"
+            skillsShowIndex = (try? skillsContainer.decodeIfPresent(String.self, forKey: .showIndex)) ?? "always"
+        } else {
+            skillsCompactionPolicy = "clearAll"
+            skillsShowIndex = "always"
         }
     }
 
@@ -209,6 +224,12 @@ struct ServerSettingsUpdate: Encodable {
         var builtinHooks: [BuiltinHookSetting]?
     }
 
+    struct SkillsUpdate: Encodable {
+        var compactionPolicy: String?
+        var showIndex: String?
+    }
+
+    var skills: SkillsUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

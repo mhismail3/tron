@@ -37,10 +37,17 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?,
-        skills: [Skill]?,
-        spells: [Skill]?
+        reasoningLevel: String?
     ) async throws
+
+    /// Activate a skill in the current session (server-owned state)
+    func activateSkillOnServer(_ skillName: String) async throws
+
+    /// Deactivate a skill from the current session
+    func deactivateSkillOnServer(_ skillName: String) async throws
+
+    /// Cast an ephemeral spell for the next prompt only
+    func castSpellOnServer(_ spellName: String) async throws
 
     /// Abort the agent on the server
     func abortAgentOnServer() async throws
@@ -94,10 +101,13 @@ final class MessagingCoordinator {
 
     /// Send a message to the agent.
     ///
+    /// Skills and spells are managed via separate RPCs (skill.activate, spell.cast),
+    /// not sent with the prompt. The server reads active skills from session state.
+    ///
     /// - Parameters:
     ///   - reasoningLevel: Optional reasoning level for extended thinking
-    ///   - skills: Optional skills to enable for this message
-    ///   - spells: Optional spells to apply
+    ///   - skills: Skills to display as chips on the user message (already activated server-side)
+    ///   - spells: Spells to display as chips on the user message (already cast server-side)
     ///   - context: The context providing access to state and dependencies
     func sendMessage(
         reasoningLevel: String? = nil,
@@ -111,7 +121,7 @@ final class MessagingCoordinator {
             return
         }
 
-        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells, reasoningLevel=\(reasoningLevel ?? "nil")")
+        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
 
         // Check if this is a special prompt that should not trigger certain dismissals
         let isAnswerPrompt = text.hasPrefix(AgentProtocol.askUserAnswerPrefix)
@@ -164,7 +174,7 @@ final class MessagingCoordinator {
             } else {
                 let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
                 context.appendMessage(userMessage)
-                context.logDebug("Added user text message with \(context.attachments.count) attachments, \(skills?.count ?? 0) skills, and \(spells?.count ?? 0) spells")
+                context.logDebug("Added user text message with \(context.attachments.count) attachments")
             }
             context.currentTurn += 1
         } else if !context.attachments.isEmpty {
@@ -191,13 +201,11 @@ final class MessagingCoordinator {
 
         // Send to server
         do {
-            context.logDebug("Calling sendPromptToServer with \(fileAttachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells...")
+            context.logDebug("Calling sendPromptToServer with \(fileAttachments.count) attachments...")
             try await context.sendPromptToServer(
                 text: text,
                 attachments: fileAttachments.isEmpty ? nil : fileAttachments,
-                reasoningLevel: reasoningLevel,
-                skills: skills,
-                spells: spells
+                reasoningLevel: reasoningLevel
             )
             context.logInfo("Prompt sent successfully")
         } catch {
@@ -208,7 +216,7 @@ final class MessagingCoordinator {
 
     // MARK: - Send Queued Message
 
-    /// Send a previously queued text message (no attachments/skills/spells).
+    /// Send a previously queued text message (no attachments).
     ///
     /// Unlike `sendMessage`, this takes explicit text and doesn't read from `context.inputText`.
     /// The user's current input bar state is left untouched.
@@ -233,9 +241,7 @@ final class MessagingCoordinator {
             try await context.sendPromptToServer(
                 text: text,
                 attachments: nil,
-                reasoningLevel: nil,
-                skills: nil,
-                spells: nil
+                reasoningLevel: nil
             )
             context.logInfo("Queued prompt sent successfully")
         } catch {

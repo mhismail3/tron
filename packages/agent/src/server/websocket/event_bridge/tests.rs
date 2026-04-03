@@ -971,10 +971,6 @@ fn all_event_types_have_wire_mapping() {
             }],
             total_activated: 1,
         },
-        TronEvent::SkillRemoved {
-            base: base.clone(),
-            skill_name: "n".into(),
-        },
         TronEvent::SubagentSpawned {
             base: base.clone(),
             subagent_session_id: "sub-1".into(),
@@ -1136,13 +1132,27 @@ fn message_deleted_wire_type_and_data() {
 }
 
 #[test]
-fn skill_removed_wire_type_and_data() {
-    let event = TronEvent::SkillRemoved {
+fn skill_activated_wire_type_and_data() {
+    let event = TronEvent::SkillActivated {
+        base: BaseEvent::now("s1"),
+        skill_name: "web-search".into(),
+        source: "global".into(),
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.event_type, "agent.skill_activated");
+    let data = rpc.data.unwrap();
+    assert_eq!(data["skillName"], "web-search");
+    assert_eq!(data["source"], "global");
+}
+
+#[test]
+fn skill_deactivated_wire_type_and_data() {
+    let event = TronEvent::SkillDeactivated {
         base: BaseEvent::now("s1"),
         skill_name: "web-search".into(),
     };
     let rpc = tron_event_to_rpc(&event);
-    assert_eq!(rpc.event_type, "agent.skill_removed");
+    assert_eq!(rpc.event_type, "agent.skill_deactivated");
     let data = rpc.data.unwrap();
     assert_eq!(data["skillName"], "web-search");
 }

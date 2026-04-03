@@ -17,7 +17,6 @@ mod prompt_runtime;
 #[path = "agent_prompt_service.rs"]
 mod prompt_service;
 
-use prompt_runtime::extract_skills;
 #[cfg(test)]
 use prompt_runtime::{
     build_user_event_payload, format_subagent_results, get_pending_subagent_results,
@@ -60,19 +59,6 @@ impl MethodHandler for PromptHandler {
                 }
             }
         }
-        let raw_skills_json = opt_array(params.as_ref(), "skills").cloned();
-        let raw_spells_json = opt_array(params.as_ref(), "spells").cloned();
-        let skills = {
-            let tmp = raw_skills_json.clone().map(Value::Array);
-            let v = extract_skills(tmp.as_ref());
-            if v.is_empty() { None } else { Some(v) }
-        };
-        let spells = {
-            let tmp = raw_spells_json.clone().map(Value::Array);
-            let v = extract_skills(tmp.as_ref());
-            if v.is_empty() { None } else { Some(v) }
-        };
-
         // Verify the session exists and get its details
         let session = AgentCommandService::load_prompt_session(ctx, &session_id).await?;
 
@@ -107,10 +93,6 @@ impl MethodHandler for PromptHandler {
                 reasoning_level,
                 images,
                 attachments,
-                skills,
-                spells,
-                raw_skills_json,
-                raw_spells_json,
             },
         );
 

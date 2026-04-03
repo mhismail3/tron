@@ -11,7 +11,8 @@
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `skills` (list, get, refresh), `filesystem` (list, read, mkdir),
+//! `skills` (list, get, refresh), `skill_session` (activate, deactivate,
+//! spell.cast, active — session-scoped skill state), `filesystem` (list, read, mkdir),
 //! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches)
 //!
 //! ## `register_platform` — Platform-specific
@@ -43,6 +44,7 @@ pub mod plan;
 pub mod sandbox;
 pub mod session;
 pub mod settings;
+pub mod skill_session;
 pub mod skills;
 pub mod system;
 pub mod tool;
@@ -163,7 +165,12 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("skill.list", skills::ListSkillsHandler);
     registry.register("skill.get", skills::GetSkillHandler);
     registry.register("skill.refresh", skills::RefreshSkillsHandler);
-    registry.register("skill.remove", skills::RemoveSkillHandler);
+
+    // Session-scoped skill state
+    registry.register("skill.activate", skill_session::ActivateHandler);
+    registry.register("skill.deactivate", skill_session::DeactivateHandler);
+    registry.register("spell.cast", skill_session::CastSpellHandler);
+    registry.register("skill.active", skill_session::ActiveHandler);
 
     // Filesystem
     registry.register("filesystem.listDir", filesystem::ListDirHandler);
@@ -516,8 +523,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            124,
-            "expected 123 methods, got {}",
+            127,
+            "expected 127 methods, got {}",
             reg.methods().len()
         );
     }

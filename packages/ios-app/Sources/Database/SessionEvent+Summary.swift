@@ -135,19 +135,19 @@ extension SessionEvent {
         case .contextCleared:
             return "Context cleared"
 
-        case .skillAdded:
+        case .skillActivated:
             let name = payload.string("name") ?? payload.string("skillName") ?? ""
             if !name.isEmpty {
                 return "Skill: \(name)"
             }
-            return "Skill added"
+            return "Skill activated"
 
-        case .skillRemoved:
+        case .skillDeactivated:
             let name = payload.string("name") ?? payload.string("skillName") ?? ""
             if !name.isEmpty {
-                return "Skill removed: \(name)"
+                return "Skill deactivated: \(name)"
             }
-            return "Skill removed"
+            return "Skill deactivated"
 
         case .sessionBranch:
             return "Branch created"

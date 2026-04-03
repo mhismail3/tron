@@ -86,9 +86,9 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
     }
 
-    /// In-chat notification for skill removal from context
-    static func skillRemoved(skillName: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .skillRemoved(skillName: skillName))
+    /// In-chat notification for skill deactivation from context
+    static func skillDeactivated(skillName: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .skillDeactivated(skillName: skillName))
     }
 
     /// In-chat notification for memory retain in progress (spinning indicator)

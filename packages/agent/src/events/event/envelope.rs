@@ -49,9 +49,9 @@ pub enum BroadcastEventType {
     /// Memory ledger update completed.
     #[serde(rename = "agent.memory_updated")]
     AgentMemoryUpdated,
-    /// A skill was removed from the session.
-    #[serde(rename = "agent.skill_removed")]
-    AgentSkillRemoved,
+    /// A skill was deactivated from the session.
+    #[serde(rename = "agent.skill_deactivated")]
+    AgentSkillDeactivated,
     /// The todo list was updated.
     #[serde(rename = "agent.todos_updated")]
     AgentTodosUpdated,
@@ -74,7 +74,7 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
     BroadcastEventType::AgentCompaction,
     BroadcastEventType::AgentMemoryUpdating,
     BroadcastEventType::AgentMemoryUpdated,
-    BroadcastEventType::AgentSkillRemoved,
+    BroadcastEventType::AgentSkillDeactivated,
     BroadcastEventType::AgentTodosUpdated,
     BroadcastEventType::EventNew,
 ];
@@ -178,7 +178,7 @@ mod tests {
                 BroadcastEventType::AgentMemoryUpdated,
                 "agent.memory_updated",
             ),
-            (BroadcastEventType::AgentSkillRemoved, "agent.skill_removed"),
+            (BroadcastEventType::AgentSkillDeactivated, "agent.skill_deactivated"),
             (BroadcastEventType::AgentTodosUpdated, "agent.todos_updated"),
             (BroadcastEventType::EventNew, "event.new"),
         ];

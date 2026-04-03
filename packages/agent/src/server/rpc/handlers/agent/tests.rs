@@ -18,42 +18,6 @@ use crate::tools::registry::ToolRegistry;
 use crate::server::device::{DeviceRequestBroker, DeviceRequestError};
 use crate::server::websocket::broadcast::BroadcastManager;
 
-// ── extract_skills tests ──
-
-#[test]
-fn skills_extracted_from_object_format() {
-    let params = json!({"skills": [{"name": "my-skill", "source": "global"}]});
-    let skills = extract_skills(params.get("skills"));
-    assert_eq!(skills, vec!["my-skill"]);
-}
-
-#[test]
-fn skills_extracted_from_string_format() {
-    let params = json!({"skills": ["my-skill"]});
-    let skills = extract_skills(params.get("skills"));
-    assert_eq!(skills, vec!["my-skill"]);
-}
-
-#[test]
-fn skills_extracted_mixed_format() {
-    let params = json!({"skills": [{"name": "a", "source": "global"}, "b"]});
-    let skills = extract_skills(params.get("skills"));
-    assert_eq!(skills, vec!["a", "b"]);
-}
-
-#[test]
-fn skills_extracted_empty_array() {
-    let params = json!({"skills": []});
-    let skills = extract_skills(params.get("skills"));
-    assert!(skills.is_empty());
-}
-
-#[test]
-fn skills_extracted_none() {
-    let skills = extract_skills(None);
-    assert!(skills.is_empty());
-}
-
 /// A mock provider that returns a single text response.
 struct TextProvider {
     text: String,
@@ -2449,37 +2413,6 @@ async fn prompt_with_images_event_has_content_blocks() {
     assert_eq!(payload["imageCount"], 1);
 }
 
-#[tokio::test]
-async fn prompt_with_skills_event_has_skills_array() {
-    let ctx = make_text_context("Using skill.");
-    let sid = ctx
-        .session_manager
-        .create_session("mock", "/tmp", None)
-        .unwrap();
-
-    let _ = PromptHandler
-        .handle(
-            Some(json!({
-                "sessionId": sid,
-                "prompt": "use this skill",
-                "skills": [{"name": "my-skill", "source": "global", "displayName": "My Skill"}]
-            })),
-            &ctx,
-        )
-        .await
-        .unwrap();
-
-    let events = wait_for_events_by_type(&ctx, &sid, &["message.user"]).await;
-    assert!(!events.is_empty(), "expected message.user event");
-    let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(payload["content"], "use this skill"); // text-only
-    let skills = payload["skills"]
-        .as_array()
-        .expect("skills should be array");
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0]["name"], "my-skill");
-}
-
 // ── format_subagent_results tests ──
 
 #[test]
@@ -2582,17 +2515,15 @@ fn format_subagent_results_multiple() {
 
 #[test]
 fn payload_text_only() {
-    let payload = build_user_event_payload("hello", None, None, None, None);
+    let payload = build_user_event_payload("hello", None, None);
     assert_eq!(payload["content"], "hello");
     assert!(payload.get("imageCount").is_none());
-    assert!(payload.get("skills").is_none());
-    assert!(payload.get("spells").is_none());
 }
 
 #[test]
 fn payload_with_single_image() {
     let images = vec![json!({"data": "base64img", "mediaType": "image/png"})];
-    let payload = build_user_event_payload("look", Some(&images), None, None, None);
+    let payload = build_user_event_payload("look", Some(&images), None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[0]["type"], "text");
@@ -2610,7 +2541,7 @@ fn payload_with_multiple_images() {
         json!({"data": "img2", "mediaType": "image/jpeg"}),
         json!({"data": "img3", "mediaType": "image/webp"}),
     ];
-    let payload = build_user_event_payload("see", Some(&images), None, None, None);
+    let payload = build_user_event_payload("see", Some(&images), None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 4); // text + 3 images
     assert_eq!(payload["imageCount"], 3);
@@ -2623,7 +2554,7 @@ fn payload_with_document_attachment() {
         "mimeType": "application/pdf",
         "fileName": "report.pdf"
     })];
-    let payload = build_user_event_payload("read this", None, Some(&atts), None, None);
+    let payload = build_user_event_payload("read this", None, Some(&atts));
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[1]["type"], "document");
@@ -2640,7 +2571,7 @@ fn payload_with_image_attachment() {
         "mimeType": "image/jpeg",
         "fileName": "photo.jpg"
     })];
-    let payload = build_user_event_payload("see", None, Some(&atts), None, None);
+    let payload = build_user_event_payload("see", None, Some(&atts));
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[1]["type"], "image");
@@ -2656,7 +2587,7 @@ fn payload_mixed_images_and_documents() {
         json!({"data": "img2", "mimeType": "image/jpeg"}),
         json!({"data": "doc1", "mimeType": "application/pdf", "fileName": "f.pdf"}),
     ];
-    let payload = build_user_event_payload("mixed", Some(&images), Some(&atts), None, None);
+    let payload = build_user_event_payload("mixed", Some(&images), Some(&atts));
     let content = payload["content"].as_array().unwrap();
     // text + 1 image param + 1 image att + 1 doc att = 4
     assert_eq!(content.len(), 4);
@@ -2664,41 +2595,9 @@ fn payload_mixed_images_and_documents() {
 }
 
 #[test]
-fn payload_with_skills_only() {
-    let skills = vec![json!({"name": "my-skill", "source": "global", "displayName": "My Skill"})];
-    let payload = build_user_event_payload("hello", None, None, Some(&skills), None);
-    assert_eq!(payload["content"], "hello"); // text-only path
-    let s = payload["skills"].as_array().unwrap();
-    assert_eq!(s.len(), 1);
-    assert_eq!(s[0]["name"], "my-skill");
-    assert_eq!(s[0]["source"], "global");
-}
-
-#[test]
-fn payload_with_spells_only() {
-    let spells = vec![json!({"name": "my-spell", "source": "global"})];
-    let payload = build_user_event_payload("cast", None, None, None, Some(&spells));
-    assert_eq!(payload["content"], "cast");
-    let s = payload["spells"].as_array().unwrap();
-    assert_eq!(s.len(), 1);
-    assert_eq!(s[0]["name"], "my-spell");
-}
-
-#[test]
-fn payload_with_skills_and_images() {
-    let images = vec![json!({"data": "img", "mediaType": "image/png"})];
-    let skills = vec![json!({"name": "sk", "source": "global"})];
-    let spells = vec![json!({"name": "sp", "source": "global"})];
-    let payload = build_user_event_payload("hi", Some(&images), None, Some(&skills), Some(&spells));
-    assert!(payload["content"].is_array()); // multimodal
-    assert!(payload["skills"].is_array());
-    assert!(payload["spells"].is_array());
-}
-
-#[test]
 fn payload_empty_images_array() {
     let images: Vec<Value> = vec![];
-    let payload = build_user_event_payload("text", Some(&images), None, None, None);
+    let payload = build_user_event_payload("text", Some(&images), None);
     assert_eq!(payload["content"], "text"); // text-only path
     assert!(payload.get("imageCount").is_none());
 }
@@ -2706,14 +2605,14 @@ fn payload_empty_images_array() {
 #[test]
 fn payload_empty_attachments_array() {
     let atts: Vec<Value> = vec![];
-    let payload = build_user_event_payload("text", None, Some(&atts), None, None);
+    let payload = build_user_event_payload("text", None, Some(&atts));
     assert_eq!(payload["content"], "text");
 }
 
 #[test]
 fn payload_malformed_image_no_data() {
     let images = vec![json!({"mediaType": "image/png"})]; // missing data
-    let payload = build_user_event_payload("oops", Some(&images), None, None, None);
+    let payload = build_user_event_payload("oops", Some(&images), None);
     // Malformed image skipped, falls back to text-only (only text block)
     assert_eq!(payload["content"], "oops");
 }
@@ -2721,7 +2620,7 @@ fn payload_malformed_image_no_data() {
 #[test]
 fn payload_malformed_image_no_mime() {
     let images = vec![json!({"data": "base64"})]; // missing mediaType/mimeType
-    let payload = build_user_event_payload("oops", Some(&images), None, None, None);
+    let payload = build_user_event_payload("oops", Some(&images), None);
     assert_eq!(payload["content"], "oops");
 }
 
@@ -2729,7 +2628,7 @@ fn payload_malformed_image_no_mime() {
 fn payload_media_type_key_variant() {
     // Clients may send `mediaType`, verify it works
     let images = vec![json!({"data": "d", "mediaType": "image/webp"})];
-    let payload = build_user_event_payload("pic", Some(&images), None, None, None);
+    let payload = build_user_event_payload("pic", Some(&images), None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content[1]["mimeType"], "image/webp");
 }
@@ -2737,17 +2636,10 @@ fn payload_media_type_key_variant() {
 #[test]
 fn payload_document_no_filename() {
     let atts = vec![json!({"data": "docdata", "mimeType": "application/pdf"})];
-    let payload = build_user_event_payload("doc", None, Some(&atts), None, None);
+    let payload = build_user_event_payload("doc", None, Some(&atts));
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content[1]["type"], "document");
     assert!(content[1].get("fileName").is_none());
-}
-
-#[test]
-fn payload_empty_skills_not_stored() {
-    let skills: Vec<Value> = vec![];
-    let payload = build_user_event_payload("hi", None, None, Some(&skills), None);
-    assert!(payload.get("skills").is_none());
 }
 
 #[test]

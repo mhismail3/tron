@@ -149,14 +149,13 @@ struct ChatView: View {
                 }
             }
         }
-        // Handle "Draft a Plan" request: Add plan skill to selection
+        // Handle "Draft a Plan" request: Add plan skill to selection and activate on server
         .onReceive(NotificationCenter.default.publisher(for: .draftPlanRequested)) { _ in
-            // Find the "plan" skill and add it to selected skills
             guard let skillStore = skillStore else { return }
             if let planSkill = skillStore.skills.first(where: { $0.name.lowercased() == "plan" }) {
-                // Only add if not already selected
                 if !viewModel.inputBarState.selectedSkills.contains(where: { $0.id == planSkill.id }) {
                     viewModel.inputBarState.selectedSkills.append(planSkill)
+                    Task { try? await viewModel.activateSkillOnServer(planSkill.name) }
                 }
             }
         }
@@ -168,8 +167,15 @@ struct ChatView: View {
             if let skillName = payload.skillName,
                let skill = skillStore?.skills.first(where: { $0.name.lowercased() == skillName }) {
                 skills = [skill]
+                Task {
+                    try? await viewModel.activateSkillOnServer(skill.name)
+                    await MainActor.run {
+                        viewModel.sendMessage(skills: skills)
+                    }
+                }
+            } else {
+                viewModel.sendMessage()
             }
-            viewModel.sendMessage(skills: skills)
         }
         .onAppear {
             // Load persisted reasoning level for this session
@@ -375,11 +381,23 @@ struct ChatView: View {
                                 let spellsToSend = viewModel.inputBarState.selectedSpells
                                 viewModel.inputBarState.selectedSkills = []
                                 viewModel.inputBarState.selectedSpells = []
-                                viewModel.sendMessage(
-                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                    skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                    spells: spellsToSend.isEmpty ? nil : spellsToSend
-                                )
+
+                                // Activate skills and cast spells on server before sending prompt
+                                Task {
+                                    for skill in skillsToSend {
+                                        try? await viewModel.activateSkillOnServer(skill.name)
+                                    }
+                                    for spell in spellsToSend {
+                                        try? await viewModel.castSpellOnServer(spell.name)
+                                    }
+                                    await MainActor.run {
+                                        viewModel.sendMessage(
+                                            reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                            skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                            spells: spellsToSend.isEmpty ? nil : spellsToSend
+                                        )
+                                    }
+                                }
                             } else {
                                 viewModel.enqueueCurrentInput()
                             }
@@ -394,7 +412,9 @@ struct ChatView: View {
                         onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
                         onModelPickerTap: { [sheetCoordinator] in sheetCoordinator.showModelPicker() },
                         onSkillSelect: nil,
-                        onSkillRemove: { _ in },
+                        onSkillRemove: { [viewModel] skill in
+                            Task { try? await viewModel.deactivateSkillOnServer(skill.name) }
+                        },
                         onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
                         onSpellRemove: { _ in },
                         onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },

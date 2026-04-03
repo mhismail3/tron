@@ -48,7 +48,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 |----------|----------|--------|
 | Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
 | Tool | `Plugins/Tool/` | tool_start, tool_end |
-| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_removed, turn_failed |
+| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_deactivated, turn_failed |
 | Session | `Plugins/Session/` | connected |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
 | Browser | `Plugins/Browser/` | browser_frame, browser_closed |

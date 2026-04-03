@@ -205,6 +205,9 @@ pub struct RunContext {
     /// Skill context to inject (full content of explicitly invoked skills).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_context: Option<String>,
+    /// Skill removal notice (one-turn "stop following" instruction).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_removal_context: Option<String>,
     /// Completed background job results to inject (unified processes + subagents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_results: Option<String>,

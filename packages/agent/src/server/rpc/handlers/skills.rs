@@ -43,15 +43,6 @@ fn resolve_working_dir(params: Option<&Value>, ctx: &RpcContext) -> String {
     "/tmp".to_string()
 }
 
-fn remove_skill_name(params: Option<&Value>) -> Result<&str, RpcError> {
-    params
-        .and_then(|p| p.get("skillName").or_else(|| p.get("name")))
-        .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::InvalidParams {
-            message: "Missing required parameter: skillName".into(),
-        })
-}
-
 /// List available skills.
 pub struct ListSkillsHandler;
 
@@ -114,44 +105,6 @@ impl MethodHandler for RefreshSkillsHandler {
     }
 }
 
-/// Remove a skill.
-pub struct RemoveSkillHandler;
-
-#[async_trait]
-impl MethodHandler for RemoveSkillHandler {
-    #[instrument(skip(self, ctx), fields(method = "skill.remove"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let name = remove_skill_name(params.as_ref())?;
-
-        let session_id = opt_string(params.as_ref(), "sessionId");
-
-        let mut registry = ctx.skill_registry.write();
-        if !registry.has(name) {
-            return Err(RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Skill '{name}' not found"),
-            });
-        }
-
-        let _ = registry.remove(name);
-
-        // Broadcast skill removed event
-        if let Some(sid) = session_id {
-            let _ = ctx
-                .orchestrator
-                .broadcast()
-                .emit(crate::core::events::TronEvent::SkillRemoved {
-                    base: crate::core::events::BaseEvent::now(sid),
-                    skill_name: name.to_owned(),
-                });
-        }
-
-        Ok(serde_json::json!({
-            "success": true,
-            "removedSkill": name,
-        }))
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -219,73 +172,6 @@ mod tests {
         assert!(result.get("skillCount").is_some());
         assert!(result.get("refreshed").is_none());
         assert!(result.get("count").is_none());
-    }
-
-    #[tokio::test]
-    async fn remove_skill_success() {
-        let ctx = make_test_context();
-        ctx.skill_registry.write().insert(make_skill("test-skill"));
-
-        let result = RemoveSkillHandler
-            .handle(
-                Some(json!({"skillName": "test-skill", "sessionId": "s1"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["removedSkill"], "test-skill");
-        assert!(!ctx.skill_registry.read().has("test-skill"));
-    }
-
-    #[tokio::test]
-    async fn remove_skill_not_found() {
-        let ctx = make_test_context();
-        let err = RemoveSkillHandler
-            .handle(Some(json!({"skillName": "nonexistent"})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "NOT_FOUND");
-    }
-
-    #[tokio::test]
-    async fn remove_skill_missing_params() {
-        let ctx = make_test_context();
-        let err = RemoveSkillHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn remove_skill_accepts_name_param() {
-        let ctx = make_test_context();
-        ctx.skill_registry.write().insert(make_skill("other"));
-
-        let result = RemoveSkillHandler
-            .handle(Some(json!({"name": "other"})), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(result["success"], true);
-    }
-
-    #[tokio::test]
-    async fn remove_skill_emits_event() {
-        let ctx = make_test_context();
-        ctx.skill_registry.write().insert(make_skill("my-skill"));
-        let mut rx = ctx.orchestrator.subscribe();
-
-        let _ = RemoveSkillHandler
-            .handle(
-                Some(json!({"skillName": "my-skill", "sessionId": "s1"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let event = rx.try_recv().unwrap();
-        assert_eq!(event.event_type(), "skill_removed");
     }
 
     #[tokio::test]

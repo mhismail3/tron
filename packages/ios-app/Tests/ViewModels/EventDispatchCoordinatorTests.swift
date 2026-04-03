@@ -301,21 +301,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleMessageDeletedCalledWith?.targetEventId, "event_123")
     }
 
-    func testDispatch_skillRemoved_callsHandleSkillRemoved() {
-        // Given: A skill removed result
-        let result = SkillRemovedPlugin.Result(skillName: "commit")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SkillRemovedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSkillRemovedCalledWith?.skillName, "commit")
-    }
-
     // MARK: - Subagent Event Tests
 
     func testDispatch_subagentSpawned_callsHandleSubagentSpawned() {
@@ -498,7 +483,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleCompactionCalledWith: CompactionPlugin.Result?
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
-    var handleSkillRemovedCalledWith: SkillRemovedPlugin.Result?
     var handleRulesActivatedCalledWith: RulesActivatedPlugin.Result?
 
     // MARK: - Subagents
@@ -583,9 +567,9 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleMessageDeletedCalledWith = result
     }
 
-    func handleSkillRemoved(_ result: SkillRemovedPlugin.Result) {
-        handleSkillRemovedCalledWith = result
-    }
+    func handleSkillActivated(_ result: SkillActivatedPlugin.Result) {}
+    func handleSkillDeactivated(_ result: SkillDeactivatedPlugin.Result) {}
+    func handleSpellCast(_ result: SpellCastPlugin.Result) {}
 
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result) {
         handleRulesActivatedCalledWith = result

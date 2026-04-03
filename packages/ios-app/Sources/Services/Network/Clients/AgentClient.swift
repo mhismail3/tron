@@ -16,9 +16,7 @@ final class AgentClient {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil,
-        skills: [Skill]? = nil,
-        spells: [Skill]? = nil
+        reasoningLevel: String? = nil
     ) async throws {
         let (ws, sessionId) = try transport.requireSession()
 
@@ -27,9 +25,7 @@ final class AgentClient {
             prompt: prompt,
             images: images,
             attachments: attachments,
-            reasoningLevel: reasoningLevel,
-            skills: skills,
-            spells: spells
+            reasoningLevel: reasoningLevel
         )
 
         let result: AgentPromptResult = try await ws.send(
@@ -40,6 +36,32 @@ final class AgentClient {
         if !result.acknowledged {
             logger.warning("Prompt not acknowledged by server", category: .chat)
         }
+    }
+
+    // MARK: - Session-Scoped Skill Methods
+
+    func activateSkill(_ skillName: String) async throws -> SkillActivateResult {
+        let (ws, sessionId) = try transport.requireSession()
+        let params = SkillActivateParams(sessionId: sessionId, skillName: skillName)
+        return try await ws.send(method: "skill.activate", params: params)
+    }
+
+    func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult {
+        let (ws, sessionId) = try transport.requireSession()
+        let params = SkillDeactivateParams(sessionId: sessionId, skillName: skillName)
+        return try await ws.send(method: "skill.deactivate", params: params)
+    }
+
+    func castSpell(_ spellName: String) async throws -> SpellCastResult {
+        let (ws, sessionId) = try transport.requireSession()
+        let params = SpellCastParams(sessionId: sessionId, spellName: spellName)
+        return try await ws.send(method: "spell.cast", params: params)
+    }
+
+    func activeSkills() async throws -> SkillActiveResult {
+        let (ws, sessionId) = try transport.requireSession()
+        let params = SkillActiveParams(sessionId: sessionId)
+        return try await ws.send(method: "skill.active", params: params)
     }
 
     func abort() async throws {

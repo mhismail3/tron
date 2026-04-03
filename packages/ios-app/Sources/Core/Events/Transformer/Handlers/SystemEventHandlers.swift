@@ -3,7 +3,7 @@ import Foundation
 /// Handlers for transforming system notification events into ChatMessages.
 ///
 /// Handles: notification.interrupted, context.cleared, compact.boundary,
-///          skill.removed, rules.loaded, stream.thinking_complete
+///          skill.deactivated, rules.loaded, stream.thinking_complete
 enum SystemEventHandlers {
 
     /// Transform notification.interrupted event into a ChatMessage.
@@ -62,22 +62,22 @@ enum SystemEventHandlers {
         )
     }
 
-    /// Transform skill.removed event into a ChatMessage.
+    /// Transform skill.deactivated event into a ChatMessage.
     ///
-    /// Skill removed events indicate when a skill was deactivated.
-    static func transformSkillRemoved(
+    /// Skill deactivated events indicate when a skill was deactivated.
+    static func transformSkillDeactivated(
         _ payload: [String: AnyCodable],
         timestamp: Date,
         logger: TronLogger = TronLogger.shared
     ) -> ChatMessage? {
         guard let skillName = payload["skillName"]?.value as? String else {
-            logger.warning("skill.removed event missing skillName in payload", category: .events)
+            logger.warning("skill.deactivated event missing skillName in payload", category: .events)
             return nil
         }
 
         return ChatMessage(
             role: .system,
-            content: .skillRemoved(skillName: skillName),
+            content: .skillDeactivated(skillName: skillName),
             timestamp: timestamp
         )
     }

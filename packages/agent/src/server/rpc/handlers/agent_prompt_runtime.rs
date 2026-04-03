@@ -15,37 +15,15 @@ use crate::server::rpc::context::run_blocking_task;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::session_context::{ContextArtifactsService, collect_dynamic_rule_paths};
 
-/// Extract skill/spell names from a JSON array.
-///
-/// Clients may send objects `[{name: "skill-name", source: "global"}]` or
-/// plain strings `["skill-name"]`. This handles both.
-pub fn extract_skills(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .or_else(|| v.as_str())
-                        .map(String::from)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// Build the JSON payload for a `message.user` event.
 ///
-/// When the prompt includes images, attachments, skills, or spells, the payload
-/// is enriched so that session resume can reconstruct client UI chips and the
-/// LLM can see previously-sent images in reconstructed history.
+/// When the prompt includes images or attachments, the payload is enriched
+/// so that session resume can reconstruct client UI and the LLM can see
+/// previously-sent images in reconstructed history.
 pub fn build_user_event_payload(
     prompt: &str,
     images: Option<&[Value]>,
     attachments: Option<&[Value]>,
-    raw_skills: Option<&[Value]>,
-    raw_spells: Option<&[Value]>,
 ) -> Value {
     let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
@@ -112,12 +90,6 @@ pub fn build_user_event_payload(
     let mut payload = serde_json::json!({ "content": content });
     if let Some(c) = image_count {
         payload["imageCount"] = Value::Number(c.into());
-    }
-    if let Some(skills) = raw_skills.filter(|s| !s.is_empty()) {
-        payload["skills"] = Value::Array(skills.to_vec());
-    }
-    if let Some(spells) = raw_spells.filter(|s| !s.is_empty()) {
-        payload["spells"] = Value::Array(spells.to_vec());
     }
     payload
 }
@@ -691,76 +663,116 @@ pub async fn persist_user_message_event(
     .await
 }
 
-pub async fn build_skill_context(
+/// Build skill context from server-owned session state.
+///
+/// Reconstructs the [`SkillTracker`] from events, looks up active skills
+/// and unconsumed spells in the registry, and builds the `<skills>` XML block.
+///
+/// Also writes `spell.consumed` events for any spells that are consumed, and
+/// returns the removal notice for recently deactivated skills.
+pub async fn build_skill_context_from_session(
     skill_registry: Arc<RwLock<SkillRegistry>>,
     event_store: Arc<EventStore>,
     session_id: String,
-    skills: Option<Vec<String>>,
-    spells: Option<Vec<String>>,
-) -> Result<Option<String>, RpcError> {
+) -> Result<SkillContextResult, RpcError> {
     run_blocking_task("agent.prompt.skills", move || {
-        let mut all_names = skills.unwrap_or_default();
-        if let Some(spell_names) = spells {
-            for name in spell_names {
-                if !all_names.contains(&name) {
-                    all_names.push(name);
-                }
+        let tracker = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+            &event_store,
+            &session_id,
+        );
+
+        // Collect active skill names + unconsumed spell names
+        let active_names = tracker.active_skill_names();
+        let unconsumed_spells = tracker.unconsumed_spells().to_vec();
+        let spell_names: Vec<String> = unconsumed_spells.iter().map(|s| s.name.clone()).collect();
+
+        tracing::info!(
+            active_count = tracker.count(),
+            active_skills = ?active_names,
+            pending_spells = ?spell_names,
+            "[skills] reconstructed tracker for session {session_id}"
+        );
+
+        // Merge active skills + spell names (dedup)
+        let mut all_names: Vec<String> = active_names;
+        for name in &spell_names {
+            if !all_names.contains(name) {
+                all_names.push(name.clone());
             }
         }
 
-        if all_names.is_empty() {
-            return Ok(None);
-        }
-
-        let found: Vec<SkillMetadata> = {
+        // Look up metadata from registry
+        let found: Vec<SkillMetadata> = if all_names.is_empty() {
+            Vec::new()
+        } else {
             let registry = skill_registry.read();
             let name_refs: Vec<&str> = all_names.iter().map(String::as_str).collect();
             let (found, _not_found) = registry.get_many(&name_refs);
             found.into_iter().cloned().collect()
         };
 
-        if found.is_empty() {
-            return Ok(None);
+        tracing::info!(
+            found_count = found.len(),
+            found_names = ?found.iter().map(|s| &s.name).collect::<Vec<_>>(),
+            "[skills] registry lookup result"
+        );
+
+        // Build XML context
+        let skill_context = if found.is_empty() {
+            None
+        } else {
+            let skill_refs: Vec<&SkillMetadata> = found.iter().collect();
+            let context = crate::skills::injector::build_skill_context(&skill_refs);
+            tracing::info!(
+                context_len = context.len(),
+                context_preview = &context[..context.len().min(200)],
+                "[skills] built skill context XML"
+            );
+            (!context.is_empty()).then_some(context)
+        };
+
+        // Write spell.consumed events for consumed spells
+        for spell in &unconsumed_spells {
+            let _ = event_store.append(&crate::events::AppendOptions {
+                session_id: &session_id,
+                event_type: crate::events::EventType::SpellConsumed,
+                payload: serde_json::json!({
+                    "spellName": spell.name,
+                    "castEventId": spell.event_id,
+                }),
+                parent_id: None,
+            });
         }
 
-        let existing = event_store
-            .get_events_by_type(&session_id, &["skill.added"], None)
-            .unwrap_or_default();
-        let existing_names: HashSet<String> = existing
-            .iter()
-            .filter_map(|event| {
-                serde_json::from_str::<serde_json::Value>(&event.payload)
-                    .ok()
-                    .and_then(|payload| {
-                        payload
-                            .get("skillName")
-                            .and_then(|value| value.as_str())
-                            .map(String::from)
-                    })
-            })
-            .collect();
+        // Build removal notice for deactivated skills
+        let pending_removals = tracker.pending_removal_notices();
+        let removal_notice = if pending_removals.is_empty() {
+            None
+        } else {
+            let names: Vec<String> = pending_removals
+                .iter()
+                .map(|n| format!("@{n}"))
+                .collect();
+            Some(format!(
+                "The following skills have been deactivated. Stop following their instructions: {}.",
+                names.join(", ")
+            ))
+        };
 
-        for skill in &found {
-            if !existing_names.contains(&skill.name) {
-                let _ = event_store.append(&crate::events::AppendOptions {
-                    session_id: &session_id,
-                    event_type: crate::events::EventType::SkillAdded,
-                    payload: serde_json::json!({
-                        "skillName": skill.name,
-                        "source": skill.source.to_string(),
-                        "addedVia": "mention",
-                        "tokens": skill.content.len() as u64 / 4,
-                    }),
-                    parent_id: None,
-                });
-            }
-        }
-
-        let skill_refs: Vec<&SkillMetadata> = found.iter().collect();
-        let context = crate::skills::injector::build_skill_context(&skill_refs);
-        Ok((!context.is_empty()).then_some(context))
+        Ok(SkillContextResult {
+            skill_context,
+            skill_removal_context: removal_notice,
+        })
     })
     .await
+}
+
+/// Result of building skill context from session state.
+pub struct SkillContextResult {
+    /// The `<skills>` XML block for active skills + consumed spells.
+    pub skill_context: Option<String>,
+    /// One-turn removal notice for recently deactivated skills.
+    pub skill_removal_context: Option<String>,
 }
 
 pub async fn load_session_update_data(

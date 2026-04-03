@@ -20,17 +20,13 @@ final class DefaultAgentRepository: AgentRepository {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil,
-        skills: [Skill]? = nil,
-        spells: [Skill]? = nil
+        reasoningLevel: String? = nil
     ) async throws {
         try await agentClient.sendPrompt(
             prompt,
             images: images,
             attachments: attachments,
-            reasoningLevel: reasoningLevel,
-            skills: skills,
-            spells: spells
+            reasoningLevel: reasoningLevel
         )
     }
 

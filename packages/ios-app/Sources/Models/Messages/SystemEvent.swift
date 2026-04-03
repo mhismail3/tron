@@ -24,8 +24,8 @@ enum SystemEvent: Equatable, Hashable {
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// A message was deleted from context
     case messageDeleted(targetType: String)
-    /// A skill was removed from context
-    case skillRemoved(skillName: String)
+    /// A skill was deactivated from context
+    case skillDeactivated(skillName: String)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)
     /// Dynamic scoped rules were activated by file access
@@ -57,7 +57,7 @@ enum SystemEvent: Equatable, Hashable {
         case .compaction:                 return .tronSky
         case .contextCleared:             return .tronSky
         case .messageDeleted:             return .tronSky
-        case .skillRemoved:               return .tronCyan
+        case .skillDeactivated:            return .tronCyan
         case .rulesLoaded:                return .tronIndigo
         case .rulesActivated:             return .tronIndigo
         case .catchingUp:                 return .tronSlate
@@ -97,8 +97,8 @@ enum SystemEvent: Equatable, Hashable {
                            targetType == "message.assistant" ? "assistant message" :
                            targetType == "tool.result" ? "tool result" : "message"
             return "Deleted \(typeLabel) from context"
-        case .skillRemoved(let skillName):
-            return "\(skillName) removed from context"
+        case .skillDeactivated(let skillName):
+            return "\(skillName) deactivated from context"
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
         case .rulesActivated(let rules, _):

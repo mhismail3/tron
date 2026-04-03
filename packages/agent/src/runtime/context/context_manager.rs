@@ -581,6 +581,7 @@ impl ContextManager {
             memory_content: self.get_full_memory_content(),
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
             server_origin: None,

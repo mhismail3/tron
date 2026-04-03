@@ -29,7 +29,9 @@ import Foundation
     func handleCompaction(_ result: CompactionPlugin.Result)
     func handleContextCleared(_ result: ContextClearedPlugin.Result)
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
-    func handleSkillRemoved(_ result: SkillRemovedPlugin.Result)
+    func handleSkillActivated(_ result: SkillActivatedPlugin.Result)
+    func handleSkillDeactivated(_ result: SkillDeactivatedPlugin.Result)
+    func handleSpellCast(_ result: SpellCastPlugin.Result)
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result)
 }
 

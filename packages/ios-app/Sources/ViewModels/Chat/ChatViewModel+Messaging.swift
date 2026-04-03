@@ -16,18 +16,26 @@ extension ChatViewModel: MessagingContext {
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?,
-        skills: [Skill]?,
-        spells: [Skill]?
+        reasoningLevel: String?
     ) async throws {
         try await rpcClient.agent.sendPrompt(
             text,
             images: nil,  // Images sent via attachments instead
             attachments: attachments,
-            reasoningLevel: reasoningLevel,
-            skills: skills,
-            spells: spells
+            reasoningLevel: reasoningLevel
         )
+    }
+
+    func activateSkillOnServer(_ skillName: String) async throws {
+        _ = try await rpcClient.agent.activateSkill(skillName)
+    }
+
+    func deactivateSkillOnServer(_ skillName: String) async throws {
+        _ = try await rpcClient.agent.deactivateSkill(skillName)
+    }
+
+    func castSpellOnServer(_ spellName: String) async throws {
+        _ = try await rpcClient.agent.castSpell(spellName)
     }
 
     func abortAgentOnServer() async throws {

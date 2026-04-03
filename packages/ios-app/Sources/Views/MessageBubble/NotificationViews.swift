@@ -357,9 +357,9 @@ struct MessageDeletedNotificationView: View {
     }
 }
 
-// MARK: - Skill Removed Notification View
+// MARK: - Skill Deactivated Notification View
 
-struct SkillRemovedNotificationView: View {
+struct SkillDeactivatedNotificationView: View {
     let skillName: String
 
     var body: some View {
@@ -373,7 +373,7 @@ struct SkillRemovedNotificationView: View {
                     .font(TronTypography.filePath)
                     .foregroundStyle(Color.tronCyan.opacity(0.9))
 
-                Text("removed from context")
+                Text("deactivated from context")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(Color.tronCyan.opacity(0.6))
             }

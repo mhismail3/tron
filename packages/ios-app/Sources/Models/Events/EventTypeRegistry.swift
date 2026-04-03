@@ -45,8 +45,8 @@ enum PersistedEventType: String, CaseIterable {
     case notificationSubagentResult = "notification.subagent_result"
 
     // Skills
-    case skillAdded = "skill.added"
-    case skillRemoved = "skill.removed"
+    case skillActivated = "skill.activated"
+    case skillDeactivated = "skill.deactivated"
 
     // Rules
     case rulesLoaded = "rules.loaded"
@@ -101,7 +101,7 @@ enum PersistedEventType: String, CaseIterable {
              .toolCall, .toolResult,
              .notificationInterrupted, .notificationSubagentResult,
              .configModelSwitch, .configReasoningLevel,
-             .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded, .rulesActivated,
+             .contextCleared, .compactBoundary, .skillDeactivated, .rulesLoaded, .rulesActivated,
              .errorAgent, .errorTool, .errorProvider,
              .turnFailed, .memoryRetained:
             return true
@@ -178,8 +178,8 @@ enum PersistedEventType: String, CaseIterable {
         case .messageDeleted: return "Message deleted"
         case .notificationInterrupted: return "Session interrupted"
         case .notificationSubagentResult: return "Subagent result available"
-        case .skillAdded: return "Skill added"
-        case .skillRemoved: return "Skill removed"
+        case .skillActivated: return "Skill activated"
+        case .skillDeactivated: return "Skill deactivated"
         case .rulesLoaded: return "Rules loaded"
         case .rulesActivated: return "Rules activated"
         case .compactBoundary: return "Compact boundary"

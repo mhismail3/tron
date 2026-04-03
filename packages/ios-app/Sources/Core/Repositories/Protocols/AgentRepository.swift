@@ -12,15 +12,11 @@ protocol AgentRepository: AnyObject {
     ///   - images: Optional image attachments
     ///   - attachments: Optional file attachments
     ///   - reasoningLevel: Optional reasoning level
-    ///   - skills: Optional skills to use
-    ///   - spells: Optional spells to use
     func sendPrompt(
         _ prompt: String,
         images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?,
-        skills: [Skill]?,
-        spells: [Skill]?
+        reasoningLevel: String?
     ) async throws
 
     /// Abort the current agent operation.

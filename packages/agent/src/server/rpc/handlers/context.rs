@@ -447,7 +447,7 @@ mod tests {
         // Add a skill event
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
-            event_type: crate::events::EventType::SkillAdded,
+            event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "web-search", "source": "global", "addedVia": "mention"}),
             parent_id: None,
         });
@@ -465,26 +465,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_detailed_snapshot_skill_removed_filtered() {
+    async fn get_detailed_snapshot_skill_deactivated_filtered() {
         let (ctx, sid) = ctx_with_session();
 
-        // Add then remove a skill
+        // Activate then deactivate a skill
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
-            event_type: crate::events::EventType::SkillAdded,
+            event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "web-search", "source": "global", "addedVia": "explicit"}),
             parent_id: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
-            event_type: crate::events::EventType::SkillRemoved,
+            event_type: crate::events::EventType::SkillDeactivated,
             payload: json!({"skillName": "web-search"}),
             parent_id: None,
         });
-        // Add another skill that stays
+        // Activate another skill that stays
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
-            event_type: crate::events::EventType::SkillAdded,
+            event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "commit", "source": "project", "addedVia": "explicit"}),
             parent_id: None,
         });

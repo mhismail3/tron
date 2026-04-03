@@ -1,6 +1,6 @@
 //! # skills
 //!
-//! Skill loader, registry, and context injector.
+//! Skill loader, registry, context injector, and session-scoped state tracker.
 //!
 //! Skills are `SKILL.md` files with optional YAML frontmatter + markdown body.
 //! The system discovers skills from three locations:
@@ -9,10 +9,13 @@
 //! - **Project (root)**: `{working_dir}/.claude/skills/` and `.tron/skills/`
 //! - **Project (nested)**: `{working_dir}/**/.claude/skills/` and `**/.tron/skills/`
 //!
-//! Nested discovery walks the project tree recursively, skipping excluded
-//! directories (`node_modules`, `.git`, etc.) and hidden directories. Root-level
-//! project skills shadow nested skills with the same name; project skills shadow
-//! global skills.
+//! ## Skill vs Spell
+//!
+//! - **Skills** are server-owned, session-scoped, event-sourced. They persist
+//!   across turns (re-injected into the system prompt every turn) until explicit
+//!   deactivation or compaction. Managed via `skill.activate` / `skill.deactivate` RPCs.
+//! - **Spells** are one-shot, truly ephemeral. Content is injected into the system
+//!   prompt for exactly one prompt, then consumed. Managed via `spell.cast` RPC.
 //!
 //! ## Module Overview
 //!
@@ -20,23 +23,15 @@
 //! - [`loader`] — Recursive filesystem discovery and scanning
 //! - [`registry`] — In-memory skill cache with source precedence and staleness detection
 //! - [`injector`] — `@reference` extraction and `<skills>` XML context building
-//! - [`tracker`] — Per-session skill tracking with event-sourced reconstruction
+//! - [`tracker`] — Per-session skill/spell tracking with event-sourced reconstruction.
+//!   Tracks active skills, pending spells, and deactivation notices.
 //! - [`denials`] — Convert frontmatter tool restrictions to denial config
 //!
-//! ## Usage
+//! ## State Model
 //!
-//! ```rust,no_run
-//! use crate::skills::registry::SkillRegistry;
-//! use crate::skills::injector::process_prompt_for_skills;
-//!
-//! let mut registry = SkillRegistry::new();
-//! // Discovers skills at all nesting levels within the project
-//! registry.initialize("/path/to/project");
-//!
-//! let result = process_prompt_for_skills("Use @browser tool", &registry);
-//! println!("Cleaned: {}", result.cleaned_prompt);
-//! println!("Context: {}", result.skill_context);
-//! ```
+//! Skill state is event-sourced via `skill.activated` / `skill.deactivated` /
+//! `spell.cast` / `spell.consumed` events. [`tracker::SkillTracker::from_events`]
+//! reconstructs the current state on session resume.
 //!
 //! ## Module Position
 //!

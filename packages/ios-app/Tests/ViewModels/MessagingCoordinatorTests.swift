@@ -212,17 +212,18 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     // MARK: - Skills and Reasoning Tests
 
-    func testSendMessagePassesSkillsToServer() async {
-        // Given: Input with skills
+    func testSendMessageDisplaysSkillsAsChips() async {
+        // Given: Input with skills (already activated server-side)
         mockContext.inputText = "Test"
         let skills = [Skill(name: "test-skill", displayName: "Test Skill", description: "Test", source: .global, tags: nil)]
 
-        // When: Sending message with skills
+        // When: Sending message with skills for display
         await coordinator.sendMessage(skills: skills, context: mockContext)
 
-        // Then: Skills should be passed to server
-        XCTAssertEqual(mockContext.lastSentSkills?.count, 1)
-        XCTAssertEqual(mockContext.lastSentSkills?.first?.name, "test-skill")
+        // Then: Skills should appear as chips on the user message
+        let userMessage = mockContext.appendedMessages.first
+        XCTAssertEqual(userMessage?.skills?.count, 1)
+        XCTAssertEqual(userMessage?.skills?.first?.name, "test-skill")
     }
 
     func testSendMessagePassesReasoningLevelToServer() async {
@@ -391,8 +392,6 @@ final class MockMessagingContext: MessagingContext {
     var lastSentText: String?
     var lastSentAttachments: [FileAttachment]?
     var lastSentReasoningLevel: String?
-    var lastSentSkills: [Skill]?
-    var lastSentSpells: [Skill]?
     var appendedMessages: [ChatMessage] = []
     var appendedInterruptedMessage = false
     var markPendingQuestionsAsSupersededCalled = false
@@ -418,21 +417,21 @@ final class MockMessagingContext: MessagingContext {
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?,
-        skills: [Skill]?,
-        spells: [Skill]?
+        reasoningLevel: String?
     ) async throws {
         sendPromptCalled = true
         lastSentText = text
         lastSentAttachments = attachments
         lastSentReasoningLevel = reasoningLevel
-        lastSentSkills = skills
-        lastSentSpells = spells
 
         if sendPromptShouldFail {
             throw MessagingTestError.serverError
         }
     }
+
+    func activateSkillOnServer(_ skillName: String) async throws {}
+    func deactivateSkillOnServer(_ skillName: String) async throws {}
+    func castSpellOnServer(_ spellName: String) async throws {}
 
     func abortAgentOnServer() async throws {
         abortAgentCalled = true

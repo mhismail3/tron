@@ -12,8 +12,8 @@ use crate::skills::registry::SkillRegistry;
 use crate::server::rpc::context::{AgentDeps, RpcContext};
 
 use super::prompt_runtime::{
-    PromptBootstrapData, PromptContextArtifacts, build_skill_context, build_user_content_override,
-    build_user_event_payload, load_prompt_bootstrap,
+    PromptBootstrapData, PromptContextArtifacts, build_skill_context_from_session,
+    build_user_content_override, build_user_event_payload, load_prompt_bootstrap,
     load_session_update_data, persist_user_message_event, resume_prompt_session,
 };
 
@@ -24,10 +24,6 @@ pub struct PromptRequest {
     pub reasoning_level: Option<String>,
     pub images: Option<Vec<Value>>,
     pub attachments: Option<Vec<Value>>,
-    pub skills: Option<Vec<String>>,
-    pub spells: Option<Vec<String>>,
-    pub raw_skills_json: Option<Vec<Value>>,
-    pub raw_spells_json: Option<Vec<Value>>,
 }
 
 struct PromptRunPlan {
@@ -193,10 +189,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         reasoning_level,
         images,
         attachments,
-        skills,
-        spells,
-        raw_skills_json,
-        raw_spells_json,
     } = request;
 
     // Create per-session hook engine: builtins + discovered user/project hooks.
@@ -508,8 +500,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         &prompt,
         images.as_deref(),
         attachments.as_deref(),
-        raw_skills_json.as_deref(),
-        raw_spells_json.as_deref(),
     );
     if let Err(error) =
         persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
@@ -525,37 +515,61 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let user_content_override =
         build_user_content_override(&prompt, &model, images.as_deref(), attachments.as_deref());
 
-    let skill_index_context = {
+    // Refresh skill registry before building context (ensures updated SKILL.md files are loaded)
+    {
         let mut registry = skill_registry.write();
         registry.refresh_if_stale(&working_dir);
-        let all_skills = registry.list(None);
-        let index = crate::skills::injector::build_skill_index(&all_skills);
-        if index.is_empty() { None } else { Some(index) }
-    };
-    let skill_context = match build_skill_context(
-        skill_registry,
+    }
+
+    // Build skill context from server-owned session state
+    let skill_result = match build_skill_context_from_session(
+        skill_registry.clone(),
         event_store.clone(),
         session_id.clone(),
-        skills,
-        spells,
     )
     .await
     {
-        Ok(context) => context,
+        Ok(result) => result,
         Err(error) => {
             warn!(
                 session_id = %session_id,
                 error = %error,
-                "failed to build skill context"
+                "failed to build skill context from session"
             );
+            super::prompt_runtime::SkillContextResult {
+                skill_context: None,
+                skill_removal_context: None,
+            }
+        }
+    };
+
+    // Build skill index based on settings
+    let skill_index_context = {
+        let settings = crate::settings::get_settings();
+        let show_index = &settings.skills.show_index;
+        let should_show = match show_index {
+            crate::settings::types::ShowIndex::Always => true,
+            crate::settings::types::ShowIndex::Never => false,
+            crate::settings::types::ShowIndex::WhenNoActiveSkills => {
+                skill_result.skill_context.is_none()
+            }
+        };
+        if should_show {
+            let registry = skill_registry.read();
+            let all_skills = registry.list(None);
+            let index = crate::skills::injector::build_skill_index(&all_skills);
+            if index.is_empty() { None } else { Some(index) }
+        } else {
             None
         }
     };
+
     let run_context = RunContext {
         reasoning_level: reasoning_level
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
         skill_index_context,
-        skill_context,
+        skill_context: skill_result.skill_context,
+        skill_removal_context: skill_result.skill_removal_context,
         job_results: job_results_context,
         user_content_override,
         ..Default::default()

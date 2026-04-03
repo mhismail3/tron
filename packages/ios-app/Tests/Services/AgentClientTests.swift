@@ -15,8 +15,6 @@ struct AgentClientTests {
         var lastImages: [ImageAttachment]?
         var lastAttachments: [FileAttachment]?
         var lastReasoningLevel: String?
-        var lastSkills: [Skill]?
-        var lastSpells: [Skill]?
         var sendPromptShouldThrow = false
 
         var abortCallCount = 0
@@ -35,21 +33,25 @@ struct AgentClientTests {
         var sendToolResultToolCallId: String?
         var sendToolResultShouldThrow = false
 
+        var activateSkillCallCount = 0
+        var lastActivatedSkill: String?
+        var deactivateSkillCallCount = 0
+        var lastDeactivatedSkill: String?
+        var castSpellCallCount = 0
+        var lastCastSpell: String?
+        var activeSkillsCallCount = 0
+
         func sendPrompt(
             _ prompt: String,
             images: [ImageAttachment]?,
             attachments: [FileAttachment]?,
-            reasoningLevel: String?,
-            skills: [Skill]?,
-            spells: [Skill]?
+            reasoningLevel: String?
         ) async throws {
             sendPromptCallCount += 1
             lastPrompt = prompt
             lastImages = images
             lastAttachments = attachments
             lastReasoningLevel = reasoningLevel
-            lastSkills = skills
-            lastSpells = spells
             if sendPromptShouldThrow { throw TestError.mockError }
         }
 
@@ -73,7 +75,6 @@ struct AgentClientTests {
         }
 
         private func makeAgentStateResult() -> AgentStateResult {
-            // AgentStateResult is Decodable, so we create it via JSON
             let json = """
             {
                 "isRunning": \(getStateIsRunning),
@@ -90,6 +91,41 @@ struct AgentClientTests {
             sendToolResultSessionId = sessionId
             sendToolResultToolCallId = toolCallId
             if sendToolResultShouldThrow { throw TestError.mockError }
+        }
+
+        func activateSkill(_ skillName: String) async throws -> SkillActivateResult {
+            activateSkillCallCount += 1
+            lastActivatedSkill = skillName
+            let json = """
+            {"success": true, "skill": {"name": "\(skillName)", "source": "global", "tokens": 100}}
+            """
+            return try! JSONDecoder().decode(SkillActivateResult.self, from: json.data(using: .utf8)!)
+        }
+
+        func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult {
+            deactivateSkillCallCount += 1
+            lastDeactivatedSkill = skillName
+            let json = """
+            {"success": true, "wasActive": true, "deactivatedSkill": "\(skillName)"}
+            """
+            return try! JSONDecoder().decode(SkillDeactivateResult.self, from: json.data(using: .utf8)!)
+        }
+
+        func castSpell(_ spellName: String) async throws -> SpellCastResult {
+            castSpellCallCount += 1
+            lastCastSpell = spellName
+            let json = """
+            {"success": true, "spell": {"name": "\(spellName)", "source": "global"}}
+            """
+            return try! JSONDecoder().decode(SpellCastResult.self, from: json.data(using: .utf8)!)
+        }
+
+        func activeSkills() async throws -> SkillActiveResult {
+            activeSkillsCallCount += 1
+            let json = """
+            {"skills": [], "pendingSpells": []}
+            """
+            return try! JSONDecoder().decode(SkillActiveResult.self, from: json.data(using: .utf8)!)
         }
 
         enum TestError: Error {
@@ -122,27 +158,20 @@ struct AgentClientTests {
         #expect(mock.lastImages == nil)
         #expect(mock.lastAttachments == nil)
         #expect(mock.lastReasoningLevel == nil)
-        #expect(mock.lastSkills == nil)
-        #expect(mock.lastSpells == nil)
     }
 
-    @Test("Send prompt with all parameters")
-    func testSendPrompt_withAllParams() async throws {
+    @Test("Send prompt with reasoning level")
+    func testSendPrompt_withReasoningLevel() async throws {
         let mock = MockAgentClient()
-        let testSkill = Self.makeTestSkill()
 
         try await mock.sendPrompt(
             "Hello",
             images: nil,
             attachments: nil,
-            reasoningLevel: "medium",
-            skills: [testSkill],
-            spells: nil
+            reasoningLevel: "medium"
         )
 
         #expect(mock.lastReasoningLevel == "medium")
-        #expect(mock.lastSkills?.count == 1)
-        #expect(mock.lastSkills?.first?.name == "test-skill")
     }
 
     @Test("Send prompt throws on error")
@@ -153,6 +182,55 @@ struct AgentClientTests {
         await #expect(throws: MockAgentClient.TestError.self) {
             try await mock.sendPrompt("Hello")
         }
+    }
+
+    // MARK: - Skill Activation Tests
+
+    @Test("Activate skill calls correctly")
+    func testActivateSkill_calls() async throws {
+        let mock = MockAgentClient()
+
+        let result = try await mock.activateSkill("browser")
+
+        #expect(mock.activateSkillCallCount == 1)
+        #expect(mock.lastActivatedSkill == "browser")
+        #expect(result.success == true)
+        #expect(result.skill?.name == "browser")
+    }
+
+    @Test("Deactivate skill calls correctly")
+    func testDeactivateSkill_calls() async throws {
+        let mock = MockAgentClient()
+
+        let result = try await mock.deactivateSkill("browser")
+
+        #expect(mock.deactivateSkillCallCount == 1)
+        #expect(mock.lastDeactivatedSkill == "browser")
+        #expect(result.success == true)
+        #expect(result.wasActive == true)
+    }
+
+    @Test("Cast spell calls correctly")
+    func testCastSpell_calls() async throws {
+        let mock = MockAgentClient()
+
+        let result = try await mock.castSpell("commit")
+
+        #expect(mock.castSpellCallCount == 1)
+        #expect(mock.lastCastSpell == "commit")
+        #expect(result.success == true)
+        #expect(result.spell?.name == "commit")
+    }
+
+    @Test("Active skills returns list")
+    func testActiveSkills_returns() async throws {
+        let mock = MockAgentClient()
+
+        let result = try await mock.activeSkills()
+
+        #expect(mock.activeSkillsCallCount == 1)
+        #expect(result.skills.isEmpty)
+        #expect(result.pendingSpells.isEmpty)
     }
 
     // MARK: - Abort Tests

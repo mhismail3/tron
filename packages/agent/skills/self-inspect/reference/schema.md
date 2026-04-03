@@ -209,7 +209,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 | Notifications | `notification.interrupted`, `notification.subagent_result`, `subagent.results_consumed` |
 | Compaction | `compact.boundary`, `compact.summary` |
 | Context | `context.cleared` |
-| Skills | `skill.added`, `skill.removed` |
+| Skills | `skill.activated`, `skill.deactivated`, `spell.cast`, `spell.consumed`, `skills.cleared` |
 | Rules | `rules.loaded`, `rules.indexed`, `rules.activated` |
 | Metadata | `metadata.update`, `metadata.tag` |
 | Files | `file.read`, `file.write`, `file.edit` |

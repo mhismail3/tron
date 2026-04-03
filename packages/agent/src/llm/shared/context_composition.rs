@@ -20,7 +20,8 @@ use crate::core::messages::Context;
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
 /// 5. `skill_index_context` (lightweight index of all available skills)
 /// 6. `skill_context` (full content of explicitly invoked skills)
-/// 7. `job_results_context` (completed background processes + subagents)
+/// 7. `skill_removal_context` (one-turn deactivation notice)
+/// 8. `job_results_context` (completed background processes + subagents)
 /// 9. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
@@ -59,6 +60,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         && !skills.is_empty()
     {
         parts.push(skills.clone());
+    }
+
+    if let Some(ref removal) = context.skill_removal_context
+        && !removal.is_empty()
+    {
+        parts.push(removal.clone());
     }
 
     if let Some(ref jobs) = context.job_results_context
@@ -101,7 +108,7 @@ pub struct GroupedContextParts {
 /// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`,
 /// `skill_index_context`
 /// **Volatile** (5m cache TTL): `dynamic_rules_context`, `skill_context`,
-/// `job_results_context`
+/// `skill_removal_context`, `job_results_context`
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     let mut stable = Vec::new();
     let mut volatile = Vec::new();
@@ -157,6 +164,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         volatile.push(skills.clone());
     }
 
+    if let Some(ref removal) = context.skill_removal_context
+        && !removal.is_empty()
+    {
+        volatile.push(removal.clone());
+    }
+
     if let Some(ref jobs) = context.job_results_context
         && !jobs.is_empty()
     {
@@ -184,6 +197,7 @@ mod tests {
             memory_content: Some("User prefers concise responses.".into()),
             skill_index_context: Some("# Available Skills\n\n- @sandbox".into()),
             skill_context: Some("Available skill: /commit".into()),
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: Some("Rule: no console.log".into()),
             server_origin: None,
@@ -220,6 +234,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -239,6 +254,7 @@ mod tests {
             memory_content: Some("memory".into()),
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -259,6 +275,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -303,6 +320,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -323,6 +341,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: None,
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -408,6 +427,7 @@ mod tests {
             memory_content: None,
             skill_index_context: None,
             skill_context: Some("Skill".into()),
+            skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
             server_origin: None,
@@ -415,5 +435,55 @@ mod tests {
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());
         assert_eq!(grouped.volatile.len(), 1);
+    }
+
+    // ── skill_removal_context ───────────────────────────────────────
+
+    #[test]
+    fn skill_removal_context_in_flat_ordering() {
+        let ctx = Context {
+            skill_context: Some("<skills>browser</skills>".into()),
+            skill_removal_context: Some(
+                "The following skills have been deactivated: @old-skill".into(),
+            ),
+            job_results_context: Some("Job done".into()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert_eq!(parts.len(), 3);
+        // Order: skill_context, skill_removal_context, job_results_context
+        assert!(parts[0].contains("browser"));
+        assert!(parts[1].contains("deactivated"));
+        assert!(parts[2].contains("Job done"));
+    }
+
+    #[test]
+    fn skill_removal_context_in_volatile_group() {
+        let ctx = Context {
+            system_prompt: Some("System".into()),
+            skill_removal_context: Some("Stop following @browser".into()),
+            ..Default::default()
+        };
+        let grouped = compose_context_parts_grouped(&ctx);
+        assert_eq!(grouped.stable.len(), 1); // system_prompt
+        assert_eq!(grouped.volatile.len(), 1); // skill_removal_context
+        assert!(grouped.volatile[0].contains("Stop following"));
+    }
+
+    #[test]
+    fn skill_removal_context_empty_skipped() {
+        let ctx = Context {
+            skill_removal_context: None,
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert!(parts.is_empty());
+
+        let ctx2 = Context {
+            skill_removal_context: Some(String::new()),
+            ..Default::default()
+        };
+        let parts2 = compose_context_parts(&ctx2);
+        assert!(parts2.is_empty());
     }
 }

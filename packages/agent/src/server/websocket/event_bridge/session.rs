@@ -215,10 +215,24 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "totalActivated": total_activated,
             })),
         )),
-        TronEvent::SkillRemoved { skill_name, .. } => Some(session_scoped(
+        TronEvent::SkillActivated {
+            skill_name, source, ..
+        } => Some(session_scoped(
             event,
-            "agent.skill_removed",
+            "agent.skill_activated",
+            Some(json!({ "skillName": skill_name, "source": source })),
+        )),
+        TronEvent::SkillDeactivated { skill_name, .. } => Some(session_scoped(
+            event,
+            "agent.skill_deactivated",
             Some(json!({ "skillName": skill_name })),
+        )),
+        TronEvent::SpellCast {
+            spell_name, source, ..
+        } => Some(session_scoped(
+            event,
+            "agent.spell_cast",
+            Some(json!({ "spellName": spell_name, "source": source })),
         )),
         TronEvent::SubagentSpawned {
             subagent_session_id,

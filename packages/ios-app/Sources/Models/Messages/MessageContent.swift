@@ -62,9 +62,9 @@ enum MessageContent: Equatable {
     static func messageDeleted(targetType: String) -> MessageContent {
         .systemEvent(.messageDeleted(targetType: targetType))
     }
-    /// In-chat notification for skill removal from context
-    static func skillRemoved(skillName: String) -> MessageContent {
-        .systemEvent(.skillRemoved(skillName: skillName))
+    /// In-chat notification for skill deactivation from context
+    static func skillDeactivated(skillName: String) -> MessageContent {
+        .systemEvent(.skillDeactivated(skillName: skillName))
     }
     /// In-chat notification for memory retain in progress
     static var memoryRetainInProgress: MessageContent {

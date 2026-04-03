@@ -118,8 +118,8 @@ enum SessionEventType: String, Codable {
     case notificationInterrupted = "notification.interrupted"
 
     // Skills
-    case skillAdded = "skill.added"
-    case skillRemoved = "skill.removed"
+    case skillActivated = "skill.activated"
+    case skillDeactivated = "skill.deactivated"
 
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"

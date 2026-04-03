@@ -53,10 +53,16 @@ define_events! {
         CompactSummary => "compact.summary" => payloads::compact::CompactSummaryPayload,
         /// Context cleared.
         ContextCleared => "context.cleared" => payloads::context::ContextClearedPayload,
-        /// Skill added to session.
-        SkillAdded => "skill.added" => payloads::skill::SkillAddedPayload,
-        /// Skill removed from session.
-        SkillRemoved => "skill.removed" => payloads::skill::SkillRemovedPayload,
+        /// Skill activated in session (server-owned state).
+        SkillActivated => "skill.activated" => payloads::skill::SkillActivatedPayload,
+        /// Skill deactivated from session.
+        SkillDeactivated => "skill.deactivated" => payloads::skill::SkillDeactivatedPayload,
+        /// Ephemeral spell cast (one-shot, next prompt only).
+        SpellCast => "spell.cast" => payloads::skill::SpellCastPayload,
+        /// Spell consumed by a prompt (marks spell.cast as used).
+        SpellConsumed => "spell.consumed" => payloads::skill::SpellConsumedPayload,
+        /// Skills cleared (emitted on compaction with `askUser` policy).
+        SkillsCleared => "skills.cleared" => payloads::skill::SkillsClearedPayload,
         /// Rules files loaded.
         RulesLoaded => "rules.loaded" => payloads::rules::RulesLoadedPayload,
         /// Rules indexed.
@@ -143,8 +149,8 @@ define_events! {
         is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
         /// Whether this is a hook event (`hook.*`).
         is_hook_type => [HookTriggered, HookCompleted, HookBackgroundStarted, HookBackgroundCompleted, LlmHookResult],
-        /// Whether this is a skill event (`skill.*`).
-        is_skill_type => [SkillAdded, SkillRemoved],
+        /// Whether this is a skill event (`skill.*` or `spell.*`).
+        is_skill_type => [SkillActivated, SkillDeactivated, SpellCast, SpellConsumed, SkillsCleared],
         /// Whether this is a rules event (`rules.*`).
         is_rules_type => [RulesLoaded, RulesIndexed, RulesActivated],
         /// Whether this is a file event (`file.*`).
@@ -156,7 +162,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 52] = [
+    const EXPECTED: [(EventType, &str); 59] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -184,8 +190,11 @@ mod tests {
         (EventType::CompactBoundary, "compact.boundary"),
         (EventType::CompactSummary, "compact.summary"),
         (EventType::ContextCleared, "context.cleared"),
-        (EventType::SkillAdded, "skill.added"),
-        (EventType::SkillRemoved, "skill.removed"),
+        (EventType::SkillActivated, "skill.activated"),
+        (EventType::SkillDeactivated, "skill.deactivated"),
+        (EventType::SpellCast, "spell.cast"),
+        (EventType::SpellConsumed, "spell.consumed"),
+        (EventType::SkillsCleared, "skills.cleared"),
         (EventType::RulesLoaded, "rules.loaded"),
         (EventType::RulesIndexed, "rules.indexed"),
         (EventType::RulesActivated, "rules.activated"),
@@ -198,6 +207,7 @@ mod tests {
         (EventType::WorktreeCommit, "worktree.commit"),
         (EventType::WorktreeReleased, "worktree.released"),
         (EventType::WorktreeMerged, "worktree.merged"),
+        (EventType::WorktreeRenamed, "worktree.renamed"),
         (EventType::ErrorAgent, "error.agent"),
         (EventType::ErrorTool, "error.tool"),
         (EventType::ErrorProvider, "error.provider"),
@@ -217,6 +227,14 @@ mod tests {
             EventType::ProcessResultsConsumed,
             "process.results_consumed",
         ),
+        (
+            EventType::NotificationUserJobAction,
+            "notification.user_job_action",
+        ),
+        (
+            EventType::UserJobActionsConsumed,
+            "user_job_actions.consumed",
+        ),
         (EventType::TodoWrite, "todo.write"),
         (EventType::TurnFailed, "turn.failed"),
         (EventType::HookTriggered, "hook.triggered"),
@@ -227,11 +245,12 @@ mod tests {
             "hook.background_completed",
         ),
         (EventType::LlmHookResult, "hook.llm_result"),
+        (EventType::MemoryRetained, "memory.retained"),
     ];
 
     #[test]
-    fn all_event_types_constant_has_52_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 56);
+    fn all_event_types_constant_has_correct_count() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 59);
     }
 
     #[test]

@@ -73,8 +73,8 @@ struct SystemEventView: View {
         case .messageDeleted(let targetType):
             MessageDeletedNotificationView(targetType: targetType)
 
-        case .skillRemoved(let skillName):
-            SkillRemovedNotificationView(skillName: skillName)
+        case .skillDeactivated(let skillName):
+            SkillDeactivatedNotificationView(skillName: skillName)
 
         case .rulesLoaded(let count):
             RulesLoadedNotificationView(count: count)

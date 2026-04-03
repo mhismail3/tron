@@ -9,6 +9,7 @@ mod api;
 mod context;
 mod guardrails;
 mod server;
+mod skills;
 mod tools;
 mod ui;
 
@@ -16,6 +17,7 @@ pub use api::*;
 pub use context::*;
 pub use guardrails::*;
 pub use server::*;
+pub use skills::*;
 pub use tools::*;
 pub use ui::*;
 
@@ -67,6 +69,8 @@ pub struct TronSettings {
     pub session: SessionSettings,
     /// UI/TUI appearance settings.
     pub ui: UiSettings,
+    /// Skill system settings (compaction policy, index visibility).
+    pub skills: SkillsSettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
@@ -91,6 +95,7 @@ impl Default for TronSettings {
             tmux: TmuxSettings::default(),
             session: SessionSettings::default(),
             ui: UiSettings::default(),
+            skills: SkillsSettings::default(),
             guardrails: None,
             mcp: crate::mcp::types::McpSettings::default(),
         }

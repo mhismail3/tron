@@ -87,7 +87,9 @@ final class EventRegistry: @unchecked Sendable {
         register(MemoryUpdatingPlugin.self)
         register(MemoryUpdatedPlugin.self)
         register(MessageDeletedPlugin.self)
-        register(SkillRemovedPlugin.self)
+        register(SkillActivatedPlugin.self)
+        register(SkillDeactivatedPlugin.self)
+        register(SpellCastPlugin.self)
         register(TurnFailedPlugin.self)
         register(RulesActivatedPlugin.self)
 

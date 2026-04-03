@@ -426,6 +426,9 @@ fn build_turn_context(
         .clone_from(&run_context.skill_index_context);
     context.skill_context.clone_from(&run_context.skill_context);
     context
+        .skill_removal_context
+        .clone_from(&run_context.skill_removal_context);
+    context
         .job_results_context
         .clone_from(&run_context.job_results);
     context.dynamic_rules_context = run_context
