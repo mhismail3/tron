@@ -2,7 +2,9 @@
 //!
 //! Executes user-defined prompts as async LLM subsessions. Always runs
 //! in background mode and returns `Continue` immediately — the subsession
-//! completes asynchronously and emits a [`LlmHookResult`] event.
+//! completes asynchronously, persists a [`LlmHookResult`] event to the
+//! event store (for schedule tracking), and broadcasts it to real-time
+//! subscribers.
 //!
 //! For the built-in title generation hook, also emits a
 //! [`SessionUpdated`](crate::core::events::TronEvent::SessionUpdated)
@@ -103,67 +105,11 @@ impl PromptHookHandler {
     }
 
     /// Check whether the title-gen hook should fire for this session.
-    ///
-    /// Schedule:
-    /// 1. First prompt → always fire
-    /// 2. Then fire when: 6+ prompts since last title gen, OR a
-    ///    compaction/memory event occurred since last title gen
-    /// 3. Whichever comes first, then reset
     fn should_generate_title(&self, session_id: &str) -> bool {
         let Some(store) = &self.event_store else {
             return true; // No store → can't check, fire anyway
         };
-
-        // Count user messages in this session
-        let user_msgs = store
-            .get_events_by_type(session_id, &["message.user"], None)
-            .unwrap_or_default();
-
-        // First prompt → always fire
-        if user_msgs.len() <= 1 {
-            return true;
-        }
-
-        // Find the last title-gen event
-        let title_events = store
-            .get_events_by_type(session_id, &["hook.llm_result"], None)
-            .unwrap_or_default();
-
-        let last_title_gen = title_events
-            .iter()
-            .rev()
-            .find(|e| e.payload.contains("title-gen"));
-
-        let Some(last_gen) = last_title_gen else {
-            return true; // No previous title gen → fire
-        };
-
-        let last_gen_seq = last_gen.sequence;
-
-        // Count user messages since last title gen
-        let msgs_since = user_msgs
-            .iter()
-            .filter(|e| e.sequence > last_gen_seq)
-            .count();
-
-        if msgs_since >= TITLE_REGEN_INTERVAL {
-            return true;
-        }
-
-        // Check for compaction or memory events since last title gen
-        let trigger_events = store
-            .get_events_by_type(
-                session_id,
-                &["compact.summary", "memory.retained"],
-                None,
-            )
-            .unwrap_or_default();
-
-        let has_trigger = trigger_events
-            .iter()
-            .any(|e| e.sequence > last_gen_seq);
-
-        has_trigger
+        should_generate_title_with_store(store, session_id)
     }
 
     /// Build the task string from the prompt template and hook context.
@@ -315,6 +261,7 @@ impl HookHandler for PromptHookHandler {
         let manager = self.subagent_manager.clone();
         let emitter = self.event_emitter.clone();
         let coordinator = self.worktree_coordinator.clone();
+        let event_store = self.event_store.clone();
 
         // Fire-and-forget: spawn the subsession in the background
         tokio::spawn(async move {
@@ -389,7 +336,6 @@ impl HookHandler for PromptHookHandler {
                         }
                     }
 
-                    // Emit LlmHookResult event for audit trail
                     // Extract token usage from subsession output
                     let (input_tokens, output_tokens) = output
                         .token_usage
@@ -401,6 +347,32 @@ impl HookHandler for PromptHookHandler {
                         })
                         .unwrap_or((0, 0));
 
+                    // Persist to EventStore so should_generate_title() can
+                    // find this result on subsequent prompts.
+                    if let Some(store) = &event_store {
+                        let payload = serde_json::json!({
+                            "hookName": hook_name,
+                            "hookId": hook_id,
+                            "hookEvent": hook_event,
+                            "output": output_text,
+                            "durationMs": duration_ms,
+                            "model": model,
+                            "inputTokens": input_tokens,
+                            "outputTokens": output_tokens,
+                            "success": true,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        if let Err(e) = store.append(&crate::events::AppendOptions {
+                            session_id: &session_id,
+                            event_type: crate::events::EventType::LlmHookResult,
+                            payload,
+                            parent_id: None,
+                        }) {
+                            warn!(hook_id = %hook_id, error = %e, "failed to persist hook.llm_result event");
+                        }
+                    }
+
+                    // Broadcast to real-time subscribers (WebSocket/iOS)
                     emitter.emit(crate::core::events::TronEvent::LlmHookResult {
                         base: BaseEvent::now(&session_id),
                         hook_name,
@@ -421,6 +393,32 @@ impl HookHandler for PromptHookHandler {
                         error = %e,
                         "LLM hook subsession failed"
                     );
+
+                    // Persist error result so schedule advances and avoids
+                    // infinite retries on persistent LLM failures.
+                    if let Some(store) = &event_store {
+                        let payload = serde_json::json!({
+                            "hookName": hook_name,
+                            "hookId": hook_id,
+                            "hookEvent": hook_event,
+                            "durationMs": duration_ms,
+                            "model": model,
+                            "inputTokens": 0,
+                            "outputTokens": 0,
+                            "success": false,
+                            "error": e.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        if let Err(persist_err) = store.append(&crate::events::AppendOptions {
+                            session_id: &session_id,
+                            event_type: crate::events::EventType::LlmHookResult,
+                            payload,
+                            parent_id: None,
+                        }) {
+                            warn!(hook_id = %hook_id, error = %persist_err, "failed to persist hook.llm_result error event");
+                        }
+                    }
+
                     emitter.emit(crate::core::events::TronEvent::LlmHookResult {
                         base: BaseEvent::now(&session_id),
                         hook_name,
@@ -441,6 +439,65 @@ impl HookHandler for PromptHookHandler {
         debug!(id = %self.id, "[prompt_hook] handle() returning Continue (subsession running in background)");
         Ok(HookResult::continue_())
     }
+}
+
+/// Check whether the title-gen hook should fire for this session.
+///
+/// Schedule:
+/// 1. First prompt → always fire
+/// 2. Then fire when: 6+ prompts since last title gen, OR a
+///    compaction/memory event occurred since last title gen
+/// 3. Whichever comes first, then reset
+fn should_generate_title_with_store(
+    store: &crate::events::EventStore,
+    session_id: &str,
+) -> bool {
+    // Count user messages in this session
+    let user_msgs = store
+        .get_events_by_type(session_id, &["message.user"], None)
+        .unwrap_or_default();
+
+    // First prompt → always fire
+    if user_msgs.len() <= 1 {
+        return true;
+    }
+
+    // Find the last title-gen event
+    let title_events = store
+        .get_events_by_type(session_id, &["hook.llm_result"], None)
+        .unwrap_or_default();
+
+    let last_title_gen = title_events
+        .iter()
+        .rev()
+        .find(|e| e.payload.contains("title-gen"));
+
+    let Some(last_gen) = last_title_gen else {
+        return true; // No previous title gen → fire
+    };
+
+    let last_gen_seq = last_gen.sequence;
+
+    // Count user messages since last title gen
+    let msgs_since = user_msgs
+        .iter()
+        .filter(|e| e.sequence > last_gen_seq)
+        .count();
+
+    if msgs_since >= TITLE_REGEN_INTERVAL {
+        return true;
+    }
+
+    // Check for compaction or memory events since last title gen
+    let trigger_events = store
+        .get_events_by_type(
+            session_id,
+            &["compact.summary", "memory.retained"],
+            None,
+        )
+        .unwrap_or_default();
+
+    trigger_events.iter().any(|e| e.sequence > last_gen_seq)
 }
 
 #[cfg(test)]
@@ -666,5 +723,283 @@ mod tests {
         };
         assert!(truncated.len() < long_json.len());
         assert!(truncated.ends_with("...(truncated)"));
+    }
+
+    // --- should_generate_title schedule tests ---
+
+    mod title_schedule {
+        use super::*;
+        use crate::events::{
+            AppendOptions, ConnectionConfig, EventStore, EventType, new_in_memory, run_migrations,
+        };
+
+        fn setup_store() -> EventStore {
+            let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
+            {
+                let conn = pool.get().unwrap();
+                run_migrations(&conn).unwrap();
+            }
+            EventStore::new(pool)
+        }
+
+        fn create_session(store: &EventStore) -> String {
+            let cr = store
+                .create_session("claude-opus-4-6", "/tmp/test", None, None, None)
+                .unwrap();
+            cr.session.id
+        }
+
+        fn append_user_message(store: &EventStore, session_id: &str) {
+            store
+                .append(&AppendOptions {
+                    session_id,
+                    event_type: EventType::MessageUser,
+                    payload: serde_json::json!({"content": "hello"}),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        fn append_title_gen_result(store: &EventStore, session_id: &str) {
+            store
+                .append(&AppendOptions {
+                    session_id,
+                    event_type: EventType::LlmHookResult,
+                    payload: serde_json::json!({
+                        "hookName": "Generate session title",
+                        "hookId": "builtin:title-gen",
+                        "hookEvent": "UserPromptSubmit",
+                        "output": "Fix login bug",
+                        "durationMs": 450,
+                        "model": "claude-haiku-4-5-20251001",
+                        "inputTokens": 100,
+                        "outputTokens": 10,
+                        "success": true,
+                        "timestamp": "2026-01-01T00:00:00Z"
+                    }),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        fn append_branch_name_gen_result(store: &EventStore, session_id: &str) {
+            store
+                .append(&AppendOptions {
+                    session_id,
+                    event_type: EventType::LlmHookResult,
+                    payload: serde_json::json!({
+                        "hookName": "Generate branch name",
+                        "hookId": "builtin:branch-name-gen",
+                        "hookEvent": "UserPromptSubmit",
+                        "output": "fuzzy-purple-elephant",
+                        "durationMs": 300,
+                        "model": "claude-haiku-4-5-20251001",
+                        "inputTokens": 80,
+                        "outputTokens": 5,
+                        "success": true,
+                        "timestamp": "2026-01-01T00:00:00Z"
+                    }),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        fn append_compaction(store: &EventStore, session_id: &str) {
+            store
+                .append(&AppendOptions {
+                    session_id,
+                    event_type: EventType::CompactSummary,
+                    payload: serde_json::json!({
+                        "summary": "Session compacted",
+                        "timestamp": "2026-01-01T00:00:00Z"
+                    }),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        fn append_memory_retained(store: &EventStore, session_id: &str) {
+            store
+                .append(&AppendOptions {
+                    session_id,
+                    event_type: EventType::MemoryRetained,
+                    payload: serde_json::json!({
+                        "timestamp": "2026-01-01T00:00:00Z"
+                    }),
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        // --- First prompt → always fire ---
+
+        #[test]
+        fn first_prompt_fires() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            // One user message (the current prompt)
+            append_user_message(&store, &sid);
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        #[test]
+        fn no_user_messages_fires() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            // Empty session, no messages at all
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- No prior title-gen → fire ---
+
+        #[test]
+        fn no_prior_title_gen_fires() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            // 3 user messages but no hook.llm_result events
+            for _ in 0..3 {
+                append_user_message(&store, &sid);
+            }
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Recent title-gen suppresses ---
+
+        #[test]
+        fn recent_title_gen_suppresses() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            // 2 user messages → title-gen fires on first prompt
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            // Title-gen result persisted
+            append_title_gen_result(&store, &sid);
+            // 2 more user messages (< 6 threshold)
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            assert!(!should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Interval reached → fire ---
+
+        #[test]
+        fn interval_reached_fires() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // Exactly 6 user messages after title-gen
+            for _ in 0..TITLE_REGEN_INTERVAL {
+                append_user_message(&store, &sid);
+            }
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        #[test]
+        fn interval_exceeded_fires() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // 8 user messages after title-gen (> 6)
+            for _ in 0..8 {
+                append_user_message(&store, &sid);
+            }
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Compaction/memory triggers ---
+
+        #[test]
+        fn compaction_triggers() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // Only 2 messages since title-gen (< 6)
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            // But compaction happened after title-gen
+            append_compaction(&store, &sid);
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        #[test]
+        fn memory_retained_triggers() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            append_memory_retained(&store, &sid);
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        #[test]
+        fn compaction_before_title_gen_ignored() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            // Compaction BEFORE title-gen (lower sequence)
+            append_compaction(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // Only 2 messages since (< 6), no trigger events after
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            assert!(!should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Non-title-gen hook results ignored ---
+
+        #[test]
+        fn non_title_gen_hook_ignored() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            // Only a branch-name-gen result, no title-gen
+            append_branch_name_gen_result(&store, &sid);
+            append_user_message(&store, &sid);
+            // Should fire because there's no title-gen event
+            assert!(should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Multiple title-gens: uses the latest ---
+
+        #[test]
+        fn multiple_title_gens_uses_latest() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            // First round: messages + title-gen
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // 7 messages (triggers interval)
+            for _ in 0..7 {
+                append_user_message(&store, &sid);
+            }
+            // Second title-gen
+            append_title_gen_result(&store, &sid);
+            // Only 2 messages since the LATEST title-gen
+            append_user_message(&store, &sid);
+            append_user_message(&store, &sid);
+            // Should NOT fire: only 2 msgs since latest gen
+            assert!(!should_generate_title_with_store(&store, &sid));
+        }
+
+        // --- Boundary: exactly at threshold boundary ---
+
+        #[test]
+        fn just_under_interval_suppresses() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            append_user_message(&store, &sid);
+            append_title_gen_result(&store, &sid);
+            // 5 messages after title-gen (one less than threshold)
+            for _ in 0..5 {
+                append_user_message(&store, &sid);
+            }
+            assert!(!should_generate_title_with_store(&store, &sid));
+        }
     }
 }
