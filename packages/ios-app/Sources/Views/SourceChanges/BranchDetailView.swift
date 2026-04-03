@@ -14,7 +14,7 @@ struct BranchDetailView: View {
     @State private var committedDiff: CommittedDiffResult?
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var expandedFiles: Set<String> = []
+    @State private var selectedFileDetail: FileDetailData?
     @State private var showMergeConfirmation = false
     @State private var isMerging = false
     @State private var mergeSuccess: String?
@@ -297,23 +297,20 @@ struct BranchDetailView: View {
 
             LazyVStack(spacing: 0) {
                 ForEach(files) { file in
-                    DiffFileRow(
-                        file: file,
-                        isExpanded: expandedFiles.contains(file.path),
-                        onToggle: {
-                            if expandedFiles.contains(file.path) {
-                                expandedFiles.remove(file.path)
-                            } else {
-                                expandedFiles.insert(file.path)
-                            }
-                        }
-                    )
+                    DiffFileRow(file: file) {
+                        selectedFileDetail = FileDetailData(from: file)
+                    }
                     if file.id != files.last?.id {
                         Divider()
                             .foregroundStyle(.tronTextMuted.opacity(0.15))
                     }
                 }
             }
+        }
+        .sheet(item: $selectedFileDetail) { fileData in
+            FileDetailSheet(file: fileData)
+                .presentationDragIndicator(.hidden)
+                .adaptivePresentationDetents([.medium, .large])
         }
     }
 

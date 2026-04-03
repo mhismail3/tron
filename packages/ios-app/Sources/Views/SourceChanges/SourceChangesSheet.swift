@@ -22,25 +22,51 @@ struct SourceChangesSheet: View {
     @State private var committedResult: CommittedDiffResult?
     @State private var branches: [SessionBranchInfo] = []
     @State private var isLoading = true
-    @State private var isWorktreeLoading = false
+    @State private var isCommitting = false
+    @State private var isMerging = false
     @State private var isBranchesLoading = true
     @State private var errorMessage: String?
-    @State private var expandedFiles: Set<String> = []
-    @State private var expandedCommittedFiles: Set<String> = []
     @State private var selectedBranch: SessionBranchInfo?
+    @State private var selectedFileDetail: FileDetailData?
     @State private var isPruning = false
     @State private var showPruneConfirmation = false
+    @State private var showCommitConfirmation = false
+    @State private var showMergeConfirmation = false
 
     enum SourceControlTab: String, CaseIterable {
         case thisSession = "This Session"
         case allBranches = "All Branches"
     }
 
-    /// Show the segmented picker only when there's something to show in "All Branches"
+    // MARK: - Computed Properties
+
     private var showTabs: Bool {
-        guard result?.isGitRepo == true else { return false }
-        return worktreeStatus?.hasWorktree == true || !branches.isEmpty
+        SourceControlMetadata.showTabs(
+            diffResult: result,
+            worktreeStatus: worktreeStatus,
+            branches: branches
+        )
     }
+
+    private var canCommit: Bool {
+        SourceControlMetadata.canCommit(
+            worktreeStatus: worktreeStatus,
+            isLoading: isCommitting
+        )
+    }
+
+    private var canMerge: Bool {
+        SourceControlMetadata.canMerge(
+            worktreeStatus: worktreeStatus,
+            isLoading: isMerging
+        )
+    }
+
+    private var hasInactiveBranches: Bool {
+        branches.contains { !$0.isActive }
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
@@ -68,45 +94,12 @@ struct SourceChangesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if selectedTab == .allBranches && !branches.filter({ !$0.isActive }).isEmpty {
-                        Button {
-                            showPruneConfirmation = true
-                        } label: {
-                            if isPruning {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Label("Prune", systemImage: "trash")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                                    .foregroundStyle(.tronError)
-                            }
-                        }
-                        .disabled(isPruning)
-                        .popover(isPresented: $showPruneConfirmation, arrowEdge: .bottom) {
-                            GlassActionSheet(
-                                actions: [
-                                    GlassAction(
-                                        title: "Delete all \(branches.filter({ !$0.isActive }).count) branches",
-                                        icon: "trash",
-                                        color: .tronError,
-                                        role: .destructive
-                                    ) {
-                                        showPruneConfirmation = false
-                                        pruneAllBranches()
-                                    },
-                                    GlassAction(
-                                        title: "Cancel",
-                                        icon: nil,
-                                        color: .tronTextMuted,
-                                        role: .cancel
-                                    ) {
-                                        showPruneConfirmation = false
-                                    }
-                                ]
-                            )
-                            .presentationCompactAdaptation(.popover)
-                        }
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    if selectedTab == .thisSession && worktreeStatus?.hasWorktree == true {
+                        commitButton
+                        mergeButton
+                    } else if selectedTab == .allBranches && hasInactiveBranches {
+                        pruneButton
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -150,6 +143,132 @@ struct SourceChangesSheet: View {
             .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large])
         }
+        .sheet(item: $selectedFileDetail) { fileData in
+            FileDetailSheet(file: fileData)
+                .presentationDragIndicator(.hidden)
+                .adaptivePresentationDetents([.medium, .large])
+        }
+    }
+
+    // MARK: - Toolbar Buttons
+
+    @ViewBuilder
+    private var commitButton: some View {
+        Button { showCommitConfirmation = true } label: {
+            if isCommitting {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "checkmark.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(canCommit ? .tronEmerald : .tronTextMuted.opacity(0.5))
+            }
+        }
+        .disabled(!canCommit || isCommitting)
+        .accessibilityLabel("Commit")
+        .popover(isPresented: $showCommitConfirmation, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Commit Changes",
+                        icon: "checkmark.circle",
+                        color: .tronEmerald,
+                        role: .default
+                    ) {
+                        showCommitConfirmation = false
+                        commitWorktreeChanges()
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showCommitConfirmation = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    @ViewBuilder
+    private var mergeButton: some View {
+        Button { showMergeConfirmation = true } label: {
+            if isMerging {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "arrow.triangle.merge")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(canMerge ? .tronEmerald : .tronTextMuted.opacity(0.5))
+            }
+        }
+        .disabled(!canMerge || isMerging)
+        .accessibilityLabel("Merge")
+        .popover(isPresented: $showMergeConfirmation, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Merge to \(worktreeStatus?.worktree?.baseBranch ?? "main")",
+                        icon: "arrow.triangle.merge",
+                        color: .tronEmerald,
+                        role: .default
+                    ) {
+                        showMergeConfirmation = false
+                        mergeWorktreeChanges()
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showMergeConfirmation = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    @ViewBuilder
+    private var pruneButton: some View {
+        Button { showPruneConfirmation = true } label: {
+            if isPruning {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Label("Prune", systemImage: "trash")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronError)
+            }
+        }
+        .disabled(isPruning)
+        .popover(isPresented: $showPruneConfirmation, arrowEdge: .bottom) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Delete all \(branches.filter({ !$0.isActive }).count) branches",
+                        icon: "trash",
+                        color: .tronError,
+                        role: .destructive
+                    ) {
+                        showPruneConfirmation = false
+                        pruneAllBranches()
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showPruneConfirmation = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
     }
 
     // MARK: - This Session Content
@@ -181,41 +300,18 @@ struct SourceChangesSheet: View {
             GeometryReader { geometry in
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 16) {
-                        if hasWorktree {
-                            WorktreeStatusView(
-                                status: worktreeStatus!,
-                                isLoading: isWorktreeLoading,
-                                onCommit: { commitWorktreeChanges() },
-                                onMerge: { mergeWorktreeChanges() }
-                            )
+                        unifiedHeader
                             .padding(.horizontal)
-                        }
-
-                        if let result {
-                            summaryHeader(result: result, files: uncommittedFiles)
-                                .padding(.horizontal)
-                        }
 
                         if hasWorktree && (!commits.isEmpty || !committedFiles.isEmpty) {
                             committedChangesSection(commits: commits, files: committedFiles)
                         }
 
-                        if hasWorktree && !uncommittedFiles.isEmpty {
-                            uncommittedSection(files: uncommittedFiles)
-                        } else if !hasWorktree && !uncommittedFiles.isEmpty {
-                            LazyVStack(spacing: 0) {
-                                ForEach(uncommittedFiles) { file in
-                                    DiffFileRow(
-                                        file: file,
-                                        isExpanded: expandedFiles.contains(file.path),
-                                        onToggle: { toggleFile(file.path, in: &expandedFiles) }
-                                    )
-                                    if file.id != uncommittedFiles.last?.id {
-                                        Divider()
-                                            .foregroundStyle(.tronTextMuted.opacity(0.15))
-                                            .padding(.horizontal)
-                                    }
-                                }
+                        if !uncommittedFiles.isEmpty {
+                            if hasWorktree {
+                                uncommittedSection(files: uncommittedFiles)
+                            } else {
+                                plainFileList(files: uncommittedFiles)
                             }
                         }
 
@@ -239,7 +335,95 @@ struct SourceChangesSheet: View {
         }
     }
 
-    // MARK: - Committed Changes Section
+    // MARK: - Unified Header
+
+    @ViewBuilder
+    private var unifiedHeader: some View {
+        let hasWorktree = worktreeStatus?.hasWorktree == true
+
+        VStack(alignment: .leading, spacing: 8) {
+            // Row 1: Branch name
+            if hasWorktree, let worktree = worktreeStatus?.worktree {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(.tronEmerald)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    Text(worktree.shortBranch)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
+                }
+            } else if let branch = result?.branch {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(.tronEmerald)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    Text(branch)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
+                }
+            }
+
+            // Row 2: Worktree metadata pills
+            if hasWorktree, let worktree = worktreeStatus?.worktree {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        if worktree.isolated {
+                            ToolInfoPill(icon: "lock.shield", label: "Isolated", color: .tronSlate)
+                        }
+
+                        let count = worktree.commitCount ?? 0
+                        ToolInfoPill(
+                            icon: "number",
+                            label: count == 1 ? "1 commit" : "\(count) commits",
+                            color: .tronSlate
+                        )
+
+                        if worktree.hasUncommittedChanges == true {
+                            ToolInfoPill(icon: "circle.fill", label: "Uncommitted", color: .orange)
+                        }
+
+                        if worktree.isMerged == true {
+                            ToolInfoPill(icon: "checkmark.circle", label: "Merged", color: .tronSuccess)
+                        }
+                    }
+                }
+                .scrollClipDisabled()
+            }
+
+            // Row 3: File summary pills
+            if let result {
+                fileSummaryPills(result: result)
+            }
+        }
+    }
+
+    private func fileSummaryPills(result: WorktreeGetDiffResult) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if let summary = result.summary {
+                    ToolInfoPill(
+                        icon: "doc.text",
+                        label: "\(summary.totalFiles) file\(summary.totalFiles == 1 ? "" : "s")",
+                        color: .tronSlate
+                    )
+                    if summary.totalAdditions > 0 {
+                        ToolInfoPill(icon: "plus", label: "\(summary.totalAdditions)", color: .tronSuccess)
+                    }
+                    if summary.totalDeletions > 0 {
+                        ToolInfoPill(icon: "minus", label: "\(summary.totalDeletions)", color: .tronError)
+                    }
+                }
+                if result.truncated == true {
+                    ToolInfoPill(icon: "exclamationmark.triangle", label: "Truncated", color: .yellow)
+                }
+            }
+        }
+        .scrollClipDisabled()
+    }
+
+    // MARK: - File Sections
 
     private func committedChangesSection(commits: [CommitEntry], files: [CommittedFileEntry]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -269,11 +453,9 @@ struct SourceChangesSheet: View {
 
             LazyVStack(spacing: 0) {
                 ForEach(files) { file in
-                    DiffFileRow(
-                        file: file,
-                        isExpanded: expandedCommittedFiles.contains(file.path),
-                        onToggle: { toggleFile(file.path, in: &expandedCommittedFiles) }
-                    )
+                    DiffFileRow(file: file) {
+                        selectedFileDetail = FileDetailData(from: file)
+                    }
                     if file.id != files.last?.id {
                         Divider()
                             .foregroundStyle(.tronTextMuted.opacity(0.15))
@@ -284,8 +466,6 @@ struct SourceChangesSheet: View {
         }
     }
 
-    // MARK: - Uncommitted Section
-
     private func uncommittedSection(files: [DiffFileEntry]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Uncommitted Changes")
@@ -295,16 +475,29 @@ struct SourceChangesSheet: View {
 
             LazyVStack(spacing: 0) {
                 ForEach(files) { file in
-                    DiffFileRow(
-                        file: file,
-                        isExpanded: expandedFiles.contains(file.path),
-                        onToggle: { toggleFile(file.path, in: &expandedFiles) }
-                    )
+                    DiffFileRow(file: file) {
+                        selectedFileDetail = FileDetailData(from: file)
+                    }
                     if file.id != files.last?.id {
                         Divider()
                             .foregroundStyle(.tronTextMuted.opacity(0.15))
                             .padding(.horizontal)
                     }
+                }
+            }
+        }
+    }
+
+    private func plainFileList(files: [DiffFileEntry]) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(files) { file in
+                DiffFileRow(file: file) {
+                    selectedFileDetail = FileDetailData(from: file)
+                }
+                if file.id != files.last?.id {
+                    Divider()
+                        .foregroundStyle(.tronTextMuted.opacity(0.15))
+                        .padding(.horizontal)
                 }
             }
         }
@@ -331,7 +524,6 @@ struct SourceChangesSheet: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // Active sessions (excluding current)
                     let activeBranches = branches.filter { $0.isActive && $0.sessionId != sessionId }
                     if !activeBranches.isEmpty {
                         sectionHeader("Active Sessions")
@@ -340,7 +532,6 @@ struct SourceChangesSheet: View {
                         }
                     }
 
-                    // Preserved branches
                     if !preservedBranches.isEmpty {
                         sectionHeader("Preserved Branches")
                         ForEach(preservedBranches) { branch in
@@ -348,7 +539,6 @@ struct SourceChangesSheet: View {
                         }
                     }
 
-                    // Current session branch
                     let currentBranches = branches.filter { $0.isActive && $0.sessionId == sessionId }
                     if !currentBranches.isEmpty {
                         sectionHeader("Current Session")
@@ -419,51 +609,6 @@ struct SourceChangesSheet: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Summary Header
-
-    private func summaryHeader(result: WorktreeGetDiffResult, files: [DiffFileEntry]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if let branch = result.branch {
-                    ToolInfoPill(
-                        icon: "arrow.triangle.branch",
-                        label: branch,
-                        color: .tronEmerald
-                    )
-                }
-                if let summary = result.summary {
-                    ToolInfoPill(
-                        icon: "doc.text",
-                        label: "\(summary.totalFiles) file\(summary.totalFiles == 1 ? "" : "s")",
-                        color: .tronSlate
-                    )
-                    if summary.totalAdditions > 0 {
-                        ToolInfoPill(
-                            icon: "plus",
-                            label: "\(summary.totalAdditions)",
-                            color: .tronSuccess
-                        )
-                    }
-                    if summary.totalDeletions > 0 {
-                        ToolInfoPill(
-                            icon: "minus",
-                            label: "\(summary.totalDeletions)",
-                            color: .tronError
-                        )
-                    }
-                }
-                if result.truncated == true {
-                    ToolInfoPill(
-                        icon: "exclamationmark.triangle",
-                        label: "Truncated",
-                        color: .yellow
-                    )
-                }
-            }
-        }
-        .scrollClipDisabled()
-    }
-
     // MARK: - Common Views
 
     private var loadingView: some View {
@@ -513,14 +658,9 @@ struct SourceChangesSheet: View {
 
     private var noChangesView: some View {
         VStack(spacing: 16) {
-            if let status = worktreeStatus, status.hasWorktree {
-                WorktreeStatusView(
-                    status: status,
-                    isLoading: isWorktreeLoading,
-                    onCommit: { commitWorktreeChanges() },
-                    onMerge: { mergeWorktreeChanges() }
-                )
-                .padding(.horizontal)
+            if worktreeStatus?.hasWorktree == true {
+                unifiedHeader
+                    .padding(.horizontal)
             }
 
             VStack(spacing: 12) {
@@ -535,25 +675,11 @@ struct SourceChangesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Helpers
-
-    private func toggleFile(_ path: String, in set: inout Set<String>) {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            if set.contains(path) {
-                set.remove(path)
-            } else {
-                set.insert(path)
-            }
-        }
-    }
-
     // MARK: - Data Loading
 
     private func loadAll() async {
         isLoading = true
         errorMessage = nil
-        expandedFiles = []
-        expandedCommittedFiles = []
 
         async let diffResult = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
         async let statusResult: WorktreeGetStatusResult? = {
@@ -585,8 +711,8 @@ struct SourceChangesSheet: View {
 
     private func commitWorktreeChanges() {
         Task {
-            isWorktreeLoading = true
-            defer { isWorktreeLoading = false }
+            isCommitting = true
+            defer { isCommitting = false }
 
             do {
                 let result = try await rpcClient.worktree.commit(
@@ -595,6 +721,8 @@ struct SourceChangesSheet: View {
                 )
                 if result.success {
                     await loadAll()
+                } else if let error = result.error {
+                    errorMessage = "Commit failed: \(error)"
                 }
             } catch {
                 errorMessage = "Commit failed: \(error.localizedDescription)"
@@ -602,24 +730,10 @@ struct SourceChangesSheet: View {
         }
     }
 
-    private func pruneAllBranches() {
-        Task {
-            isPruning = true
-            defer { isPruning = false }
-
-            do {
-                let _ = try await rpcClient.worktree.pruneBranches(sessionId: sessionId)
-                await loadBranches()
-            } catch {
-                errorMessage = "Prune failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
     private func mergeWorktreeChanges() {
         Task {
-            isWorktreeLoading = true
-            defer { isWorktreeLoading = false }
+            isMerging = true
+            defer { isMerging = false }
 
             do {
                 let targetBranch = worktreeStatus?.worktree?.baseBranch ?? "main"
@@ -637,6 +751,20 @@ struct SourceChangesSheet: View {
                 await loadAll()
             } catch {
                 errorMessage = "Merge failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func pruneAllBranches() {
+        Task {
+            isPruning = true
+            defer { isPruning = false }
+
+            do {
+                let _ = try await rpcClient.worktree.pruneBranches(sessionId: sessionId)
+                await loadBranches()
+            } catch {
+                errorMessage = "Prune failed: \(error.localizedDescription)"
             }
         }
     }
