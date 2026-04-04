@@ -54,6 +54,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Deep link router - persists across server changes
     private(set) var deepLinkRouter: DeepLinkRouter
 
+    /// Draft store for persisting input bar state per session
+    private(set) var draftStore: DraftStore
+
     /// Shared audio recorder — starts on-demand when user taps mic
     let audioRecorder = AudioRecorder()
 
@@ -130,6 +133,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
         }
         eventDatabase = db
+        draftStore = DraftStore(eventDatabase: db)
         pushNotificationService = PushNotificationService()
         deepLinkRouter = DeepLinkRouter()
 
@@ -157,6 +161,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Configure skill store with RPC client (after all properties initialized)
         store.configure(rpcClient: client)
+
+        // Wire draft store into event store manager for cleanup on session delete
+        eventStoreManager.draftStore = draftStore
 
         // Listen for auth updates from WebSocket events
         NotificationCenter.default.addObserver(

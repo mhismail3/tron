@@ -21,7 +21,7 @@ dependencies.eventDatabase
 
 ## Service Lifecycle
 
-- **Persistent**: `eventDatabase`, `pushNotificationService`, `deepLinkRouter`
+- **Persistent**: `eventDatabase`, `draftStore`, `pushNotificationService`, `deepLinkRouter`
 - **Recreated on server change**: `rpcClient`, `skillStore`, `eventStoreManager`
 
 ## Initialization

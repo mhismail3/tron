@@ -228,6 +228,9 @@ final class ChatViewModel {
     /// Reference to EventStoreManager for event-sourced persistence
     weak var eventStoreManager: EventStoreManager?
 
+    /// Reference to DraftStore for persisting unsent input state
+    weak var draftStore: DraftStore?
+
     /// Workspace ID for event caching
     var workspaceId: String = ""
 

@@ -29,6 +29,8 @@ final class EventDatabase: DatabaseTransport {
     lazy var thinking: ThinkingRepository = ThinkingRepository(transport: self, eventRepository: events)
     @ObservationIgnored
     lazy var tree: TreeRepository = TreeRepository(eventRepository: events, sessionRepository: sessions)
+    @ObservationIgnored
+    lazy var drafts: DraftRepository = DraftRepository(transport: self)
 
     // MARK: - Initialization
 
@@ -91,6 +93,7 @@ final class EventDatabase: DatabaseTransport {
         try execute("DELETE FROM events")
         try execute("DELETE FROM sessions")
         try execute("DELETE FROM sync_state")
+        try execute("DELETE FROM session_drafts")
     }
 
     /// Remove duplicate events for a session, preferring events with richer content (tool blocks).

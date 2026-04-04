@@ -14,6 +14,7 @@ sessions: id, workspace_id, title, created_at, updated_at, ...
 events: id, session_id, type, payload (JSON), sequence, timestamp, ...
 thinking_blocks: id, event_id, block_index, content (separate for size)
 sync_state: session_id, last_synced_sequence
+session_drafts: session_id (PK), text, skills_json, spells_json, attachment_metadata_json, updated_at
 ```
 
 ## Repositories
@@ -23,6 +24,7 @@ sync_state: session_id, last_synced_sequence
 - `ThinkingRepository` - Thinking block storage
 - `TreeRepository` - Event parent/child relationships
 - `SyncRepository` - Sync state tracking
+- `DraftRepository` - Per-session draft persistence (text, skills, spells, attachment metadata as JSON)
 
 ## Usage
 

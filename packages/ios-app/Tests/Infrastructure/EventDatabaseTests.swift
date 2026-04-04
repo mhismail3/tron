@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import TronMobile
 
 /// Tests for the EventDatabase SQLite store
@@ -1114,5 +1115,60 @@ final class EventDatabaseTests: XCTestCase {
 
         // Should remove 1 duplicate from each session
         XCTAssertEqual(totalRemoved, 2)
+    }
+
+    // MARK: - Session Drafts Table
+
+    @MainActor
+    func testSessionDraftsTableExists() throws {
+        // The session_drafts table should exist after initialization
+        var stmt: OpaquePointer?
+        let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='session_drafts'"
+        XCTAssertEqual(sqlite3_prepare_v2(database.db, sql, -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        let name = String(cString: sqlite3_column_text(stmt, 0))
+        XCTAssertEqual(name, "session_drafts")
+    }
+
+    @MainActor
+    func testSessionDraftsTable_basicCRUD() throws {
+        // Insert
+        let insertSQL = """
+            INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
+            VALUES ('test-session', 'hello world', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
+        """
+        try database.execute(insertSQL)
+
+        // Select
+        var stmt: OpaquePointer?
+        let selectSQL = "SELECT text FROM session_drafts WHERE session_id = 'test-session'"
+        XCTAssertEqual(sqlite3_prepare_v2(database.db, selectSQL, -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        let text = String(cString: sqlite3_column_text(stmt, 0))
+        XCTAssertEqual(text, "hello world")
+    }
+
+    @MainActor
+    func testClearAll_includesSessionDrafts() throws {
+        // Insert a draft
+        try database.execute("""
+            INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
+            VALUES ('test-session', 'draft text', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
+        """)
+
+        // Clear all
+        try database.clearAll()
+
+        // Verify draft is gone
+        var stmt: OpaquePointer?
+        let sql = "SELECT COUNT(*) FROM session_drafts"
+        XCTAssertEqual(sqlite3_prepare_v2(database.db, sql, -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(stmt, 0), 0)
     }
 }

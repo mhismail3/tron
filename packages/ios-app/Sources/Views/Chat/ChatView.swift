@@ -185,10 +185,15 @@ struct ChatView: View {
             // Note: Message entry animations are handled in .task after messages load
         }
         .onDisappear {
+            // Persist draft state before view is destroyed
+            dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState)
             // Reset for next entry
             initialLoadComplete = false
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
+        }
+        .onChange(of: viewModel.inputBarState.draftFingerprint) { _, _ in
+            dependencies.draftStore.scheduleSave(sessionId: sessionId, inputBarState: viewModel.inputBarState)
         }
         .task {
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
@@ -205,6 +210,10 @@ struct ChatView: View {
 
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
+
+            // Restore draft state and wire draft store
+            dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)
+            viewModel.draftStore = dependencies.draftStore
 
             // Run model prefetch in parallel with connect/resume
             // This is a fire-and-forget operation that doesn't block session entry

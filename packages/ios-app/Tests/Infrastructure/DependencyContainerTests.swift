@@ -42,6 +42,11 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssert(Self.sharedContainer.eventStoreManager is EventStoreManager)
     }
 
+    func test_container_providesDraftStore() async throws {
+        XCTAssertNotNil(Self.sharedContainer.draftStore)
+        XCTAssert(Self.sharedContainer.draftStore is DraftStore)
+    }
+
     func test_container_providesPushNotificationService() async throws {
         XCTAssertNotNil(Self.sharedContainer.pushNotificationService)
         XCTAssert(Self.sharedContainer.pushNotificationService is PushNotificationService)

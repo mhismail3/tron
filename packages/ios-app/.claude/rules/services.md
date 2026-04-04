@@ -50,6 +50,7 @@ struct MyClient {
 - `EventStoreManager` - Session list, event sync, dashboard polling
 - `WebSocketService` - Low-level WebSocket with auto-reconnect
 - `SkillStore` - Cached skill definitions
+- `DraftStore` - Per-session draft persistence (debounced save, file-based attachment storage)
 
 ## Rules
 

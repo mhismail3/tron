@@ -77,6 +77,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Clear the thinking caption state
     /// Called on abort to remove the thinking caption
     func clearThinkingCaption()
+
+    /// Draft store for clearing persisted drafts after send
+    var draftStore: DraftStore? { get }
 }
 
 /// Coordinates message sending, agent abort, and attachment management for ChatViewModel.
@@ -198,6 +201,9 @@ final class MessagingCoordinator {
         let fileAttachments = context.attachments.map { FileAttachment(attachment: $0) }
         context.attachments = []
         context.selectedImages = []
+
+        // Clear persisted draft now that input state is consumed
+        context.draftStore?.clearDraft(sessionId: context.sessionId)
 
         // Send to server
         do {

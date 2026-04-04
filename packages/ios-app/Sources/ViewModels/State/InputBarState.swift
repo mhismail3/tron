@@ -51,6 +51,27 @@ final class InputBarState {
         return before - attachments.count
     }
 
+    // MARK: - Draft Persistence
+
+    /// Lightweight fingerprint for draft-relevant state.
+    /// Used by ChatView to trigger debounced draft saves via `.onChange`.
+    var draftFingerprint: Int {
+        var hasher = Hasher()
+        hasher.combine(text)
+        hasher.combine(attachments.map(\.id))
+        hasher.combine(selectedSkills.map(\.name))
+        hasher.combine(selectedSpells.map(\.name))
+        return hasher.finalize()
+    }
+
+    /// Whether there is any draft content worth persisting.
+    var hasDraftContent: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !attachments.isEmpty
+            || !selectedSkills.isEmpty
+            || !selectedSpells.isEmpty
+    }
+
     // MARK: - Computed Properties
 
     /// Whether there is any content to send

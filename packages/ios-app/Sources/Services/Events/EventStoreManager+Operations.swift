@@ -59,6 +59,7 @@ extension EventStoreManager {
         do {
             try eventDB.sessions.delete(sessionId)
             try eventDB.events.deleteBySession(sessionId)
+            draftStore?.deleteSessionDraft(sessionId: sessionId)
         } catch {
             // Rollback: restore the session to local array
             if let (session, index) = removed {

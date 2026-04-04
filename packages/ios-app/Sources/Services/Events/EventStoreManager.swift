@@ -25,6 +25,7 @@ final class EventStoreManager {
 
     let eventDB: EventDatabase
     private(set) var rpcClient: RPCClient
+    weak var draftStore: DraftStore?
 
     // MARK: - Observable State
 

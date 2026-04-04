@@ -17,6 +17,7 @@ enum DatabaseSchema {
         try createSessionsTable(db: db)
         try runSessionsMigrations(db: db)
         try createSyncStateTable(db: db)
+        try createDraftsTable(db: db)
     }
 
     /// Check if a column exists in a table.
@@ -181,6 +182,21 @@ enum DatabaseSchema {
                 last_synced_event_id TEXT,
                 last_sync_timestamp TEXT,
                 pending_event_ids TEXT
+            )
+        """)
+    }
+
+    // MARK: - Drafts Table
+
+    private static func createDraftsTable(db: OpaquePointer?) throws {
+        try execute(db: db, """
+            CREATE TABLE IF NOT EXISTS session_drafts (
+                session_id TEXT PRIMARY KEY,
+                text TEXT NOT NULL DEFAULT '',
+                skills_json TEXT NOT NULL DEFAULT '[]',
+                spells_json TEXT NOT NULL DEFAULT '[]',
+                attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL
             )
         """)
     }

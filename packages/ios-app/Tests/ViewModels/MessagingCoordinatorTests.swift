@@ -237,6 +237,65 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastSentReasoningLevel, "high")
     }
 
+    // MARK: - Draft Clearing Tests
+
+    func testSendMessage_clearsDraftAfterSend() async {
+        // Given: A draft store with a saved draft
+        let db = EventDatabase()!
+        try! await db.initialize()
+        try! db.clearAll()
+        let store = DraftStore(eventDatabase: db)
+        mockContext.draftStore = store
+
+        // Save a draft
+        let draftState = InputBarState()
+        draftState.text = "draft text"
+        store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
+
+        // Verify draft exists
+        let checkState = InputBarState()
+        XCTAssertTrue(store.loadDraft(sessionId: "test-session", into: checkState))
+
+        // When: Sending a message
+        mockContext.inputText = "Test message"
+        await coordinator.sendMessage(context: mockContext)
+
+        // Then: Draft should be cleared
+        let afterState = InputBarState()
+        XCTAssertFalse(store.loadDraft(sessionId: "test-session", into: afterState))
+
+        store.removeAllDraftFiles()
+        try? db.clearAll()
+        db.close()
+    }
+
+    func testSendMessage_clearsDraft_evenOnServerError() async {
+        // Given: Draft store and server will fail
+        let db = EventDatabase()!
+        try! await db.initialize()
+        try! db.clearAll()
+        let store = DraftStore(eventDatabase: db)
+        mockContext.draftStore = store
+
+        let draftState = InputBarState()
+        draftState.text = "draft"
+        store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
+
+        mockContext.inputText = "Test"
+        mockContext.sendPromptShouldFail = true
+
+        // When: Sending message (server fails)
+        await coordinator.sendMessage(context: mockContext)
+
+        // Then: Draft should still be cleared (input state was already consumed)
+        let afterState = InputBarState()
+        XCTAssertFalse(store.loadDraft(sessionId: "test-session", into: afterState))
+
+        store.removeAllDraftFiles()
+        try? db.clearAll()
+        db.close()
+    }
+
     // MARK: - Error Handling Tests
 
     func testSendMessageHandlesServerError() async {
@@ -382,6 +441,7 @@ final class MockMessagingContext: MessagingContext {
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
     var agentPhase: AgentPhase = .idle
+    var draftStore: DraftStore?
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     var lastAnsweredQuestionCount: Int = 0

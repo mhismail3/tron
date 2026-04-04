@@ -110,6 +110,12 @@ struct TronMobileApp: App {
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
                 container.setBackgroundState(isBackground)
+
+                // Flush any pending debounced draft save before backgrounding
+                if isBackground {
+                    container.draftStore.flushPending()
+                }
+
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
 
                 // When returning to foreground, check for pending share content
