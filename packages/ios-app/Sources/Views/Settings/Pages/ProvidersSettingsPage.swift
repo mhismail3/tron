@@ -232,6 +232,7 @@ private struct ProviderCard: View {
             }
             .padding(12)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityAddTraits(.isButton)
             .onTapGesture { onToggle() }
 
             // Expanded content
@@ -417,6 +418,7 @@ private struct CredentialRow: View {
         }
         .padding(10)
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityAddTraits(.isButton)
         .onTapGesture { Task { await onSelect() } }
         .sectionFill(providerColor, cornerRadius: 8, subtle: true)
         .overlay {
@@ -653,6 +655,7 @@ private struct ServiceCard: View {
             }
             .padding(12)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityAddTraits(.isButton)
             .onTapGesture { onToggle() }
 
             if isExpanded {

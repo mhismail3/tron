@@ -212,31 +212,33 @@ struct SettingsView: View {
     }
 
     private func categoryRow(icon: String, label: String, subtitle: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 18)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(subtitle)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(subtitle)
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronTextMuted)
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture { action() }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Notifications Card
@@ -264,51 +266,55 @@ struct SettingsView: View {
             SettingsSectionHeader(title: "Danger Zone", color: .tronError)
 
             SettingsCard(accent: .tronError) {
-                SettingsRow(icon: "arrow.counterclockwise", label: "Reset Chat Session", accentColor: .tronError, labelColor: .tronError) {
-                    EmptyView()
-                }
-                .opacity(eventStoreManager.chatSession == nil ? 0.4 : 1)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .onTapGesture {
-                    guard eventStoreManager.chatSession != nil else { return }
+                Button {
                     showResetChatConfirmation = true
-                }
-
-                SettingsRowDivider()
-
-                HStack {
-                    Image(systemName: "archivebox")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronError)
-                        .frame(width: 18)
-                    Text("Archive All Sessions")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronError)
-                    Spacer()
-                    if isArchivingAll {
-                        ProgressView()
-                            .tint(.tronError)
-                            .scaleEffect(0.7)
+                } label: {
+                    SettingsRow(icon: "arrow.counterclockwise", label: "Reset Chat Session", accentColor: .tronError, labelColor: .tronError) {
+                        EmptyView()
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .opacity(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll ? 0.4 : 1)
-                .onTapGesture {
-                    guard eventStoreManager.sessions.contains(where: { !$0.isChat }), !isArchivingAll else { return }
-                    showArchiveAllConfirmation = true
-                }
+                .buttonStyle(.plain)
+                .disabled(eventStoreManager.chatSession == nil)
+                .opacity(eventStoreManager.chatSession == nil ? 0.4 : 1)
 
                 SettingsRowDivider()
 
-                SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
-                    EmptyView()
+                Button {
+                    showArchiveAllConfirmation = true
+                } label: {
+                    HStack {
+                        Image(systemName: "archivebox")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronError)
+                            .frame(width: 18)
+                        Text("Archive All Sessions")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronError)
+                        Spacer()
+                        if isArchivingAll {
+                            ProgressView()
+                                .tint(.tronError)
+                                .scaleEffect(0.7)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .onTapGesture {
+                .buttonStyle(.plain)
+                .disabled(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll)
+                .opacity(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll ? 0.4 : 1)
+
+                SettingsRowDivider()
+
+                Button {
                     showingResetAlert = true
+                } label: {
+                    SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
+                        EmptyView()
+                    }
                 }
+                .buttonStyle(.plain)
             }
         }
     }
