@@ -63,6 +63,7 @@ impl SessionCommandService {
                 model: request.model.clone(),
                 working_directory: request.working_directory.clone(),
                 source: None,
+                title: request.title.clone(),
             });
 
         spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
@@ -247,6 +248,7 @@ impl SessionCommandService {
                     model: model.clone(),
                     working_directory: working_directory.clone(),
                     source: Some("chat".into()),
+                    title: Some("Chat".into()),
                 });
         }
 
@@ -331,6 +333,7 @@ impl SessionCommandService {
                 model: model.clone(),
                 working_directory: working_directory.clone(),
                 source: Some("chat".into()),
+                title: Some("Chat".into()),
             });
 
         Ok(json!({

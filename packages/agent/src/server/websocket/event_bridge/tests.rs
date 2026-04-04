@@ -215,6 +215,7 @@ async fn bridge_broadcasts_session_lifecycle_to_all() {
             model: "claude-opus-4-6".into(),
             working_directory: "/tmp".into(),
             source: None,
+            title: None,
         })
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -684,6 +685,7 @@ fn session_created_has_required_fields() {
         model: "claude-opus-4-6".into(),
         working_directory: "/tmp/project".into(),
         source: None,
+        title: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "session.created");
@@ -772,6 +774,7 @@ fn event_bridge_maps_session_created() {
         model: "claude-opus-4-6".into(),
         working_directory: "/tmp".into(),
         source: None,
+        title: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "session.created");
@@ -913,6 +916,7 @@ fn all_event_types_have_wire_mapping() {
             model: "m".into(),
             working_directory: "/".into(),
             source: None,
+            title: None,
         },
         TronEvent::SessionArchived { base: base.clone() },
         TronEvent::SessionUnarchived { base: base.clone() },

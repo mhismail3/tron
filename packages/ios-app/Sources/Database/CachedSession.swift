@@ -75,6 +75,9 @@ struct CachedSession: Identifiable, Codable {
         if let title = title, !title.isEmpty {
             return title
         }
+        if isChat {
+            return "Chat"
+        }
         return URL(fileURLWithPath: workingDirectory).lastPathComponent
     }
 

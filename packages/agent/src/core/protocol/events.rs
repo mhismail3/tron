@@ -647,6 +647,9 @@ tron_events! {
         /// Session source (e.g. "chat" for persistent chat sessions).
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        /// Session title (e.g. "Chat" for persistent chat sessions).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     } => "session_created",
 
     /// Session archived.
@@ -1650,6 +1653,7 @@ mod tests {
                 model: "m".into(),
                 working_directory: "/tmp".into(),
                 source: None,
+                title: None,
             },
             TronEvent::SessionArchived { base: base.clone() },
             TronEvent::SessionUnarchived { base: base.clone() },

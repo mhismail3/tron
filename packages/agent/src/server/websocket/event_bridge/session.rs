@@ -96,6 +96,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             model,
             working_directory,
             source,
+            title,
             ..
         } => Some(global(
             event,
@@ -103,6 +104,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             Some(json!({
                 "model": model,
                 "workingDirectory": working_directory,
+                "title": title,
                 "messageCount": 0,
                 "inputTokens": 0,
                 "outputTokens": 0,
