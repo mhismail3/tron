@@ -39,7 +39,6 @@ extension ChatView {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 11, height: 11)
                         .foregroundStyle(.tronPurple)
-                        .offset(y: 1)
                         .transition(.opacity)
                 }
                 if let worktree = viewModel.worktreeState.worktree {
@@ -55,7 +54,6 @@ extension ChatView {
                                 .frame(width: 5, height: 5)
                         }
                     }
-                    .offset(y: 1)
                     .transition(.opacity)
                 }
                 TypewriterText(

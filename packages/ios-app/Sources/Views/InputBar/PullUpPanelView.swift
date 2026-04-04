@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Liquid glass container revealed below the input bar.
+/// Suggestion chips revealed below the input bar with a backdrop blur.
 /// Has its own easy-dismiss drag gesture (lower threshold than the input bar pull-up).
 @available(iOS 26.0, *)
 struct PullUpPanelView: View {
@@ -31,10 +31,7 @@ struct PullUpPanelView: View {
         .frame(maxWidth: .infinity)
         .frame(height: PullUpPanelState.expandedHeight)
         .contentShape(Rectangle())
-        .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-        )
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .offset(y: dismissOffset)
@@ -90,9 +87,9 @@ struct PullUpPanelView: View {
     // MARK: - Panel Content
 
     private var panelContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Suggestions")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .padding(.leading, 4)
@@ -106,15 +103,11 @@ struct PullUpPanelView: View {
                     Text(suggestion)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .glassEffect(
-                            .regular.tint(Color.tronEmerald.opacity(0.25)).interactive(),
-                            in: .capsule
-                        )
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
+                .chipStyle(.tronEmerald, tintOpacity: 0.25, strokeOpacity: 0.3)
                 .opacity(isVisible ? 1 : 0)
                 .offset(y: isVisible ? 0 : 12)
             }
