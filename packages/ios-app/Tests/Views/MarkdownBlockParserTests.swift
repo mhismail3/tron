@@ -9,7 +9,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "Hello world.\n\n"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .paragraph(let content) = blocks[0] {
+        if case .paragraph(let content) = blocks[0].kind {
             XCTAssertEqual(content, "Hello world.")
         } else {
             XCTFail("Expected paragraph")
@@ -27,7 +27,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 2)
         for block in blocks {
-            if case .paragraph(let content) = block {
+            if case .paragraph(let content) = block.kind {
                 XCTAssertFalse(
                     content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     "Should not produce empty paragraph blocks"
@@ -82,7 +82,7 @@ final class MarkdownBlockParserTests: XCTestCase {
 
         // Verify no empty blocks
         for (i, block) in blocks.enumerated() {
-            switch block {
+            switch block.kind {
             case .paragraph(let content):
                 XCTAssertFalse(
                     content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -103,7 +103,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         }
 
         // Verify last block is a paragraph with content
-        if case .paragraph(let content) = blocks.last {
+        if case .paragraph(let content) = blocks.last?.kind {
             XCTAssertTrue(content.contains("ending text"))
         } else {
             XCTFail("Last block should be a paragraph, got \(String(describing: blocks.last))")
@@ -115,7 +115,7 @@ final class MarkdownBlockParserTests: XCTestCase {
     func testHeaderParsing() {
         let blocks = MarkdownBlockParser.parse("## Title\n\nParagraph.")
         XCTAssertEqual(blocks.count, 2)
-        if case .header(let level, let content) = blocks[0] {
+        if case .header(let level, let content) = blocks[0].kind {
             XCTAssertEqual(level, 2)
             XCTAssertEqual(content, "Title")
         } else {
@@ -127,7 +127,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "```swift\nlet x = 1\n```"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .codeBlock(let lang, let code) = blocks[0] {
+        if case .codeBlock(let lang, let code) = blocks[0].kind {
             XCTAssertEqual(lang, "swift")
             XCTAssertEqual(code, "let x = 1")
         } else {
@@ -139,7 +139,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "- Item 1\n- Item 2\n- Item 3"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .unorderedList(let items) = blocks[0] {
+        if case .unorderedList(let items) = blocks[0].kind {
             XCTAssertEqual(items.count, 3)
         } else {
             XCTFail("Expected unordered list")
@@ -150,7 +150,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "1. First\n2. Second"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .orderedList(let items) = blocks[0] {
+        if case .orderedList(let items) = blocks[0].kind {
             XCTAssertEqual(items.count, 2)
         } else {
             XCTFail("Expected ordered list")
@@ -161,7 +161,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "> Quote line 1\n> Quote line 2"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .blockquote = blocks[0] {} else {
+        if case .blockquote = blocks[0].kind {} else {
             XCTFail("Expected blockquote")
         }
     }
@@ -170,14 +170,14 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "Before.\n\n---\n\nAfter."
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 3)
-        XCTAssertEqual(blocks[1], .horizontalRule)
+        XCTAssertEqual(blocks[1].kind, .horizontalRule)
     }
 
     func testTableParsing() {
         let text = "| A | B |\n|---|---|\n| 1 | 2 |"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .table = blocks[0] {} else {
+        if case .table = blocks[0].kind {} else {
             XCTFail("Expected table")
         }
     }
@@ -186,19 +186,35 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "# Title\n\nParagraph.\n\n```\ncode\n```\n\n- item"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 4)
-        if case .header = blocks[0] {} else { XCTFail("Expected header at 0") }
-        if case .paragraph = blocks[1] {} else { XCTFail("Expected paragraph at 1") }
-        if case .codeBlock = blocks[2] {} else { XCTFail("Expected code at 2") }
-        if case .unorderedList = blocks[3] {} else { XCTFail("Expected list at 3") }
+        if case .header = blocks[0].kind {} else { XCTFail("Expected header at 0") }
+        if case .paragraph = blocks[1].kind {} else { XCTFail("Expected paragraph at 1") }
+        if case .codeBlock = blocks[2].kind {} else { XCTFail("Expected code at 2") }
+        if case .unorderedList = blocks[3].kind {} else { XCTFail("Expected list at 3") }
     }
 
     func testSingleParagraphNoCrash() {
         let blocks = MarkdownBlockParser.parse("Just a single line.")
         XCTAssertEqual(blocks.count, 1)
-        if case .paragraph(let content) = blocks[0] {
+        if case .paragraph(let content) = blocks[0].kind {
             XCTAssertEqual(content, "Just a single line.")
         } else {
             XCTFail("Expected paragraph")
         }
+    }
+
+    // MARK: - Block Identity Tests
+
+    func testBlocksHaveStableIdentifiers() {
+        let blocks = MarkdownBlockParser.parse("Hello.\n\n## Title\n\n```\ncode\n```")
+        XCTAssertEqual(blocks.count, 3)
+        // Each block should have a unique ID
+        let ids = Set(blocks.map(\.id))
+        XCTAssertEqual(ids.count, 3, "All blocks should have unique IDs")
+    }
+
+    func testIdenticalContentAtDifferentPositionsGetsDifferentIds() {
+        let blocks = MarkdownBlockParser.parse("Same text.\n\nSame text.")
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertNotEqual(blocks[0].id, blocks[1].id, "Same content at different positions should have different IDs")
     }
 }

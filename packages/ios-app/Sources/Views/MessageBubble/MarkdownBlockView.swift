@@ -50,7 +50,7 @@ struct MarkdownBlockView: View {
     @Environment(\.textSelectionDisabled) private var textSelectionDisabled
 
     var body: some View {
-        switch block {
+        switch block.kind {
         case .header(let level, let content):
             headerView(level: level, content: content)
         case .paragraph(let content):

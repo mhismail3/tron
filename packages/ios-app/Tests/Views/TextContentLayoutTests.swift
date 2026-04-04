@@ -10,7 +10,7 @@ final class TextContentLayoutTests: XCTestCase {
         let text = "Real content.\n\n\n\n"
         let blocks = MarkdownBlockParser.parse(text)
         for block in blocks {
-            if case .paragraph(let content) = block {
+            if case .paragraph(let content) = block.kind {
                 XCTAssertFalse(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -20,7 +20,7 @@ final class TextContentLayoutTests: XCTestCase {
         let text = ">\n> Real quote"
         let blocks = MarkdownBlockParser.parse(text)
         for block in blocks {
-            if case .blockquote(let content) = block {
+            if case .blockquote(let content) = block.kind {
                 XCTAssertFalse(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -31,7 +31,7 @@ final class TextContentLayoutTests: XCTestCase {
         let text = "#  \n\nReal content."
         let blocks = MarkdownBlockParser.parse(text)
         for block in blocks {
-            if case .header(_, let content) = block {
+            if case .header(_, let content) = block.kind {
                 XCTAssertFalse(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

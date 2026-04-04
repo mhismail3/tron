@@ -145,7 +145,7 @@ struct ContextMarkdownContent: View {
     var body: some View {
         let blocks = MarkdownBlockParser.parse(content)
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+            ForEach(blocks) { block in
                 compactBlock(block)
             }
         }
@@ -153,7 +153,7 @@ struct ContextMarkdownContent: View {
 
     @ViewBuilder
     private func compactBlock(_ block: MarkdownBlock) -> some View {
-        switch block {
+        switch block.kind {
         case .header(let level, let content):
             let (size, weight) = headerStyle(for: level)
             Text(inlineMarkdown(from: content, size: size, weight: weight))

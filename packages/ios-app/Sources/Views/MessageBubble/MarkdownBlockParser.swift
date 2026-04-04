@@ -2,15 +2,41 @@ import Foundation
 
 // MARK: - Markdown Block Types
 
-enum MarkdownBlock: Equatable {
-    case header(level: Int, content: String)
-    case paragraph(content: String)
-    case codeBlock(language: String?, code: String)
-    case blockquote(content: String)
-    case orderedList(items: [String])
-    case unorderedList(items: [String])
-    case table(MarkdownTable)
-    case horizontalRule
+struct MarkdownBlock: Equatable, Identifiable {
+    /// Stable identity based on position and content hash for efficient SwiftUI diffing.
+    let id: String
+    let kind: Kind
+
+    enum Kind: Equatable {
+        case header(level: Int, content: String)
+        case paragraph(content: String)
+        case codeBlock(language: String?, code: String)
+        case blockquote(content: String)
+        case orderedList(items: [String])
+        case unorderedList(items: [String])
+        case table(MarkdownTable)
+        case horizontalRule
+    }
+
+    init(index: Int, kind: Kind) {
+        self.kind = kind
+        // Combine position with a content fingerprint for stable identity.
+        // Position alone breaks on insert; content alone breaks on duplicates.
+        let contentHash: Int
+        switch kind {
+        case .header(_, let c), .paragraph(let c), .blockquote(let c):
+            contentHash = c.hashValue
+        case .codeBlock(let lang, let code):
+            contentHash = (lang ?? "").hashValue &+ code.hashValue
+        case .orderedList(let items), .unorderedList(let items):
+            contentHash = items.hashValue
+        case .table(let t):
+            contentHash = t.hashValue
+        case .horizontalRule:
+            contentHash = 0
+        }
+        self.id = "\(index)-\(contentHash)"
+    }
 }
 
 // MARK: - Block-Level Markdown Parser
@@ -48,13 +74,13 @@ enum MarkdownBlockParser {
                     i += 1
                 }
                 let code = codeLines.joined(separator: "\n")
-                blocks.append(.codeBlock(language: language, code: code))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .codeBlock(language: language, code: code)))
                 continue
             }
 
             // Horizontal rule (---, ***, ___ with optional spaces, at least 3 chars)
             if isHorizontalRule(trimmed) {
-                blocks.append(.horizontalRule)
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .horizontalRule))
                 i += 1
                 continue
             }
@@ -69,17 +95,17 @@ enum MarkdownBlockParser {
                     i += 1
                 }
                 if let table = MarkdownTableParser.parseTable(tableLines) {
-                    blocks.append(.table(table))
+                    blocks.append(MarkdownBlock(index: blocks.count, kind: .table(table)))
                 } else {
                     // Not a valid table — treat as paragraph
-                    blocks.append(.paragraph(content: tableLines.joined(separator: "\n")))
+                    blocks.append(MarkdownBlock(index: blocks.count, kind: .paragraph(content: tableLines.joined(separator: "\n"))))
                 }
                 continue
             }
 
             // Header (# through ######)
             if let (level, content) = parseHeader(trimmed) {
-                blocks.append(.header(level: level, content: content))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .header(level: level, content: content)))
                 i += 1
                 continue
             }
@@ -96,7 +122,7 @@ enum MarkdownBlockParser {
                     quoteLines.append(stripped)
                     i += 1
                 }
-                blocks.append(.blockquote(content: quoteLines.joined(separator: "\n")))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .blockquote(content: quoteLines.joined(separator: "\n"))))
                 continue
             }
 
@@ -119,7 +145,7 @@ enum MarkdownBlockParser {
                     }
                     i += 1
                 }
-                blocks.append(.unorderedList(items: items))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .unorderedList(items: items)))
                 continue
             }
 
@@ -142,7 +168,7 @@ enum MarkdownBlockParser {
                     }
                     i += 1
                 }
-                blocks.append(.orderedList(items: items))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .orderedList(items: items)))
                 continue
             }
 
@@ -159,12 +185,12 @@ enum MarkdownBlockParser {
                 i += 1
             }
             if !paraLines.isEmpty {
-                blocks.append(.paragraph(content: paraLines.joined(separator: "\n")))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .paragraph(content: paraLines.joined(separator: "\n"))))
             }
         }
 
         return blocks.filter { block in
-            switch block {
+            switch block.kind {
             case .paragraph(let content):
                 return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             case .blockquote(let content):

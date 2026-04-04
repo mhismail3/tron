@@ -32,13 +32,13 @@ extension View {
 
 // MARK: - Table Types
 
-struct MarkdownTable: Equatable {
+struct MarkdownTable: Equatable, Hashable {
     let headers: [String]
     let rows: [[String]]
     let alignments: [TableAlignment]
 }
 
-enum TableAlignment: Equatable {
+enum TableAlignment: Equatable, Hashable {
     case left
     case center
     case right
@@ -59,10 +59,8 @@ struct TextContentView: View {
         inlineMarkdown(from: content, size: size)
     }
 
-    /// Parse text into block-level markdown segments
-    private var blocks: [MarkdownBlock] {
-        MarkdownBlockParser.parse(text)
-    }
+    /// Cached parsed blocks — updated only when `text` changes, avoiding re-parse on every body evaluation.
+    @State private var blocks: [MarkdownBlock] = []
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -81,7 +79,7 @@ struct TextContentView: View {
                     .lineSpacing(4)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    ForEach(blocks) { block in
                         MarkdownBlockView(block: block)
                     }
                 }
@@ -90,6 +88,8 @@ struct TextContentView: View {
         .padding(.top, 4)
         .padding(.horizontal, isUser ? 0 : 4)
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
+        .onAppear { blocks = MarkdownBlockParser.parse(text) }
+        .onChange(of: text) { _, newText in blocks = MarkdownBlockParser.parse(newText) }
     }
 }
 
