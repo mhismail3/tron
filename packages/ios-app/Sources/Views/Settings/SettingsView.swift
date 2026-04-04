@@ -30,13 +30,13 @@ struct SettingsView: View {
     @State private var showArchiveAllConfirmation = false
     @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
-    @State private var showConnectionPage = false
-    @State private var showSessionPage = false
-    @State private var showContextPage = false
-    @State private var showProvidersPage = false
-    @State private var showAppearancePage = false
-    @State private var showMCPServersPage = false
-    @State private var showHooksPage = false
+    @State private var activePage: SettingsPage?
+
+    /// Settings sub-pages, driven by a single `.sheet(item:)`.
+    enum SettingsPage: String, Identifiable {
+        case connection, session, context, providers, appearance, mcpServers, hooks
+        var id: String { rawValue }
+    }
 
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
@@ -75,58 +75,45 @@ struct SettingsView: View {
             LogViewer()
         }
         #endif
-        .sheet(isPresented: $showConnectionPage) {
-            ConnectionSettingsPage(
-                serverHost: $serverHost,
-                serverPort: $serverPort,
-                settingsState: settingsState,
-                onHostSubmit: {
-                    dependencies.updateServerSettings(host: serverHost, port: effectivePort)
-                },
-                onPortChange: { newPort in
-                    dependencies.updateServerSettings(host: serverHost, port: newPort)
-                },
-                updateServerSetting: updateServerSetting
-            )
-            .adaptivePresentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showSessionPage) {
-            SessionSettingsPage(
-                settingsState: settingsState,
-                confirmArchive: $confirmArchive,
-                selectedModelDisplayName: selectedModelDisplayName,
-                updateServerSetting: updateServerSetting
-            )
-            .adaptivePresentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showContextPage) {
-            ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                .adaptivePresentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showProvidersPage) {
-            ProvidersSettingsPage()
-                .adaptivePresentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showAppearancePage) {
-            if #available(iOS 26.0, *) {
-                AppearanceSettingsPage()
-                    .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.hidden)
+        .sheet(item: $activePage) { page in
+            Group {
+                switch page {
+                case .connection:
+                    ConnectionSettingsPage(
+                        serverHost: $serverHost,
+                        serverPort: $serverPort,
+                        settingsState: settingsState,
+                        onHostSubmit: {
+                            dependencies.updateServerSettings(host: serverHost, port: effectivePort)
+                        },
+                        onPortChange: { newPort in
+                            dependencies.updateServerSettings(host: serverHost, port: newPort)
+                        },
+                        updateServerSetting: updateServerSetting
+                    )
+                case .session:
+                    SessionSettingsPage(
+                        settingsState: settingsState,
+                        confirmArchive: $confirmArchive,
+                        selectedModelDisplayName: selectedModelDisplayName,
+                        updateServerSetting: updateServerSetting
+                    )
+                case .context:
+                    ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                case .providers:
+                    ProvidersSettingsPage()
+                case .appearance:
+                    if #available(iOS 26.0, *) {
+                        AppearanceSettingsPage()
+                    }
+                case .mcpServers:
+                    MCPServersPage()
+                case .hooks:
+                    HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                }
             }
-        }
-        .sheet(isPresented: $showMCPServersPage) {
-            MCPServersPage()
-                .adaptivePresentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showHooksPage) {
-            HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                .adaptivePresentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
+            .adaptivePresentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
         }
         .task {
             await settingsState.load(using: rpcClient)
@@ -168,44 +155,44 @@ struct SettingsView: View {
     private var categoriesCard: some View {
         SettingsCard {
             categoryRow(icon: "network", label: "Connection", subtitle: "Server, accounts") {
-                showConnectionPage = true
+                activePage = .connection
             }
 
             SettingsRowDivider()
 
             categoryRow(icon: "key.horizontal", label: "Providers", subtitle: "API keys, OAuth tokens") {
-                showProvidersPage = true
+                activePage = .providers
             }
 
             SettingsRowDivider()
 
             categoryRow(icon: "bolt", label: "Session", subtitle: "Workspace, model, limits") {
-                showSessionPage = true
+                activePage = .session
             }
 
             SettingsRowDivider()
 
             categoryRow(icon: "brain", label: "Context", subtitle: "Compaction, memory, rules") {
-                showContextPage = true
+                activePage = .context
             }
 
             SettingsRowDivider()
 
             categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "External tool servers") {
-                showMCPServersPage = true
+                activePage = .mcpServers
             }
 
             SettingsRowDivider()
 
             categoryRow(icon: "bolt.horizontal", label: "Hooks", subtitle: "LLM lifecycle hooks") {
-                showHooksPage = true
+                activePage = .hooks
             }
 
             if #available(iOS 26.0, *) {
                 SettingsRowDivider()
 
                 categoryRow(icon: "paintbrush", label: "Appearance", subtitle: "Theme, font, indicators") {
-                    showAppearancePage = true
+                    activePage = .appearance
                 }
             }
         }
