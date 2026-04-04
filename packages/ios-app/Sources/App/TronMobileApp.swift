@@ -40,6 +40,7 @@ struct TronMobileApp: App {
                             deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
                         )
                         .environment(\.dependencies, container)
+                        .withErrorHandler()
                     case .loading:
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))

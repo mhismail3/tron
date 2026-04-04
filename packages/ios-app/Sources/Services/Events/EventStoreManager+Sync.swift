@@ -51,6 +51,7 @@ extension EventStoreManager {
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
         } catch {
             logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
+            ErrorHandler.shared.handle(error, context: "Session refresh")
         }
     }
 
@@ -103,6 +104,7 @@ extension EventStoreManager {
         } catch {
             setLastSyncError(error.localizedDescription)
             logger.error("Full sync failed: \(error.localizedDescription)", category: .session)
+            ErrorHandler.shared.handle(error, context: "Session sync")
         }
 
         setIsSyncing(false)
