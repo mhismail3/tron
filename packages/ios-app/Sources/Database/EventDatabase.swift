@@ -49,6 +49,14 @@ final class EventDatabase: DatabaseTransport {
         self.dbPath = dbDir.appendingPathComponent("prod.db").path
     }
 
+    /// Fallback initializer for when Documents directory is unavailable (e.g., device restore).
+    /// Data in the fallback path may be lost when the temp directory is cleaned.
+    init(fallbackPath: String) {
+        let dir = (fallbackPath as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        self.dbPath = fallbackPath
+    }
+
     func initialize() async throws {
         guard !isInitialized else { return }
 

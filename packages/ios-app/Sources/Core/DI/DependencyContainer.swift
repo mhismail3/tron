@@ -128,9 +128,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
         let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.prodPort
 
-        // Initialize core services that persist across server changes
-        guard let db = EventDatabase() else {
-            fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
+        // Initialize core services that persist across server changes.
+        // Falls back to temp directory if Documents is unavailable (e.g., device migration).
+        let db: EventDatabase
+        if let primaryDB = EventDatabase() {
+            db = primaryDB
+        } else {
+            TronLogger.shared.error("Documents directory unavailable, using temporary database", category: .session)
+            db = EventDatabase(fallbackPath: NSTemporaryDirectory() + ".tron/database/fallback.db")
         }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db)

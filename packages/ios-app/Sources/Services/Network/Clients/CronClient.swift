@@ -3,31 +3,37 @@ import Foundation
 /// Client for cron scheduling RPC methods.
 @MainActor
 final class CronClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
+    }
+
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
     }
 
     // MARK: - Job Management
 
     /// List cron jobs with optional filters.
     func listJobs(enabled: Bool? = nil, tags: [String]? = nil, workspaceId: String? = nil) async throws -> CronListResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronListParams(enabled: enabled, tags: tags, workspaceId: workspaceId)
         return try await ws.send(method: "cron.list", params: params)
     }
 
     /// Get a single job with runtime state and recent runs.
     func getJob(jobId: String) async throws -> CronGetResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronGetParams(jobId: jobId)
         return try await ws.send(method: "cron.get", params: params)
     }
 
     /// Create a new cron job.
     func createJob(_ job: CronCreateJobParams) async throws -> CronCreateResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronCreateParams(job: job)
         return try await ws.send(method: "cron.create", params: params)
     }
@@ -48,7 +54,7 @@ final class CronClient {
         tags: [String]? = nil,
         workspaceId: String? = nil
     ) async throws -> CronUpdateResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronUpdateParams(
             jobId: jobId,
             name: name,
@@ -69,14 +75,14 @@ final class CronClient {
 
     /// Delete a cron job (preserves run history).
     func deleteJob(jobId: String) async throws -> CronDeleteResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronDeleteParams(jobId: jobId)
         return try await ws.send(method: "cron.delete", params: params)
     }
 
     /// Trigger immediate execution of a job.
     func triggerJob(jobId: String) async throws -> CronRunResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronRunParams(jobId: jobId)
         return try await ws.send(method: "cron.run", params: params)
     }
@@ -85,13 +91,13 @@ final class CronClient {
 
     /// Get scheduler health and status.
     func getStatus() async throws -> CronStatusResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(method: "cron.status", params: EmptyParams())
     }
 
     /// Get paginated run history for a job.
     func getRuns(jobId: String, limit: Int? = nil, offset: Int? = nil, status: String? = nil) async throws -> CronGetRunsResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = CronGetRunsParams(jobId: jobId, limit: limit, offset: offset, status: status)
         return try await ws.send(method: "cron.getRuns", params: params)
     }

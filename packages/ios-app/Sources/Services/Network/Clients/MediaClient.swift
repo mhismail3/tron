@@ -4,10 +4,16 @@ import Foundation
 /// Handles transcription, voice notes, and browser streaming.
 @MainActor
 final class MediaClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
+    }
+
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
     }
 
     // MARK: - Transcription Methods
@@ -17,14 +23,14 @@ final class MediaClient {
         mimeType: String = "audio/wav",
         fileName: String? = nil
     ) async throws -> TranscribeAudioResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let audioBase64 = await Task.detached(priority: .utility) {
             audioData.base64EncodedString()
         }.value
 
         let params = TranscribeAudioParams(
-            sessionId: transport.currentSessionId,
+            sessionId: transport?.currentSessionId,
             audioBase64: audioBase64,
             mimeType: mimeType,
             fileName: fileName
@@ -45,7 +51,7 @@ final class MediaClient {
         mimeType: String = "audio/wav",
         fileName: String? = nil
     ) async throws -> VoiceNotesSaveResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         // Encode audio to base64 off main thread
         let audioBase64 = await Task.detached(priority: .utility) {
@@ -67,7 +73,7 @@ final class MediaClient {
 
     /// List saved voice notes
     func listVoiceNotes(limit: Int = 50, offset: Int = 0) async throws -> VoiceNotesListResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = VoiceNotesListParams(limit: limit, offset: offset)
         return try await ws.send(method: "voiceNotes.list", params: params)
@@ -75,7 +81,7 @@ final class MediaClient {
 
     /// Delete a voice note
     func deleteVoiceNote(filename: String) async throws -> VoiceNotesDeleteResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = VoiceNotesDeleteParams(filename: filename)
         return try await ws.send(method: "voiceNotes.delete", params: params)
@@ -97,7 +103,7 @@ final class MediaClient {
         maxHeight: Int = 960,
         everyNthFrame: Int = 1
     ) async throws -> BrowserStartStreamResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = BrowserStartStreamParams(
             sessionId: sessionId,
@@ -113,7 +119,7 @@ final class MediaClient {
 
     /// Stop browser frame streaming for a session
     func stopBrowserStream(sessionId: String) async throws -> BrowserStopStreamResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = BrowserStopStreamParams(sessionId: sessionId)
         return try await ws.send(method: "browser.stopStream", params: params)
@@ -121,7 +127,7 @@ final class MediaClient {
 
     /// Get browser status for a session
     func getBrowserStatus(sessionId: String) async throws -> BrowserGetStatusResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = BrowserGetStatusParams(sessionId: sessionId)
         return try await ws.send(method: "browser.getStatus", params: params)
@@ -129,7 +135,7 @@ final class MediaClient {
 
     /// Get browser status for current session
     func getBrowserStatus() async throws -> BrowserGetStatusResult {
-        let (_, sessionId) = try transport.requireSession()
+        let (_, sessionId) = try requireTransport().requireSession()
         return try await getBrowserStatus(sessionId: sessionId)
     }
 }

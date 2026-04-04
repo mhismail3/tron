@@ -4,16 +4,22 @@ import Foundation
 /// Manages MCP server lifecycle: status, add, remove, enable, disable, restart, reload.
 @MainActor
 final class MCPClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     // MARK: - Status
 
     func status() async throws -> [MCPServerStatus] {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let result: [MCPServerStatus] = try await ws.send(
             method: "mcp.status",
             params: EmptyParams()
@@ -24,7 +30,7 @@ final class MCPClient {
     // MARK: - Server Management
 
     func addServer(_ params: MCPAddServerParams) async throws -> MCPAddServerResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(
             method: "mcp.addServer",
             params: params
@@ -32,7 +38,7 @@ final class MCPClient {
     }
 
     func removeServer(name: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let _: MCPSuccessResult = try await ws.send(
             method: "mcp.removeServer",
             params: MCPServerNameParams(name: name)
@@ -40,7 +46,7 @@ final class MCPClient {
     }
 
     func enableServer(name: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let _: MCPSuccessResult = try await ws.send(
             method: "mcp.enableServer",
             params: MCPServerNameParams(name: name)
@@ -48,7 +54,7 @@ final class MCPClient {
     }
 
     func disableServer(name: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let _: MCPSuccessResult = try await ws.send(
             method: "mcp.disableServer",
             params: MCPServerNameParams(name: name)
@@ -56,7 +62,7 @@ final class MCPClient {
     }
 
     func restartServer(name: String) async throws -> MCPRestartServerResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(
             method: "mcp.restartServer",
             params: MCPServerNameParams(name: name)
@@ -66,7 +72,7 @@ final class MCPClient {
     // MARK: - Tool Listing
 
     func listTools(server: String? = nil) async throws -> [MCPToolInfo] {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct ListToolsParams: Encodable {
             let server: String?
@@ -82,7 +88,7 @@ final class MCPClient {
     // MARK: - Reload
 
     func reload() async throws -> MCPReloadResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(
             method: "mcp.reload",
             params: EmptyParams()

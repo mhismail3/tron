@@ -4,16 +4,22 @@ import Foundation
 /// Handles directory listing, file reading, and repository cloning.
 @MainActor
 final class FilesystemClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     // MARK: - Filesystem Methods
 
     func listDirectory(path: String?, showHidden: Bool = false) async throws -> DirectoryListResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = FilesystemListDirParams(path: path, showHidden: showHidden)
         return try await ws.send(
@@ -23,7 +29,7 @@ final class FilesystemClient {
     }
 
     func getHome() async throws -> HomeResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         return try await ws.send(
             method: "filesystem.getHome",
@@ -33,7 +39,7 @@ final class FilesystemClient {
 
     /// Create a new directory
     func createDirectory(path: String, recursive: Bool = false) async throws -> FilesystemCreateDirResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = FilesystemCreateDirParams(path: path, recursive: recursive)
         return try await ws.send(
@@ -44,7 +50,7 @@ final class FilesystemClient {
 
     /// Read file content from server
     func readFile(path: String) async throws -> String {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct ReadFileParams: Codable {
             let path: String
@@ -63,7 +69,7 @@ final class FilesystemClient {
 
     /// Clone a Git repository to a target path
     func cloneRepository(url: String, targetPath: String) async throws -> GitCloneResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = GitCloneParams(url: url, targetPath: targetPath)
         return try await ws.send(

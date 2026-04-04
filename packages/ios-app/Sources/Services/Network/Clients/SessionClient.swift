@@ -4,10 +4,16 @@ import Foundation
 /// Handles session creation, listing, resumption, deletion, and forking.
 @MainActor
 final class SessionClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
+    }
+
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
     }
 
     // MARK: - Session Methods
@@ -16,7 +22,7 @@ final class SessionClient {
         workingDirectory: String,
         model: String? = nil
     ) async throws -> SessionCreateResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
@@ -29,8 +35,8 @@ final class SessionClient {
             params: params
         )
 
-        transport.setCurrentSessionId(result.sessionId)
-        transport.setCurrentModel(result.model)
+        try requireTransport().setCurrentSessionId(result.sessionId)
+        try requireTransport().setCurrentModel(result.model)
         logger.info("Created session: \(result.sessionId)", category: .session)
 
         return result
@@ -42,7 +48,7 @@ final class SessionClient {
         offset: Int = 0,
         includeArchived: Bool = false
     ) async throws -> SessionListResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionListParams(
             workingDirectory: workingDirectory,
@@ -60,7 +66,7 @@ final class SessionClient {
     }
 
     func resume(sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionResumeParams(sessionId: sessionId)
         let result: SessionResumeResult = try await ws.send(
@@ -68,25 +74,25 @@ final class SessionClient {
             params: params
         )
 
-        transport.setCurrentSessionId(result.sessionId)
-        transport.setCurrentModel(result.model)
+        try requireTransport().setCurrentSessionId(result.sessionId)
+        try requireTransport().setCurrentModel(result.model)
         logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
     func archive(_ sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionArchiveParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "session.archive", params: params)
 
-        if transport.currentSessionId == sessionId {
-            transport.setCurrentSessionId(nil)
+        if transport?.currentSessionId == sessionId {
+            try requireTransport().setCurrentSessionId(nil)
         }
         logger.info("Archived session: \(sessionId)", category: .session)
     }
 
     func unarchive(_ sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionUnarchiveParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "session.unarchive", params: params)
@@ -95,7 +101,7 @@ final class SessionClient {
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
-        let (ws, sessionId) = try transport.requireSession()
+        let (ws, sessionId) = try requireTransport().requireSession()
 
         let params = SessionHistoryParams(
             sessionId: sessionId,
@@ -114,19 +120,19 @@ final class SessionClient {
     // MARK: - Chat Session
 
     func getChat() async throws -> ChatSessionResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(method: "session.getChat", params: EmptyParams())
     }
 
     func resetChat() async throws -> ResetChatResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         return try await ws.send(method: "session.resetChat", params: EmptyParams())
     }
 
     // MARK: - Fork
 
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)
         logger.info("[FORK] Sending fork request: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)

@@ -12,7 +12,7 @@ protocol ModelClientProtocol {
 /// Handles model switching and listing with caching.
 @MainActor
 final class ModelClient: ModelClientProtocol {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     // Model list cache (5-minute TTL to reduce redundant server calls)
     private var modelCache: [ModelInfo]?
@@ -23,10 +23,16 @@ final class ModelClient: ModelClientProtocol {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     // MARK: - Model Methods
 
     func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = ModelSwitchParams(sessionId: sessionId, model: model)
         let result: ModelSwitchResult = try await ws.send(
@@ -34,8 +40,8 @@ final class ModelClient: ModelClientProtocol {
             params: params
         )
 
-        if transport.currentSessionId == sessionId {
-            transport.setCurrentModel(result.newModel)
+        if transport?.currentSessionId == sessionId {
+            try requireTransport().setCurrentModel(result.newModel)
         }
 
         logger.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)
@@ -53,7 +59,7 @@ final class ModelClient: ModelClientProtocol {
             return cached
         }
 
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let result: ModelListResult = try await ws.send(
             method: "model.list",
@@ -71,7 +77,7 @@ final class ModelClient: ModelClientProtocol {
     // MARK: - Reasoning Level
 
     func setReasoningLevel(_ sessionId: String, level: String) async throws -> ReasoningLevelResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = ReasoningLevelParams(sessionId: sessionId, level: level)
         return try await ws.send(

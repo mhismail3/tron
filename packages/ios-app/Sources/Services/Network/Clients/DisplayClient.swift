@@ -4,15 +4,21 @@ import Foundation
 /// Used to control display streams (e.g., stopping an active screen capture stream).
 @MainActor
 final class DisplayClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     /// Stop an active display stream by stream ID.
     func stopStream(streamId: String) async throws -> StopStreamResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct StopStreamParams: Codable {
             let streamId: String

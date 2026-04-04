@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Model Name Formatter
 
@@ -6,12 +7,16 @@ import Foundation
 /// Uses server-provided metadata when available, falls back to ID heuristic parsing.
 enum ModelNameFormatter {
 
-    /// Server model data, populated from model.list response.
-    /// Written on main actor by ModelClient, read by String extensions.
-    nonisolated(unsafe) private(set) static var serverModels: [String: ModelInfo] = [:]
+    /// Lock-protected server model cache. Written by ModelClient, read from any context.
+    private static let _serverModels = OSAllocatedUnfairLock<[String: ModelInfo]>(initialState: [:])
+
+    /// Thread-safe read access to server models.
+    static var serverModels: [String: ModelInfo] {
+        _serverModels.withLock { $0 }
+    }
 
     static func updateFromServer(_ models: [ModelInfo]) {
-        serverModels = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+        _serverModels.withLock { $0 = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) }) }
     }
 
     /// Output format for model names

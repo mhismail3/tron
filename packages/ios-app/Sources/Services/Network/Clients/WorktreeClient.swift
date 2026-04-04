@@ -4,17 +4,23 @@ import Foundation
 /// Handles worktree status, commits, merges, diffs, and branch management.
 @MainActor
 final class WorktreeClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
+    }
+
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
     }
 
     // MARK: - Status
 
     /// Get worktree status for a session
     func getStatus(sessionId: String) async throws -> WorktreeGetStatusResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = WorktreeGetStatusParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.getStatus", params: params)
@@ -24,7 +30,7 @@ final class WorktreeClient {
 
     /// Commit changes in a session's worktree
     func commit(sessionId: String, message: String) async throws -> WorktreeCommitResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = WorktreeCommitParams(sessionId: sessionId, message: message)
         let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
@@ -42,7 +48,7 @@ final class WorktreeClient {
         targetBranch: String,
         strategy: String? = nil
     ) async throws -> WorktreeMergeResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = WorktreeMergeParams(
             sessionId: sessionId,
@@ -62,7 +68,7 @@ final class WorktreeClient {
 
     /// List all session branches (active and preserved) for the session's repo
     func listSessionBranches(sessionId: String) async throws -> [SessionBranchInfo] {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = ListSessionBranchesParams(sessionId: sessionId)
         let result: SessionBranchListResult = try await ws.send(
             method: "worktree.listSessionBranches",
@@ -73,14 +79,14 @@ final class WorktreeClient {
 
     /// Delete a single session branch
     func deleteBranch(sessionId: String, branch: String) async throws -> DeleteBranchResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = DeleteBranchParams(sessionId: sessionId, branch: branch)
         return try await ws.send(method: "worktree.deleteBranch", params: params)
     }
 
     /// Prune all inactive session branches
     func pruneBranches(sessionId: String) async throws -> PruneBranchesResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = PruneBranchesParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.pruneBranches", params: params)
     }
@@ -89,7 +95,7 @@ final class WorktreeClient {
 
     /// Get committed diff (base..HEAD) for a session
     func getCommittedDiff(sessionId: String) async throws -> CommittedDiffResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = GetCommittedDiffParams(sessionId: sessionId)
         return try await ws.send(
             method: "worktree.getCommittedDiff",
@@ -99,7 +105,7 @@ final class WorktreeClient {
 
     /// Get diff of all uncommitted changes for a session's working directory
     func getWorkingDirectoryDiff(sessionId: String) async throws -> WorktreeGetDiffResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
         let params = WorktreeGetDiffParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.getDiff", params: params)
     }

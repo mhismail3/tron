@@ -4,16 +4,22 @@ import Foundation
 /// Reads and writes server-authoritative settings (compaction, model, workspace).
 @MainActor
 final class SettingsClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     // MARK: - Settings Methods
 
     func get() async throws -> ServerSettings {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let result: ServerSettings = try await ws.send(
             method: "settings.get",
@@ -24,7 +30,7 @@ final class SettingsClient {
     }
 
     func update(_ settings: ServerSettingsUpdate) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct UpdateParams: Encodable {
             let settings: ServerSettingsUpdate

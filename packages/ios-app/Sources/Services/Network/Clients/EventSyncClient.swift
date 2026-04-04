@@ -4,10 +4,16 @@ import Foundation
 /// Handles event history retrieval, incremental sync, and ancestor traversal.
 @MainActor
 final class EventSyncClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
+    }
+
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
     }
 
     // MARK: - Event Sync Methods
@@ -19,7 +25,7 @@ final class EventSyncClient {
         limit: Int? = nil,
         beforeEventId: String? = nil
     ) async throws -> EventsGetHistoryResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = EventsGetHistoryParams(
             sessionId: sessionId,
@@ -39,7 +45,7 @@ final class EventSyncClient {
         afterTimestamp: String? = nil,
         limit: Int? = nil
     ) async throws -> EventsGetSinceResult {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = EventsGetSinceParams(
             sessionId: sessionId,
@@ -77,7 +83,7 @@ final class EventSyncClient {
 
     /// Get ancestor events for an event (traverses across session boundaries via parent_id chain)
     func getAncestors(_ eventId: String) async throws -> [RawEvent] {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         let params = TreeGetAncestorsParams(eventId: eventId)
         logger.info("[ANCESTORS] Fetching ancestors for eventId=\(eventId)", category: .session)

@@ -4,15 +4,21 @@ import Foundation
 /// Unified interface for managing background processes and subagents.
 @MainActor
 final class JobClient {
-    private unowned let transport: RPCTransport
+    private weak var transport: (any RPCTransport)?
 
     init(transport: RPCTransport) {
         self.transport = transport
     }
 
+    /// Access transport safely, throwing if deallocated during server change.
+    private func requireTransport() throws -> any RPCTransport {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        return transport
+    }
+
     /// Promote a blocking job to background.
     func background(jobId: String, sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -32,7 +38,7 @@ final class JobClient {
 
     /// Cancel a running job.
     func cancel(jobId: String, sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -52,7 +58,7 @@ final class JobClient {
 
     /// Subscribe to real-time output streaming for a job.
     func subscribe(jobId: String, sessionId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -72,7 +78,7 @@ final class JobClient {
 
     /// Stop streaming output for a job.
     func unsubscribe(jobId: String) async throws {
-        let ws = try transport.requireConnection()
+        let ws = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String

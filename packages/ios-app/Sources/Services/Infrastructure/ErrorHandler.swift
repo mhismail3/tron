@@ -49,32 +49,8 @@ final class ErrorHandler {
 
     // MARK: - Public API
 
-    /// Handle a TronError with appropriate logging and user notification
-    func handle(_ error: TronError, context: String? = nil) {
-        let message: String
-        if let context {
-            message = "\(context): \(error.localizedDescription)"
-        } else {
-            message = error.localizedDescription
-        }
-
-        // Log the error
-        logger.error(message, category: .session)
-
-        // Show to user
-        currentError = message
-        currentSeverity = .error
-        showError = true
-    }
-
     /// Handle any Error with appropriate logging and user notification
     func handle(_ error: Error, context: String? = nil) {
-        // Convert to TronError if possible
-        if let tronError = error as? TronError {
-            handle(tronError, context: context)
-            return
-        }
-
         let message: String
         if let context {
             message = "\(context): \(error.localizedDescription)"
