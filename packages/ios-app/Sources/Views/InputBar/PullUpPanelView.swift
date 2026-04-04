@@ -21,11 +21,11 @@ struct PullUpPanelView: View {
     private static let staggerDelay: Double = 0.07
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             if panelState.suggestions.isEmpty {
                 Spacer()
             } else {
-                suggestionChips
+                panelContent
             }
         }
         .frame(maxWidth: .infinity)
@@ -87,31 +87,38 @@ struct PullUpPanelView: View {
         }
     }
 
-    // MARK: - Suggestion Chips
+    // MARK: - Panel Content
 
-    private var suggestionChips: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(panelState.suggestions.enumerated()), id: \.offset) { index, suggestion in
-                    let isVisible = visibleChips.contains(index)
+    private var panelContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Suggestions")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
 
-                    Button {
-                        onSuggestionTapped?(suggestion)
-                    } label: {
-                        Text(suggestion)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .chipStyle(.tronEmerald, tintOpacity: 0.25)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(isVisible ? 1 : 0)
-                    .offset(y: isVisible ? 0 : 12)
+            ForEach(Array(panelState.suggestions.enumerated()), id: \.offset) { index, suggestion in
+                let isVisible = visibleChips.contains(index)
+
+                Button {
+                    onSuggestionTapped?(suggestion)
+                } label: {
+                    Text(suggestion)
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .glassEffect(
+                            .regular.tint(Color.tronEmerald.opacity(0.25)).interactive(),
+                            in: .capsule
+                        )
+                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                 }
+                .buttonStyle(.plain)
+                .opacity(isVisible ? 1 : 0)
+                .offset(y: isVisible ? 0 : 12)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(16)
     }
 }

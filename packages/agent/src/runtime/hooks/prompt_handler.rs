@@ -380,32 +380,14 @@ impl HookHandler for PromptHookHandler {
                             "success": true,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
-                        debug!(
-                            hook_id = %hook_id,
-                            session_id = %session_id,
-                            output_len = output_text.as_ref().map(|s| s.len()).unwrap_or(0),
-                            "[prompt_hook] persisting hook.llm_result event to event store"
-                        );
-                        match store.append(&crate::events::AppendOptions {
+                        if let Err(e) = store.append(&crate::events::AppendOptions {
                             session_id: &session_id,
                             event_type: crate::events::EventType::LlmHookResult,
                             payload,
                             parent_id: None,
                         }) {
-                            Ok(row) => {
-                                debug!(
-                                    hook_id = %hook_id,
-                                    event_id = %row.id,
-                                    sequence = row.sequence,
-                                    "[prompt_hook] persisted hook.llm_result event successfully"
-                                );
-                            }
-                            Err(e) => {
-                                warn!(hook_id = %hook_id, error = %e, "failed to persist hook.llm_result event");
-                            }
+                            warn!(hook_id = %hook_id, error = %e, "failed to persist hook.llm_result event");
                         }
-                    } else {
-                        debug!(hook_id = %hook_id, "[prompt_hook] no event_store — skipping persistence");
                     }
 
                     // Broadcast to real-time subscribers (WebSocket/iOS)

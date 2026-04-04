@@ -544,19 +544,16 @@ extension UnifiedEventTransformer {
 
             case .llmHookResult:
                 // Extract the latest suggest-prompts output (overwrites previous)
-                let hookId = event.payload["hookId"]?.value as? String
-                let success = event.payload["success"]?.value as? Bool
-                let output = event.payload["output"]?.value as? String
-                logger.info("[SUGGEST-DEBUG] llmHookResult event: id=\(event.id), hookId=\(hookId ?? "nil"), success=\(String(describing: success)), outputLen=\(output?.count ?? 0), payloadKeys=\(Array(event.payload.keys))", category: .events)
-                if let hookId, hookId.contains("suggest-prompts"),
-                   let success, success,
-                   let output {
+                if let hookId = event.payload["hookId"]?.value as? String,
+                   hookId.contains("suggest-prompts"),
+                   let success = event.payload["success"]?.value as? Bool,
+                   success,
+                   let output = event.payload["output"]?.value as? String {
                     let suggestions = output
                         .components(separatedBy: .newlines)
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty && $0.count < 80 }
                     state.suggestions = Array(suggestions.prefix(5))
-                    logger.info("[SUGGEST-DEBUG] parsed \(state.suggestions.count) suggestions: \(state.suggestions)", category: .events)
                 }
 
             default:
