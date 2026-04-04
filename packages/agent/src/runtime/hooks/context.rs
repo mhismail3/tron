@@ -31,7 +31,13 @@ pub trait HookContextFactory: Send + Sync {
     ) -> HookContext;
 
     /// Create a [`HookContext::Stop`] context.
-    fn create_stop_context(&self, stop_reason: &str, final_message: Option<&str>) -> HookContext;
+    fn create_stop_context(
+        &self,
+        stop_reason: &str,
+        final_message: Option<&str>,
+        last_user_prompt: Option<&str>,
+        last_assistant_response: Option<&str>,
+    ) -> HookContext;
 
     /// Create a [`HookContext::SessionStart`] context.
     fn create_session_start_context(&self, working_directory: &str) -> HookContext;
@@ -117,12 +123,20 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_stop_context(&self, stop_reason: &str, final_message: Option<&str>) -> HookContext {
+    fn create_stop_context(
+        &self,
+        stop_reason: &str,
+        final_message: Option<&str>,
+        last_user_prompt: Option<&str>,
+        last_assistant_response: Option<&str>,
+    ) -> HookContext {
         HookContext::Stop {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
             stop_reason: stop_reason.to_string(),
             final_message: final_message.map(ToString::to_string),
+            last_user_prompt: last_user_prompt.map(ToString::to_string),
+            last_assistant_response: last_assistant_response.map(ToString::to_string),
         }
     }
 
@@ -226,10 +240,12 @@ mod tests {
     #[test]
     fn test_stop_context() {
         let factory = make_factory();
-        let ctx = factory.create_stop_context("end_turn", Some("Done."));
+        let ctx = factory.create_stop_context("end_turn", Some("Done."), Some("Hello"), Some("Hi there"));
         assert_eq!(ctx.hook_type(), HookType::Stop);
-        if let HookContext::Stop { final_message, .. } = &ctx {
+        if let HookContext::Stop { final_message, last_user_prompt, last_assistant_response, .. } = &ctx {
             assert_eq!(final_message.as_deref(), Some("Done."));
+            assert_eq!(last_user_prompt.as_deref(), Some("Hello"));
+            assert_eq!(last_assistant_response.as_deref(), Some("Hi there"));
         } else {
             panic!("Expected Stop context");
         }
@@ -238,7 +254,7 @@ mod tests {
     #[test]
     fn test_stop_context_no_message() {
         let factory = make_factory();
-        let ctx = factory.create_stop_context("end_turn", None);
+        let ctx = factory.create_stop_context("end_turn", None, None, None);
         if let HookContext::Stop { final_message, .. } = &ctx {
             assert!(final_message.is_none());
         } else {
@@ -347,7 +363,7 @@ mod tests {
     #[test]
     fn test_factory_session_id_consistent() {
         let factory = make_factory();
-        let c1 = factory.create_stop_context("a", None);
+        let c1 = factory.create_stop_context("a", None, None, None);
         let c2 = factory.create_pre_compact_context(100, 50);
         assert_eq!(c1.session_id(), c2.session_id());
         assert_eq!(c1.session_id(), "session-123");

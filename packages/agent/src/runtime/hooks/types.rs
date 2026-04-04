@@ -232,6 +232,10 @@ pub enum HookContext {
         stop_reason: String,
         /// Last message from the agent.
         final_message: Option<String>,
+        /// Last user prompt text (for suggestion hooks).
+        last_user_prompt: Option<String>,
+        /// Last assistant response text, truncated (for suggestion hooks).
+        last_assistant_response: Option<String>,
     },
     /// Context for [`HookType::SubagentStop`].
     #[serde(rename_all = "camelCase")]
@@ -671,6 +675,8 @@ mod tests {
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             stop_reason: "end_turn".to_string(),
             final_message: Some("Done.".to_string()),
+            last_user_prompt: None,
+            last_assistant_response: None,
         };
         assert_eq!(ctx.hook_type(), HookType::Stop);
     }
@@ -799,6 +805,8 @@ mod tests {
             timestamp: "t".to_string(),
             stop_reason: "done".to_string(),
             final_message: None,
+            last_user_prompt: None,
+            last_assistant_response: None,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         // The tag field should be "hookType"

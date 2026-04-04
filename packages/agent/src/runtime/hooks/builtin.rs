@@ -20,6 +20,9 @@ pub const TITLE_GEN_ID: &str = "builtin:title-gen";
 /// Built-in hook ID: auto-generate memorable branch names on worktree creation.
 pub const BRANCH_NAME_GEN_ID: &str = "builtin:branch-name-gen";
 
+/// Built-in hook ID: suggest follow-up prompts when the agent finishes.
+pub const SUGGEST_PROMPTS_ID: &str = "builtin:suggest-prompts";
+
 const TITLE_GEN_PROMPT: &str =
     "Generate a concise 3-6 word title for this session based on the user's prompt (in the 'prompt' field of the event context). Return ONLY the title text, nothing else.";
 
@@ -27,6 +30,15 @@ const BRANCH_NAME_GEN_PROMPT: &str =
     "Generate a random memorable 3-word branch name in the format word-word-word (lowercase, hyphen-separated). \
      Use the pattern adjective-adjective-noun or adjective-noun-noun. Examples: fuzzy-purple-elephant, \
      quick-silver-falcon, gentle-autumn-river. Return ONLY the 3-word name, nothing else.";
+
+const SUGGEST_PROMPTS_PROMPT: &str =
+    "Based on the conversation context below, generate 3-5 short follow-up prompts the user might send next.\n\n\
+     Rules:\n\
+     - Each suggestion: 4-8 words, one per line\n\
+     - No bullets, numbers, or prefixes — just the raw text\n\
+     - Mix actions, questions, and refinements\n\
+     - Be specific to the conversation, not generic\n\
+     - Output ONLY the suggestions, nothing else";
 
 /// Register all built-in hooks into the engine.
 ///
@@ -85,6 +97,26 @@ pub fn register_builtins(
         branch_handler = branch_handler.with_worktree_coordinator(coord.clone());
     }
     engine.registry_mut().register(Arc::new(branch_handler));
+
+    // Suggest follow-up prompts hook
+    let suggest_enabled = crate::settings::types::BuiltinHookSetting::is_enabled(
+        builtin_settings,
+        SUGGEST_PROMPTS_ID,
+    );
+
+    let suggest_handler = PromptHookHandler::new(
+        SUGGEST_PROMPTS_ID.to_string(),
+        SUGGEST_PROMPTS_ID.to_string(),
+        "Suggest follow-up prompts".to_string(),
+        HookType::Stop,
+        SUGGEST_PROMPTS_PROMPT.to_string(),
+        suggest_enabled,
+        0,
+        llm_model.to_string(),
+        subagent_manager.clone(),
+        event_emitter.clone(),
+    );
+    engine.registry_mut().register(Arc::new(suggest_handler));
 }
 
 /// Metadata about a built-in hook (for iOS settings display).
@@ -110,6 +142,12 @@ pub fn list_builtins() -> Vec<BuiltinHookInfo> {
             description: "Renames worktree branches to memorable 3-word names",
             hook_type: HookType::WorktreeAcquired,
         },
+        BuiltinHookInfo {
+            id: SUGGEST_PROMPTS_ID,
+            label: "Suggest follow-up prompts",
+            description: "Suggests short follow-up prompts when the agent finishes responding",
+            hook_type: HookType::Stop,
+        },
     ]
 }
 
@@ -124,12 +162,13 @@ mod tests {
     // test the lookup and metadata logic.
 
     #[test]
-    fn test_list_builtins_returns_both_hooks() {
+    fn test_list_builtins_returns_all_hooks() {
         let builtins = list_builtins();
-        assert_eq!(builtins.len(), 2);
+        assert_eq!(builtins.len(), 3);
         let ids: Vec<&str> = builtins.iter().map(|b| b.id).collect();
         assert!(ids.contains(&TITLE_GEN_ID));
         assert!(ids.contains(&BRANCH_NAME_GEN_ID));
+        assert!(ids.contains(&SUGGEST_PROMPTS_ID));
     }
 
     #[test]

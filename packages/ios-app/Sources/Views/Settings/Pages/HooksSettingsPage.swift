@@ -8,6 +8,7 @@ struct HooksSettingsPage: View {
     private let builtinMeta: [(id: String, label: String, description: String, event: String)] = [
         ("builtin:title-gen", "Generate Session Title", "Auto-generates a short title when a session starts", "session-start"),
         ("builtin:branch-name-gen", "Generate Branch Name", "Renames worktree branches to memorable 3-word names", "worktree-acquired"),
+        ("builtin:suggest-prompts", "Suggest Follow-up Prompts", "Suggests short follow-up prompts when the agent finishes", "stop"),
     ]
 
     var body: some View {

@@ -255,11 +255,38 @@ impl TronAgent {
 
         // Fire Stop hook (non-blocking, background)
         if let Some(hook_engine) = &self.hooks {
+            // Extract last user/assistant messages for suggestion hooks.
+            let messages = self.context_manager.messages_slice();
+            let last_user = messages.iter().rev().find_map(|m| match m {
+                Message::User { content, .. } => {
+                    let text = match content {
+                        UserMessageContent::Text(s) => s.clone(),
+                        UserMessageContent::Blocks(blocks) => {
+                            crate::core::content::extract_text_from_user_content(blocks)
+                        }
+                    };
+                    if text.is_empty() { None } else { Some(text) }
+                }
+                _ => None,
+            });
+            let last_assistant = messages.iter().rev().find_map(|m| match m {
+                Message::Assistant { content, .. } => {
+                    let text: String = content.iter().filter_map(|c| c.as_text()).collect::<Vec<_>>().join("\n");
+                    if text.is_empty() { None } else {
+                        // Truncate to avoid bloating hook context
+                        Some(if text.len() > 500 { text[..500].to_string() } else { text })
+                    }
+                }
+                _ => None,
+            });
+
             let hook_ctx = crate::runtime::hooks::types::HookContext::Stop {
                 session_id: self.session_id.clone(),
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 stop_reason: format!("{final_stop_reason:?}"),
                 final_message: None,
+                last_user_prompt: last_user,
+                last_assistant_response: last_assistant,
             };
             let _ = hook_engine.execute(&hook_ctx).await;
         }

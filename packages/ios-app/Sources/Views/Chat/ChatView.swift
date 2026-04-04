@@ -19,7 +19,6 @@ struct ChatView: View {
     // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout
     // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
     @State var sheetCoordinator = SheetCoordinator()
-    @State var pullUpPanelState = PullUpPanelState()
 
     // Note: Model state (cachedModels, isLoadingModels, optimisticModelName)
     // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
@@ -434,13 +433,21 @@ struct ChatView: View {
             }
 
             // Pull-up panel content
-            if pullUpPanelState.isExpanded {
-                PullUpPanelView(panelState: pullUpPanelState)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            if viewModel.pullUpPanelState.isExpanded {
+                PullUpPanelView(
+                    panelState: viewModel.pullUpPanelState,
+                    onSuggestionTapped: { [viewModel] suggestion in
+                        viewModel.inputBarState.text = suggestion
+                        withAnimation(.tronSnap) {
+                            viewModel.pullUpPanelState.position = .collapsed
+                        }
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .modifier(InputAreaDragModifier(
-            panelState: pullUpPanelState,
+            panelState: viewModel.pullUpPanelState,
             onWillExpand: { [viewModel] in
                 // Dismiss keyboard and mention popups when expanding
                 UIApplication.shared.sendAction(
@@ -450,13 +457,26 @@ struct ChatView: View {
                 viewModel.inputBarState.isMentionPopupVisible = false
             }
         ))
-        .animation(.tronSnap, value: pullUpPanelState.isExpanded)
+        .animation(.tronSnap, value: viewModel.pullUpPanelState.isExpanded)
         .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
             // Collapse panel when keyboard appears (mutual exclusion)
-            if !wasVisible && isVisible && pullUpPanelState.isExpanded {
+            if !wasVisible && isVisible && viewModel.pullUpPanelState.isExpanded {
                 withAnimation(.tronSnap) {
-                    pullUpPanelState.position = .collapsed
+                    viewModel.pullUpPanelState.position = .collapsed
                 }
+            }
+        }
+        .onChange(of: viewModel.agentPhase) { _, newPhase in
+            if newPhase != .idle {
+                // Agent started: auto-dismiss panel and disable drag
+                withAnimation(.tronSnap) {
+                    viewModel.pullUpPanelState.position = .collapsed
+                }
+                viewModel.pullUpPanelState.isDragDisabled = true
+                viewModel.pullUpPanelState.suggestions = []
+            } else {
+                // Agent finished: re-enable drag
+                viewModel.pullUpPanelState.isDragDisabled = false
             }
         }
     }

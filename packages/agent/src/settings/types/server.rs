@@ -213,6 +213,10 @@ impl BuiltinHookSetting {
                 id: "builtin:branch-name-gen".to_string(),
                 enabled: true,
             },
+            Self {
+                id: "builtin:suggest-prompts".to_string(),
+                enabled: true,
+            },
         ]
     }
 
@@ -479,11 +483,13 @@ mod tests {
         assert!(h.extensions.contains(&".prompt".to_string()));
         assert!(h.extensions.contains(&".ts".to_string()));
         assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
-        assert_eq!(h.builtin_hooks.len(), 2);
+        assert_eq!(h.builtin_hooks.len(), 3);
         assert_eq!(h.builtin_hooks[0].id, "builtin:title-gen");
         assert!(h.builtin_hooks[0].enabled);
         assert_eq!(h.builtin_hooks[1].id, "builtin:branch-name-gen");
         assert!(h.builtin_hooks[1].enabled);
+        assert_eq!(h.builtin_hooks[2].id, "builtin:suggest-prompts");
+        assert!(h.builtin_hooks[2].enabled);
     }
 
     #[test]
@@ -496,7 +502,7 @@ mod tests {
         assert_eq!(h.default_timeout_ms, 3000);
         assert_eq!(h.llm_model, "claude-haiku-4-5-20251001");
         // Defaults populated
-        assert_eq!(h.builtin_hooks.len(), 2);
+        assert_eq!(h.builtin_hooks.len(), 3);
         assert_eq!(h.builtin_hooks[0].id, "builtin:title-gen");
     }
 

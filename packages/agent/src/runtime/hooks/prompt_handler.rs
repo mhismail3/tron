@@ -38,6 +38,9 @@ const TITLE_GEN_MARKER: &str = "title-gen";
 /// Hook names containing this substring trigger branch name generation.
 const BRANCH_NAME_GEN_MARKER: &str = "branch-name-gen";
 
+/// Hook names containing this substring trigger prompt suggestion generation.
+const SUGGEST_PROMPTS_MARKER: &str = "suggest-prompts";
+
 /// LLM prompt-based hook handler.
 ///
 /// Spawns a lightweight subsession with the user's prompt, then emits
@@ -246,12 +249,23 @@ impl HookHandler for PromptHookHandler {
 
         let is_title_gen = self.id.contains(TITLE_GEN_MARKER);
         let is_branch_name_gen = self.id.contains(BRANCH_NAME_GEN_MARKER);
+        let is_suggest_prompts = self.id.contains(SUGGEST_PROMPTS_MARKER);
 
         // Title-gen has a schedule: first prompt, then every N prompts
         // or after compaction/memory events.
         if is_title_gen && !self.should_generate_title(context.session_id()) {
             debug!(id = %self.id, "[prompt_hook] skipping (schedule says not yet)");
             return Ok(HookResult::continue_());
+        }
+
+        // Suggest-prompts: skip if no conversation context available.
+        if is_suggest_prompts {
+            if let HookContext::Stop { last_user_prompt, .. } = context {
+                if last_user_prompt.is_none() {
+                    debug!(id = %self.id, "[prompt_hook] skipping suggest-prompts (no user prompt)");
+                    return Ok(HookResult::continue_());
+                }
+            }
         }
 
         debug!(id = %self.id, session_id = %context.session_id(), "[prompt_hook] spawning background subsession");

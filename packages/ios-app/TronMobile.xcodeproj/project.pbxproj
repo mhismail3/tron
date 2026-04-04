@@ -435,6 +435,7 @@
 		A49D1B18FB4452B215A7BF05 /* IBMPlexSerif-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F72E8400474CDFE4BA272302 /* IBMPlexSerif-SemiBold.ttf */; };
 		A4A0F7BE86C243391A1F3A67 /* RPCTypes+Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6AD7C1E54D055E3FA5C8A /* RPCTypes+Settings.swift */; };
 		A4B3D8BAFC8FE1D9D9820FAB /* RPCTypes+Media.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3350EAE069F022FC42E9AD16 /* RPCTypes+Media.swift */; };
+		A4D7344345D2B70BADFD08B5 /* ChatViewModel+HookEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF575B6B4B389EA2632DB88E /* ChatViewModel+HookEvents.swift */; };
 		A5D9E014D5AD2A2D386AF034 /* BashToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDB95C69285DC43F89A3446 /* BashToolDetailSheet.swift */; };
 		A6FF0CA8C277543C8A7D0E2F /* ErrorPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */; };
 		A73C32F028EC1DF7026345A1 /* CommandToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 824F28682A9C3D09741C68AA /* CommandToolDetailSheet.swift */; };
@@ -447,6 +448,7 @@
 		A9C56AF4AEF5B9B6E32720FC /* StreamSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D993D7E0FB114273142BEA70 /* StreamSheetView.swift */; };
 		A9FB32984B838D5B1C05F49C /* SubagentStatBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A57FFB0CA4967AA9029825 /* SubagentStatBadge.swift */; };
 		AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B65C803EB12E8C7004E843 /* View+Extensions.swift */; };
+		AA27D663CC61554BDE494A11 /* LlmHookResultPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DF01E5A7982A974BC563E3 /* LlmHookResultPlugin.swift */; };
 		AA375C66F865224831AE7BBB /* ComputerUseToolDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA36C2C932E72D731DFDDA77 /* ComputerUseToolDetailSheetTests.swift */; };
 		AB568B31599661842860EB6A /* EventStoreManager+Operations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2D2FAA96E6A3AB87B00C27 /* EventStoreManager+Operations.swift */; };
 		AC33A9D80F9FC92D6C97D277 /* RPCTypes+Tool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8651EB5A46A156ECF87755B /* RPCTypes+Tool.swift */; };
@@ -1237,6 +1239,7 @@
 		DE255AADDFC9B06277562F78 /* MessagingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagingCoordinator.swift; sourceTree = "<group>"; };
 		DE7816ABBC956CE9E60ABA97 /* AnswerParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerParser.swift; sourceTree = "<group>"; };
 		DE88DEE3F08070A2E1884468 /* SubagentSpawnedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentSpawnedPlugin.swift; sourceTree = "<group>"; };
+		DF575B6B4B389EA2632DB88E /* ChatViewModel+HookEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+HookEvents.swift"; sourceTree = "<group>"; };
 		DF71E640CC0F7917E5FE42B6 /* SandboxesDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxesDashboardView.swift; sourceTree = "<group>"; };
 		DF881DA76CF64054893335E0 /* NewSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlow.swift; sourceTree = "<group>"; };
 		DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericToolViewer.swift; sourceTree = "<group>"; };
@@ -1304,6 +1307,7 @@
 		F48684A67BFB95E1036AE787 /* CompactionStartedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactionStartedPlugin.swift; sourceTree = "<group>"; };
 		F4C6348A82F197609B6FCECA /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
 		F4CFC0C58B7F643E839F5FCA /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
+		F4DF01E5A7982A974BC563E3 /* LlmHookResultPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmHookResultPlugin.swift; sourceTree = "<group>"; };
 		F58086E60ECF8827D8CDE511 /* ServerRestartingPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRestartingPluginTests.swift; sourceTree = "<group>"; };
 		F5C1DF1578EC7398CF56B21D /* RPCTypes+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Events.swift"; sourceTree = "<group>"; };
 		F5CCDA3880BD3F110A4A2016 /* GetConfirmationDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetConfirmationDetectorTests.swift; sourceTree = "<group>"; };
@@ -2459,6 +2463,7 @@
 				582CEC7B5595B3B601A12467 /* EventRegistry.swift */,
 				C7297D9A306D121FEC63F0C2 /* ParsedEventV2.swift */,
 				AE57A76FF9539761C0E81D08 /* Display */,
+				AA51B98B2A19E9867E4DF327 /* Hook */,
 				8484A19D413A097A935F3D62 /* Lifecycle */,
 				74E5A51D2E0592010CBE5182 /* Process */,
 				5541AA1F28867E9BF05FF9AC /* Server */,
@@ -2546,6 +2551,14 @@
 				D16FFDA62C9F030693901D94 /* EditToolSections.swift */,
 			);
 			path = Edit;
+			sourceTree = "<group>";
+		};
+		AA51B98B2A19E9867E4DF327 /* Hook */ = {
+			isa = PBXGroup;
+			children = (
+				F4DF01E5A7982A974BC563E3 /* LlmHookResultPlugin.swift */,
+			);
+			path = Hook;
 			sourceTree = "<group>";
 		};
 		AC6166611A5239356657919C /* Handlers */ = {
@@ -2898,6 +2911,7 @@
 				7F3184BA596501A715C760BC /* ChatViewModel+EventDispatchContext.swift */,
 				07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */,
 				062CC8B33A9D59C8820A54B3 /* ChatViewModel+GetConfirmation.swift */,
+				DF575B6B4B389EA2632DB88E /* ChatViewModel+HookEvents.swift */,
 				F92F6CAE7238A608B2D19BE1 /* ChatViewModel+Messaging.swift */,
 				EFC14EF0FDE28C78BDF20CA9 /* ChatViewModel+Pagination.swift */,
 				FDA1991FA3B154D4147D8650 /* ChatViewModel+ProcessEvents.swift */,
@@ -3306,6 +3320,7 @@
 				2130D6AA40D603B50FA41D3F /* ChatViewModel+EventDispatchContext.swift in Sources */,
 				1192E3F84F3AAE4245D0581E /* ChatViewModel+Events.swift in Sources */,
 				80BE6981CB995BAD2F9CAAA8 /* ChatViewModel+GetConfirmation.swift in Sources */,
+				A4D7344345D2B70BADFD08B5 /* ChatViewModel+HookEvents.swift in Sources */,
 				262F728F81322E55356E8958 /* ChatViewModel+Messaging.swift in Sources */,
 				2366A060C08EAC01873DE799 /* ChatViewModel+Pagination.swift in Sources */,
 				83FB61D99E6A64AC55F2C362 /* ChatViewModel+ProcessEvents.swift in Sources */,
@@ -3447,6 +3462,7 @@
 				829887338DE66A444E3371F8 /* JobClient.swift in Sources */,
 				FC6A95E7D82AB0CAAC9BF3EE /* KeyboardObserver.swift in Sources */,
 				C4D3F600444E9B277D6FB8B8 /* LineNumberedContentView.swift in Sources */,
+				AA27D663CC61554BDE494A11 /* LlmHookResultPlugin.swift in Sources */,
 				02FE389EB93928871C55206C /* LogViewer.swift in Sources */,
 				68F10F5CFF9AE69C663A5567 /* LoggingContext.swift in Sources */,
 				E130B9D7131C53E75CBCDE58 /* MCPClient.swift in Sources */,

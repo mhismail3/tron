@@ -18,6 +18,12 @@ final class PullUpPanelState {
 
     var isExpanded: Bool { position == .expanded }
 
+    /// Suggested follow-up prompts from LLM hook.
+    var suggestions: [String] = []
+
+    /// When true, pull-up drag gesture is disabled (agent is active).
+    var isDragDisabled: Bool = false
+
     // MARK: - Constants
 
     /// Height of the revealed panel content area.

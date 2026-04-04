@@ -132,6 +132,9 @@ final class EventRegistry: @unchecked Sendable {
         register(ProcessStatusUpdatePlugin.self)
         register(JobBackgroundedPlugin.self)
 
+        // Hook events
+        register(LlmHookResultPlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

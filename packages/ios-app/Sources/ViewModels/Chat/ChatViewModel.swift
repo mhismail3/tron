@@ -103,6 +103,8 @@ final class ChatViewModel {
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)
     let worktreeState = WorktreeIsolationState()
+    /// Pull-up panel state (suggestions, position, drag)
+    let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
 
     /// Whether AskUserQuestion was called in the current turn (ToolEventContext, TurnLifecycleContext)

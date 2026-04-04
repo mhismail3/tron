@@ -504,6 +504,8 @@ mod tests {
                 timestamp: "t".to_string(),
                 stop_reason: "end_turn".to_string(),
                 final_message: None,
+                last_user_prompt: None,
+                last_assistant_response: None,
             },
             _ => HookContext::SessionStart {
                 session_id: "s1".to_string(),

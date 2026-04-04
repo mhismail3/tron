@@ -5,6 +5,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct PullUpPanelView: View {
     @Bindable var panelState: PullUpPanelState
+    var onSuggestionTapped: ((String) -> Void)?
 
     /// Drag offset local to the panel dismiss gesture.
     @State private var dismissOffset: CGFloat = 0
@@ -13,8 +14,12 @@ struct PullUpPanelView: View {
     private static let dismissVelocityThreshold: CGFloat = 150
 
     var body: some View {
-        VStack {
-            Spacer()
+        VStack(spacing: 0) {
+            if panelState.suggestions.isEmpty {
+                Spacer()
+            } else {
+                suggestionChips
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: PullUpPanelState.expandedHeight)
@@ -53,5 +58,29 @@ struct PullUpPanelView: View {
                     }
                 }
         )
+    }
+
+    // MARK: - Suggestion Chips
+
+    private var suggestionChips: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(panelState.suggestions, id: \.self) { suggestion in
+                    Button {
+                        onSuggestionTapped?(suggestion)
+                    } label: {
+                        Text(suggestion)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }

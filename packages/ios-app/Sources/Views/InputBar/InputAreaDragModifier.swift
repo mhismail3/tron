@@ -13,6 +13,7 @@ struct InputAreaDragModifier: ViewModifier {
             .gesture(
                 DragGesture(minimumDistance: 12)
                     .onChanged { value in
+                        guard !panelState.isDragDisabled else { return }
                         let raw = value.translation.height
 
                         // Direction lock: only respond to the correct direction
@@ -38,6 +39,7 @@ struct InputAreaDragModifier: ViewModifier {
                         )
                     }
                     .onEnded { value in
+                        guard !panelState.isDragDisabled else { return }
                         let distance = abs(panelState.dragOffset)
                         let velocity = value.predictedEndLocation.y - value.location.y
 

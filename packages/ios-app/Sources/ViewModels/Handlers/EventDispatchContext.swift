@@ -71,6 +71,10 @@ import Foundation
     func handleJobBackgrounded(_ result: JobBackgroundedPlugin.Result)
 }
 
+@MainActor protocol HookEventHandler: AnyObject {
+    func handleLlmHookResult(_ result: LlmHookResultPlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -84,5 +88,5 @@ import Foundation
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, DisplayStreamEventHandler,
-    ProcessEventHandler, EventDispatchLogger {}
+    ProcessEventHandler, HookEventHandler, EventDispatchLogger {}
 
