@@ -10,9 +10,15 @@ enum ModelNameFormatter {
     /// Lock-protected server model cache. Written by ModelClient, read from any context.
     private static let _serverModels = OSAllocatedUnfairLock<[String: ModelInfo]>(initialState: [:])
 
-    /// Thread-safe read access to server models.
+    /// Thread-safe snapshot of all server models. Copies the entire dictionary.
+    /// Prefer `lookupModel(_:)` for single-key lookups to avoid full copy.
     static var serverModels: [String: ModelInfo] {
         _serverModels.withLock { $0 }
+    }
+
+    /// Thread-safe single-key lookup — avoids copying the full dictionary.
+    private static func lookupModel(_ id: String) -> ModelInfo? {
+        _serverModels.withLock { $0[id] }
     }
 
     static func updateFromServer(_ models: [ModelInfo]) {
@@ -39,7 +45,7 @@ enum ModelNameFormatter {
     /// - Returns: Formatted model name
     static func format(_ modelId: String, style: Style, fallback: String? = nil) -> String {
         // Use server metadata when available
-        if let info = serverModels[modelId] {
+        if let info = lookupModel(modelId) {
             switch style {
             case .short:
                 return info.name
@@ -326,8 +332,5 @@ extension String {
 /// Formats a model ID into a friendly display name.
 /// Uses server cache when available, falls back to heuristic parsing.
 func formatModelDisplayName(_ modelId: String) -> String {
-    if let info = ModelNameFormatter.serverModels[modelId] {
-        return info.name
-    }
-    return modelId.shortModelName
+    ModelNameFormatter.format(modelId, style: .short)
 }
