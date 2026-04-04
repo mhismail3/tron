@@ -231,7 +231,7 @@ struct SessionSettingsPage: View {
                         .font(TronTypography.mono(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
-                        .frame(minWidth: 20)
+                        .frame(minWidth: 30, alignment: .trailing)
                     TronStepper(
                         value: Bindable(settingsState).maxConcurrentSessions,
                         range: 1...50
@@ -251,7 +251,7 @@ struct SessionSettingsPage: View {
                         .font(TronTypography.mono(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
-                        .frame(minWidth: 40)
+                        .frame(minWidth: 30, alignment: .trailing)
                     TronStepper(
                         value: Bindable(settingsState).cacheTtlSecs,
                         range: 0...7200,
