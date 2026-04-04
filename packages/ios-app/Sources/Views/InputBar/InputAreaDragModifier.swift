@@ -1,7 +1,10 @@
 import SwiftUI
+import UIKit
 
-/// Applies a vertical drag gesture with rubber-band resistance to toggle
-/// the pull-up panel between collapsed and expanded positions.
+/// Long-press-and-drag gesture on the input bar to reveal the suggestion row.
+///
+/// Hold for 0.6s → haptic + lift-off animation → drag/flick up to expand.
+/// When expanded, a simple swipe down on the input bar collapses.
 @available(iOS 26.0, *)
 struct InputAreaDragModifier: ViewModifier {
     @Bindable var panelState: PullUpPanelState
@@ -10,28 +13,38 @@ struct InputAreaDragModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(y: panelState.dragOffset)
-            .gesture(
-                DragGesture(minimumDistance: 12)
+            .scaleEffect(panelState.isHoldActive ? 1.02 : 1.0)
+            .shadow(
+                color: panelState.isHoldActive ? .black.opacity(0.15) : .clear,
+                radius: panelState.isHoldActive ? 8 : 0,
+                y: panelState.isHoldActive ? 4 : 0
+            )
+            .gesture(panelState.isExpanded ? dismissDragGesture : nil)
+            .gesture(panelState.isExpanded ? nil : holdAndDragGesture)
+    }
+
+    // MARK: - Expand Gesture (long press + drag)
+
+    private var holdAndDragGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.6)
+            .onChanged { _ in }
+            .onEnded { _ in
+                guard !panelState.isDragDisabled else { return }
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    panelState.isHoldActive = true
+                }
+            }
+            .sequenced(before:
+                DragGesture(minimumDistance: 5)
                     .onChanged { value in
-                        guard !panelState.isDragDisabled else { return }
+                        guard panelState.isHoldActive else { return }
                         let raw = value.translation.height
-
-                        // Direction lock: only respond to the correct direction
-                        switch panelState.position {
-                        case .collapsed:
-                            // Only respond to upward pull (negative translation)
-                            guard raw < 0 else {
-                                panelState.dragOffset = 0
-                                return
-                            }
-                        case .expanded:
-                            // Only respond to downward pull (positive translation)
-                            guard raw > 0 else {
-                                panelState.dragOffset = 0
-                                return
-                            }
+                        guard raw < 0 else {
+                            panelState.dragOffset = 0
+                            return
                         }
-
                         panelState.dragOffset = Self.rubberBand(
                             raw,
                             limit: PullUpPanelState.expandedHeight,
@@ -39,46 +52,54 @@ struct InputAreaDragModifier: ViewModifier {
                         )
                     }
                     .onEnded { value in
-                        guard !panelState.isDragDisabled else { return }
                         let distance = abs(panelState.dragOffset)
                         let velocity = value.predictedEndLocation.y - value.location.y
+                        let shouldExpand = distance > PullUpPanelState.dragThreshold
+                            || velocity < -PullUpPanelState.velocityThreshold
 
-                        // Check if we should toggle position
-                        let distanceTriggered = distance > PullUpPanelState.dragThreshold
-                        let velocityTriggered: Bool
-                        switch panelState.position {
-                        case .collapsed:
-                            // Upward flick = negative velocity
-                            velocityTriggered = velocity < -PullUpPanelState.velocityThreshold
-                        case .expanded:
-                            // Downward flick = positive velocity
-                            velocityTriggered = velocity > PullUpPanelState.velocityThreshold
-                        }
-
-                        let shouldToggle = distanceTriggered || velocityTriggered
-
-                        if shouldToggle && !panelState.isExpanded {
+                        if shouldExpand {
                             onWillExpand?()
                         }
 
                         withAnimation(.tronSnap) {
                             panelState.dragOffset = 0
-                            if shouldToggle {
-                                panelState.position = panelState.isExpanded ? .collapsed : .expanded
+                            panelState.isHoldActive = false
+                            if shouldExpand {
+                                panelState.position = .expanded
                             }
                         }
                     }
             )
     }
 
+    // MARK: - Dismiss Gesture (simple swipe down when expanded)
+
+    private var dismissDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                let raw = value.translation.height
+                guard raw > 0 else {
+                    panelState.dragOffset = 0
+                    return
+                }
+                panelState.dragOffset = raw * 0.6
+            }
+            .onEnded { value in
+                let distance = panelState.dragOffset
+                let velocity = value.predictedEndLocation.y - value.location.y
+                let shouldDismiss = distance > 20 || velocity > 120
+
+                withAnimation(.tronSnap) {
+                    panelState.dragOffset = 0
+                    if shouldDismiss {
+                        panelState.position = .collapsed
+                    }
+                }
+            }
+    }
+
     // MARK: - Rubber-Band Physics
 
-    /// Logarithmic resistance curve: small drags feel near-1:1, large drags attenuate.
-    /// - Parameters:
-    ///   - rawOffset: Raw finger translation in points
-    ///   - limit: Maximum meaningful offset (panel height)
-    ///   - factor: Resistance multiplier (0.0–1.0, lower = more resistant)
-    /// - Returns: Visually attenuated offset
     static func rubberBand(_ rawOffset: CGFloat, limit: CGFloat, factor: CGFloat) -> CGFloat {
         let sign: CGFloat = rawOffset < 0 ? -1 : 1
         let magnitude = abs(rawOffset)

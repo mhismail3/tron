@@ -432,7 +432,7 @@ struct ChatView: View {
                 .id(sessionId)
             }
 
-            // Pull-up panel content
+            // Suggestion row
             if viewModel.pullUpPanelState.isExpanded {
                 PullUpPanelView(
                     panelState: viewModel.pullUpPanelState,
@@ -446,10 +446,18 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .overlay(alignment: .center) {
+            // Arrow indicator when hold is active
+            if viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.tronEmerald.opacity(0.6))
+                    .transition(.opacity)
+            }
+        }
         .modifier(InputAreaDragModifier(
             panelState: viewModel.pullUpPanelState,
             onWillExpand: { [viewModel] in
-                // Dismiss keyboard and mention popups when expanding
                 UIApplication.shared.sendAction(
                     #selector(UIResponder.resignFirstResponder),
                     to: nil, from: nil, for: nil
@@ -458,8 +466,8 @@ struct ChatView: View {
             }
         ))
         .animation(.tronSnap, value: viewModel.pullUpPanelState.isExpanded)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.pullUpPanelState.isHoldActive)
         .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
-            // Collapse panel when keyboard appears (mutual exclusion)
             if !wasVisible && isVisible && viewModel.pullUpPanelState.isExpanded {
                 withAnimation(.tronSnap) {
                     viewModel.pullUpPanelState.position = .collapsed
@@ -468,14 +476,13 @@ struct ChatView: View {
         }
         .onChange(of: viewModel.agentPhase) { _, newPhase in
             if newPhase != .idle {
-                // Agent started: auto-dismiss panel and disable drag
                 withAnimation(.tronSnap) {
                     viewModel.pullUpPanelState.position = .collapsed
                 }
                 viewModel.pullUpPanelState.isDragDisabled = true
+                viewModel.pullUpPanelState.isHoldActive = false
                 viewModel.pullUpPanelState.suggestions = []
             } else {
-                // Agent finished: re-enable drag
                 viewModel.pullUpPanelState.isDragDisabled = false
             }
         }
@@ -603,6 +610,13 @@ struct ChatView: View {
                         logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
                     }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
+
+                    // Dismiss suggestion row when user starts scrolling
+                    if case .interacting = newPhase, viewModel.pullUpPanelState.isExpanded {
+                        withAnimation(.tronSnap) {
+                            viewModel.pullUpPanelState.position = .collapsed
+                        }
+                    }
                 }
                 // Track near-bottom geometry — fires only when the Bool changes.
                 // Threshold includes contentInsets.bottom to account for the input
