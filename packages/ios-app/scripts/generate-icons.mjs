@@ -122,10 +122,9 @@ async function main() {
 
   console.log("Generating app icons...");
 
-  // Production icon: explicit light + dark variants
+  // Production icon: emerald moose on cream (iOS auto-generates dark variant)
   const deepEmeraldSvg = recolorSvg(ORIGINAL_FILL, "#059669");
-  await generateAppIcon(deepEmeraldSvg, BG.cream, join(ASSETS, "AppIcon.appiconset", "icon-1024-light.png"));
-  await generateAppIcon(whiteSvg, BG.dark, join(ASSETS, "AppIcon.appiconset", "icon-1024-dark.png"));
+  await generateAppIcon(deepEmeraldSvg, BG.cream, join(ASSETS, "AppIcon.appiconset", "icon-1024.png"));
 
   // Beta icon: white moose on amber bg (iOS auto-generates dark/tinted)
   await generateAppIcon(whiteSvg, COLORS.amber, join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"));
@@ -154,8 +153,7 @@ async function main() {
   let allOk = true;
   const checks = [
     // App icons (1024x1024, no alpha needed)
-    [join(ASSETS, "AppIcon.appiconset", "icon-1024-light.png"), 1024, 1024],
-    [join(ASSETS, "AppIcon.appiconset", "icon-1024-dark.png"), 1024, 1024],
+    [join(ASSETS, "AppIcon.appiconset", "icon-1024.png"), 1024, 1024],
     [join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"), 1024, 1024],
     // In-app logos (transparent)
     [join(logoDir, "tron-logo.png"), 100, 100, true],
@@ -175,7 +173,7 @@ async function main() {
   }
 
   if (allOk) {
-    console.log("\nAll 12 files generated and verified successfully.");
+    console.log("\nAll 11 files generated and verified successfully.");
   } else {
     console.error("\nSome verifications failed!");
     process.exit(1);
