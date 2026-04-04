@@ -133,14 +133,14 @@ impl MethodHandler for SwitchModelHandler {
             .emit(crate::core::events::TronEvent::SessionUpdated {
                 base: crate::core::events::BaseEvent::now(&session_id),
                 title: session.title.clone(),
-                model: model.clone(),
-                message_count: session.event_count,
-                input_tokens: session.total_input_tokens,
-                output_tokens: session.total_output_tokens,
-                last_turn_input_tokens: session.last_turn_input_tokens,
-                cache_read_tokens: session.total_cache_read_tokens,
-                cache_creation_tokens: session.total_cache_creation_tokens,
-                cost: session.total_cost,
+                model: Some(model.clone()),
+                message_count: Some(session.event_count),
+                input_tokens: Some(session.total_input_tokens),
+                output_tokens: Some(session.total_output_tokens),
+                last_turn_input_tokens: Some(session.last_turn_input_tokens),
+                cache_read_tokens: Some(session.total_cache_read_tokens),
+                cache_creation_tokens: Some(session.total_cache_creation_tokens),
+                cost: Some(session.total_cost),
                 last_activity: session.last_activity_at.clone(),
                 is_active,
                 last_user_prompt: None,
@@ -653,8 +653,7 @@ mod tests {
 
         let event = rx.try_recv().unwrap();
         if let crate::core::events::TronEvent::SessionUpdated { cost, .. } = event {
-            // Cost should come from session, not hardcoded 0.0
-            // (exact value depends on how event store aggregates)
+            let cost = cost.unwrap_or(0.0);
             assert!(cost >= 0.0);
         } else {
             panic!("expected SessionUpdated event");
@@ -681,7 +680,7 @@ mod tests {
 
         let event = rx.try_recv().unwrap();
         if let crate::core::events::TronEvent::SessionUpdated { model, .. } = event {
-            assert_eq!(model, "claude-sonnet-4-5-20250929");
+            assert_eq!(model, Some("claude-sonnet-4-5-20250929".into()));
         } else {
             panic!("expected SessionUpdated event");
         }

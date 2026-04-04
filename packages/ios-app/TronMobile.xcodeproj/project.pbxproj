@@ -160,6 +160,7 @@
 		373BFD920785D7F15D8454BD /* SettingsPageContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F381FBEF94536C12E3CCF85E /* SettingsPageContainer.swift */; };
 		37A7664776CCEE9B7A425D06 /* InputAreaDragModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A91A0F33B2C429B2442B45 /* InputAreaDragModifier.swift */; };
 		382740800CC6867D4A1D7BE6 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D05A145BE8014E1D17C36824 /* IBMPlexMono-Regular.ttf */; };
+		38317572307F17BBC0A3869D /* TypewriterAnimationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */; };
 		384BD3DA151B485E849055E5 /* MessageRole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53DDBD358011DF4C6F8B9E05 /* MessageRole.swift */; };
 		38E4283F5D01D1F3B2AA3F2E /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C354688A011B9B926C2D15 /* Skill.swift */; };
 		39F90AD7E4119698ECBE921F /* ComputerUseDetailsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5AACA7D30F43F0D5582D21 /* ComputerUseDetailsHelper.swift */; };
@@ -259,6 +260,7 @@
 		635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */; };
 		64578473F4E468C657CDCE51 /* SystemEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 876D3BCA467E57145E1062AC /* SystemEvent.swift */; };
 		64D67422193355B8130715F4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CDC9922B58D9AB366386EA /* ContentView.swift */; };
+		653249F8742F2FECA5C0BF28 /* TypewriterAnimationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */; };
 		663FFAB3A7ADF27B2F7B14C0 /* MemoryCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DB0B2DB800488B66C6E22E /* MemoryCoordinatorTests.swift */; };
 		6672C93ED6BFA3F1A586F15E /* DefaultModelRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78AD055C1A8BF64BCA400E5C /* DefaultModelRepository.swift */; };
 		66731D5766A40CC970BD5716 /* SheetReadOnlyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485B54C19D15CC8E97591460 /* SheetReadOnlyTests.swift */; };
@@ -971,6 +973,7 @@
 		7287993C693A02565C33042A /* ThinkingIndicatorStyleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingIndicatorStyleTests.swift; sourceTree = "<group>"; };
 		72974DF8AE4761DD06B90381 /* AppearanceSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsPage.swift; sourceTree = "<group>"; };
 		72B63610368929ABBF758B36 /* DurationFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationFormatterTests.swift; sourceTree = "<group>"; };
+		73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationStateTests.swift; sourceTree = "<group>"; };
 		73FC1466CB50C9CEF5F84DFC /* ModelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelClient.swift; sourceTree = "<group>"; };
 		744FA401B3D1D597D5427351 /* InputHistoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputHistoryStoreTests.swift; sourceTree = "<group>"; };
 		7450E3BB7E98F9D547C4CBB6 /* ErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandler.swift; sourceTree = "<group>"; };
@@ -1028,6 +1031,7 @@
 		876D3BCA467E57145E1062AC /* SystemEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEvent.swift; sourceTree = "<group>"; };
 		879251B0CFAE32083926A18E /* foreground-emerald.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "foreground-emerald.png"; sourceTree = "<group>"; };
 		88293D1A0C4FA7A91F04D7F5 /* FallbackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackViews.swift; sourceTree = "<group>"; };
+		8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationState.swift; sourceTree = "<group>"; };
 		887FAA60E6696C5099018531 /* EventDatabaseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseProtocol.swift; sourceTree = "<group>"; };
 		8991F9313A206B5CCF36C2A6 /* EventDispatchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDispatchContext.swift; sourceTree = "<group>"; };
 		89A21F2C8295D305E962466F /* ToolResultNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultNote.swift; sourceTree = "<group>"; };
@@ -2625,6 +2629,7 @@
 				BBF591FED5A63542C266BA2E /* ConnectionStatusPill.swift */,
 				6A728932D4055DD33082C067 /* LineNumberedContentView.swift */,
 				A86CDFE588E9C4A56E401D39 /* MultiLineTextView.swift */,
+				8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */,
 				2E2F2BF782B756D47E100F37 /* TypewriterText.swift */,
 			);
 			path = Components;
@@ -2685,6 +2690,7 @@
 				3B3B0877E54541B6F3F6B054 /* SkillDetailSheetTests.swift */,
 				8E689E779C8C57917FB8E8C5 /* SourceChangesSheetTests.swift */,
 				FCA7437FC583F0F161B4DB24 /* TextContentLayoutTests.swift */,
+				73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */,
 				C940E394586353E994B37A82 /* WebToolViewerTests.swift */,
 				BE40DF4033B1696EF9BF6551 /* Chat */,
 				8B0C41DE449522B1E1E956FF /* Tools */,
@@ -3712,6 +3718,7 @@
 				760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */,
 				0BBBA0C6949E8B4A7D92C354 /* TurnLifecycleCoordinator.swift in Sources */,
 				0EB1252C2D1DD49C7A70EC89 /* TurnStartPlugin.swift in Sources */,
+				653249F8742F2FECA5C0BF28 /* TypewriterAnimationState.swift in Sources */,
 				762FC08424B88C8006C0E264 /* TypewriterText.swift in Sources */,
 				DFD1465183617D8EE8B69A5F /* UIUpdateQueue.swift in Sources */,
 				635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */,
@@ -3880,6 +3887,7 @@
 				861356FD5F070B399FD51613 /* TronTypographyTests.swift in Sources */,
 				DB71481015BA128E4D2069E5 /* TurnEndPluginTests.swift in Sources */,
 				5FBFDBA2E52517DAA17F6AB0 /* TurnLifecycleCoordinatorTests.swift in Sources */,
+				38317572307F17BBC0A3869D /* TypewriterAnimationStateTests.swift in Sources */,
 				CED95D67E671E58659E757BE /* UIUpdateQueueTests.swift in Sources */,
 				D23BB4288D88F43D51E030B3 /* UnifiedEventTransformerTests.swift in Sources */,
 				253853E70455D523D0932AE5 /* VoiceNotesRecorderTests.swift in Sources */,

@@ -668,23 +668,28 @@ tron_events! {
     SessionDeleted {} => "session_deleted",
 
     /// Session metadata updated (live sync to iOS).
+    ///
+    /// All stats/model fields are Optional so partial updates (e.g., title-only
+    /// from the title-gen hook) don't zero out real session data on the client.
     SessionUpdated {
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
-        model: String,
-        #[serde(rename = "messageCount")]
-        message_count: i64,
-        #[serde(rename = "inputTokens")]
-        input_tokens: i64,
-        #[serde(rename = "outputTokens")]
-        output_tokens: i64,
-        #[serde(rename = "lastTurnInputTokens")]
-        last_turn_input_tokens: i64,
-        #[serde(rename = "cacheReadTokens")]
-        cache_read_tokens: i64,
-        #[serde(rename = "cacheCreationTokens")]
-        cache_creation_tokens: i64,
-        cost: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(rename = "messageCount", skip_serializing_if = "Option::is_none")]
+        message_count: Option<i64>,
+        #[serde(rename = "inputTokens", skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<i64>,
+        #[serde(rename = "outputTokens", skip_serializing_if = "Option::is_none")]
+        output_tokens: Option<i64>,
+        #[serde(rename = "lastTurnInputTokens", skip_serializing_if = "Option::is_none")]
+        last_turn_input_tokens: Option<i64>,
+        #[serde(rename = "cacheReadTokens", skip_serializing_if = "Option::is_none")]
+        cache_read_tokens: Option<i64>,
+        #[serde(rename = "cacheCreationTokens", skip_serializing_if = "Option::is_none")]
+        cache_creation_tokens: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
         #[serde(rename = "lastActivity")]
         last_activity: String,
         #[serde(rename = "isActive")]
@@ -1665,14 +1670,14 @@ mod tests {
             TronEvent::SessionUpdated {
                 base: base.clone(),
                 title: None,
-                model: "m".into(),
-                message_count: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                last_turn_input_tokens: 0,
-                cache_read_tokens: 0,
-                cache_creation_tokens: 0,
-                cost: 0.0,
+                model: Some("m".into()),
+                message_count: Some(0),
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                last_turn_input_tokens: Some(0),
+                cache_read_tokens: Some(0),
+                cache_creation_tokens: Some(0),
+                cost: Some(0.0),
                 last_activity: "t".into(),
                 is_active: true,
                 last_user_prompt: None,
@@ -1867,14 +1872,14 @@ mod tests {
         let e = TronEvent::SessionUpdated {
             base: BaseEvent::now("s1"),
             title: Some("title".into()),
-            model: "claude-opus-4-6".into(),
-            message_count: 5,
-            input_tokens: 100,
-            output_tokens: 50,
-            last_turn_input_tokens: 20,
-            cache_read_tokens: 10,
-            cache_creation_tokens: 5,
-            cost: 0.01,
+            model: Some("claude-opus-4-6".into()),
+            message_count: Some(5),
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            last_turn_input_tokens: Some(20),
+            cache_read_tokens: Some(10),
+            cache_creation_tokens: Some(5),
+            cost: Some(0.01),
             last_activity: "2024-01-01T00:00:00Z".into(),
             is_active: true,
             last_user_prompt: Some("hello".into()),

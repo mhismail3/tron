@@ -308,21 +308,26 @@ impl HookHandler for PromptHookHandler {
                 Ok(output) => {
                     let output_text = Self::truncate_output(&output.output);
 
-                    // For title generation, emit SessionUpdated with title
+                    // For title generation, persist to DB and emit SessionUpdated
                     if is_title_gen {
                         if let Some(title) = output_text.as_ref().and_then(|t| Self::clean_title(t)) {
+                            if let Some(store) = &event_store {
+                                if let Err(e) = store.update_session_title(&session_id, Some(&title)) {
+                                    warn!(session_id = %session_id, error = %e, "failed to persist hook-generated title");
+                                }
+                            }
                             debug!(title = %title, "LLM hook generated session title");
                             emitter.emit(crate::core::events::TronEvent::SessionUpdated {
                                 base: BaseEvent::now(&session_id),
                                 title: Some(title),
-                                model: model.clone(),
-                                message_count: 0,
-                                input_tokens: 0,
-                                output_tokens: 0,
-                                last_turn_input_tokens: 0,
-                                cache_read_tokens: 0,
-                                cache_creation_tokens: 0,
-                                cost: 0.0,
+                                model: None,
+                                message_count: None,
+                                input_tokens: None,
+                                output_tokens: None,
+                                last_turn_input_tokens: None,
+                                cache_read_tokens: None,
+                                cache_creation_tokens: None,
+                                cost: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                                 is_active: true,
                                 last_user_prompt: None,
@@ -1019,5 +1024,110 @@ mod tests {
             }
             assert!(!should_generate_title_with_store(&store, &sid));
         }
+
+        // --- Title persistence tests ---
+
+        #[test]
+        fn title_persists_to_session_db() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            assert!(store.get_session(&sid).unwrap().unwrap().title.is_none());
+
+            store.update_session_title(&sid, Some("Fix login bug")).unwrap();
+
+            let session = store.get_session(&sid).unwrap().unwrap();
+            assert_eq!(session.title.as_deref(), Some("Fix login bug"));
+        }
+
+        #[test]
+        fn title_persist_survives_reload() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            store.update_session_title(&sid, Some("New Title")).unwrap();
+            assert_eq!(
+                store.get_session(&sid).unwrap().unwrap().title.as_deref(),
+                Some("New Title")
+            );
+        }
+
+        #[test]
+        fn title_persist_overwrites_previous() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            store.update_session_title(&sid, Some("First")).unwrap();
+            store.update_session_title(&sid, Some("Second")).unwrap();
+            assert_eq!(
+                store.get_session(&sid).unwrap().unwrap().title.as_deref(),
+                Some("Second")
+            );
+        }
+
+        #[test]
+        fn title_persist_handles_special_chars() {
+            let store = setup_store();
+            let sid = create_session(&store);
+            let title = "Fix l'Hopital's \"rule\" \u{2014} \u{65e5}\u{672c}\u{8a9e}";
+            store
+                .update_session_title(&sid, Some(title))
+                .unwrap();
+            assert_eq!(
+                store.get_session(&sid).unwrap().unwrap().title.as_deref(),
+                Some(title)
+            );
+        }
+
+        #[test]
+        fn title_persist_nonexistent_session_returns_false() {
+            let store = setup_store();
+            let result = store
+                .update_session_title("nonexistent", Some("Title"))
+                .unwrap();
+            assert!(!result);
+        }
+    }
+
+    // --- Title-gen SessionUpdated contract ---
+
+    #[test]
+    fn title_gen_session_updated_omits_stats() {
+        use crate::core::events::BaseEvent;
+
+        let event = crate::core::events::TronEvent::SessionUpdated {
+            base: BaseEvent::now("test"),
+            title: Some("New Title".to_string()),
+            model: None,
+            message_count: None,
+            input_tokens: None,
+            output_tokens: None,
+            last_turn_input_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            cost: None,
+            last_activity: "2026-01-01T00:00:00Z".to_string(),
+            is_active: true,
+            last_user_prompt: None,
+            last_assistant_response: None,
+            parent_session_id: None,
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+        let data = json.as_object().unwrap();
+        assert_eq!(
+            data.get("title").and_then(|v| v.as_str()),
+            Some("New Title")
+        );
+        // Stats should be omitted (skip_serializing_if = "Option::is_none")
+        assert!(
+            data.get("model").is_none(),
+            "model should be omitted when None"
+        );
+        assert!(
+            data.get("messageCount").is_none(),
+            "messageCount should be omitted when None"
+        );
+        assert!(
+            data.get("cost").is_none(),
+            "cost should be omitted when None"
+        );
     }
 }
