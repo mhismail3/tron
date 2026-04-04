@@ -233,8 +233,10 @@ pub enum HookContext {
         /// Last message from the agent.
         final_message: Option<String>,
         /// Last user prompt text (for suggestion hooks).
+        #[serde(skip_serializing_if = "Option::is_none")]
         last_user_prompt: Option<String>,
         /// Last assistant response text, truncated (for suggestion hooks).
+        #[serde(skip_serializing_if = "Option::is_none")]
         last_assistant_response: Option<String>,
     },
     /// Context for [`HookType::SubagentStop`].
