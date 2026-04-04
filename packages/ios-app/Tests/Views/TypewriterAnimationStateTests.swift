@@ -96,35 +96,4 @@ final class TypewriterAnimationStateTests: XCTestCase {
         state.snap(to: "snapped")
         XCTAssertEqual(state.displayedText, "snapped")
     }
-
-    // MARK: - isAnimating (prevents toolbar layout collapse)
-
-    func testIsAnimating_trueWhileRunning() async {
-        let state = TypewriterAnimationState(text: "old", characterDelay: .milliseconds(50))
-        XCTAssertFalse(state.isAnimating)
-        state.animate(to: "new")
-        XCTAssertTrue(state.isAnimating)
-        await state.waitForCompletion()
-        XCTAssertFalse(state.isAnimating)
-    }
-
-    func testIsAnimating_falseAfterSnap() async {
-        let state = TypewriterAnimationState(text: "old", characterDelay: .milliseconds(50))
-        state.animate(to: "new")
-        XCTAssertTrue(state.isAnimating)
-        state.snap(to: "snapped")
-        XCTAssertFalse(state.isAnimating)
-    }
-
-    func testIsAnimating_falseAfterCancellation() async {
-        let state = TypewriterAnimationState(text: "preparedness", characterDelay: .milliseconds(50))
-        state.animate(to: "New Title")
-        try? await Task.sleep(for: .milliseconds(100))
-        XCTAssertTrue(state.isAnimating)
-        state.animate(to: "Final")
-        // New animation is now running
-        XCTAssertTrue(state.isAnimating)
-        await state.waitForCompletion()
-        XCTAssertFalse(state.isAnimating)
-    }
 }

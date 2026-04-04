@@ -32,8 +32,6 @@ extension ChatView {
     @ToolbarContentBuilder
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            let titleValue = eventStoreManager.activeSession?.displayTitle ?? "Chat"
-            let _ = logger.info("[TITLE-DEBUG] toolbar eval: displayTitle='\(titleValue)' sessionTitle=\(eventStoreManager.activeSession?.title ?? "nil") activeId=\(eventStoreManager.activeSessionId ?? "nil")")
             HStack(alignment: .center, spacing: 6) {
                 if eventStoreManager.activeSession?.isFork == true {
                     Image(systemName: "tuningfork")
@@ -59,7 +57,7 @@ extension ChatView {
                     .transition(.opacity)
                 }
                 TypewriterText(
-                    text: titleValue,
+                    text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
                     font: TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold),
                     color: .tronEmerald
                 )

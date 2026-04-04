@@ -152,15 +152,11 @@ final class EventStoreManager {
         case CompletePlugin.eventType:
             // Processing completed for a session
             if let sessionId = event.sessionId {
-                let titleBefore = sessions.first(where: { $0.id == sessionId })?.title
-                logger.info("[TITLE-DEBUG] CompletePlugin for \(sessionId), title before sync='\(titleBefore ?? "nil")'", category: .session)
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
                 Task {
                     do {
                         try await self.syncSessionEvents(sessionId: sessionId)
-                        let titleAfter = self.sessions.first(where: { $0.id == sessionId })?.title
-                        logger.info("[TITLE-DEBUG] after syncSessionEvents title='\(titleAfter ?? "nil")'", category: .session)
                     } catch {
                         logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
                     }
@@ -222,18 +218,10 @@ final class EventStoreManager {
             return
         }
 
-        let isActiveSession = sessionId == activeSessionId
-        logger.info("Global: session.updated for \(sessionId) (active=\(isActiveSession)) title=\(result.title ?? "nil") model=\(result.model ?? "nil") msgCount=\(result.messageCount.map(String.init) ?? "nil")", category: .session)
-        if let title = result.title, isActiveSession {
-            logger.info("[TITLE-DEBUG] session.updated setting title='\(title)' for active session \(sessionId)", category: .session)
-        }
+        logger.info("Global: session.updated for \(sessionId)", category: .session)
         updateSession(at: index) { session in
-            let oldTitle = session.title
             if let title = result.title { session.title = title }
             if let model = result.model { session.latestModel = model }
-            if isActiveSession {
-                logger.info("[TITLE-DEBUG] after update: oldTitle=\(oldTitle ?? "nil") newTitle=\(session.title ?? "nil") displayTitle=\(session.displayTitle)", category: .session)
-            }
             if let count = result.messageCount { session.messageCount = count }
             if let tokens = result.inputTokens { session.inputTokens = tokens }
             if let tokens = result.outputTokens { session.outputTokens = tokens }
@@ -431,7 +419,6 @@ final class EventStoreManager {
         do {
             // Preserve existing transient state before reloading
             var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, isProcessing: Bool?)] = [:]
-            var preservedTitles: [String: String?] = [:]
             for session in sessions {
                 preservedDashboardInfo[session.id] = (
                     session.lastUserPrompt,
@@ -439,22 +426,11 @@ final class EventStoreManager {
                     session.lastToolCount,
                     session.isProcessing
                 )
-                if session.id == activeSessionId {
-                    preservedTitles[session.id] = session.title
-                }
             }
 
             // Filter by current server origin if enabled
             let origin = filterByOrigin ? currentServerOrigin : nil
             sessions = try eventDB.sessions.getByOrigin(origin)
-            if let activeId = activeSessionId {
-                let oldTitle = preservedTitles[activeId] ?? nil
-                let newTitle = sessions.first(where: { $0.id == activeId })?.title
-                let newDisplayTitle = sessions.first(where: { $0.id == activeId })?.displayTitle
-                if oldTitle != newTitle {
-                    logger.info("[TITLE-DEBUG] loadSessions CHANGED active session title: '\(oldTitle ?? "nil")' → '\(newTitle ?? "nil")' displayTitle='\(newDisplayTitle ?? "nil")'", category: .session)
-                }
-            }
             chatSessionId = sessions.first(where: { $0.isChat })?.id
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"), chat: \(chatSessionId ?? "none"))", category: .session)
 
