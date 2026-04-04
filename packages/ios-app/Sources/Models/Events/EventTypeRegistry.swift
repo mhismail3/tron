@@ -92,6 +92,9 @@ enum PersistedEventType: String, CaseIterable {
     // Memory
     case memoryRetained = "memory.retained"
 
+    // Hooks
+    case llmHookResult = "hook.llm_result"
+
     // MARK: - Display Classification
 
     /// Whether this event type should render as a ChatMessage in the chat UI
@@ -121,7 +124,8 @@ enum PersistedEventType: String, CaseIterable {
              .compactBoundary, .compactSummary,
              .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged, .worktreeRenamed,
              .subagentSpawned, .subagentCompleted, .subagentFailed,
-             .errorAgent:
+             .errorAgent,
+             .llmHookResult:
             return true
         default:
             return false
@@ -148,7 +152,8 @@ enum PersistedEventType: String, CaseIterable {
              .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
              .configPromptUpdate,
              .messageDeleted,
-             .fileRead, .fileWrite, .fileEdit:
+             .fileRead, .fileWrite, .fileEdit,
+             .llmHookResult:
             return true
         default:
             return false
@@ -204,6 +209,7 @@ enum PersistedEventType: String, CaseIterable {
         case .subagentResultsConsumed: return "Subagent results consumed"
         case .turnFailed: return "Turn failed"
         case .memoryRetained: return "Memory retained"
+        case .llmHookResult: return "LLM hook result"
         }
     }
 }

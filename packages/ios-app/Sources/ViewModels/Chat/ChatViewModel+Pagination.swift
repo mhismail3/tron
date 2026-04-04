@@ -73,9 +73,14 @@ extension ChatViewModel {
             // We compare against HISTORY count (allReconstructedMessages), not total messages,
             // because catch-up messages shouldn't prevent us from reloading when history grows.
             let state = try manager.getReconstructedState(sessionId: sessionId)
+            logger.info("[SUGGEST-DEBUG] post-sync reconstruct: suggestions=\(state.suggestions), msgCount=\(state.messages.count)", category: .session)
             if state.messages.count > initialHistoryCount {
                 logger.info("Server sync found \(state.messages.count - initialHistoryCount) new history messages, updating UI (isProcessing=\(isProcessing))", category: .session)
                 await loadPersistedMessagesAsync()
+            } else if !state.suggestions.isEmpty && pullUpPanelState.suggestions.isEmpty {
+                // Sync may have brought new hook results without new messages
+                pullUpPanelState.suggestions = state.suggestions
+                logger.info("[SUGGEST-DEBUG] post-sync: restored \(state.suggestions.count) suggestions (no new messages)", category: .session)
             }
         } catch {
             logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
@@ -144,6 +149,13 @@ extension ChatViewModel {
             // Apply event-sourced reasoning level (authoritative over UserDefaults)
             if let eventSourcedLevel = state.reasoningLevel {
                 inputBarState.reasoningLevel = eventSourcedLevel
+            }
+
+            // Restore suggestion prompts from the latest hook result
+            logger.info("[SUGGEST-DEBUG] loadPersisted: state.suggestions=\(state.suggestions), count=\(state.suggestions.count)", category: .session)
+            if !state.suggestions.isEmpty {
+                pullUpPanelState.suggestions = state.suggestions
+                logger.info("[SUGGEST-DEBUG] restored \(state.suggestions.count) suggestions into pullUpPanelState", category: .session)
             }
 
             // Populate SubagentState from reconstructed subagent results

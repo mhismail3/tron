@@ -10,8 +10,15 @@ struct PullUpPanelView: View {
     /// Drag offset local to the panel dismiss gesture.
     @State private var dismissOffset: CGFloat = 0
 
+    /// Tracks which chip indices have appeared (drives stagger animation).
+    @State private var visibleChips: Set<Int> = []
+
+    /// Snapshot of suggestions used to detect new arrivals.
+    @State private var lastSuggestionCount: Int = 0
+
     private static let dismissThreshold: CGFloat = 30
     private static let dismissVelocityThreshold: CGFloat = 150
+    private static let staggerDelay: Double = 0.07
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,12 +42,10 @@ struct PullUpPanelView: View {
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
                     let raw = value.translation.height
-                    // Only respond to downward pull
                     guard raw > 0 else {
                         dismissOffset = 0
                         return
                     }
-                    // Light resistance — easier than input bar
                     dismissOffset = raw * 0.7
                 }
                 .onEnded { value in
@@ -58,25 +63,51 @@ struct PullUpPanelView: View {
                     }
                 }
         )
+        .onChange(of: panelState.suggestions) { _, newSuggestions in
+            guard newSuggestions.count != lastSuggestionCount else { return }
+            lastSuggestionCount = newSuggestions.count
+            visibleChips = []
+            animateChipsIn(count: newSuggestions.count)
+        }
+        .onAppear {
+            if !panelState.suggestions.isEmpty && visibleChips.isEmpty {
+                animateChipsIn(count: panelState.suggestions.count)
+            }
+        }
+    }
+
+    // MARK: - Stagger Animation
+
+    private func animateChipsIn(count: Int) {
+        for index in 0..<count {
+            let delay = Self.staggerDelay * Double(index)
+            _ = withAnimation(.spring(response: 0.4, dampingFraction: 0.75).delay(delay)) {
+                visibleChips.insert(index)
+            }
+        }
     }
 
     // MARK: - Suggestion Chips
 
     private var suggestionChips: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(panelState.suggestions, id: \.self) { suggestion in
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(panelState.suggestions.enumerated()), id: \.offset) { index, suggestion in
+                    let isVisible = visibleChips.contains(index)
+
                     Button {
                         onSuggestionTapped?(suggestion)
                     } label: {
                         Text(suggestion)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronEmerald)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .chipStyle(.tronEmerald, tintOpacity: 0.25)
                     }
                     .buttonStyle(.plain)
+                    .opacity(isVisible ? 1 : 0)
+                    .offset(y: isVisible ? 0 : 12)
                 }
             }
             .padding(16)

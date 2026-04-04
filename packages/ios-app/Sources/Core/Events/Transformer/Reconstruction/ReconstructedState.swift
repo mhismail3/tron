@@ -69,6 +69,9 @@ struct ReconstructedState {
     /// Subagent failure events keyed by subagent session ID
     var subagentFailures: [String: SubagentFailureInfo]
 
+    /// Suggested follow-up prompts from the latest suggest-prompts hook result
+    var suggestions: [String]
+
     // MARK: - Initialization
 
     init() {
@@ -89,6 +92,7 @@ struct ReconstructedState {
         self.subagentSpawns = []
         self.subagentCompletions = [:]
         self.subagentFailures = [:]
+        self.suggestions = []
     }
 }
 

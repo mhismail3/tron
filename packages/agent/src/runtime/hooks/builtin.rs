@@ -104,7 +104,7 @@ pub fn register_builtins(
         SUGGEST_PROMPTS_ID,
     );
 
-    let suggest_handler = PromptHookHandler::new(
+    let mut suggest_handler = PromptHookHandler::new(
         SUGGEST_PROMPTS_ID.to_string(),
         SUGGEST_PROMPTS_ID.to_string(),
         "Suggest follow-up prompts".to_string(),
@@ -116,6 +116,9 @@ pub fn register_builtins(
         subagent_manager.clone(),
         event_emitter.clone(),
     );
+    if let Some(store) = event_store {
+        suggest_handler = suggest_handler.with_event_store(store.clone());
+    }
     engine.registry_mut().register(Arc::new(suggest_handler));
 }
 
