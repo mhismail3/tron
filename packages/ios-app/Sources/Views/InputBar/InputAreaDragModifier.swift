@@ -3,7 +3,7 @@ import UIKit
 
 /// Long-press-and-drag gesture on the input bar to reveal the suggestion row.
 ///
-/// Hold for 0.6s → haptic + lift-off animation → drag/flick up to expand.
+/// Hold for 0.3s → haptic + lift-off animation → drag/flick up to expand.
 /// When expanded, a simple swipe down on the input bar collapses.
 @available(iOS 26.0, *)
 struct InputAreaDragModifier: ViewModifier {
@@ -26,7 +26,7 @@ struct InputAreaDragModifier: ViewModifier {
     // MARK: - Expand Gesture (long press + drag)
 
     private var holdAndDragGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.6)
+        LongPressGesture(minimumDuration: 0.3)
             .onChanged { _ in }
             .onEnded { _ in
                 guard !panelState.isDragDisabled else { return }
