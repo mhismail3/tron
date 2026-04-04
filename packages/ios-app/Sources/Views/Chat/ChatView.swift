@@ -448,7 +448,7 @@ struct ChatView: View {
         }
         .overlay(alignment: .center) {
             // Arrow indicator when hold is active
-            if viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded {
+            if viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded && !viewModel.inputBarState.isMentionPopupVisible {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.tronEmerald.opacity(0.6))
