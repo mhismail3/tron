@@ -645,6 +645,9 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func handleProcessStatusUpdate(_ result: ProcessStatusUpdatePlugin.Result) {}
     func handleJobBackgrounded(_ result: JobBackgroundedPlugin.Result) {}
 
+    // Hook events
+    func handleLlmHookResult(_ result: LlmHookResultPlugin.Result) {}
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

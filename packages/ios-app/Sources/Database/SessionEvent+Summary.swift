@@ -232,6 +232,42 @@ extension SessionEvent {
             let count = payload.int("count") ?? 0
             return count > 0 ? "Results consumed (\(count))" : "Results consumed"
 
+        case .llmHookResult:
+            let hookName = payload.string("hookName") ?? ""
+            if !hookName.isEmpty {
+                return "Hook: \(hookName)"
+            }
+            return "LLM hook result"
+
+        case .subagentSpawned:
+            return "Subagent spawned"
+
+        case .subagentCompleted:
+            return "Subagent completed"
+
+        case .subagentFailed:
+            let error = payload.string("error") ?? ""
+            if !error.isEmpty {
+                return "Subagent failed: \(String(error.prefix(30)))"
+            }
+            return "Subagent failed"
+
+        case .subagentResultsConsumed:
+            return "Results consumed"
+
+        case .notificationSubagentResult:
+            return "Subagent result"
+
+        case .turnFailed:
+            let error = payload.string("error") ?? ""
+            if !error.isEmpty {
+                return "Turn failed: \(String(error.prefix(30)))"
+            }
+            return "Turn failed"
+
+        case .memoryRetained:
+            return "Memory retained"
+
         case .unknown:
             // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
             let formatted = type

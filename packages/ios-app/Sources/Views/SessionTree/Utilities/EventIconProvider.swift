@@ -71,6 +71,26 @@ enum EventIconProvider {
             return "bell.badge.fill"
         case .processResultsConsumed:
             return "tray.and.arrow.down.fill"
+        case .llmHookResult:
+            return "wand.and.rays"
+        case .subagentSpawned:
+            return "arrow.triangle.branch"
+        case .subagentCompleted:
+            return "checkmark.circle.fill"
+        case .subagentFailed:
+            return "xmark.circle.fill"
+        case .subagentResultsConsumed:
+            return "tray.and.arrow.down.fill"
+        case .notificationSubagentResult:
+            return "bell.badge.fill"
+        case .turnFailed:
+            return "exclamationmark.triangle.fill"
+        case .memoryRetained:
+            return "brain.head.profile.fill"
+        case .streamTextDelta, .streamThinkingDelta:
+            return "text.cursor"
+        case .streamThinkingComplete:
+            return "brain"
         default:
             return "circle.fill"
         }
@@ -134,6 +154,24 @@ enum EventIconProvider {
             return .tronWarning
         case .processResultsConsumed:
             return .tronSuccess
+        case .llmHookResult:
+            return .tronPurple
+        case .subagentSpawned:
+            return .tronCyan
+        case .subagentCompleted:
+            return .tronSuccess
+        case .subagentFailed:
+            return .tronError
+        case .subagentResultsConsumed:
+            return .tronSuccess
+        case .notificationSubagentResult:
+            return .tronWarning
+        case .turnFailed:
+            return .tronError
+        case .memoryRetained:
+            return .tronPurple
+        case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
+            return .tronBlue
         default:
             return .tronTextMuted
         }

@@ -149,9 +149,27 @@ enum SessionEventType: String, Codable {
     case worktreeMerged = "worktree.merged"
     case worktreeRenamed = "worktree.renamed"
 
+    // Subagent lifecycle
+    case subagentSpawned = "subagent.spawned"
+    case subagentCompleted = "subagent.completed"
+    case subagentFailed = "subagent.failed"
+    case subagentResultsConsumed = "subagent.results_consumed"
+
+    // Notifications
+    case notificationSubagentResult = "notification.subagent_result"
+
     // Process management
     case notificationProcessResult = "notification.process_result"
     case processResultsConsumed = "process.results_consumed"
+
+    // Turn events
+    case turnFailed = "turn.failed"
+
+    // Memory
+    case memoryRetained = "memory.retained"
+
+    // Hooks
+    case llmHookResult = "hook.llm_result"
 
     case unknown
 }

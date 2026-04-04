@@ -92,6 +92,10 @@ enum PersistedEventType: String, CaseIterable {
     // Memory
     case memoryRetained = "memory.retained"
 
+    // Process management
+    case notificationProcessResult = "notification.process_result"
+    case processResultsConsumed = "process.results_consumed"
+
     // Hooks
     case llmHookResult = "hook.llm_result"
 
@@ -209,6 +213,8 @@ enum PersistedEventType: String, CaseIterable {
         case .subagentResultsConsumed: return "Subagent results consumed"
         case .turnFailed: return "Turn failed"
         case .memoryRetained: return "Memory retained"
+        case .notificationProcessResult: return "Process result"
+        case .processResultsConsumed: return "Results consumed"
         case .llmHookResult: return "LLM hook result"
         }
     }
