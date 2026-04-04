@@ -43,7 +43,6 @@ Views/Chat/
 
 Use `SheetCoordinator` for managing sheets:
 - Single active sheet pattern (avoids SwiftUI compiler issues)
-- Sheet state in `ViewModels/State/SheetState.swift`
 - Present via `sheetCoordinator.present(.sheetType)`
 
 ## Rules

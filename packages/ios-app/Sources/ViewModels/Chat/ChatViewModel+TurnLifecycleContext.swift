@@ -47,9 +47,41 @@ extension ChatViewModel: TurnLifecycleContext {
         thinkingState.startTurn(turnNumber, model: model)
     }
 
-    /// Persist thinking content for the completed turn (TurnLifecycleContext)
+    /// End thinking turn and persist content to database (TurnLifecycleContext)
     func endThinkingTurn() async {
-        await thinkingState.endTurn()
+        guard let payload = thinkingState.endTurn() else { return }
+        await persistThinkingPayload(payload)
+    }
+
+    /// Persist a thinking payload to the event database
+    private func persistThinkingPayload(_ payload: ThinkingCompletePayload) async {
+        guard let database = eventStoreManager?.eventDB else {
+            logger.warning("Cannot persist thinking - no database", category: .session)
+            return
+        }
+
+        guard let session = try? database.sessions.get(sessionId) else {
+            logger.warning("Cannot persist thinking - session not found", category: .session)
+            return
+        }
+
+        let event = SessionEvent(
+            id: "evt_thinking_\(UUID().uuidString)",
+            parentId: nil,
+            sessionId: sessionId,
+            workspaceId: session.workspaceId,
+            type: "stream.thinking_complete",
+            timestamp: DateParser.now,
+            sequence: 0,
+            payload: payload.toDictionary().mapValues { AnyCodable($0) }
+        )
+
+        do {
+            try database.events.insert(event)
+            logger.debug("Persisted thinking event for turn \(payload.turnNumber)", category: .session)
+        } catch {
+            logger.error("Failed to persist thinking event: \(error.localizedDescription)", category: .session)
+        }
     }
 
     // MARK: - UI Coordination (Protocol Methods)

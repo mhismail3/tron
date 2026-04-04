@@ -138,7 +138,7 @@ extension ChatViewModel {
         thinkingState.clearCurrentStreaming()
 
         // End any active display stream.
-        if isStreamActive {
+        if displayStreamState.isStreamActive {
             endDisplayStream()
         }
 

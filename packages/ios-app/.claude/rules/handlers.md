@@ -40,6 +40,8 @@ extension ChatViewModel: FeatureContext {
 - `CompactionCoordinator` - Handles context compaction start/complete pill transitions
 - `MemoryCoordinator` - Handles memory retention start/complete pill transitions
 - `ConnectionCoordinator` - Manages session connection, reconnection, and catch-up
+- `ContentViewCoordinator` - App-level navigation, session selection, deep links
+- `SheetCoordinator` - Sheet lifecycle management with enum-based single-sheet pattern
 
 ## Event Dispatch
 

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Manages thinking display state for ChatViewModel
-/// Handles live streaming, persistence, history, and lazy loading for the sheet
+/// Manages thinking display state for ChatViewModel.
+/// Pure state object: handles live streaming, history blocks, and lazy loading for the sheet.
+/// Database persistence is handled by the caller (ChatViewModel+TurnLifecycleContext).
 @Observable
 @MainActor
 final class ThinkingState {
@@ -39,22 +40,9 @@ final class ThinkingState {
     /// Whether content is being loaded
     private(set) var isLoadingContent: Bool = false
 
-    // MARK: - Dependencies
-
-    private weak var eventDatabase: EventDatabase?
-    private var sessionId: String?
-
     // MARK: - Initialization
 
-    init(eventDatabase: EventDatabase? = nil) {
-        self.eventDatabase = eventDatabase
-    }
-
-    /// Set the event database reference (called from ChatViewModel)
-    func setEventDatabase(_ database: EventDatabase?, sessionId: String?) {
-        self.eventDatabase = database
-        self.sessionId = sessionId
-    }
+    init() {}
 
     // MARK: - Catch-Up Seeding
 
@@ -74,33 +62,28 @@ final class ThinkingState {
 
     /// Start a new turn for thinking
     func startTurn(_ turnNumber: Int, model: String?) {
-        // If there's accumulated thinking from previous turn, it should already be persisted
-        // Clear streaming state for new turn
         currentText = ""
         isStreaming = false
         currentTurnNumber = turnNumber
         currentModel = model
     }
 
-    /// End the current turn - persist thinking to database
-    /// Called from ChatViewModel when agent.turn_end is received
-    func endTurn() async {
-        // Only persist if there's actual thinking content
+    /// End the current turn. Returns payload to persist, or nil if no thinking content.
+    /// The caller is responsible for persisting the payload to the database.
+    func endTurn() -> ThinkingCompletePayload? {
         guard !currentText.isEmpty else {
             isStreaming = false
-            return
+            return nil
         }
 
-        // Create payload and persist
         let payload = ThinkingCompletePayload(
             turnNumber: currentTurnNumber,
             content: currentText,
             model: currentModel
         )
 
-        // Create block for local display immediately
         let block = ThinkingBlock(
-            eventId: "local_\(UUID().uuidString)",  // Temporary ID until synced
+            eventId: "local_\(UUID().uuidString)",
             turnNumber: currentTurnNumber,
             preview: payload.preview,
             characterCount: payload.characterCount,
@@ -108,51 +91,13 @@ final class ThinkingState {
             timestamp: Date()
         )
 
-        // Add to history
         withAnimation(.easeInOut(duration: 0.2)) {
             blocks.append(block)
         }
 
-        // Persist to database via event insertion
-        await persistThinkingEvent(payload)
-
-        // Clear streaming state
         isStreaming = false
         // Keep currentText until turn actually ends so caption remains visible
-    }
-
-    /// Persist thinking complete event to database
-    private func persistThinkingEvent(_ payload: ThinkingCompletePayload) async {
-        guard let database = eventDatabase,
-              let sessionId = sessionId else {
-            logger.warning("Cannot persist thinking - no database or session", category: .session)
-            return
-        }
-
-        // Get workspace ID from session
-        guard let session = try? database.sessions.get(sessionId) else {
-            logger.warning("Cannot persist thinking - session not found", category: .session)
-            return
-        }
-
-        // Create event
-        let event = SessionEvent(
-            id: "evt_thinking_\(UUID().uuidString)",
-            parentId: nil,  // Will be set by event chain
-            sessionId: sessionId,
-            workspaceId: session.workspaceId,
-            type: "stream.thinking_complete",
-            timestamp: DateParser.now,
-            sequence: 0,  // Will be determined by insert order
-            payload: payload.toDictionary().mapValues { AnyCodable($0) }
-        )
-
-        do {
-            try database.events.insert(event)
-            logger.debug("Persisted thinking event for turn \(payload.turnNumber)", category: .session)
-        } catch {
-            logger.error("Failed to persist thinking event: \(error.localizedDescription)", category: .session)
-        }
+        return payload
     }
 
     /// Clear current streaming state (called on agent.complete or agent.error)
@@ -164,14 +109,7 @@ final class ThinkingState {
     // MARK: - History Loading
 
     /// Load thinking history for a session (called on session resume)
-    func loadHistory(sessionId: String) async {
-        self.sessionId = sessionId
-
-        guard let database = eventDatabase else {
-            logger.warning("Cannot load thinking history - no database", category: .session)
-            return
-        }
-
+    func loadHistory(sessionId: String, database: EventDatabase) async {
         do {
             let loadedBlocks = try database.thinking.getEvents(sessionId: sessionId, previewOnly: true)
             await MainActor.run {
@@ -188,44 +126,33 @@ final class ThinkingState {
     // MARK: - Lazy Loading for Sheet
 
     /// Load full content for a block (when user taps to expand in sheet)
-    func loadFullContent(blockId: UUID) async {
+    func loadFullContent(blockId: UUID, database: EventDatabase) async {
         // If same block is already selected and loaded, just toggle visibility
         if selectedBlockId == blockId && !loadedFullContent.isEmpty {
-            // Deselect
             selectedBlockId = nil
             loadedFullContent = ""
             return
         }
 
-        // Find the block
         guard let block = blocks.first(where: { $0.id == blockId }) else {
             logger.warning("Block not found: \(blockId)", category: .session)
             return
         }
 
-        // Clear previous content and set loading state
         isLoadingContent = true
         selectedBlockId = blockId
         loadedFullContent = ""
-
-        // Load from database
-        guard let database = eventDatabase else {
-            isLoadingContent = false
-            logger.warning("Cannot load full content - no database", category: .session)
-            return
-        }
 
         do {
             if let content = try database.thinking.getContent(eventId: block.eventId) {
                 loadedFullContent = content
             } else {
-                // Fallback to preview if full content not found
                 loadedFullContent = block.preview
                 logger.warning("Full content not found for block \(block.eventId), using preview", category: .session)
             }
         } catch {
             logger.error("Failed to load full content: \(error.localizedDescription)", category: .session)
-            loadedFullContent = block.preview  // Fallback
+            loadedFullContent = block.preview
         }
 
         isLoadingContent = false
@@ -277,7 +204,6 @@ final class ThinkingState {
         selectedBlockId = nil
         loadedFullContent = ""
         isLoadingContent = false
-        sessionId = nil
     }
 
     /// Clear session-specific state only

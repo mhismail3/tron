@@ -26,8 +26,7 @@ extension ChatViewModel {
         // Set up MessageWindowManager with self as data source for virtual scrolling
         setupMessageWindowManager()
 
-        // Set up ThinkingState with database reference for persistence
-        thinkingState.setEventDatabase(manager.eventDB, sessionId: sessionId)
+        // ThinkingState is a pure state object -- no database setup needed
     }
 
     /// Sync events from server and load persisted messages
@@ -53,7 +52,9 @@ extension ChatViewModel {
         hasInitiallyLoaded = true
 
         // Load thinking history for display in sheet
-        await thinkingState.loadHistory(sessionId: sessionId)
+        if let database = eventStoreManager?.eventDB {
+            await thinkingState.loadHistory(sessionId: sessionId, database: database)
+        }
 
         // Track HISTORY message count (from DB), not total count which includes catch-up
         // This is important for determining if sync brought new events

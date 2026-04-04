@@ -18,8 +18,8 @@ paths:
 | `ThinkingState` | Thinking/extended thinking |
 | `ProcessState` | Background process tracking |
 | `InputBarState` | Input field state |
-| `SheetState` | Active sheet management |
 | `ContextTrackingState` | Token counts, costs, context window |
+| `DisplayStreamState` | Active display stream, frames, sheet |
 | `WorktreeIsolationState` | Worktree status, merge/commit |
 
 ## Managers (`ViewModels/Managers/`)

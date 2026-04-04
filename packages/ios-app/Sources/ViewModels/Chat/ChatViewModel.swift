@@ -27,7 +27,7 @@ final class ChatViewModel {
     var connectionState: ConnectionState = .disconnected
     var showSettings = false
     var errorMessage: String?
-    var showError = false
+    var showError: Bool { errorMessage != nil }
     /// Set to true when the session doesn't exist on server and view should navigate back
     var shouldDismiss = false
     var isThinkingExpanded = false
@@ -40,20 +40,8 @@ final class ChatViewModel {
 
     // MARK: - Display Stream State
 
-    /// Active stream identifier (nil when no stream is actively sending frames).
-    var activeStreamId: String?
-    /// Current or last frame image from the stream (persists after stream ends).
-    var streamFrameImage: UIImage?
-    /// Tool call ID that initiated the stream (persists after stream ends).
-    var streamToolCallId: String?
-    /// Whether the stream sheet is presented.
-    var showStreamSheet = false
-    /// Whether the stream sheet has been auto-opened (prevents re-opening on dismiss).
-    var hasAutoOpenedStream = false
-    /// Stream ID that was explicitly stopped (frames ignored until cleared).
-    var stoppedStreamId: String?
-    /// Whether a display stream is currently active (frames arriving).
-    var isStreamActive: Bool { activeStreamId != nil }
+    /// Display stream state (active stream, frames, sheet, stop tracking)
+    var displayStreamState = DisplayStreamState()
 
     // MARK: - Input State (delegated to InputBarState for backward compatibility)
 
@@ -539,7 +527,6 @@ final class ChatViewModel {
         case .fatal:
             logger.error(message, category: category)
             errorMessage = message
-            showError = true
         case .warning:
             logger.warning(message, category: category)
         case .info:
@@ -554,7 +541,6 @@ final class ChatViewModel {
 
     func clearError() {
         errorMessage = nil
-        showError = false
     }
 
     // MARK: - Commands

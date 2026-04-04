@@ -8,21 +8,7 @@ extension ChatViewModel: DisplayStreamEventHandler {
     // MARK: - Handler
 
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {
-        // Ignore frames for a stream we've stopped.
-        if let stopped = stoppedStreamId, stopped == result.streamId {
-            return
-        }
-
-        let isNewStream = (activeStreamId == nil)
-        activeStreamId = result.streamId
-        streamFrameImage = result.image
-        streamToolCallId = result.toolCallId
-
-        // Auto-open the sheet exactly once per stream.
-        if isNewStream && !hasAutoOpenedStream {
-            showStreamSheet = true
-            hasAutoOpenedStream = true
-        }
+        displayStreamState.handleFrame(streamId: result.streamId, image: result.image, toolCallId: result.toolCallId)
     }
 
     // MARK: - Stream Lifecycle
@@ -31,18 +17,15 @@ extension ChatViewModel: DisplayStreamEventHandler {
     /// Keeps `streamFrameImage` and `streamToolCallId` so the tool chip
     /// can still show the last frame after the stream is over.
     func endDisplayStream() {
-        activeStreamId = nil
+        displayStreamState.endStream()
     }
 
     /// Stop the active display stream via RPC and clean up active state.
     /// Keeps the last frame for post-stream viewing.
     func stopDisplayStream() {
-        guard let streamId = activeStreamId else { return }
+        guard let streamId = displayStreamState.activeStreamId else { return }
 
-        // Mark this stream as stopped so incoming frames are ignored
-        // even if the server takes a moment to actually stop the producer.
-        stoppedStreamId = streamId
-        activeStreamId = nil
+        displayStreamState.markStopped()
 
         launchBackground { [weak self] in
             guard let self else { return }
@@ -57,11 +40,6 @@ extension ChatViewModel: DisplayStreamEventHandler {
 
     /// Clear all stream state (e.g., on session change or disconnect).
     func clearDisplayStreamState() {
-        activeStreamId = nil
-        stoppedStreamId = nil
-        streamFrameImage = nil
-        streamToolCallId = nil
-        showStreamSheet = false
-        hasAutoOpenedStream = false
+        displayStreamState.clearAll()
     }
 }

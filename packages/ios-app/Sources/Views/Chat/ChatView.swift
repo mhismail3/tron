@@ -79,10 +79,10 @@ struct ChatView: View {
             skillStore: skillStore,
             workspaceDeleted: workspaceDeleted
         )
-        .sheet(isPresented: $viewModel.showStreamSheet) {
+        .sheet(isPresented: $viewModel.displayStreamState.showStreamSheet) {
             StreamSheetView(
                 viewModel: viewModel,
-                onClose: { viewModel.showStreamSheet = false },
+                onClose: { viewModel.displayStreamState.showStreamSheet = false },
                 onStop: { viewModel.stopDisplayStream() }
             )
         }
@@ -95,7 +95,10 @@ struct ChatView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .alert("Error", isPresented: $viewModel.showError) {
+        .alert("Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.clearError() } }
+        )) {
             Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
@@ -521,7 +524,7 @@ struct ChatView: View {
             if data.normalizedName == "display",
                let displayType = data.details?["displayType"]?.value as? String,
                displayType == "stream" {
-                viewModel.showStreamSheet = true
+                viewModel.displayStreamState.showStreamSheet = true
             } else {
                 sheetCoordinator.showCommandToolDetail(data)
             }

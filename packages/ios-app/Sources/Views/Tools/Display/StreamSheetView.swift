@@ -17,8 +17,8 @@ struct StreamSheetView: View {
 
     var body: some View {
         // Read from viewModel in body so @Observable tracks these accesses.
-        let frameImage = viewModel.streamFrameImage
-        let isActive = viewModel.isStreamActive
+        let frameImage = viewModel.displayStreamState.streamFrameImage
+        let isActive = viewModel.displayStreamState.isStreamActive
 
         NavigationStack {
             Group {
