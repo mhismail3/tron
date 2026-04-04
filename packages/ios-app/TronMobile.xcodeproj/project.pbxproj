@@ -187,6 +187,7 @@
 		43BA34884D69600B7E5AEACB /* AskUserQuestionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81AD25FBBB782DF4866A5852 /* AskUserQuestionTypes.swift */; };
 		43BDB1C765927BE67FE06CBD /* MessageHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BDCD7F29207A366C356FF4 /* MessageHandlers.swift */; };
 		45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D5C1A94E170CFF37A3544A /* ToolPayloads.swift */; };
+		467E6A490BB8E384A9ED45BD /* ErrorHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB51ED817BDAB05A25CA903 /* ErrorHandlerTests.swift */; };
 		469D9F2F808178424B200CB3 /* MessageQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F3F49288E68CB2894749F3 /* MessageQueueState.swift */; };
 		4726E3E0436849DDD8156C32 /* DraftMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6704CE7E76B248474B6745B /* DraftMetadataTests.swift */; };
 		47D15DD4869D82F881EBDDD1 /* SessionCreatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1463E6DC7D278EF388E3BFD2 /* SessionCreatedPlugin.swift */; };
@@ -720,6 +721,7 @@
 		095A36B3D9995F7C524A8C5C /* RPCTypes+MCP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+MCP.swift"; sourceTree = "<group>"; };
 		09BB41E595069B9C3C91095D /* ToolGeneratingPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolGeneratingPluginTests.swift; sourceTree = "<group>"; };
 		09CB207B0C6F3173192E5729 /* ContextClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextClientTests.swift; sourceTree = "<group>"; };
+		0AB51ED817BDAB05A25CA903 /* ErrorHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandlerTests.swift; sourceTree = "<group>"; };
 		0B459558B2DDAE5B155700AB /* ToolEventCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolEventCoordinator.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
 		0BAB929601533EC09E32588B /* WebFetchErrorClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchErrorClassifier.swift; sourceTree = "<group>"; };
@@ -1377,7 +1379,6 @@
 			children = (
 				688A487D8A41776755416E9E /* AppConstants.swift */,
 				CDF93F54F691E635410F9742 /* DI */,
-				8E5BDBD810203C70BC4DC72C /* Errors */,
 				755D00F42AA8BC643C87506C /* Events */,
 				A13B558A7040160269C2861C /* Repositories */,
 			);
@@ -2027,6 +2028,7 @@
 				F877AB5A7D88D1919F6395AE /* AgentClientTests.swift */,
 				09CB207B0C6F3173192E5729 /* ContextClientTests.swift */,
 				2B65A5B1B902A7CA8B0EAB84 /* DraftStoreTests.swift */,
+				0AB51ED817BDAB05A25CA903 /* ErrorHandlerTests.swift */,
 				A8D8EA62B03448D7C891FC2B /* EventStoreManagerPollingTests.swift */,
 				4C6F731511E7094839A32CCD /* EventStoreManagerReconstructionTests.swift */,
 				22F2EBC0031AC3D96E60D41D /* EventStoreManagerTests.swift */,
@@ -2328,13 +2330,6 @@
 				E20121A6457EA5AB5644733C /* GetConfirmationTransformer.swift */,
 			);
 			path = GetConfirmation;
-			sourceTree = "<group>";
-		};
-		8E5BDBD810203C70BC4DC72C /* Errors */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Errors;
 			sourceTree = "<group>";
 		};
 		92E678876BE6D4CFFD746FD7 /* ViewModels */ = {
@@ -3797,6 +3792,7 @@
 				7BCDB43AEFC8DCF1FB878AF6 /* DurationFormatterTests.swift in Sources */,
 				E4100DBD9F959B2E75F1162B /* EditToolDetailSheetTests.swift in Sources */,
 				85C14B3A6FE000D8C04FC0BC /* ErrorClassificationTests.swift in Sources */,
+				467E6A490BB8E384A9ED45BD /* ErrorHandlerTests.swift in Sources */,
 				5481BA545653F8E3D907ABD0 /* EventDatabaseTests.swift in Sources */,
 				0BB47FACE2AC8EFBCDB4F82D /* EventDispatchCoordinatorTests.swift in Sources */,
 				16035186C13B7A81F68BD7C8 /* EventIconProviderTests.swift in Sources */,

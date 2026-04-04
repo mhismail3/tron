@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Error Handler
 
-/// Centralized error handling service
-/// Provides consistent error reporting, logging, and user notification
+/// Centralized error handling service.
+/// Queues errors so rapid successive failures are not silently overwritten.
 @MainActor
 @Observable
 final class ErrorHandler {
@@ -13,35 +13,32 @@ final class ErrorHandler {
 
     // MARK: - State
 
-    /// Current error message to display
-    private(set) var currentError: String?
+    /// Queue of pending error messages (FIFO). The first entry is the one currently displayed.
+    private var errorQueue: [QueuedError] = []
 
-    /// Whether to show the error alert
-    private(set) var showError: Bool = false
+    /// The currently displayed error, if any.
+    var currentError: QueuedError? { errorQueue.first }
 
-    /// Error severity for the current error
-    private(set) var currentSeverity: ErrorSeverity = .error
+    /// Whether an error alert should be shown.
+    var showError: Bool { !errorQueue.isEmpty }
 
     // MARK: - Types
 
-    enum ErrorSeverity {
-        /// Critical errors that require user attention
-        case error
-        /// Warnings that may affect functionality
-        case warning
-        /// Informational messages
-        case info
+    struct QueuedError: Equatable {
+        let message: String
+        let severity: ErrorSeverity
+    }
 
-        var logLevel: LogCategory {
-            switch self {
-            case .error: return .session
-            case .warning: return .session
-            case .info: return .session
-            }
-        }
+    enum ErrorSeverity: Equatable {
+        case error
+        case warning
+        case info
     }
 
     // MARK: - Private
+
+    /// Maximum queued errors to prevent unbounded growth from error storms.
+    private let maxQueueSize = 5
 
     private let logger = TronLogger.shared
 
@@ -49,7 +46,8 @@ final class ErrorHandler {
 
     // MARK: - Public API
 
-    /// Handle any Error with appropriate logging and user notification
+    /// Handle any Error with logging and user notification.
+    /// Queued — does not overwrite a currently displayed error.
     func handle(_ error: Error, context: String? = nil) {
         let message: String
         if let context {
@@ -59,12 +57,10 @@ final class ErrorHandler {
         }
 
         logger.error(message, category: .session)
-        currentError = message
-        currentSeverity = .error
-        showError = true
+        enqueue(message, severity: .error)
     }
 
-    /// Show an error message directly
+    /// Show an error/warning/info message directly.
     func showError(_ message: String, severity: ErrorSeverity = .error) {
         switch severity {
         case .error:
@@ -75,9 +71,7 @@ final class ErrorHandler {
             logger.info(message, category: .session)
         }
 
-        currentError = message
-        currentSeverity = severity
-        showError = true
+        enqueue(message, severity: severity)
     }
 
     /// Log an error without showing to user
@@ -96,24 +90,43 @@ final class ErrorHandler {
         logger.warning(message, category: .session)
     }
 
-    /// Clear the current error state
+    /// Dismiss the current error and advance to the next queued error (if any).
     func clearError() {
-        currentError = nil
-        showError = false
+        guard !errorQueue.isEmpty else { return }
+        errorQueue.removeFirst()
+    }
+
+    /// Clear all queued errors.
+    func clearAll() {
+        errorQueue.removeAll()
     }
 
     /// Log an error silently without showing to user.
-    /// Context is required to ensure meaningful error messages.
     func logError(_ error: Error, context: String) {
         let message = "\(context): \(error.localizedDescription)"
         logger.error(message, category: .session)
     }
 
     /// Log an error silently without showing to user (with category).
-    /// Context is required to ensure meaningful error messages.
     func logError(_ error: Error, context: String, category: LogCategory) {
         let message = "\(context): \(error.localizedDescription)"
         logger.error(message, category: category)
+    }
+
+    // MARK: - Private
+
+    private func enqueue(_ message: String, severity: ErrorSeverity) {
+        // Deduplicate: don't add if the same message is already in the queue.
+        guard !errorQueue.contains(where: { $0.message == message }) else { return }
+
+        if errorQueue.count >= maxQueueSize {
+            // Drop the oldest non-displayed error to make room.
+            if errorQueue.count > 1 {
+                errorQueue.remove(at: 1)
+            }
+        }
+
+        errorQueue.append(QueuedError(message: message, severity: severity))
     }
 }
 
@@ -133,7 +146,7 @@ struct ErrorAlertModifier: ViewModifier {
                 }
             } message: {
                 if let error = errorHandler.currentError {
-                    Text(error)
+                    Text(error.message)
                 }
             }
     }
