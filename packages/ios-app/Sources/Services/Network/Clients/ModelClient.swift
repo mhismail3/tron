@@ -41,7 +41,7 @@ final class ModelClient: ModelClientProtocol {
         )
 
         if transport?.currentSessionId == sessionId {
-            try requireTransport().setCurrentModel(result.newModel)
+            transport?.setCurrentModel(result.newModel)
         }
 
         logger.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)

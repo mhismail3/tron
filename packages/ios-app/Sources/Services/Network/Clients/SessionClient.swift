@@ -35,8 +35,8 @@ final class SessionClient {
             params: params
         )
 
-        try requireTransport().setCurrentSessionId(result.sessionId)
-        try requireTransport().setCurrentModel(result.model)
+        transport?.setCurrentSessionId(result.sessionId)
+        transport?.setCurrentModel(result.model)
         logger.info("Created session: \(result.sessionId)", category: .session)
 
         return result
@@ -74,8 +74,8 @@ final class SessionClient {
             params: params
         )
 
-        try requireTransport().setCurrentSessionId(result.sessionId)
-        try requireTransport().setCurrentModel(result.model)
+        transport?.setCurrentSessionId(result.sessionId)
+        transport?.setCurrentModel(result.model)
         logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
@@ -86,7 +86,7 @@ final class SessionClient {
         let _: EmptyParams = try await ws.send(method: "session.archive", params: params)
 
         if transport?.currentSessionId == sessionId {
-            try requireTransport().setCurrentSessionId(nil)
+            transport?.setCurrentSessionId(nil)
         }
         logger.info("Archived session: \(sessionId)", category: .session)
     }
