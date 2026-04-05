@@ -15,7 +15,7 @@ paths:
 | State | Purpose |
 |-------|---------|
 | `SubagentState` | Tracks active sub-agents, events |
-| `ThinkingState` | Thinking/extended thinking |
+| `ThinkingState` | Thinking text streaming and turn lifecycle |
 | `ProcessState` | Background process tracking |
 | `InputBarState` | Input field state |
 | `ContextTrackingState` | Token counts, costs, context window |

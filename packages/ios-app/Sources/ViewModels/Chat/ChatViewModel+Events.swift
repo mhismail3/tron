@@ -182,6 +182,8 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
         isRetaining = false
         memoryRetainInProgressMessageId = nil
+        askUserQuestionState.clearAll()
+        getConfirmationState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         // Clear queue — server context is lost, queued messages are stale
@@ -288,6 +290,8 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
         isRetaining = false
         memoryRetainInProgressMessageId = nil
+        askUserQuestionState.clearAll()
+        getConfirmationState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
@@ -332,6 +336,9 @@ extension ChatViewModel {
         isCompacting = false
         compactionInProgressMessageId = nil
         isRetaining = false
+        memoryRetainInProgressMessageId = nil
+        askUserQuestionState.clearAll()
+        getConfirmationState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

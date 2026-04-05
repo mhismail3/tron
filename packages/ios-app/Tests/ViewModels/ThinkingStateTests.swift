@@ -10,11 +10,6 @@ final class ThinkingStateTests: XCTestCase {
         let state = ThinkingState()
         XCTAssertEqual(state.currentText, "")
         XCTAssertFalse(state.isStreaming)
-        XCTAssertTrue(state.blocks.isEmpty)
-        XCTAssertFalse(state.showSheet)
-        XCTAssertNil(state.selectedBlockId)
-        XCTAssertEqual(state.loadedFullContent, "")
-        XCTAssertFalse(state.isLoadingContent)
     }
 
     // MARK: - Streaming
@@ -35,7 +30,7 @@ final class ThinkingStateTests: XCTestCase {
         XCTAssertFalse(state.isStreaming)
     }
 
-    // MARK: - endTurn (Pure -- No DB)
+    // MARK: - endTurn
 
     func testEndTurnWithContentReturnsPayload() {
         let state = ThinkingState()
@@ -60,18 +55,6 @@ final class ThinkingStateTests: XCTestCase {
         XCTAssertFalse(state.isStreaming)
     }
 
-    func testEndTurnAppendsBlockToHistory() {
-        let state = ThinkingState()
-        state.startTurn(1, model: "claude-opus-4-6")
-        state.handleThinkingDelta("Some thinking")
-
-        let _ = state.endTurn()
-
-        XCTAssertEqual(state.blocks.count, 1)
-        XCTAssertEqual(state.blocks[0].turnNumber, 1)
-        XCTAssertEqual(state.blocks[0].model, "claude-opus-4-6")
-    }
-
     func testEndTurnSetsStreamingFalse() {
         let state = ThinkingState()
         state.handleThinkingDelta("thinking")
@@ -87,84 +70,35 @@ final class ThinkingStateTests: XCTestCase {
 
         let _ = state.endTurn()
 
-        // currentText persists until cleared by next turn or clearCurrentStreaming
         XCTAssertEqual(state.currentText, "thinking text")
     }
 
-    func testMultipleTurnsAccumulateBlocks() {
+    func testEndTurnReturnsSynchronously() {
+        let state = ThinkingState()
+        state.startTurn(1, model: "test")
+        state.handleThinkingDelta("content")
+        let payload = state.endTurn()
+        XCTAssertNotNil(payload)
+    }
+
+    func testMultipleEndTurnsReturnIndependentPayloads() {
         let state = ThinkingState()
 
         state.startTurn(1, model: "model-a")
-        state.handleThinkingDelta("Turn 1 thinking")
-        let _ = state.endTurn()
+        state.handleThinkingDelta("Turn 1")
+        let p1 = state.endTurn()
 
         state.startTurn(2, model: "model-b")
-        state.handleThinkingDelta("Turn 2 thinking")
-        let _ = state.endTurn()
+        state.handleThinkingDelta("Turn 2")
+        let p2 = state.endTurn()
 
-        XCTAssertEqual(state.blocks.count, 2)
-        XCTAssertEqual(state.blocks[0].turnNumber, 1)
-        XCTAssertEqual(state.blocks[1].turnNumber, 2)
-    }
-
-    func testEndTurnBlockHasCorrectPreviewAndCharCount() {
-        let state = ThinkingState()
-        state.startTurn(1, model: "test")
-        state.handleThinkingDelta("Short content")
-
-        let payload = state.endTurn()
-
-        XCTAssertNotNil(payload)
-        XCTAssertEqual(payload?.characterCount, "Short content".count)
-        XCTAssertEqual(state.blocks[0].characterCount, "Short content".count)
-    }
-
-    // MARK: - Caption
-
-    func testCaptionTextTruncatesToThreeLines() {
-        let state = ThinkingState()
-        state.handleThinkingDelta("Line 1\nLine 2\nLine 3\nLine 4\nLine 5")
-        let caption = state.captionText
-        XCTAssertFalse(caption.contains("Line 4"))
-    }
-
-    func testCaptionTextEmptyWhenNoContent() {
-        let state = ThinkingState()
-        XCTAssertEqual(state.captionText, "")
-    }
-
-    func testShouldShowCaptionWhenHasContent() {
-        let state = ThinkingState()
-        XCTAssertFalse(state.shouldShowCaption)
-
-        state.handleThinkingDelta("text")
-        XCTAssertTrue(state.shouldShowCaption)
-    }
-
-    func testHasContentWhenStreamingOrBlocks() {
-        let state = ThinkingState()
-        XCTAssertFalse(state.hasContent)
-
-        state.handleThinkingDelta("text")
-        XCTAssertTrue(state.hasContent)
+        XCTAssertEqual(p1?.turnNumber, 1)
+        XCTAssertEqual(p1?.model, "model-a")
+        XCTAssertEqual(p2?.turnNumber, 2)
+        XCTAssertEqual(p2?.model, "model-b")
     }
 
     // MARK: - Cleanup
-
-    func testClearAllResetsEverything() {
-        let state = ThinkingState()
-        state.handleThinkingDelta("text")
-        state.showSheet = true
-
-        state.clearAll()
-
-        XCTAssertEqual(state.currentText, "")
-        XCTAssertFalse(state.isStreaming)
-        XCTAssertTrue(state.blocks.isEmpty)
-        XCTAssertFalse(state.showSheet)
-        XCTAssertNil(state.selectedBlockId)
-        XCTAssertEqual(state.loadedFullContent, "")
-    }
 
     func testClearCurrentStreamingResetsTextAndStreaming() {
         let state = ThinkingState()
@@ -174,19 +108,6 @@ final class ThinkingStateTests: XCTestCase {
 
         XCTAssertEqual(state.currentText, "")
         XCTAssertFalse(state.isStreaming)
-    }
-
-    func testClearSessionClearsBlocksButNotStreaming() {
-        let state = ThinkingState()
-        state.startTurn(1, model: "m")
-        state.handleThinkingDelta("text")
-        let _ = state.endTurn()
-
-        state.clearSession()
-
-        XCTAssertTrue(state.blocks.isEmpty)
-        XCTAssertNil(state.selectedBlockId)
-        XCTAssertEqual(state.loadedFullContent, "")
     }
 
     // MARK: - seedCatchUpThinking
@@ -205,23 +126,13 @@ final class ThinkingStateTests: XCTestCase {
         XCTAssertFalse(state.isStreaming)
     }
 
-    // MARK: - No Database Dependencies
+    // MARK: - No Dependencies
 
-    func testInitDoesNotRequireDatabase() {
+    func testInitDoesNotRequireDependencies() {
         let state = ThinkingState()
         XCTAssertNotNil(state)
         state.handleThinkingDelta("text")
         let payload = state.endTurn()
         XCTAssertNotNil(payload)
-    }
-
-    func testEndTurnReturnsSynchronously() {
-        // endTurn is no longer async -- it returns a payload synchronously
-        let state = ThinkingState()
-        state.startTurn(1, model: "test")
-        state.handleThinkingDelta("content")
-        let payload = state.endTurn()
-        XCTAssertNotNil(payload)
-        // If this compiles and runs without await, the test passes
     }
 }

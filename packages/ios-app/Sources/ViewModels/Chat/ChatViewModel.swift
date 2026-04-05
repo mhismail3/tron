@@ -305,6 +305,9 @@ final class ChatViewModel {
                 self.runningToolCount = 0
                 self.clearDisplayStreamState()
                 self.clearProcessState()
+                self.askUserQuestionState.clearAll()
+                self.getConfirmationState.clearAll()
+                self.subagentState.clearAll()
                 self.prunedLiveMessages.removeAll()
             }
         })

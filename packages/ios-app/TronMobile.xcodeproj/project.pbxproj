@@ -522,7 +522,6 @@
 		C9F653247068AA0A2E95D4BE /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C646A336E35F47DB4BEE2F8C /* PushNotificationService.swift */; };
 		CA108EDBDE08C589D6EDC3D8 /* EventDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */; };
 		CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */; };
-		CBAAAEBFE99D816083CE9986 /* ThinkingCaption.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */; };
 		CBC62CA1AF015D6A65D6BCF3 /* SessionHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FE4369053D03ED80C8114F /* SessionHistoryView.swift */; };
 		CCE187E76E4B295AC067F0FA /* SheetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622D2B21CA5C0E743DA7DBA7 /* SheetCoordinator.swift */; };
 		CCE3E95A40D19B38A7EF9424 /* ProcessSpawnedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9773BD08D8941F09C5C0A45A /* ProcessSpawnedPlugin.swift */; };
@@ -1256,7 +1255,6 @@
 		DF71E640CC0F7917E5FE42B6 /* SandboxesDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxesDashboardView.swift; sourceTree = "<group>"; };
 		DF881DA76CF64054893335E0 /* NewSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlow.swift; sourceTree = "<group>"; };
 		DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericToolViewer.swift; sourceTree = "<group>"; };
-		DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingCaption.swift; sourceTree = "<group>"; };
 		DFB6C8BAE94BDDB44124DB9D /* GenerativeWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeWebView.swift; sourceTree = "<group>"; };
 		E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventIconProvider.swift; sourceTree = "<group>"; };
 		E10F44727A46F0F661FB6C0E /* NotificationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViews.swift; sourceTree = "<group>"; };
@@ -1370,7 +1368,6 @@
 		0463D1ECA32DD4FC984E72AE /* Thinking */ = {
 			isa = PBXGroup;
 			children = (
-				DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */,
 				ABD345A78C7D80B1406300BF /* ThinkingDetailSheet.swift */,
 			);
 			path = Thinking;
@@ -3654,7 +3651,6 @@
 				A422D72D05760C3590A1A83E /* TextDeltaPlugin.swift in Sources */,
 				D647A7ED8940F0F8CCA41C51 /* ThinkingBanner.swift in Sources */,
 				88880CBD1B95BA03D14989F4 /* ThinkingBlock.swift in Sources */,
-				CBAAAEBFE99D816083CE9986 /* ThinkingCaption.swift in Sources */,
 				7468D763F93087DFAE9DB984 /* ThinkingContentView.swift in Sources */,
 				F7137AA020C920D5C4C9DA18 /* ThinkingDeltaPlugin.swift in Sources */,
 				0C1308EAACB24A6ECC6A5337 /* ThinkingDetailSheet.swift in Sources */,
