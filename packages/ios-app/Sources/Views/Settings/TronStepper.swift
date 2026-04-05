@@ -6,6 +6,7 @@ struct TronStepper: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
     var step: Int = 1
+    var accent: Color = .tronEmerald
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -27,12 +28,12 @@ struct TronStepper: View {
         }
         .background(
             Capsule(style: .continuous)
-                .fill(Color.tronEmerald.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                .fill(accent.opacity(colorScheme == .dark ? 0.12 : 0.08))
         )
         .clipShape(Capsule(style: .continuous))
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(Color.tronEmerald.opacity(0.25), lineWidth: 0.5)
+                .strokeBorder(accent.opacity(0.25), lineWidth: 0.5)
         )
         .fixedSize()
     }
@@ -44,7 +45,7 @@ struct TronStepper: View {
         } label: {
             Image(systemName: systemName)
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(enabled ? .tronEmerald : .tronTextDisabled)
+                .foregroundStyle(enabled ? accent : .tronTextDisabled)
                 .frame(width: 44, height: 30)
                 .contentShape(Rectangle())
         }

@@ -39,15 +39,27 @@ struct AutomationFormSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                basicSection
-                scheduleSection
-                payloadSection
-                advancedSection
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Tip: use @manage-automations in a session to create these conversationally.")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                    if let error = errorMessage {
+                        errorBanner(error)
+                    }
+                    basicsSection
+                    scheduleSection
+                    payloadSection
+                    advancedSection
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
-            .font(TronTypography.body)
-            .scrollContentBackground(.hidden)
-            .navigationTitle("New Automation")
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -88,116 +100,216 @@ struct AutomationFormSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronCoral)
+    }
+
+    // MARK: - Error Banner
+
+    private func errorBanner(_ error: String) -> some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.tronError)
+            Text(error)
+                .font(TronTypography.subheadline)
+                .foregroundStyle(.tronError)
+        }
+        .padding()
+        .glassEffect(.regular.tint(Color.tronError.opacity(0.3)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Sections
 
-    private var basicSection: some View {
-        Section {
-            TextField("Name", text: $name)
-                .font(TronTypography.body)
-            TextField("Description (optional)", text: $description)
-                .font(TronTypography.body)
-        } header: {
-            Text("Basics")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronCoral)
+    private var basicsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Basics", color: .tronCoral)
+
+            SettingsCard(accent: .tronCoral) {
+                glassTextField(icon: "tag", placeholder: "Name", text: $name)
+                SettingsRowDivider()
+                glassTextField(icon: "text.alignleft", placeholder: "Description (optional)", text: $description)
+            }
         }
     }
 
     private var scheduleSection: some View {
-        Section {
-            Picker("Type", selection: $scheduleType) {
-                Text("Interval").tag("every")
-                Text("Cron").tag("cron")
-                Text("One-Shot").tag("oneShot")
-            }
-            .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Schedule", color: .tronCoral)
 
-            switch scheduleType {
-            case "cron":
-                TextField("Cron Expression", text: $cronExpression)
-                    .font(TronTypography.code(size: TronTypography.sizeBody))
-                TextField("Timezone", text: $cronTimezone)
-                    .font(TronTypography.body)
-            case "every":
-                Stepper("Every \(intervalMinutes) minutes", value: $intervalMinutes, in: 1...10080)
-                    .font(TronTypography.body)
-            case "oneShot":
-                DatePicker("Run At", selection: $oneShotDate)
-                    .font(TronTypography.body)
-            default:
-                EmptyView()
+            TronSegmentedControl(
+                options: [("Interval", "every"), ("Cron", "cron"), ("One-Shot", "oneShot")],
+                selection: $scheduleType,
+                accent: .tronCoral
+            )
+
+            SettingsCard(accent: .tronCoral) {
+                switch scheduleType {
+                case "every":
+                    SettingsRow(icon: "timer", label: "Every \(intervalMinutes) min", accentColor: .tronCoral) {
+                        Text("\(intervalMinutes)")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronCoral)
+                            .monospacedDigit()
+                            .frame(minWidth: 30, alignment: .trailing)
+                        TronStepper(value: $intervalMinutes, range: 1...10080, accent: .tronCoral)
+                    }
+                case "cron":
+                    glassTextField(icon: "clock", placeholder: "Cron Expression", text: $cronExpression, codeFont: true)
+                    SettingsRowDivider()
+                    glassTextField(icon: "globe", placeholder: "Timezone", text: $cronTimezone)
+                case "oneShot":
+                    SettingsRow(icon: "calendar.badge.clock", label: "Run At", accentColor: .tronCoral) {
+                        DatePicker("", selection: $oneShotDate)
+                            .labelsHidden()
+                    }
+                default:
+                    EmptyView()
+                }
             }
-        } header: {
-            Text("Schedule")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronCoral)
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: scheduleType)
+
+            SettingsCaption(text: scheduleHelpText)
         }
     }
 
     private var payloadSection: some View {
-        Section {
-            Picker("Type", selection: $payloadType) {
-                Text("Shell").tag("shellCommand")
-                Text("Agent").tag("agentTurn")
-                Text("Webhook").tag("webhook")
-            }
-            .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Payload", color: .tronCoral)
 
-            switch payloadType {
-            case "shellCommand":
-                TextField("Command", text: $shellCommand, axis: .vertical)
-                    .font(TronTypography.code(size: TronTypography.sizeBody))
-                    .lineLimit(1...5)
-            case "agentTurn":
-                TextField("Prompt", text: $agentPrompt, axis: .vertical)
-                    .font(TronTypography.body)
-                    .lineLimit(1...5)
-            case "webhook":
-                TextField("URL", text: $webhookUrl)
-                    .font(TronTypography.code(size: TronTypography.sizeBody))
-                    .keyboardType(.URL)
-                    .autocapitalization(.none)
-                Picker("Method", selection: $webhookMethod) {
-                    ForEach(["GET", "POST", "PUT", "PATCH", "DELETE"], id: \.self) { m in
-                        Text(m).tag(m)
+            TronSegmentedControl(
+                options: [("Shell", "shellCommand"), ("Agent", "agentTurn"), ("Webhook", "webhook")],
+                selection: $payloadType,
+                accent: .tronCoral
+            )
+
+            SettingsCard(accent: .tronCoral) {
+                switch payloadType {
+                case "shellCommand":
+                    glassTextField(icon: "terminal.fill", placeholder: "Command", text: $shellCommand, codeFont: true, axis: .vertical)
+                case "agentTurn":
+                    glassTextField(icon: "brain", placeholder: "Prompt", text: $agentPrompt, axis: .vertical)
+                case "webhook":
+                    glassTextField(icon: "link", placeholder: "URL", text: $webhookUrl, codeFont: true, keyboard: .URL)
+                    SettingsRowDivider()
+                    SettingsRow(icon: "arrow.up.arrow.down", label: "Method", accentColor: .tronCoral) {
+                        cyclingPicker(
+                            values: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                            labels: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                            selection: $webhookMethod
+                        )
                     }
+                default:
+                    EmptyView()
                 }
-                .font(TronTypography.body)
-            default:
-                EmptyView()
             }
-        } header: {
-            Text("Payload")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronCoral)
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: payloadType)
         }
     }
 
     private var advancedSection: some View {
-        Section {
-            Picker("On Overlap", selection: $overlapPolicy) {
-                Text("Skip").tag("skip")
-                Text("Allow").tag("allow")
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Advanced", color: .tronCoral)
+
+            SettingsCard(accent: .tronCoral) {
+                SettingsRow(icon: "arrow.triangle.2.circlepath", label: "On Overlap", accentColor: .tronCoral) {
+                    cyclingPicker(values: ["skip", "allow"], labels: ["Skip", "Allow"], selection: $overlapPolicy)
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "exclamationmark.triangle", label: "On Misfire", accentColor: .tronCoral) {
+                    cyclingPicker(values: ["skip", "runOnce"], labels: ["Skip", "Run Once"], selection: $misfirePolicy)
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "arrow.counterclockwise", label: "Max Retries", accentColor: .tronCoral) {
+                    Text("\(maxRetries)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronCoral)
+                        .monospacedDigit()
+                        .frame(minWidth: 30, alignment: .trailing)
+                    TronStepper(value: $maxRetries, range: 0...10, accent: .tronCoral)
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "xmark.octagon", label: "Auto-Disable", accentColor: .tronCoral) {
+                    Text(autoDisableAfter == 0 ? "Off" : "\(autoDisableAfter)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronCoral)
+                        .monospacedDigit()
+                        .frame(minWidth: 30, alignment: .trailing)
+                    TronStepper(value: $autoDisableAfter, range: 0...100, accent: .tronCoral)
+                }
+                SettingsRowDivider()
+                glassTextField(icon: "tag", placeholder: "Tags (comma-separated)", text: $tags)
             }
-            .font(TronTypography.body)
-            Picker("On Misfire", selection: $misfirePolicy) {
-                Text("Skip").tag("skip")
-                Text("Run Once").tag("runOnce")
-            }
-            .font(TronTypography.body)
-            Stepper("Max Retries: \(maxRetries)", value: $maxRetries, in: 0...10)
-                .font(TronTypography.body)
-            Stepper("Auto-Disable After: \(autoDisableAfter) failures", value: $autoDisableAfter, in: 0...100)
-                .font(TronTypography.body)
-            TextField("Tags (comma-separated)", text: $tags)
-                .font(TronTypography.body)
-        } header: {
-            Text("Advanced")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronCoral)
+
+            SettingsCaption(text: "Auto-disable turns off the job after consecutive failures. 0 means never.")
         }
+    }
+
+    // MARK: - Helpers
+
+    private var scheduleHelpText: String {
+        switch scheduleType {
+        case "every": return "How often to run. Minimum 1 minute, maximum 7 days."
+        case "cron": return "Standard 5-field cron expression (min hour dom mon dow)."
+        case "oneShot": return "Runs exactly once at the specified time."
+        default: return ""
+        }
+    }
+
+    private func glassTextField(
+        icon: String,
+        placeholder: String,
+        text: Binding<String>,
+        codeFont: Bool = false,
+        axis: Axis = .horizontal,
+        keyboard: UIKeyboardType = .default
+    ) -> some View {
+        HStack(alignment: .center) {
+            Image(systemName: icon)
+                .font(codeFont
+                    ? TronTypography.code(size: TronTypography.sizeBody)
+                    : TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronCoral)
+                .frame(width: 18)
+            TextField(placeholder, text: text, axis: axis)
+                .font(codeFont
+                    ? TronTypography.code(size: TronTypography.sizeBody)
+                    : TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(axis == .vertical ? 1...5 : 1...1)
+                .keyboardType(keyboard)
+                .autocorrectionDisabled(codeFont)
+                .textInputAutocapitalization(codeFont ? .never : .sentences)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    private func cyclingPicker(
+        values: [String],
+        labels: [String],
+        selection: Binding<String>
+    ) -> some View {
+        let currentIndex = values.firstIndex(of: selection.wrappedValue) ?? 0
+        return Button {
+            let next = (currentIndex + 1) % values.count
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                selection.wrappedValue = values[next]
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(labels[currentIndex])
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+            }
+            .foregroundStyle(.tronCoral)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.tronCoral.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Validation

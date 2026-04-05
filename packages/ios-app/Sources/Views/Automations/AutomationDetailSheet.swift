@@ -36,13 +36,15 @@ struct AutomationDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    jobInfoSection
-                    runtimeStateSection
+                VStack(alignment: .leading, spacing: 24) {
+                    configurationSection
+                    runtimeSection
                     actionsSection
                     recentRunsSection
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -65,90 +67,197 @@ struct AutomationDetailSheet: View {
         .sheet(item: $selectedRun) { run in
             AutomationRunDetailSheet(run: run)
         }
+        .adaptivePresentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .task {
             await refreshJob()
         }
     }
 
-    // MARK: - Job Info
+    // MARK: - Configuration
 
-    private var jobInfoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Configuration")
+    private var configurationSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Configuration", color: .tronCoral)
 
-            infoRow("Type", value: currentJob.payload.typeLabel, icon: currentJob.payload.icon)
-            infoRow("Schedule", value: currentJob.schedule.summary, icon: "clock")
-            infoRow("Status", value: currentJob.enabled ? "Active" : "Paused", icon: "circle.fill",
-                     color: currentJob.enabled ? .green : .tronTextMuted)
+            SettingsCard(accent: .tronCoral) {
+                SettingsRow(icon: currentJob.payload.icon, label: currentJob.payload.typeLabel, accentColor: .tronCoral) {
+                    Text(currentJob.enabled ? "Active" : "Paused")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .foregroundStyle(currentJob.enabled ? .tronSuccess : .tronTextMuted)
+                }
 
-            if let desc = currentJob.description, !desc.isEmpty {
-                infoRow("Description", value: desc, icon: "text.alignleft")
-            }
+                SettingsRowDivider()
 
-            switch currentJob.payload {
-            case .shellCommand(let command, _, _):
-                payloadDetail("Command", value: command)
-            case .agentTurn(let prompt, let model, _, _):
-                payloadDetail("Prompt", value: prompt)
-                if let model { payloadDetail("Model", value: model) }
-            case .webhook(let url, let method, _, _, _):
-                payloadDetail("URL", value: url)
-                if let method { payloadDetail("Method", value: method.uppercased()) }
-            case .systemEvent(let sessionId, _):
-                payloadDetail("Session", value: sessionId)
-            }
+                SettingsRow(icon: "clock", label: "Schedule", accentColor: .tronCoral) {
+                    Text(currentJob.schedule.summary)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(1)
+                }
 
-            if !currentJob.tags.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "tag")
-                        .font(TronTypography.codeSM)
-                        .foregroundStyle(.tronTextMuted)
-                        .frame(width: 20)
-                    ForEach(currentJob.tags, id: \.self) { tag in
-                        Text(tag)
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronCoral.opacity(0.8))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.tronCoral.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                payloadDetailRows
+
+                if let desc = currentJob.description, !desc.isEmpty {
+                    SettingsRowDivider()
+                    SettingsRow(icon: "text.alignleft", label: "Description", accentColor: .tronCoral) {
+                        Text(desc)
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
                     }
                 }
+
+                if !currentJob.tags.isEmpty {
+                    SettingsRowDivider()
+                    tagsRow
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.tronCoral.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Runtime State
-
     @ViewBuilder
-    private var runtimeStateSection: some View {
-        if let state = currentRuntimeState {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionTitle("Runtime")
-
-                if let nextRun = state.nextRunAt {
-                    infoRow("Next Run", value: DateParser.shortDateTime(nextRun), icon: "arrow.right.circle")
-                }
-                if let lastRun = state.lastRunAt {
-                    infoRow("Last Run", value: DateParser.shortDateTime(lastRun), icon: "arrow.left.circle")
-                }
-                if state.consecutiveFailures > 0 {
-                    infoRow("Failures", value: "\(state.consecutiveFailures) consecutive",
-                            icon: "exclamationmark.triangle", color: .red)
-                }
-                if state.runningSince != nil {
-                    infoRow("Status", value: "Currently running", icon: "play.circle.fill", color: .tronCoral)
+    private var payloadDetailRows: some View {
+        switch currentJob.payload {
+        case .shellCommand(let command, _, _):
+            SettingsRowDivider()
+            SettingsRow(icon: "terminal.fill", label: "Command", accentColor: .tronCoral) {
+                Text(command)
+                    .font(TronTypography.code(size: TronTypography.sizeBody3))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+            }
+        case .agentTurn(let prompt, let model, _, _):
+            SettingsRowDivider()
+            SettingsRow(icon: "brain", label: "Prompt", accentColor: .tronCoral) {
+                Text(prompt)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+            }
+            if let model {
+                SettingsRowDivider()
+                SettingsRow(icon: "cpu", label: "Model", accentColor: .tronCoral) {
+                    Text(model)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .foregroundStyle(.tronTextSecondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color.tronCoral.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+        case .webhook(let url, let method, _, _, _):
+            SettingsRowDivider()
+            SettingsRow(icon: "link", label: "URL", accentColor: .tronCoral) {
+                Text(url)
+                    .font(TronTypography.code(size: TronTypography.sizeBody3))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+            }
+            if let method {
+                SettingsRowDivider()
+                SettingsRow(icon: "arrow.up.arrow.down", label: "Method", accentColor: .tronCoral) {
+                    Text(method.uppercased())
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .foregroundStyle(.tronCoral)
+                }
+            }
+        case .systemEvent(let sessionId, _):
+            SettingsRowDivider()
+            SettingsRow(icon: "bolt.fill", label: "Session", accentColor: .tronCoral) {
+                Text(sessionId)
+                    .font(TronTypography.code(size: TronTypography.sizeBody3))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+            }
         }
+    }
+
+    private var tagsRow: some View {
+        HStack {
+            Image(systemName: "tag")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronCoral)
+                .frame(width: 18)
+            ForEach(currentJob.tags, id: \.self) { tag in
+                Text(tag)
+                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                    .foregroundStyle(.tronCoral.opacity(0.8))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronCoral.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Runtime
+
+    @ViewBuilder
+    private var runtimeSection: some View {
+        if let state = currentRuntimeState, hasRuntimeInfo(state) {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Runtime", color: .tronCoral)
+
+                SettingsCard(accent: .tronCoral) {
+                    runtimeRows(state)
+                }
+            }
+        }
+    }
+
+    private func hasRuntimeInfo(_ state: CronRuntimeStateDTO) -> Bool {
+        state.nextRunAt != nil || state.lastRunAt != nil || state.consecutiveFailures > 0 || state.runningSince != nil
+    }
+
+    @ViewBuilder
+    private func runtimeRows(_ state: CronRuntimeStateDTO) -> some View {
+        let items = buildRuntimeItems(state)
+        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+            if index > 0 { SettingsRowDivider() }
+            SettingsRow(icon: item.icon, label: item.label, accentColor: item.accent) {
+                if item.showSpinner {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.tronCoral)
+                        Text(item.value)
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .foregroundStyle(item.accent)
+                    }
+                } else {
+                    Text(item.value)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .foregroundStyle(item.valueColor)
+                }
+            }
+        }
+    }
+
+    private struct RuntimeItem {
+        let icon: String
+        let label: String
+        let value: String
+        let accent: Color
+        var valueColor: Color = .tronTextSecondary
+        var showSpinner: Bool = false
+    }
+
+    private func buildRuntimeItems(_ state: CronRuntimeStateDTO) -> [RuntimeItem] {
+        var items: [RuntimeItem] = []
+        if let nextRun = state.nextRunAt {
+            items.append(RuntimeItem(icon: "arrow.right.circle", label: "Next Run", value: DateParser.shortDateTime(nextRun), accent: .tronCoral))
+        }
+        if let lastRun = state.lastRunAt {
+            items.append(RuntimeItem(icon: "arrow.left.circle", label: "Last Run", value: DateParser.shortDateTime(lastRun), accent: .tronCoral))
+        }
+        if state.consecutiveFailures > 0 {
+            items.append(RuntimeItem(icon: "exclamationmark.triangle", label: "Failures", value: "\(state.consecutiveFailures) consecutive", accent: .tronError, valueColor: .tronError))
+        }
+        if state.runningSince != nil {
+            items.append(RuntimeItem(icon: "play.circle.fill", label: "Status", value: "Running", accent: .tronCoral, showSpinner: true))
+        }
+        return items
     }
 
     // MARK: - Actions
@@ -166,9 +275,15 @@ struct AutomationDetailSheet: View {
             } label: {
                 Label("Run Now", systemImage: "play.fill")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronCoral)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .buttonStyle(.bordered)
-            .tint(.tronCoral)
+            .glassEffect(
+                .regular.tint(Color.tronCoral.opacity(0.2)).interactive(),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
             .disabled(isPerformingAction)
 
             Button {
@@ -180,59 +295,74 @@ struct AutomationDetailSheet: View {
                     isPerformingAction = false
                 }
             } label: {
-                Label(currentJob.enabled ? "Pause" : "Enable",
-                      systemImage: currentJob.enabled ? "pause.fill" : "play.fill")
+                let tint: Color = currentJob.enabled ? .orange : .tronSuccess
+                Label(currentJob.enabled ? "Pause" : "Enable", systemImage: currentJob.enabled ? "pause.fill" : "play.fill")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .buttonStyle(.bordered)
-            .tint(currentJob.enabled ? .orange : .green)
+            .glassEffect(
+                .regular.tint((currentJob.enabled ? Color.orange : Color.tronSuccess).opacity(0.2)).interactive(),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
             .disabled(isPerformingAction)
 
             Spacer()
 
             Button(action: onDelete) {
-                Label("Delete", systemImage: "trash")
+                Image(systemName: "trash")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronError)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .buttonStyle(.bordered)
-            .tint(.red)
+            .glassEffect(
+                .regular.tint(Color.tronError.opacity(0.2)).interactive(),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
             .disabled(isPerformingAction)
         }
+        .opacity(isPerformingAction ? 0.6 : 1)
     }
 
     // MARK: - Recent Runs
 
     private var recentRunsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Recent Runs")
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Recent Runs", color: .tronCoral)
 
             if isLoadingRuns {
                 ProgressView()
                     .tint(.tronCoral)
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 16)
             } else if recentRuns.isEmpty {
                 Text("No runs yet")
-                    .font(TronTypography.codeSM)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextMuted)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 16)
             } else {
-                ForEach(recentRuns) { run in
-                    runRow(run)
-                        .onTapGesture { selectedRun = run }
+                SettingsCard(accent: .tronCoral) {
+                    ForEach(Array(recentRuns.enumerated()), id: \.element.id) { index, run in
+                        if index > 0 { SettingsRowDivider() }
+                        runRow(run)
+                    }
                 }
             }
         }
     }
 
-    @ViewBuilder
     private func runRow(_ run: CronRunDTO) -> some View {
         HStack(spacing: 10) {
             runStatusIcon(run.status)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(DateParser.shortDateTime(run.startedAt))
-                    .font(TronTypography.codeSM)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextPrimary)
 
                 if let duration = run.durationMs {
@@ -249,71 +379,33 @@ struct AutomationDetailSheet: View {
                 .foregroundStyle(runStatusColor(run.status))
 
             Image(systemName: "chevron.right")
-                .font(TronTypography.labelSM)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
         }
-        .padding(.vertical, 8)
         .padding(.horizontal, 12)
-        .background(Color.tronCoral.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 10)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture { selectedRun = run }
     }
 
-    // MARK: - Helpers
-
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-            .foregroundStyle(.tronCoral)
-    }
-
-    private func infoRow(_ label: String, value: String, icon: String, color: Color = .tronTextSecondary) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(TronTypography.codeSM)
-                .foregroundStyle(color)
-                .frame(width: 20)
-            Text(label)
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronTextMuted)
-                .frame(width: 80, alignment: .leading)
-            Text(value)
-                .font(TronTypography.codeSM)
-                .foregroundStyle(color)
-                .lineLimit(2)
-        }
-    }
-
-    private func payloadDetail(_ label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("")
-                .frame(width: 20)
-            Text(label)
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronTextMuted)
-                .frame(width: 80, alignment: .leading)
-            Text(value)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(3)
-        }
-    }
+    // MARK: - Run Status
 
     @ViewBuilder
     private func runStatusIcon(_ status: String) -> some View {
         switch status {
         case "completed":
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(.tronSuccess)
         case "failed":
             Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(.tronError)
         case "running":
             ProgressView()
                 .controlSize(.mini)
                 .tint(.tronCoral)
         case "timedOut":
             Image(systemName: "clock.badge.exclamationmark")
-                .foregroundStyle(.orange)
+                .foregroundStyle(.tronWarning)
         case "skipped":
             Image(systemName: "arrow.right.circle")
                 .foregroundStyle(.tronTextMuted)
@@ -325,10 +417,10 @@ struct AutomationDetailSheet: View {
 
     private func runStatusColor(_ status: String) -> Color {
         switch status {
-        case "completed": return .green
-        case "failed": return .red
+        case "completed": return .tronSuccess
+        case "failed": return .tronError
         case "running": return .tronCoral
-        case "timedOut": return .orange
+        case "timedOut": return .tronWarning
         case "skipped": return .tronTextMuted
         default: return .tronTextSecondary
         }
