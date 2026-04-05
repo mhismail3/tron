@@ -164,7 +164,51 @@ For single-file skills:
 - Content should be self-contained
 - Clear sections with headers
 
-### 9. Import-Specific Conversions
+### 9. Preflight & Self-Sufficiency Check
+
+Every skill should be able to set itself up from scratch without asking the user. Check for and add the following if missing:
+
+**A. Dependency installation**
+
+If the skill relies on any CLI tool, binary, or brew formula, it must check for it and install if absent:
+
+```bash
+# Pattern — check then install
+if ! command -v <tool> &>/dev/null; then
+  brew install <formula>
+fi
+```
+
+Add this to a clearly labeled `## Setup` or `## Preflight` section in the skill.
+
+**B. Auth / credentials**
+
+If the skill requires authentication:
+- Check if credentials are already stored in the vault under a well-known name.
+- If yes, document the vault key and show how to retrieve them:
+  ```bash
+  ~/.tron/skills/vault/scripts/vault.sh get <vault-name> --field <field>
+  ```
+- If credentials are not in the vault yet, the skill should prompt Tron to ask the user for them once and store them via the vault skill — **not** require the user to configure things manually every time.
+- Never hardcode credentials in skill files.
+
+**C. Directory / file structure**
+
+If the skill writes state to disk (e.g., `~/.tron/system/mods/<name>/`), it must `mkdir -p` that path before first use.
+
+**D. Idempotency**
+
+All preflight steps must be safe to run repeatedly. A second run should detect everything is already in place and proceed silently.
+
+**What to add when healing:**
+
+If the skill is missing a preflight section, add one. Model it on the vault skill's pattern:
+1. Check each dependency (binary, brew formula, directory, vault entry).
+2. Auto-fix anything that can be auto-fixed (install, mkdir).
+3. For anything requiring user input (first-time credentials), guide Tron to collect and vault them, then continue.
+4. Output clear pass/fail status so future runs can confirm the environment is ready.
+
+### 11. Import-Specific Conversions
 
 **From Claude Code plugins:**
 - `~/.claude/` paths → `~/.tron/` equivalents
@@ -181,7 +225,7 @@ For single-file skills:
 - Identify tool dependencies and add to `allowedTools`
 - If complex, restructure into routing table + sub-files
 
-### 10. Apply Fixes
+### 12. Apply Fixes
 
 After analysis, rewrite the skill files:
 1. Fix frontmatter (add missing fields, rename invalid keys, fix values)
@@ -191,7 +235,7 @@ After analysis, rewrite the skill files:
 5. Fix SQL queries
 6. Clean up content structure
 
-### 11. Verify
+### 13. Verify
 
 After healing, re-read and confirm:
 - Frontmatter parses correctly (all recognized keys present)
@@ -227,6 +271,12 @@ Database:
 Files:
   [FAIL] Routing table references "reference/api.md" but file does not exist
   [PASS] "reference/schema.md" exists
+
+Preflight:
+  [FAIL] No preflight/setup section found → added dependency check and vault credential retrieval
+  [FAIL] CLI tool "tron-twitter" used but no install check → added brew install guard
+  [WARN] Auth required but no vault integration → added vault lookup for "twitter-account"
+  [PASS] State directory created with mkdir -p
 
 Fixes applied: 4
 Warnings: 2
