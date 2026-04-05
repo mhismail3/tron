@@ -48,11 +48,11 @@ Autonomous, multi-round investigation with rigorous source evaluation. Use this 
 
 ## Output
 
-Write the report to `~/.tron/memory/knowledge/` and create linked notes:
+Write the report to `~/.tron/workspace/knowledge/` and create linked notes:
 
 ### 1. Research report
 
-**Path:** `~/.tron/memory/knowledge/sources/YYYY-MM-DD-{topic-slug}-research.md`
+**Path:** `~/.tron/workspace/knowledge/sources/YYYY-MM-DD-{topic-slug}-research.md`
 
 ```markdown
 ---
@@ -108,15 +108,15 @@ How to apply these findings.
 
 ### 2. Topic notes
 
-Extract key concepts into `~/.tron/memory/knowledge/topics/` notes (see `extract.md` Step 4). Link them back to the research report with `[[topic-slug-research]]`.
+Extract key concepts into `~/.tron/workspace/knowledge/topics/` notes (see `extract.md` Step 4). Link them back to the research report with `[[topic-slug-research]]`.
 
 ### 3. Argument notes
 
-If the research surfaces a thesis or synthesis, create an argument note in `~/.tron/memory/knowledge/arguments/` (see `extract.md` Step 5).
+If the research surfaces a thesis or synthesis, create an argument note in `~/.tron/workspace/knowledge/arguments/` (see `extract.md` Step 5).
 
 ## Completion
 
-1. Write the report to `~/.tron/memory/knowledge/sources/`
+1. Write the report to `~/.tron/workspace/knowledge/sources/`
 2. Create/update topic and argument notes
 3. Verify all citations have corresponding entries in Sources
 4. Return a summary: report path, sources consulted, confidence level, key findings

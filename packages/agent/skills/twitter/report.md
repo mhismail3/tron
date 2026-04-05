@@ -16,7 +16,7 @@ For paraphrased references: mention @username inline with a link to the tweet.
 
 ## Report Output
 
-Write to: `~/.tron/memory/research/YYYY-MM-DD-x-<slug>/report.md`
+Write to: `~/.tron/workspace/research/YYYY-MM-DD-x-<slug>/report.md`
 
 Generate the timestamp from current time, slug from the research topic.
 
@@ -75,6 +75,6 @@ Linked articles fetched and referenced.
 ## Completion
 
 When done:
-1. Write the report to `~/.tron/memory/research/<timestamp>-x-<slug>/report.md`
+1. Write the report to `~/.tron/workspace/research/<timestamp>-x-<slug>/report.md`
 2. Verify all tweet citations include @username and link
 3. Return a summary: report path, tweets analyzed, accounts consulted, confidence level, key findings in 2-3 sentences

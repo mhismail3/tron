@@ -25,9 +25,9 @@ Use WebFetch to read the URL. Extract:
 Before creating or modifying anything, check what already exists:
 
 ```
-Find *.md in ~/.tron/memory/knowledge/sources/
-Find *.md in ~/.tron/memory/knowledge/topics/
-Search for "<key concept>" in ~/.tron/memory/knowledge/
+Find *.md in ~/.tron/workspace/knowledge/sources/
+Find *.md in ~/.tron/workspace/knowledge/topics/
+Search for "<key concept>" in ~/.tron/workspace/knowledge/
 ```
 
 Read any notes that look relevant. Update existing notes instead of creating duplicates.
@@ -36,7 +36,7 @@ Read any notes that look relevant. Update existing notes instead of creating dup
 
 One per URL. If a source note for this URL already exists, update it.
 
-**Path:** `~/.tron/memory/knowledge/sources/YYYY-MM-DD-{author-last-name}-{short-title}.md`
+**Path:** `~/.tron/workspace/knowledge/sources/YYYY-MM-DD-{author-last-name}-{short-title}.md`
 
 ```markdown
 ---
@@ -71,7 +71,7 @@ Topics are atomic — one concept per note. They grow as multiple sources contri
 
 Search first. If a topic exists, read it and use Edit to integrate new information. If not, create one.
 
-**Path:** `~/.tron/memory/knowledge/topics/{topic-name}.md` (living document — topic slug, no date prefix)
+**Path:** `~/.tron/workspace/knowledge/topics/{topic-name}.md` (living document — topic slug, no date prefix)
 
 ```markdown
 ---
@@ -99,7 +99,7 @@ At least one topic note per extraction. Keep notes atomic — if a note covers t
 
 Arguments are synthesis — a thesis, question, or connection emerging from multiple topics and sources. At least one per extraction.
 
-**Path:** `~/.tron/memory/knowledge/arguments/{thesis-or-question}.md` (living document — topic slug, no date prefix)
+**Path:** `~/.tron/workspace/knowledge/arguments/{thesis-or-question}.md` (living document — topic slug, no date prefix)
 
 ```markdown
 ---

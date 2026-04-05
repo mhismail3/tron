@@ -446,7 +446,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         system_prompt: if is_chat {
             Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
         } else {
-            // Precedence: project .tron/SYSTEM.md > global ~/.tron/memory/rules/SYSTEM.md > embedded
+            // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/rules/SYSTEM.md > embedded
             crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
                 .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
                 .map(|loaded| loaded.content)

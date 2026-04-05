@@ -336,9 +336,10 @@ mod tests {
     // ── remove_container_metadata ────────────────────────────────
 
     fn write_containers_file(dir: &std::path::Path, content: &str) -> PathBuf {
-        let artifacts = dir.join(".tron").join("system");
+        use crate::core::paths::{dirs, files};
+        let artifacts = dir.join(".tron").join(dirs::SYSTEM);
         std::fs::create_dir_all(&artifacts).unwrap();
-        let path = artifacts.join("containers.json");
+        let path = artifacts.join(files::CONTAINERS_JSON);
         std::fs::write(&path, content).unwrap();
         path
     }

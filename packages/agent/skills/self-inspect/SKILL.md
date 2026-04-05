@@ -1,6 +1,6 @@
 ---
 name: "Self Inspect"
-description: "Inspect Tron database, settings, auth, skills, mods, deployment, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/memory/reports/"
+description: "Inspect Tron database, settings, auth, skills, mods, deployment, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
 version: "3.2.0"
 allowedTools:
   - Bash
@@ -16,7 +16,7 @@ All inspection is done via direct `sqlite3` queries and file reads — no wrappe
 
 ## MANDATORY: Session Debug Always Produces a Report File
 
-Whenever you debug or investigate a session — for ANY reason — you MUST write a structured report to `~/.tron/memory/reports/`. This is not optional. Posting findings only in chat is not sufficient. The file must be written BEFORE you give the verbal summary. See `reference/session-debug.md` Step 8 for the exact path format and template.
+Whenever you debug or investigate a session — for ANY reason — you MUST write a structured report to `~/.tron/workspace/reports/`. This is not optional. Posting findings only in chat is not sufficient. The file must be written BEFORE you give the verbal summary. See `reference/session-debug.md` Step 8 for the exact path format and template.
 
 ## Routing Table
 
@@ -24,7 +24,7 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 |--------|--------|
 | Database schema, tables, columns | Read `reference/schema.md` |
 | SQL queries for investigation | Read `reference/queries.md` |
-| Debug this session / what went wrong / why did that fail | Read `reference/session-debug.md` → **write report to `~/.tron/memory/reports/` (mandatory)** |
+| Debug this session / what went wrong / why did that fail | Read `reference/session-debug.md` → **write report to `~/.tron/workspace/reports/` (mandatory)** |
 | Investigation workflows | Read `reference/workflows.md` |
 | Server health | `curl -s http://localhost:9847/health \| jq .` |
 | Deep health check | `curl -s http://localhost:9847/health/deep \| jq .` |

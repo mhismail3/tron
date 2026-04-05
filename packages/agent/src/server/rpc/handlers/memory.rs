@@ -23,7 +23,7 @@ use std::sync::Arc;
 // =============================================================================
 
 /// Trigger a memory retain: summarize session history since the last boundary
-/// and write to `~/.tron/memory/sessions/{session_id}.md`.
+/// and write to `~/.tron/workspace/sessions/{session_id}.md`.
 pub struct RetainMemoryHandler;
 
 #[async_trait]
@@ -386,11 +386,9 @@ fn keyword_summary(session_id: &str, turn_count: i64) -> String {
     format!("Session {session_id} ({turn_count} turns)")
 }
 
-/// Return the path for a session's memory file: `~/.tron/memory/sessions/{session_id}.md`.
+/// Return the path for a session's memory file: `~/.tron/workspace/sessions/{session_id}.md`.
 fn session_file_path(session_id: &str) -> std::path::PathBuf {
-    crate::core::paths::tron_home()
-        .join("memory")
-        .join("sessions")
+    crate::core::paths::sessions_dir()
         .join(format!("{session_id}.md"))
 }
 
@@ -413,7 +411,7 @@ fn format_session_section(ts: &str, title: &str, summary: &str) -> String {
     format!("\n## {display_ts} — {title}\n\n{summary}\n")
 }
 
-/// Write a session memory entry to `~/.tron/memory/sessions/{session_id}.md`.
+/// Write a session memory entry to `~/.tron/workspace/sessions/{session_id}.md`.
 ///
 /// Creates the file with YAML frontmatter on first write; appends a new
 /// timestamped section on subsequent writes.
@@ -459,7 +457,8 @@ mod tests {
     fn session_file_path_uses_session_id() {
         let path = session_file_path("sess_019d4a32");
         assert_eq!(path.file_name().unwrap().to_str().unwrap(), "sess_019d4a32.md");
-        assert!(path.to_str().unwrap().contains(".tron/memory/sessions"));
+        let expected = format!(".tron/{}/{}", crate::core::paths::dirs::WORKSPACE, crate::core::paths::dirs::SESSIONS);
+        assert!(path.to_str().unwrap().contains(&expected));
     }
 
     #[test]

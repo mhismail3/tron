@@ -98,7 +98,7 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// Reset ~/.tron/memory/rules/SYSTEM.md to the built-in default.
+    /// Reset the global system prompt to the built-in default.
     ResetPrompt,
 }
 
@@ -270,8 +270,7 @@ async fn main() -> Result<()> {
     if let Some(cmd) = args.command {
         match cmd {
             Command::ResetPrompt => {
-                let tron_home = tron::settings::tron_home_dir();
-                let path = tron_home.join("memory").join("rules").join("SYSTEM.md");
+                let path = tron::core::paths::global_system_prompt_path();
                 let content = tron::runtime::context::system_prompts::build_seeded_content(
                     tron::runtime::context::system_prompts::TRON_CORE_PROMPT,
                 );
@@ -310,10 +309,9 @@ async fn main() -> Result<()> {
                 eprintln!(
                     "DEPLOY SAFETY: {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts exceeded, auto-rolling back"
                 );
-                let binary_path = tron::settings::tron_home_dir().join("system").join("bin").join("tron");
                 tron::server::deploy::auto_rollback(
                     &deploy_dir,
-                    &binary_path,
+                    &tron::core::paths::tron_binary_path(),
                     &format!("exceeded {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts"),
                 );
                 // auto_rollback never returns
@@ -326,17 +324,18 @@ async fn main() -> Result<()> {
 
     // Ensure ~/.tron/ directory structure exists
     {
+        use tron::core::paths::dirs;
         let tron_home = tron::settings::tron_home_dir();
-        let system = tron_home.join("system");
-        for subdir in &["bin", "db", "deployment"] {
+        let system = tron_home.join(dirs::SYSTEM);
+        for subdir in &[dirs::BIN, dirs::DB, dirs::DEPLOYMENT] {
             let _ = std::fs::create_dir_all(system.join(subdir));
         }
-        for subdir in &["sessions", "knowledge", "reports", "cron", "scratch", "screenshots"] {
-            let _ = std::fs::create_dir_all(tron_home.join("memory").join(subdir));
+        for subdir in &[dirs::SESSIONS, dirs::KNOWLEDGE, dirs::REPORTS, dirs::CRON, dirs::SCRATCH, dirs::SCREENSHOTS] {
+            let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(subdir));
         }
-        let _ = std::fs::create_dir_all(tron_home.join("user").join("voice"));
-        let _ = std::fs::create_dir_all(tron_home.join("skills"));
-        let _ = std::fs::create_dir_all(tron_home.join("memory").join("rules"));
+        let _ = std::fs::create_dir_all(tron_home.join(dirs::USER).join(dirs::VOICE));
+        let _ = std::fs::create_dir_all(tron_home.join(dirs::SKILLS));
+        let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::RULES));
 
         // Seed global SYSTEM.md (system prompt override) if missing or not customized.
         let _ = tron::runtime::context::system_prompts::seed_global_system_prompt(&tron_home);
@@ -625,9 +624,7 @@ async fn main() -> Result<()> {
 
     // Cron scheduler
     let cron_cancel = tokio_util::sync::CancellationToken::new();
-    let cron_config_path = tron::settings::tron_home_dir()
-        .join("memory")
-        .join("automations.json");
+    let cron_config_path = tron::core::paths::automations_path();
     let cron_backup_path = tron::settings::deploy_dir().join("automations.json.bak");
 
     let cron_agent_executor = agent_deps.as_ref().map(|deps| {
@@ -817,7 +814,7 @@ async fn main() -> Result<()> {
             && sentinel.status == "restarting"
         {
             let auth = auth_path();
-            let binary_path = tron::settings::tron_home_dir().join("system").join("bin").join("tron");
+            let binary_path = tron::core::paths::tron_binary_path();
             let test_result = tron::server::deploy::run_self_test(
                 &db_path,
                 &settings_path_for_selftest,

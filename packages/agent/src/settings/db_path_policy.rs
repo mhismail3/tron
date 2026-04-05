@@ -13,7 +13,8 @@ pub const PRODUCTION_DB_FILENAME: &str = "log.db";
 /// Default production database directory for a given home directory.
 #[must_use]
 pub fn production_db_dir_from_home(home: &Path) -> PathBuf {
-    home.join(".tron").join("system").join("db")
+    use crate::core::paths::dirs;
+    home.join(".tron").join(dirs::SYSTEM).join(dirs::DB)
 }
 
 /// Default production database path for a given home directory.

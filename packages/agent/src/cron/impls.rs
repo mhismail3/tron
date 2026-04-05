@@ -124,10 +124,9 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 })
             })
             .or_else(|| {
-                let home = crate::core::paths::home_dir();
-                let cron_dir = format!("{home}/.tron/memory/cron");
+                let cron_dir = crate::core::paths::cron_dir();
                 let _ = std::fs::create_dir_all(&cron_dir);
-                Some(cron_dir)
+                Some(cron_dir.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "/tmp".into());
 

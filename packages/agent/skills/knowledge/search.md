@@ -7,42 +7,42 @@ Find information across the knowledge base using a combination of file discovery
 ### Full-text search
 
 ```
-Search for "query terms" in ~/.tron/memory/knowledge/
+Search for "query terms" in ~/.tron/workspace/knowledge/
 ```
 
 Use regex for flexible matching:
 ```
-Search for "pattern|alternative" in ~/.tron/memory/knowledge/
-Search for "concept.*related" in ~/.tron/memory/knowledge/
+Search for "pattern|alternative" in ~/.tron/workspace/knowledge/
+Search for "concept.*related" in ~/.tron/workspace/knowledge/
 ```
 
 ### Category-scoped search
 
 Narrow to a specific category when you know the note type:
 ```
-Search for "query" in ~/.tron/memory/knowledge/sources/
-Search for "query" in ~/.tron/memory/knowledge/topics/
-Search for "query" in ~/.tron/memory/knowledge/arguments/
+Search for "query" in ~/.tron/workspace/knowledge/sources/
+Search for "query" in ~/.tron/workspace/knowledge/topics/
+Search for "query" in ~/.tron/workspace/knowledge/arguments/
 ```
 
 ### Tag search
 
 ```
-Search for "tags:.*tagname" in ~/.tron/memory/knowledge/
+Search for "tags:.*tagname" in ~/.tron/workspace/knowledge/
 ```
 
 ### Backlink search
 
 Find all notes that reference a specific note:
 ```
-Search for "[[Note Name]]" in ~/.tron/memory/knowledge/
+Search for "[[Note Name]]" in ~/.tron/workspace/knowledge/
 ```
 
 ### Browse by directory
 
 ```
-Find *.md in ~/.tron/memory/knowledge/
-Find *.md in ~/.tron/memory/knowledge/topics/
+Find *.md in ~/.tron/workspace/knowledge/
+Find *.md in ~/.tron/workspace/knowledge/topics/
 ```
 
 ## Search order

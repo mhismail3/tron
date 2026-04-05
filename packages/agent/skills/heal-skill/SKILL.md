@@ -110,11 +110,11 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/system/deployment/` | Deploy scripts and state |
 | `~/.tron/system/mods/` | Optional modules (apns, google, transcribe, twitter) |
 | `~/.tron/skills/` | Installed skills |
-| `~/.tron/memory/rules/` | System rules (SYSTEM.md) |
-| `~/.tron/memory/knowledge/` | Knowledge base |
-| `~/.tron/memory/sessions/` | Session notes |
-| `~/.tron/memory/cron/` | Cron working files |
-| `~/.tron/memory/scratch/` | Temporary files |
+| `~/.tron/workspace/rules/` | System rules (SYSTEM.md) |
+| `~/.tron/workspace/knowledge/` | Knowledge base |
+| `~/.tron/workspace/sessions/` | Session notes |
+| `~/.tron/workspace/cron/` | Cron working files |
+| `~/.tron/workspace/scratch/` | Temporary files |
 | `~/.tron/user/voice/` | Voice I/O |
 
 **Stale path translations:**
@@ -128,7 +128,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/mods/` | `~/.tron/system/mods/` |
 | `~/.tron/artifacts/` | `~/.tron/system/deployment/` |
 | `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` |
-| `~/.tron/knowledge/` | `~/.tron/memory/knowledge/` |
+| `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` |
 | `~/.tron/database/` | `~/.tron/system/db/` |
 
 ### 6. Validate Database References

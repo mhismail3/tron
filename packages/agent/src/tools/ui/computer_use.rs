@@ -499,9 +499,7 @@ impl ComputerUseTool {
         let screenshots_dir = if cfg!(test) {
             std::path::PathBuf::from(&ctx.working_directory).join("screenshots")
         } else {
-            crate::settings::tron_home_dir()
-                .join("memory")
-                .join("screenshots")
+            crate::core::paths::screenshots_dir()
         };
         let _ = tokio::fs::create_dir_all(&screenshots_dir).await;
         let screenshot_path = screenshots_dir.join(&screenshot_filename);

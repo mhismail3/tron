@@ -38,11 +38,7 @@ impl ApnsConfig {
             return expanded;
         }
         // Default: ~/.tron/system/mods/apns/AuthKey_{keyId}.p8
-        let home = crate::core::paths::home_dir();
-        PathBuf::from(home)
-            .join(".tron")
-            .join("system")
-            .join("mods")
+        crate::core::paths::mods_dir()
             .join("apns")
             .join(format!("AuthKey_{}.p8", self.key_id))
     }
@@ -70,11 +66,7 @@ pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
     let config_path = if let Some(base) = base {
         base.join("config.json")
     } else {
-        let home = crate::core::paths::home_dir();
-        PathBuf::from(home)
-            .join(".tron")
-            .join("system")
-            .join("mods")
+        crate::core::paths::mods_dir()
             .join("apns")
             .join("config.json")
     };

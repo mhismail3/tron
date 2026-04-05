@@ -7,9 +7,9 @@ tags: [automations, cron, scheduling, jobs]
 
 # Manage Automations
 
-Manage scheduled automations (cron jobs) stored in `~/.tron/memory/automations.json`. The scheduler watches this file (polling every 5 seconds via SHA256 fingerprint) and auto-reconciles on change — no restart needed.
+Manage scheduled automations (cron jobs) stored in `~/.tron/workspace/automations.json`. The scheduler watches this file (polling every 5 seconds via SHA256 fingerprint) and auto-reconciles on change — no restart needed.
 
-Use the standard **Read**, **Write**, and **Edit** tools to manage this file directly. Always use the absolute path `~/.tron/memory/automations.json`.
+Use the standard **Read**, **Write**, and **Edit** tools to manage this file directly. Always use the absolute path `~/.tron/workspace/automations.json`.
 
 ## Before Creating or Updating
 
@@ -238,7 +238,7 @@ Optional: `"headers"` for custom headers.
 All files produced or consumed by cron jobs — output logs, result artifacts, intermediate data, scripts, and working files — must be organized under:
 
 ```
-~/.tron/memory/cron/
+~/.tron/workspace/cron/
 ```
 
 ### Structure
@@ -246,7 +246,7 @@ All files produced or consumed by cron jobs — output logs, result artifacts, i
 Use one subdirectory per job, named after the job's `id` or a short slug derived from the job `name`:
 
 ```
-~/.tron/memory/cron/
+~/.tron/workspace/cron/
   <job-slug>/
     output/        # Result files written by the job (reports, exports, etc.)
     logs/          # Any plain-text logs or summaries the job writes
@@ -258,18 +258,18 @@ Only create subdirectories that are actually needed — a simple job may only ne
 
 ### Rules
 
-- **Agent turn prompts** that produce file output must write to `~/.tron/memory/cron/<job-slug>/output/`.
-- **Shell commands** must write any output files or logs to `~/.tron/memory/cron/<job-slug>/` — not to arbitrary tmp paths or the home directory.
-- **State files** (e.g., last-run cursors, seen IDs, counters) live in `~/.tron/memory/cron/<job-slug>/state/`.
-- **Scripts** invoked by `shellCommand` payloads should be stored in `~/.tron/memory/cron/<job-slug>/scripts/` so they are co-located with the job.
-- The directory must be created before the job runs. Add `mkdir -p ~/.tron/memory/cron/<job-slug>/output` (and other needed subdirs) to the beginning of any shell command, or include it in the agent turn prompt.
+- **Agent turn prompts** that produce file output must write to `~/.tron/workspace/cron/<job-slug>/output/`.
+- **Shell commands** must write any output files or logs to `~/.tron/workspace/cron/<job-slug>/` — not to arbitrary tmp paths or the home directory.
+- **State files** (e.g., last-run cursors, seen IDs, counters) live in `~/.tron/workspace/cron/<job-slug>/state/`.
+- **Scripts** invoked by `shellCommand` payloads should be stored in `~/.tron/workspace/cron/<job-slug>/scripts/` so they are co-located with the job.
+- The directory must be created before the job runs. Add `mkdir -p ~/.tron/workspace/cron/<job-slug>/output` (and other needed subdirs) to the beginning of any shell command, or include it in the agent turn prompt.
 
 ### Naming output files
 
 Use timestamped filenames so runs don't overwrite each other:
 
 ```bash
-~/.tron/memory/cron/<job-slug>/output/$(date +%Y-%m-%d_%H-%M-%S).txt
+~/.tron/workspace/cron/<job-slug>/output/$(date +%Y-%m-%d_%H-%M-%S).txt
 ```
 
 For state files that must persist a single value across runs, use a fixed filename (e.g., `last_seen.json`).
@@ -279,7 +279,7 @@ For state files that must persist a single value across runs, use a fixed filena
 ### Read (list all automations)
 
 ```
-Read ~/.tron/memory/automations.json
+Read ~/.tron/workspace/automations.json
 ```
 
 ### Create
@@ -340,4 +340,4 @@ Create a one-shot job with `at` set to the current time (or a few seconds in the
 - For `agentTurn` payloads, write clear, detailed prompts — the agent session runs without user interaction
 - Prefer cron expressions with timezones for time-of-day schedules; use interval for polling-style jobs
 - Default to the user's local timezone, not UTC
-- **All job I/O goes in `~/.tron/memory/cron/<job-slug>/`** — never scatter output to tmp dirs, home dir, or ad-hoc paths. Create the directory structure as part of job setup.
+- **All job I/O goes in `~/.tron/workspace/cron/<job-slug>/`** — never scatter output to tmp dirs, home dir, or ad-hoc paths. Create the directory structure as part of job setup.

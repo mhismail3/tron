@@ -7,12 +7,12 @@ tags: [knowledge, notes, research, vault]
 
 # Knowledge
 
-Maintain a persistent knowledge base at `~/.tron/memory/knowledge/`. Notes are plain Markdown files with optional YAML frontmatter. Use your standard tools — Read, Write, Edit, Find, Search — to manage everything directly.
+Maintain a persistent knowledge base at `~/.tron/workspace/knowledge/`. Notes are plain Markdown files with optional YAML frontmatter. Use your standard tools — Read, Write, Edit, Find, Search — to manage everything directly.
 
 ## Knowledge folder
 
 ```
-~/.tron/memory/knowledge/
+~/.tron/workspace/knowledge/
   sources/       -- one note per URL (articles, papers, tweets)
   topics/        -- one note per atomic concept (grows over time)
   arguments/     -- synthesis notes connecting topics
@@ -43,7 +43,7 @@ For simple operations that don't need a sub-file:
 ### Save a quick note
 
 ```
-Write to: ~/.tron/memory/knowledge/{category}/{slug}.md
+Write to: ~/.tron/workspace/knowledge/{category}/{slug}.md
 ```
 
 Include frontmatter:
@@ -61,19 +61,19 @@ updated: "YYYY-MM-DD"
 
 ```
 # Full-text search
-Search for "query" in ~/.tron/memory/knowledge/
+Search for "query" in ~/.tron/workspace/knowledge/
 
 # Find all notes in a category
-Find *.md in ~/.tron/memory/knowledge/topics/
+Find *.md in ~/.tron/workspace/knowledge/topics/
 
 # Find by tag
-Search for "tags:.*tagname" in ~/.tron/memory/knowledge/
+Search for "tags:.*tagname" in ~/.tron/workspace/knowledge/
 ```
 
 ### Read a note
 
 ```
-Read: ~/.tron/memory/knowledge/{category}/{slug}.md
+Read: ~/.tron/workspace/knowledge/{category}/{slug}.md
 ```
 
 ## When to save knowledge

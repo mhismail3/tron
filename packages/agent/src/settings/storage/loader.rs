@@ -25,17 +25,17 @@ pub fn tron_home_dir() -> PathBuf {
 
 /// Resolve the path to the settings file (`~/.tron/system/settings.json`).
 pub fn settings_path() -> PathBuf {
-    tron_home_dir().join("system").join("settings.json")
+    crate::core::paths::settings_path()
 }
 
 /// Resolve the path to the auth file (`~/.tron/system/auth.json`).
 pub fn auth_path() -> PathBuf {
-    tron_home_dir().join("system").join("auth.json")
+    crate::core::paths::auth_path()
 }
 
 /// Resolve the deployment directory (`~/.tron/system/deployment/`).
 pub fn deploy_dir() -> PathBuf {
-    tron_home_dir().join("system").join("deployment")
+    crate::core::paths::deploy_dir()
 }
 
 /// Load settings from the default path with env var overrides.

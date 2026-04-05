@@ -1,10 +1,10 @@
 # Debug Current Session
 
-> **MANDATORY OUTPUT RULE**: Every session debug or investigation MUST produce a written report file at `~/.tron/memory/reports/YYYY-MM-DD-session-debug.md`. Writing findings only in chat is not acceptable. Write the file first, then give the verbal summary. No exceptions.
+> **MANDATORY OUTPUT RULE**: Every session debug or investigation MUST produce a written report file at `~/.tron/workspace/reports/YYYY-MM-DD-session-debug.md`. Writing findings only in chat is not acceptable. Write the file first, then give the verbal summary. No exceptions.
 
 **What this does**: Debugs the session you are currently operating in — the literal conversation happening right now between you and the user. "This session" means YOUR active session: the one with `ended_at IS NULL` and the most recent `last_activity_at` in the database. That is always the session you are running inside of, because your own queries update its `last_activity_at` timestamp.
 
-Produces a structured diagnostic report written to `~/.tron/memory/reports/`.
+Produces a structured diagnostic report written to `~/.tron/workspace/reports/`.
 
 ```bash
 DB="$HOME/.tron/system/db/log.db"
@@ -148,10 +148,10 @@ ORDER BY sequence;
 ## Step 8: Write the Diagnostic Report (MANDATORY — do not skip)
 
 ```bash
-mkdir -p ~/.tron/memory/reports
+mkdir -p ~/.tron/workspace/reports
 ```
 
-Write a markdown report to `~/.tron/memory/reports/YYYY-MM-DD-session-debug.md` using the current date. Use `date -u +%Y-%m-%d` for the date prefix. If multiple debug reports are needed on the same day, append a short disambiguator (e.g. `2026-03-31-session-debug-auth-failure.md`). **This step is not optional. Do not summarize findings only in chat. Write the file, then tell the user the path.**
+Write a markdown report to `~/.tron/workspace/reports/YYYY-MM-DD-session-debug.md` using the current date. Use `date -u +%Y-%m-%d` for the date prefix. If multiple debug reports are needed on the same day, append a short disambiguator (e.g. `2026-03-31-session-debug-auth-failure.md`). **This step is not optional. Do not summarize findings only in chat. Write the file, then tell the user the path.**
 
 ### Report Template
 

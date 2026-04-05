@@ -111,7 +111,7 @@ impl TronServer {
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
             deploy_restart_initiated: Arc::new(AtomicBool::new(false)),
-            deploy_binary_path: crate::settings::tron_home_dir().join("system").join("bin").join("tron"),
+            deploy_binary_path: crate::core::paths::tron_binary_path(),
             deploy_dir: crate::settings::deploy_dir(),
             start_time: Instant::now(),
         }

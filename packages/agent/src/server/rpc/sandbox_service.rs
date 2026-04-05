@@ -11,11 +11,7 @@ const CONTAINER_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const CONTAINER_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) fn containers_json_path() -> PathBuf {
-    let home = crate::core::paths::home_dir();
-    PathBuf::from(home)
-        .join(".tron")
-        .join("system")
-        .join("containers.json")
+    crate::core::paths::containers_path()
 }
 
 pub(crate) fn load_containers(path: &Path) -> Result<Vec<Value>, RpcError> {

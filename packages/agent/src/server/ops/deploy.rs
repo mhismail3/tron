@@ -1384,7 +1384,7 @@ mod tests {
 
     #[tokio::test]
     async fn deploy_restart_does_not_touch_real_binary() {
-        let real_binary = crate::settings::tron_home_dir().join("system").join("bin").join("tron");
+        let real_binary = crate::core::paths::tron_binary_path();
         if !real_binary.exists() {
             // CI or fresh machine — nothing to protect
             return;

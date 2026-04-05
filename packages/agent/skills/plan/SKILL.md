@@ -27,10 +27,10 @@ These rules apply at ALL times, in every phase, without exception.
 
 **Read-only discipline.** Bash is for exploration only — git log, git diff, ls, curl, and similar read-only commands. Never modify files or state through Bash.
 
-**Filesystem hygiene.** All artifacts go under `~/.tron/memory/`. Use absolute paths — `~` does not expand in Write tool calls. Use the correct subdirectory:
+**Filesystem hygiene.** All artifacts go under `~/.tron/workspace/`. Use absolute paths — `~` does not expand in Write tool calls. Use the correct subdirectory:
 
 ```
-~/.tron/memory/
+~/.tron/workspace/
   plans/       — implementation plans (YYYY-MM-DD-<slug>.md)
   reports/     — research reports (YYYY-MM-DD-<slug>.md)
   scratch/     — working drafts, intermediate notes, comparison tables
@@ -118,7 +118,7 @@ AskUserQuestion:
 
 Write the artifact based on the mode set in Phase 1.
 
-**Plan mode** — write to `~/.tron/memory/plans/YYYY-MM-DD-<slug>.md`:
+**Plan mode** — write to `~/.tron/workspace/plans/YYYY-MM-DD-<slug>.md`:
 
 | Section | Content |
 |---------|---------|
@@ -132,7 +132,7 @@ Write the artifact based on the mode set in Phase 1.
 
 Be specific: exact file paths, function names, line numbers. Concrete enough that someone unfamiliar with the discussion could execute it.
 
-**Research mode** — write to `~/.tron/memory/reports/YYYY-MM-DD-<slug>.md`:
+**Research mode** — write to `~/.tron/workspace/reports/YYYY-MM-DD-<slug>.md`:
 
 | Section | Content |
 |---------|---------|
@@ -164,7 +164,7 @@ If revisions are needed, gather specific feedback and update the artifact. Repea
 ## Completion
 
 When done:
-1. Ensure the artifact is written to the correct path under `~/.tron/memory/`
+1. Ensure the artifact is written to the correct path under `~/.tron/workspace/`
 2. Clean up any scratch files used during drafting
 3. Present the final artifact path and a brief summary
 4. Return the path so downstream agents or the user can reference it

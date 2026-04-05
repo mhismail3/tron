@@ -8,7 +8,7 @@
 //! Users can override at two levels:
 //!
 //! 1. **Project**: `.tron/SYSTEM.md` in the working directory
-//! 2. **Global**: `~/.tron/memory/rules/SYSTEM.md`
+//! 2. **Global**: `~/.tron/workspace/rules/SYSTEM.md`
 //!
 //! Precedence: project override > global override > embedded `TRON_CORE_PROMPT`.
 
@@ -150,7 +150,7 @@ pub struct LoadedSystemPrompt {
 pub enum SystemPromptSource {
     /// Project-level `.tron/SYSTEM.md`.
     Project,
-    /// Global `~/.tron/memory/rules/SYSTEM.md`.
+    /// Global `~/.tron/workspace/rules/SYSTEM.md`.
     Global,
 }
 
@@ -260,10 +260,11 @@ pub fn strip_hash_header(file_content: &str) -> &str {
 ///
 /// Returns `true` if the file was written, `false` otherwise.
 pub fn seed_global_system_prompt(tron_home: &Path) -> bool {
+    use crate::core::paths::{dirs, files};
     let path = tron_home
-        .join("memory")
-        .join("rules")
-        .join("SYSTEM.md");
+        .join(dirs::WORKSPACE)
+        .join(dirs::RULES)
+        .join(files::SYSTEM_MD);
 
     if let Ok(existing) = fs::read_to_string(&path) {
         if is_user_customized(&existing) {
@@ -293,11 +294,12 @@ pub fn seed_global_system_prompt(tron_home: &Path) -> bool {
 
 /// Load the global system prompt from a given home directory.
 ///
-/// Looks for `{home}/.tron/memory/rules/SYSTEM.md`. Strips the hash header
+/// Looks for `{home}/.tron/workspace/rules/SYSTEM.md`. Strips the hash header
 /// if present. Returns `None` if the file is missing, empty, or oversized.
 #[must_use]
 pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt> {
-    let path = home.join(".tron").join("memory").join("rules").join("SYSTEM.md");
+    use crate::core::paths::{dirs, files};
+    let path = home.join(".tron").join(dirs::WORKSPACE).join(dirs::RULES).join(files::SYSTEM_MD);
 
     let Ok(metadata) = fs::metadata(&path) else {
         return None;
@@ -329,7 +331,7 @@ pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt>
     }
 }
 
-/// Load the global system prompt from `~/.tron/memory/rules/SYSTEM.md`.
+/// Load the global system prompt from `~/.tron/workspace/rules/SYSTEM.md`.
 ///
 /// Convenience wrapper around [`load_global_system_prompt_from`] using the
 /// user's home directory.
@@ -699,7 +701,7 @@ mod tests {
     #[test]
     fn seed_creates_file_when_missing() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         assert!(seed_global_system_prompt(dir.path()));
@@ -709,7 +711,7 @@ mod tests {
     #[test]
     fn seed_created_file_is_not_user_customized() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         seed_global_system_prompt(dir.path());
@@ -720,7 +722,7 @@ mod tests {
     #[test]
     fn seed_created_file_body_is_core_prompt() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         seed_global_system_prompt(dir.path());
@@ -731,7 +733,7 @@ mod tests {
     #[test]
     fn seed_updates_pristine_file_with_different_hash() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         // Write a pristine file with different content (simulating old version)
@@ -747,7 +749,7 @@ mod tests {
     #[test]
     fn seed_preserves_customized_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         let custom = "My fully custom prompt";
@@ -761,7 +763,7 @@ mod tests {
     #[test]
     fn seed_preserves_file_without_hash_header() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         let manual = "Manually created SYSTEM.md\nwith custom content";
@@ -777,7 +779,7 @@ mod tests {
     #[test]
     fn seed_returns_true_on_write_false_on_skip() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         // First call creates → true
@@ -789,7 +791,7 @@ mod tests {
     #[test]
     fn seed_handles_empty_existing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
@@ -808,7 +810,7 @@ mod tests {
     #[test]
     fn seed_idempotent_when_pristine() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join("memory").join("rules");
+        let rules_dir = dir.path().join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         let _ = seed_global_system_prompt(dir.path());
@@ -831,7 +833,7 @@ mod tests {
     #[test]
     fn load_global_returns_content_when_file_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "Custom global prompt").unwrap();
 
@@ -842,7 +844,7 @@ mod tests {
     #[test]
     fn load_global_strips_hash_header() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         let seeded = build_seeded_content("Prompt body");
@@ -856,7 +858,7 @@ mod tests {
     #[test]
     fn load_global_source_is_global() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "prompt").unwrap();
 
@@ -867,7 +869,7 @@ mod tests {
     #[test]
     fn load_global_rejects_oversized_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         let big = "x".repeat(150_000);
         fs::write(rules_dir.join("SYSTEM.md"), big).unwrap();
@@ -878,7 +880,7 @@ mod tests {
     #[test]
     fn load_global_returns_customized_content_as_is() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
 
         let custom = "User's custom prompt\nwith multiple lines";
@@ -891,7 +893,7 @@ mod tests {
     #[test]
     fn load_global_returns_none_for_empty_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join("memory").join("rules");
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
 

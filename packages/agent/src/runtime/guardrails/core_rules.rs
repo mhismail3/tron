@@ -768,12 +768,12 @@ mod tests {
         let home = homedir();
         let ctx = make_ctx(
             "Write",
-            serde_json::json!({"file_path": format!("{home}/.tron/memory/scratch/file.txt")}),
+            serde_json::json!({"file_path": format!("{home}/.tron/{}/{}/file.txt", crate::core::paths::dirs::WORKSPACE, crate::core::paths::dirs::SCRATCH)}),
         );
         let result = rule.evaluate(&ctx, None);
         assert!(
             !result.triggered,
-            "Write to ~/.tron/memory/scratch should be allowed"
+            "Write to ~/.tron/workspace/scratch should be allowed"
         );
     }
 }

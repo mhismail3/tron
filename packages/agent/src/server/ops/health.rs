@@ -74,13 +74,13 @@ pub fn deep_health_check(
         // 1. Database
         check_database(pool),
         // 2. Settings
-        check_settings(&tron_home.join("settings.json")),
+        check_settings(&tron_home.join(crate::core::paths::files::SETTINGS_JSON)),
         // 3. Auth
-        check_auth(&tron_home.join("system").join("auth.json")),
+        check_auth(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::files::AUTH_JSON)),
         // 4. Skills
-        check_skills(&tron_home.join("skills")),
+        check_skills(&tron_home.join(crate::core::paths::dirs::SKILLS)),
         // 5. Binary
-        check_binary(&tron_home.join("system").join("bin").join("tron")),
+        check_binary(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::dirs::BIN).join("tron")),
         // 6. Deploy
         check_deploy(deploy_dir),
         // 7. Disk

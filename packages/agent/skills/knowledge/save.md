@@ -17,14 +17,14 @@ Save a piece of knowledge quickly — a fact, reference, preference, or observat
 ### Step 2: Check for existing notes
 
 ```
-Search for "<key terms>" in ~/.tron/memory/knowledge/
+Search for "<key terms>" in ~/.tron/workspace/knowledge/
 ```
 
 If a related note exists, update it with Edit rather than creating a duplicate.
 
 ### Step 3: Write the note
 
-**Path:** `~/.tron/memory/knowledge/{category}/{slug}.md` — name by topic slug, no date prefix (these are living documents).
+**Path:** `~/.tron/workspace/knowledge/{category}/{slug}.md` — name by topic slug, no date prefix (these are living documents).
 
 ```markdown
 ---

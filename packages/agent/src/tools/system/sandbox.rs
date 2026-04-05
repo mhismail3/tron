@@ -13,12 +13,11 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::core::paths::tron_home;
 use crate::tools::errors::ToolError;
 
 /// Tron scratch directory for sandbox workspaces.
 fn scratch_dir() -> PathBuf {
-    tron_home().join("memory").join("scratch")
+    crate::core::paths::scratch_dir()
 }
 
 /// Configuration for a lightweight sandbox.
@@ -540,7 +539,8 @@ mod tests {
             .await
             .unwrap();
         let path_str = workspace.path.to_string_lossy().to_string();
-        assert!(path_str.contains(".tron/memory/scratch/sandbox-"));
+        let expected = format!(".tron/{}/{}/sandbox-", crate::core::paths::dirs::WORKSPACE, crate::core::paths::dirs::SCRATCH);
+        assert!(path_str.contains(&expected));
         workspace.cleanup().await.unwrap();
     }
 

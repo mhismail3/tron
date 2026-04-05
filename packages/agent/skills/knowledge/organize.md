@@ -7,7 +7,7 @@ Maintain, restructure, and clean up the knowledge base.
 ### Move a note
 
 ```bash
-mv ~/.tron/memory/knowledge/old-category/note.md ~/.tron/memory/knowledge/new-category/note.md
+mv ~/.tron/workspace/knowledge/old-category/note.md ~/.tron/workspace/knowledge/new-category/note.md
 ```
 
 After moving, search for `[[Note Name]]` across the vault and update broken references if the display name changed.
@@ -15,7 +15,7 @@ After moving, search for `[[Note Name]]` across the vault and update broken refe
 ### Rename a note
 
 ```bash
-mv ~/.tron/memory/knowledge/category/old-name.md ~/.tron/memory/knowledge/category/new-name.md
+mv ~/.tron/workspace/knowledge/category/old-name.md ~/.tron/workspace/knowledge/category/new-name.md
 ```
 
 Then search for `[[Old Name]]` and replace with `[[New Name]]` across the vault.
@@ -50,7 +50,7 @@ If a note covers multiple distinct concepts:
 ### Create a new category
 
 ```bash
-mkdir -p ~/.tron/memory/knowledge/new-category/
+mkdir -p ~/.tron/workspace/knowledge/new-category/
 ```
 
 ### Audit for orphans
@@ -58,12 +58,12 @@ mkdir -p ~/.tron/memory/knowledge/new-category/
 Find notes with no inbound wikilinks:
 
 ```
-Find *.md in ~/.tron/memory/knowledge/
+Find *.md in ~/.tron/workspace/knowledge/
 ```
 
 For each note, check if any other note references it:
 ```
-Search for "[[Note Name]]" in ~/.tron/memory/knowledge/
+Search for "[[Note Name]]" in ~/.tron/workspace/knowledge/
 ```
 
 Notes with zero backlinks may need better cross-referencing or may be candidates for removal.
