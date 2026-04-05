@@ -60,6 +60,8 @@ pub struct PromptHookHandler {
     event_store: Option<Arc<crate::events::EventStore>>,
     /// Optional worktree coordinator for branch rename operations.
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
+    /// Shared abort tracker for cancelling stale subsessions across prompts.
+    abort_tracker: Option<Arc<super::abort_tracker::HookAbortTracker>>,
 }
 
 /// How many user prompts between automatic title regeneration.
@@ -92,6 +94,7 @@ impl PromptHookHandler {
             event_emitter,
             event_store: None,
             worktree_coordinator: None,
+            abort_tracker: None,
         }
     }
 
@@ -104,6 +107,12 @@ impl PromptHookHandler {
     /// Attach a worktree coordinator for branch rename operations.
     pub fn with_worktree_coordinator(mut self, coord: Arc<crate::worktree::WorktreeCoordinator>) -> Self {
         self.worktree_coordinator = Some(coord);
+        self
+    }
+
+    /// Attach a shared abort tracker for cancelling stale subsessions.
+    pub fn with_abort_tracker(mut self, tracker: Arc<super::abort_tracker::HookAbortTracker>) -> Self {
+        self.abort_tracker = Some(tracker);
         self
     }
 
@@ -280,9 +289,10 @@ impl HookHandler for PromptHookHandler {
         let emitter = self.event_emitter.clone();
         let coordinator = self.worktree_coordinator.clone();
         let event_store = self.event_store.clone();
+        let abort_key = format!("{}:{}", session_id, hook_id);
 
         // Fire-and-forget: spawn the subsession in the background
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             debug!(hook_id = %hook_id, "[prompt_hook] background task started, calling spawn_subsession");
             let start = Instant::now();
 
@@ -458,6 +468,13 @@ impl HookHandler for PromptHookHandler {
                 }
             }
         });
+
+        // Register this subsession's handle, aborting any previous one for the same key.
+        if let Some(ref tracker) = self.abort_tracker {
+            if tracker.replace(&abort_key, join_handle.abort_handle()) {
+                debug!(id = %self.id, "[prompt_hook] aborted previous stale subsession");
+            }
+        }
 
         debug!(id = %self.id, "[prompt_hook] handle() returning Continue (subsession running in background)");
         Ok(HookResult::continue_())

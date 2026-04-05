@@ -368,6 +368,14 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastDashboardResponse, "Interrupted")
     }
 
+    func testAbortAgentMarksAwaitingSuggestions() async {
+        // When: Aborting agent
+        await coordinator.abortAgent(context: mockContext)
+
+        // Then: Should mark awaiting suggestions so the hook result is accepted
+        XCTAssertTrue(mockContext.markAwaitingSuggestionsCalled)
+    }
+
     func testAbortAgentHandlesServerError() async {
         // Given: Server abort will fail
         mockContext.abortShouldFail = true
@@ -526,6 +534,11 @@ final class MockMessagingContext: MessagingContext {
 
     func clearThinkingCaption() {
         // No-op for tests
+    }
+
+    var markAwaitingSuggestionsCalled = false
+    func markAwaitingSuggestions() {
+        markAwaitingSuggestionsCalled = true
     }
 
     func flushPendingTextUpdates() {

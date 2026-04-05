@@ -62,6 +62,7 @@
 //!
 //! - `builtin:title-gen` — auto-generates session titles from user prompts
 //! - `builtin:branch-name-gen` — renames worktree branches to memorable 3-word names
+//! - `builtin:suggest-prompts` — suggests follow-up prompts when the agent finishes
 //!
 //! # Hot Reload
 //!
@@ -73,6 +74,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | [`abort_tracker`] | Abort handles for fire-and-forget hook subsessions |
 //! | [`builtin`] | Built-in hook definitions + registration |
 //! | [`engine`] | `HookEngine` — dispatch, blocking/background partitioning |
 //! | [`registry`] | Priority-sorted handler storage per event type |
@@ -85,6 +87,7 @@
 //! | [`errors`] | Hook-specific error types |
 //! | [`types`] | Shared types (config, results, discovered hooks) |
 
+pub mod abort_tracker;
 pub mod background;
 pub mod builtin;
 pub mod context;

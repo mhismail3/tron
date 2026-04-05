@@ -83,6 +83,8 @@ pub struct RpcContext {
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Output buffer registry for on-demand process output streaming.
     pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Shared abort tracker for cancelling stale hook subsessions across prompts.
+    pub hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
 }
 
 impl RpcContext {

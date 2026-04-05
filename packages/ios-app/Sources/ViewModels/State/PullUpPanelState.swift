@@ -24,6 +24,10 @@ final class PullUpPanelState {
     /// Suggested follow-up prompts from LLM hook.
     var suggestions: [String] = []
 
+    /// Whether we're expecting suggestions from the current turn's hook.
+    /// Set true on agent.complete and abort. Set false on turn start and after accepting.
+    var awaitingSuggestions = false
+
     /// When true, pull-up drag gesture is disabled (agent is active).
     var isDragDisabled: Bool = false
 

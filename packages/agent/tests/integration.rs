@@ -77,6 +77,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
+        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
     };
 
     let mut registry = MethodRegistry::new();
@@ -362,6 +363,7 @@ async fn boot_server_with_provider_and_handles(
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
+        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
     };
 
     let mut registry = MethodRegistry::new();

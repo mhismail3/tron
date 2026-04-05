@@ -38,6 +38,7 @@ const SUGGEST_PROMPTS_PROMPT: &str =
      - No bullets, numbers, or prefixes — just the raw text\n\
      - Mix actions, questions, and refinements\n\
      - Be specific to the conversation, not generic\n\
+     - If stop_reason is \"Interrupted\", the user stopped the response — suggest corrections, redirections, or alternative approaches\n\
      - Output ONLY the suggestions, nothing else";
 
 /// Register all built-in hooks into the engine.
@@ -53,6 +54,7 @@ pub fn register_builtins(
     event_emitter: &Arc<crate::runtime::agent::event_emitter::EventEmitter>,
     event_store: Option<&Arc<crate::events::EventStore>>,
     worktree_coordinator: Option<&Arc<crate::worktree::WorktreeCoordinator>>,
+    abort_tracker: &Arc<super::abort_tracker::HookAbortTracker>,
 ) {
     // Title generation hook
     let title_gen_enabled =
@@ -70,6 +72,7 @@ pub fn register_builtins(
         subagent_manager.clone(),
         event_emitter.clone(),
     );
+    title_handler = title_handler.with_abort_tracker(abort_tracker.clone());
     if let Some(store) = event_store {
         title_handler = title_handler.with_event_store(store.clone());
     }
@@ -93,6 +96,7 @@ pub fn register_builtins(
         subagent_manager.clone(),
         event_emitter.clone(),
     );
+    branch_handler = branch_handler.with_abort_tracker(abort_tracker.clone());
     if let Some(coord) = worktree_coordinator {
         branch_handler = branch_handler.with_worktree_coordinator(coord.clone());
     }
@@ -116,6 +120,7 @@ pub fn register_builtins(
         subagent_manager.clone(),
         event_emitter.clone(),
     );
+    suggest_handler = suggest_handler.with_abort_tracker(abort_tracker.clone());
     if let Some(store) = event_store {
         suggest_handler = suggest_handler.with_event_store(store.clone());
     }

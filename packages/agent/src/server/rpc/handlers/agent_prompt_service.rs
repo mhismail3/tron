@@ -43,6 +43,7 @@ struct PromptRunPlan {
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -140,6 +141,7 @@ pub fn spawn_prompt_run(
         process_manager: ctx.process_manager.clone(),
         job_manager: ctx.job_manager.clone(),
         output_buffer_registry: ctx.output_buffer_registry.clone(),
+        hook_abort_tracker: ctx.hook_abort_tracker.clone(),
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -175,6 +177,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         process_manager,
         job_manager,
         output_buffer_registry,
+        hook_abort_tracker,
         server_origin,
         run_id,
         model,
@@ -218,6 +221,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 &broadcast,
                 Some(&event_store),
                 worktree_coordinator.as_ref(),
+                &hook_abort_tracker,
             );
         }
 

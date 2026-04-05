@@ -447,7 +447,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     }
 
     func test_complete_clearsToolTracking() {
-        // Given
+        // Given: agent must be processing for handleComplete to transition
+        viewModel.agentPhase = .processing
         viewModel.currentTurnToolCalls = [
             ToolCallRecord(toolCallId: "t1", toolName: "Bash", arguments: "{}")
         ]

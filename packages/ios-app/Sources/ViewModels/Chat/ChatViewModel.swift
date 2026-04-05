@@ -309,6 +309,7 @@ final class ChatViewModel {
                 self.getConfirmationState.clearAll()
                 self.subagentState.clearAll()
                 self.prunedLiveMessages.removeAll()
+                self.pullUpPanelState.awaitingSuggestions = false
             }
         })
 

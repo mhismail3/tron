@@ -543,6 +543,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         };
         (ctx, coord)
     }

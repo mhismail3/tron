@@ -233,6 +233,47 @@ Optional: `"headers"` for custom headers.
 - Push + WebSocket: `[{"type": "apns"}, {"type": "websocket"}]`
 - Webhook: `[{"type": "webhook", "url": "https://..."}]`
 
+## Cron I/O Directory
+
+All files produced or consumed by cron jobs — output logs, result artifacts, intermediate data, scripts, and working files — must be organized under:
+
+```
+~/.tron/memory/cron/
+```
+
+### Structure
+
+Use one subdirectory per job, named after the job's `id` or a short slug derived from the job `name`:
+
+```
+~/.tron/memory/cron/
+  <job-slug>/
+    output/        # Result files written by the job (reports, exports, etc.)
+    logs/          # Any plain-text logs or summaries the job writes
+    state/         # Persistent state the job reads/writes between runs
+    scripts/       # Shell scripts or helper files the job invokes
+```
+
+Only create subdirectories that are actually needed — a simple job may only need `output/`.
+
+### Rules
+
+- **Agent turn prompts** that produce file output must write to `~/.tron/memory/cron/<job-slug>/output/`.
+- **Shell commands** must write any output files or logs to `~/.tron/memory/cron/<job-slug>/` — not to arbitrary tmp paths or the home directory.
+- **State files** (e.g., last-run cursors, seen IDs, counters) live in `~/.tron/memory/cron/<job-slug>/state/`.
+- **Scripts** invoked by `shellCommand` payloads should be stored in `~/.tron/memory/cron/<job-slug>/scripts/` so they are co-located with the job.
+- The directory must be created before the job runs. Add `mkdir -p ~/.tron/memory/cron/<job-slug>/output` (and other needed subdirs) to the beginning of any shell command, or include it in the agent turn prompt.
+
+### Naming output files
+
+Use timestamped filenames so runs don't overwrite each other:
+
+```bash
+~/.tron/memory/cron/<job-slug>/output/$(date +%Y-%m-%d_%H-%M-%S).txt
+```
+
+For state files that must persist a single value across runs, use a fixed filename (e.g., `last_seen.json`).
+
 ## CRUD Workflow
 
 ### Read (list all automations)
@@ -299,3 +340,4 @@ Create a one-shot job with `at` set to the current time (or a few seconds in the
 - For `agentTurn` payloads, write clear, detailed prompts — the agent session runs without user interaction
 - Prefer cron expressions with timezones for time-of-day schedules; use interval for polling-style jobs
 - Default to the user's local timezone, not UTC
+- **All job I/O goes in `~/.tron/memory/cron/<job-slug>/`** — never scatter output to tmp dirs, home dir, or ad-hoc paths. Create the directory structure as part of job setup.

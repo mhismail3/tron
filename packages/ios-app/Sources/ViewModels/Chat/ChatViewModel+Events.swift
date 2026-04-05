@@ -110,6 +110,7 @@ extension ChatViewModel {
         // Also clears any stale postProcessing state from a previous cycle.
         agentPhase = .processing
         runningToolCount = 0
+        pullUpPanelState.awaitingSuggestions = false
 
         if isCompacting {
             isCompacting = false
@@ -131,6 +132,10 @@ extension ChatViewModel {
     }
 
     func handleComplete() {
+        // Only transition from .processing → .postProcessing.
+        // After abort, agentPhase is already .idle — skip to prevent flicker.
+        guard agentPhase == .processing else { return }
+
         // Capture streaming text before finalization clears it
         let finalStreamingText = streamingManager.streamingText
 
@@ -148,6 +153,7 @@ extension ChatViewModel {
         // Enter post-processing state: text field enabled, send button disabled.
         // Cleared by agent_ready event when background hooks finish.
         agentPhase = .postProcessing
+        pullUpPanelState.awaitingSuggestions = true
 
         // Defensive timeout: if agent.ready never arrives, recover the send button
         postProcessingTimeoutTask?.cancel()
@@ -186,6 +192,7 @@ extension ChatViewModel {
         getConfirmationState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
+        pullUpPanelState.awaitingSuggestions = false
         // Clear queue — server context is lost, queued messages are stale
         messageQueueState.clear()
     }
@@ -339,6 +346,7 @@ extension ChatViewModel {
         memoryRetainInProgressMessageId = nil
         askUserQuestionState.clearAll()
         getConfirmationState.clearAll()
+        pullUpPanelState.awaitingSuggestions = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

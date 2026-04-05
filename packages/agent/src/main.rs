@@ -603,6 +603,7 @@ async fn main() -> Result<()> {
         guardrails: None,
     });
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
+    let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
 
     // Transcription sidecar (parakeet-mlx via Python worker)
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
@@ -730,6 +731,7 @@ async fn main() -> Result<()> {
         process_manager: Some(process_manager.clone()),
         job_manager: Some(job_manager.clone()),
         output_buffer_registry: Some(output_buffer_registry.clone()),
+        hook_abort_tracker: hook_abort_tracker.clone(),
     };
 
     // Method registry
@@ -1375,6 +1377,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1566,6 +1569,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         };
 
         let mut registry = MethodRegistry::new();
