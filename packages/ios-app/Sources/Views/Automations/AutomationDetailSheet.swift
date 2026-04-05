@@ -1,19 +1,37 @@
 import SwiftUI
 
 /// Detail sheet for a single cron job showing config, runtime state, and recent runs.
+/// Owns its own state and refreshes after actions for real-time updates.
 @available(iOS 26.0, *)
 struct AutomationDetailSheet: View {
     let rpcClient: RPCClient
-    let job: CronJobDTO
-    let runtimeState: CronRuntimeStateDTO?
     let onTrigger: () -> Void
     let onDelete: () -> Void
     let onToggleEnabled: () -> Void
 
+    @State private var currentJob: CronJobDTO
+    @State private var currentRuntimeState: CronRuntimeStateDTO?
     @State private var recentRuns: [CronRunDTO] = []
     @State private var isLoadingRuns = true
+    @State private var isPerformingAction = false
     @State private var selectedRun: CronRunDTO?
     @Environment(\.dismiss) private var dismiss
+
+    init(
+        rpcClient: RPCClient,
+        job: CronJobDTO,
+        initialRuntimeState: CronRuntimeStateDTO?,
+        onTrigger: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        onToggleEnabled: @escaping () -> Void
+    ) {
+        self.rpcClient = rpcClient
+        self._currentJob = State(initialValue: job)
+        self._currentRuntimeState = State(initialValue: initialRuntimeState)
+        self.onTrigger = onTrigger
+        self.onDelete = onDelete
+        self.onToggleEnabled = onToggleEnabled
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,12 +44,21 @@ struct AutomationDetailSheet: View {
                 }
                 .padding()
             }
-            .navigationTitle(job.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .principal) {
+                    Text(currentJob.name)
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronCoral)
+                        .lineLimit(1)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronCoral)
+                    }
                 }
             }
         }
@@ -39,7 +66,7 @@ struct AutomationDetailSheet: View {
             AutomationRunDetailSheet(run: run)
         }
         .task {
-            await loadRuns()
+            await refreshJob()
         }
     }
 
@@ -49,17 +76,16 @@ struct AutomationDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("Configuration")
 
-            infoRow("Type", value: job.payload.typeLabel, icon: job.payload.icon)
-            infoRow("Schedule", value: job.schedule.summary, icon: "clock")
-            infoRow("Status", value: job.enabled ? "Active" : "Paused", icon: "circle.fill",
-                     color: job.enabled ? .green : .tronTextMuted)
+            infoRow("Type", value: currentJob.payload.typeLabel, icon: currentJob.payload.icon)
+            infoRow("Schedule", value: currentJob.schedule.summary, icon: "clock")
+            infoRow("Status", value: currentJob.enabled ? "Active" : "Paused", icon: "circle.fill",
+                     color: currentJob.enabled ? .green : .tronTextMuted)
 
-            if let desc = job.description, !desc.isEmpty {
+            if let desc = currentJob.description, !desc.isEmpty {
                 infoRow("Description", value: desc, icon: "text.alignleft")
             }
 
-            // Payload details
-            switch job.payload {
+            switch currentJob.payload {
             case .shellCommand(let command, _, _):
                 payloadDetail("Command", value: command)
             case .agentTurn(let prompt, let model, _, _):
@@ -72,13 +98,13 @@ struct AutomationDetailSheet: View {
                 payloadDetail("Session", value: sessionId)
             }
 
-            if !job.tags.isEmpty {
+            if !currentJob.tags.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "tag")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                         .frame(width: 20)
-                    ForEach(job.tags, id: \.self) { tag in
+                    ForEach(currentJob.tags, id: \.self) { tag in
                         Text(tag)
                             .font(TronTypography.codeSM)
                             .foregroundStyle(.tronCoral.opacity(0.8))
@@ -90,6 +116,7 @@ struct AutomationDetailSheet: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.tronCoral.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -99,7 +126,7 @@ struct AutomationDetailSheet: View {
 
     @ViewBuilder
     private var runtimeStateSection: some View {
-        if let state = runtimeState {
+        if let state = currentRuntimeState {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("Runtime")
 
@@ -128,20 +155,38 @@ struct AutomationDetailSheet: View {
 
     private var actionsSection: some View {
         HStack(spacing: 12) {
-            Button(action: onTrigger) {
+            Button {
+                Task {
+                    isPerformingAction = true
+                    onTrigger()
+                    try? await Task.sleep(for: .milliseconds(500))
+                    await refreshJob()
+                    isPerformingAction = false
+                }
+            } label: {
                 Label("Run Now", systemImage: "play.fill")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
             }
             .buttonStyle(.bordered)
             .tint(.tronCoral)
+            .disabled(isPerformingAction)
 
-            Button(action: onToggleEnabled) {
-                Label(job.enabled ? "Pause" : "Enable",
-                      systemImage: job.enabled ? "pause.fill" : "play.fill")
+            Button {
+                Task {
+                    isPerformingAction = true
+                    onToggleEnabled()
+                    try? await Task.sleep(for: .milliseconds(300))
+                    await refreshJob()
+                    isPerformingAction = false
+                }
+            } label: {
+                Label(currentJob.enabled ? "Pause" : "Enable",
+                      systemImage: currentJob.enabled ? "pause.fill" : "play.fill")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
             }
             .buttonStyle(.bordered)
-            .tint(job.enabled ? .orange : .green)
+            .tint(currentJob.enabled ? .orange : .green)
+            .disabled(isPerformingAction)
 
             Spacer()
 
@@ -151,6 +196,7 @@ struct AutomationDetailSheet: View {
             }
             .buttonStyle(.bordered)
             .tint(.red)
+            .disabled(isPerformingAction)
         }
     }
 
@@ -288,18 +334,15 @@ struct AutomationDetailSheet: View {
         }
     }
 
-    private func loadRuns() async {
-        isLoadingRuns = true
+    private func refreshJob() async {
         do {
-            let result = try await rpcClient.cron.getRuns(jobId: job.id, limit: 10)
-            await MainActor.run {
-                recentRuns = result.runs
-                isLoadingRuns = false
-            }
+            let result = try await rpcClient.cron.getJob(jobId: currentJob.id)
+            currentJob = result.job
+            currentRuntimeState = result.runtimeState
+            recentRuns = result.recentRuns
+            isLoadingRuns = false
         } catch {
-            await MainActor.run {
-                isLoadingRuns = false
-            }
+            isLoadingRuns = false
         }
     }
 }

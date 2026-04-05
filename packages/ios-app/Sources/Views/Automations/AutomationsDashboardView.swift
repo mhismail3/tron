@@ -59,7 +59,7 @@ struct AutomationsDashboardView: View {
             AutomationDetailSheet(
                 rpcClient: rpcClient,
                 job: job,
-                runtimeState: runtimeStates[job.id],
+                initialRuntimeState: runtimeStates[job.id],
                 onTrigger: { triggerJob(job) },
                 onDelete: {
                     selectedJob = nil
