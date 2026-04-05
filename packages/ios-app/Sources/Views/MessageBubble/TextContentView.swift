@@ -59,8 +59,16 @@ struct TextContentView: View {
         inlineMarkdown(from: content, size: size)
     }
 
-    /// Cached parsed blocks — updated only when `text` changes, avoiding re-parse on every body evaluation.
-    @State private var blocks: [MarkdownBlock] = []
+    /// Cached parsed blocks — initialized eagerly in init, updated only when `text` changes.
+    /// Must be parsed in init (not .onAppear) so the first body evaluation has content,
+    /// preventing a zero-height frame when transitioning from StreamingContentView.
+    @State private var blocks: [MarkdownBlock]
+
+    init(text: String, role: MessageRole) {
+        self.text = text
+        self.role = role
+        _blocks = State(initialValue: MarkdownBlockParser.parse(text))
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -88,7 +96,6 @@ struct TextContentView: View {
         .padding(.top, 4)
         .padding(.horizontal, isUser ? 0 : 4)
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
-        .onAppear { blocks = MarkdownBlockParser.parse(text) }
         .onChange(of: text) { _, newText in blocks = MarkdownBlockParser.parse(newText) }
     }
 }
