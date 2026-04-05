@@ -447,6 +447,15 @@ This is the body.";
     }
 
     #[test]
+    fn test_denied_patterns_in_frontmatter_ignored() {
+        // deniedPatterns was removed; unknown keys are silently skipped
+        let content = "---\ndeniedPatterns:\n  - tool: Bash\n---\nBody";
+        let result = parse_skill_md(content);
+        assert_eq!(result.content, "Body");
+        assert!(result.frontmatter.denied_tools.is_none());
+    }
+
+    #[test]
     fn test_snake_case_keys() {
         let content = "---\nallowed_tools: [Read]\nsubagent_model: haiku\n---\nBody";
         let result = parse_skill_md(content);

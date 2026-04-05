@@ -2,6 +2,10 @@
 //!
 //! Spawns a subagent with the given task, mode, and configuration.
 //! Supports blocking (wait for result within timeout) and non-blocking (return session ID) modes.
+//!
+//! Tool restrictions: `deniedTools` (string array) removes named tools from the
+//! subagent's registry. `denyAllTools` (boolean) removes all tools for text-only
+//! agents. Both are hard-enforced via `AgentFactory` registry removal.
 
 use std::sync::Arc;
 
@@ -55,8 +59,9 @@ Parameters:\n\
 - **task**: The task description for the agent (required)\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
 - **timeout**: How long to block before auto-backgrounding in ms (default: 300000 = 5 min). Set 0 to background immediately.\n\
-- **model**, **systemPrompt**, **toolDenials**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
-- **toolDenials**: Deny tools/patterns. Use { denyAll: true } for text-only agents\n\n\
+- **model**, **systemPrompt**, **deniedTools**, **denyAllTools**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
+- **deniedTools**: Array of tool names to remove from the subagent's registry\n\
+- **denyAllTools**: Set true for text-only agents (removes all tools)\n\n\
 Returns (when completed within timeout):\n\
 - Full output, token usage, duration statistics, status",
         )
@@ -64,7 +69,8 @@ Returns (when completed within timeout):\n\
         .property("mode", json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}))
         .property("model", json!({"type": "string", "description": "Override model for the subagent"}))
         .property("systemPrompt", json!({"type": "string", "description": "Custom system prompt"}))
-        .property("toolDenials", json!({"type": "object", "description": "Tool denial configuration"}))
+        .property("deniedTools", json!({"type": "array", "items": {"type": "string"}, "description": "Tool names to remove from the subagent's registry."}))
+        .property("denyAllTools", json!({"type": "boolean", "description": "Remove all tools (text-only agent). Takes precedence over deniedTools."}))
         .property("skills", json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}))
         .property("workingDirectory", json!({"type": "string", "description": "Working directory"}))
         .property("maxTurns", json!({"type": "number", "description": "Maximum turns before stopping"}))
@@ -104,7 +110,13 @@ Returns (when completed within timeout):\n\
         let system_prompt = get_optional_string(&params, "systemPrompt");
         let working_directory = get_optional_string(&params, "workingDirectory")
             .unwrap_or_else(|| ctx.working_directory.clone());
-        let tool_denials = params.get("toolDenials").cloned();
+        let denied_tools = if get_optional_bool(&params, "denyAllTools") == Some(true) {
+            ctx.all_tool_names.clone()
+        } else if let Some(arr) = params.get("deniedTools").and_then(Value::as_array) {
+            arr.iter().filter_map(Value::as_str).map(String::from).collect()
+        } else {
+            vec![]
+        };
         let skills = params.get("skills").and_then(Value::as_array).map(|arr| {
             arr.iter()
                 .filter_map(Value::as_str)
@@ -129,7 +141,7 @@ Returns (when completed within timeout):\n\
             working_directory,
             max_turns,
             timeout_ms,
-            tool_denials,
+            denied_tools,
             skills,
             max_depth: user_max_depth,
             current_depth: ctx.subagent_depth + 1,
@@ -354,16 +366,93 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_denials_forwarded() {
-        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
-        let r = tool
+    async fn denied_tools_array_parsed_and_forwarded() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let _ = tool
             .execute(
-                json!({"task": "t", "toolDenials": {"denyAll": true}}),
+                json!({"task": "t", "deniedTools": ["Bash", "Write"]}),
                 &make_ctx(),
             )
             .await
             .unwrap();
-        assert!(r.is_error.is_none());
+        let config = spawner.captured_config();
+        assert_eq!(config.denied_tools, vec!["Bash".to_string(), "Write".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn deny_all_tools_populates_all_tool_names() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let mut ctx = make_ctx();
+        ctx.all_tool_names = vec!["Read".into(), "Write".into(), "Bash".into()];
+        let _ = tool
+            .execute(json!({"task": "t", "denyAllTools": true}), &ctx)
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(
+            config.denied_tools,
+            vec!["Read".to_string(), "Write".to_string(), "Bash".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn no_denial_params_results_in_empty_denied_tools() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let _ = tool
+            .execute(json!({"task": "t"}), &make_ctx())
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert!(config.denied_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deny_all_takes_precedence_over_denied_tools_array() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let mut ctx = make_ctx();
+        ctx.all_tool_names = vec!["Read".into(), "Write".into()];
+        let _ = tool
+            .execute(
+                json!({"task": "t", "denyAllTools": true, "deniedTools": ["Read"]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.denied_tools, vec!["Read".to_string(), "Write".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn denied_tools_non_string_elements_skipped() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let _ = tool
+            .execute(
+                json!({"task": "t", "deniedTools": ["Bash", 123, null, "Write"]}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.denied_tools, vec!["Bash".to_string(), "Write".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn deny_all_tools_false_ignored() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let mut ctx = make_ctx();
+        ctx.all_tool_names = vec!["Read".into()];
+        let _ = tool
+            .execute(json!({"task": "t", "denyAllTools": false}), &ctx)
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert!(config.denied_tools.is_empty());
     }
 
     #[tokio::test]
@@ -443,6 +532,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         }
     }
 

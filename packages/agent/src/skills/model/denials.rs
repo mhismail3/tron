@@ -1,10 +1,14 @@
 //! Convert skill frontmatter to tool denial configuration.
 //!
-//! Supports two modes:
+//! Supports two mutually exclusive modes:
 //! - **Deny-list** (`deniedTools`): directly specifies denied tools
 //! - **Allow-list** (`allowedTools`): inverts to denied (all tools not in allow list)
 //!
 //! If both are specified, `deniedTools` takes precedence with a warning.
+//!
+//! For inline skills on the main agent, restrictions are soft-enforced via prompt
+//! XML hints. For subagent skills and cron jobs, restrictions are hard-enforced via
+//! tool registry removal in `AgentFactory`.
 
 use std::collections::HashSet;
 
@@ -34,11 +38,7 @@ pub fn skill_frontmatter_to_denials(
 
     if has_denied {
         let denied_tools = frontmatter.denied_tools.clone().unwrap_or_default();
-        let denied_patterns = frontmatter.denied_patterns.clone().unwrap_or_default();
-        return Some(ToolDenialConfig {
-            denied_tools,
-            denied_patterns,
-        });
+        return Some(ToolDenialConfig { denied_tools });
     }
 
     if let Some(allowed_list) = frontmatter.allowed_tools.as_ref().filter(|a| !a.is_empty()) {
@@ -48,11 +48,7 @@ pub fn skill_frontmatter_to_denials(
             .filter(|tool| !allowed.contains(tool.as_str()))
             .cloned()
             .collect();
-        let denied_patterns = frontmatter.denied_patterns.clone().unwrap_or_default();
-        return Some(ToolDenialConfig {
-            denied_tools,
-            denied_patterns,
-        });
+        return Some(ToolDenialConfig { denied_tools });
     }
 
     None
@@ -129,26 +125,6 @@ mod tests {
             ..Default::default()
         };
         assert!(skill_frontmatter_to_denials(&fm, &all_tools()).is_none());
-    }
-
-    #[test]
-    fn test_denied_patterns_included() {
-        use crate::skills::types::{DenyPattern, SkillDeniedPatternRule};
-        let fm = SkillFrontmatter {
-            denied_tools: Some(vec!["Bash".to_string()]),
-            denied_patterns: Some(vec![SkillDeniedPatternRule {
-                tool: "Bash".to_string(),
-                deny_patterns: vec![DenyPattern {
-                    parameter: "command".to_string(),
-                    patterns: vec!["rm.*".to_string()],
-                }],
-                message: Some("No removing".to_string()),
-            }]),
-            ..Default::default()
-        };
-        let config = skill_frontmatter_to_denials(&fm, &all_tools()).unwrap();
-        assert_eq!(config.denied_patterns.len(), 1);
-        assert_eq!(config.denied_patterns[0].tool, "Bash");
     }
 
     #[test]

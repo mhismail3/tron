@@ -419,6 +419,7 @@ impl SubagentSpawner for SubagentManager {
             tracker: tracker.clone(),
             cancel,
             tools: tool_factory(),
+            denied_tools: config.denied_tools.clone(),
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {
@@ -651,7 +652,7 @@ mod tests {
             working_directory: "/tmp".into(),
             max_turns: 5,
             timeout_ms: 10_000,
-            tool_denials: None,
+            denied_tools: vec![],
             skills: None,
             max_depth: 0,
             current_depth: 0,

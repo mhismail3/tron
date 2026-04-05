@@ -3,7 +3,7 @@ name: generate
 description: "Generate interactive web UIs with @json-render/shadcn, displayed in-app via WebView"
 version: "2.0.0"
 tags: [ui, generate, webview, react, shadcn]
-tools:
+allowedTools:
   - Bash
   - Display
 ---

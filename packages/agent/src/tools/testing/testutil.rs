@@ -28,6 +28,7 @@ pub fn make_ctx() -> ToolContext {
         job_manager: None,
         output_buffer_registry: None,
         event_emitter: None,
+        all_tool_names: vec![],
     }
 }
 

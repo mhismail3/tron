@@ -65,6 +65,7 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
     pub(super) tools: ToolRegistry,
+    pub(super) denied_tools: Vec<String>,
 }
 
 pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
@@ -301,7 +302,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_tools: vec![],
+            denied_tools: params.denied_tools,
             subagent_depth: params.subagent_depth,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,

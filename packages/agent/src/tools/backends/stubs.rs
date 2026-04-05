@@ -72,7 +72,7 @@ mod tests {
             working_directory: "/tmp".into(),
             max_turns: 5,
             timeout_ms: 30_000,
-            tool_denials: None,
+            denied_tools: vec![],
             skills: None,
             max_depth: 0,
             current_depth: 0,

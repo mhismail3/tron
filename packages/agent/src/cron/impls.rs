@@ -185,7 +185,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         // 5. Build denied tools list from user restrictions
         let tool_names: Vec<String> = tools.names();
         let denied_tools = tool_restrictions
-            .map(|r| r.resolve_denied_tools(&tool_names))
+            .map(|r| r.to_denied_list(&tool_names))
             .unwrap_or_default();
         // Interactive tools (AskUserQuestion, etc.)
         // are removed automatically by AgentFactory when is_unattended=true.

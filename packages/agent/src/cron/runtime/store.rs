@@ -1072,8 +1072,7 @@ mod tests {
         let pool = setup_pool();
         let mut job = make_job("cron_tr", "Restricted");
         job.tool_restrictions = Some(crate::cron::types::ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["Bash".into(), "Write".into()]),
+            allowed_tools: Some(vec!["Read".into(), "Grep".into()]),
         });
         upsert_job(&pool, &job).unwrap();
 
@@ -1081,10 +1080,9 @@ mod tests {
         assert!(loaded.tool_restrictions.is_some());
         let tr = loaded.tool_restrictions.unwrap();
         assert_eq!(
-            tr.denied_tools,
-            Some(vec!["Bash".to_string(), "Write".to_string()])
+            tr.allowed_tools,
+            Some(vec!["Read".to_string(), "Grep".to_string()])
         );
-        assert!(tr.allowed_tools.is_none());
     }
 
     #[test]

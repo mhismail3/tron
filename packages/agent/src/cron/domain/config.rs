@@ -170,24 +170,6 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
         }
     }
 
-    // Validate tool restrictions
-    if let Some(ref tr) = job.tool_restrictions {
-        validate_tool_restrictions(tr)?;
-    }
-
-    Ok(())
-}
-
-/// Validate tool restrictions: `allowed_tools` and `denied_tools` are mutually exclusive.
-fn validate_tool_restrictions(tr: &ToolRestrictions) -> Result<(), CronError> {
-    if let (Some(allowed), Some(denied)) = (&tr.allowed_tools, &tr.denied_tools)
-        && !allowed.is_empty()
-        && !denied.is_empty()
-    {
-        return Err(CronError::Validation(
-            "cannot set both allowedTools and deniedTools".into(),
-        ));
-    }
     Ok(())
 }
 
@@ -481,34 +463,12 @@ mod tests {
     // ── Tool restrictions validation ─────────────────────────────────
 
     #[test]
-    fn validate_job_tool_restrictions_denied_only() {
-        let mut job = make_valid_job();
-        job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["Bash".into()]),
-        });
-        validate_job(&job).unwrap();
-    }
-
-    #[test]
     fn validate_job_tool_restrictions_allowed_only() {
         let mut job = make_valid_job();
         job.tool_restrictions = Some(ToolRestrictions {
             allowed_tools: Some(vec!["Read".into()]),
-            denied_tools: None,
         });
         validate_job(&job).unwrap();
-    }
-
-    #[test]
-    fn validate_job_tool_restrictions_both_set_rejected() {
-        let mut job = make_valid_job();
-        job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["Read".into()]),
-            denied_tools: Some(vec!["Bash".into()]),
-        });
-        let err = validate_job(&job).unwrap_err();
-        assert!(err.to_string().contains("cannot set both"));
     }
 
     #[test]
@@ -519,11 +479,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_job_tool_restrictions_empty_lists() {
+    fn validate_job_tool_restrictions_empty_list() {
         let mut job = make_valid_job();
         job.tool_restrictions = Some(ToolRestrictions {
             allowed_tools: Some(vec![]),
-            denied_tools: Some(vec![]),
         });
         validate_job(&job).unwrap();
     }

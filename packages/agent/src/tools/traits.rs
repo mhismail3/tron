@@ -65,6 +65,8 @@ pub struct ToolContext {
     /// Event emitter for broadcasting tool events (used by managed processes
     /// to emit `ToolExecutionUpdate` events directly, bypassing `output_tx`).
     pub event_emitter: Option<Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
+    /// All tool names available in the current registry (for `denyAllTools` resolution).
+    pub all_tool_names: Vec<String>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -163,9 +165,9 @@ pub struct SubagentConfig {
     pub max_turns: u32,
     /// Timeout in milliseconds.
     pub timeout_ms: u64,
-    /// Tool denials configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_denials: Option<Value>,
+    /// Tool names to deny from the subagent's registry.
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
     /// Skills to enable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
@@ -763,6 +765,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -784,6 +787,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -804,6 +808,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
@@ -978,6 +983,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         };
         assert!(ctx.process_manager.is_none());
     }
@@ -1153,6 +1159,7 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            all_tool_names: vec![],
         };
         assert!(ctx.job_manager.is_none());
     }

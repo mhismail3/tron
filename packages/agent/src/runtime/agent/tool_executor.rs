@@ -205,6 +205,7 @@ pub async fn execute_tool(
         job_manager: ctx.job_manager.map(Arc::clone),
         output_buffer_registry: ctx.output_buffer_registry.map(Arc::clone),
         event_emitter: Some(Arc::clone(ctx.emitter)),
+        all_tool_names: ctx.registry.names(),
     };
 
     // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events

@@ -59,29 +59,6 @@ pub enum SkillRemoveReason {
     Compact,
 }
 
-/// Granular tool denial pattern for a specific tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillDeniedPatternRule {
-    /// Tool name this rule applies to.
-    pub tool: String,
-    /// Parameter patterns to deny.
-    pub deny_patterns: Vec<DenyPattern>,
-    /// Optional custom denial message.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-
-/// A single parameter pattern to deny.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DenyPattern {
-    /// Parameter name to check.
-    pub parameter: String,
-    /// Regex patterns that trigger denial.
-    pub patterns: Vec<String>,
-}
-
 /// YAML frontmatter parsed from a SKILL.md file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,9 +81,6 @@ pub struct SkillFrontmatter {
     /// Deny-list of tools (mutually exclusive with `allowed_tools`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub denied_tools: Option<Vec<String>>,
-    /// Granular pattern-based deny rules.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub denied_patterns: Option<Vec<SkillDeniedPatternRule>>,
     /// Subagent execution mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SkillSubagentMode>,
@@ -246,8 +220,6 @@ pub struct AddedSkillInfo {
 pub struct ToolDenialConfig {
     /// Tools that are denied.
     pub denied_tools: Vec<String>,
-    /// Granular pattern-based deny rules.
-    pub denied_patterns: Vec<SkillDeniedPatternRule>,
 }
 
 #[cfg(test)]

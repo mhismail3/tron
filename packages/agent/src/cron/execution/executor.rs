@@ -917,30 +917,11 @@ mod tests {
     // ── Tool restriction enforcement ─────────────────────────────────
 
     #[tokio::test]
-    async fn shell_command_blocked_by_denied_tools() {
-        let deps = make_test_deps();
-        let mut job = make_shell_job("echo hi");
-        job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["ShellCommand".into()]),
-        });
-        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("ShellCommand blocked")
-        );
-    }
-
-    #[tokio::test]
     async fn shell_command_blocked_by_allowed_tools_missing() {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo hi");
         job.tool_restrictions = Some(ToolRestrictions {
             allowed_tools: Some(vec!["Webhook".into()]),
-            denied_tools: None,
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -966,26 +947,13 @@ mod tests {
         let mut job = make_shell_job("echo allowed");
         job.tool_restrictions = Some(ToolRestrictions {
             allowed_tools: Some(vec!["ShellCommand".into()]),
-            denied_tools: None,
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn shell_command_allowed_when_not_in_denied_list() {
-        let deps = make_test_deps();
-        let mut job = make_shell_job("echo ok");
-        job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["Webhook".into()]),
-        });
-        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn webhook_blocked_by_denied_tools() {
+    async fn webhook_blocked_by_allowed_tools() {
         let deps = make_test_deps();
         let mut job = CronJob {
             payload: Payload::Webhook {
@@ -998,8 +966,7 @@ mod tests {
             ..make_shell_job("echo")
         };
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["Webhook".into()]),
+            allowed_tools: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -1007,7 +974,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_event_blocked_by_denied_tools() {
+    async fn system_event_blocked_by_allowed_tools() {
         let deps = make_test_deps();
         let mut job = CronJob {
             payload: Payload::SystemEvent {
@@ -1017,8 +984,7 @@ mod tests {
             ..make_shell_job("echo")
         };
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["SystemEvent".into()]),
+            allowed_tools: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -1043,10 +1009,9 @@ mod tests {
             },
             ..make_shell_job("echo")
         };
-        // Even with restrictions that don't mention AgentTurn, it should dispatch
+        // Even with restrictions that don't include AgentTurn, it should dispatch
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: None,
-            denied_tools: Some(vec!["ShellCommand".into()]),
+            allowed_tools: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());
