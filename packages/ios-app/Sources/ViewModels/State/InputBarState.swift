@@ -133,6 +133,10 @@ struct InputBarConfig {
         AttachmentCapability.from(model: currentModelInfo)
     }
 
+    // MARK: - Drag Hint
+    /// Show the chevron-up drag hint above the input row (hold gesture active).
+    let showDragHint: Bool
+
     // MARK: - Message Queue
     /// Queued messages waiting to be sent when the agent becomes ready.
     let queuedMessages: [QueuedMessage]
@@ -156,6 +160,7 @@ struct InputBarConfig {
         inputHistory: InputHistoryStore? = nil,
         animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false,
+        showDragHint: Bool = false,
         queuedMessages: [QueuedMessage] = []
     ) {
         self.agentPhase = agentPhase
@@ -174,6 +179,7 @@ struct InputBarConfig {
         self.inputHistory = inputHistory
         self.animationCoordinator = animationCoordinator
         self.readOnly = readOnly
+        self.showDragHint = showDragHint
         self.queuedMessages = queuedMessages
     }
 }

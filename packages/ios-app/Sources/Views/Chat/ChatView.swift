@@ -377,6 +377,7 @@ struct ChatView: View {
                         inputHistory: inputHistory,
                         animationCoordinator: viewModel.animationCoordinator,
                         readOnly: workspaceDeleted || !isInteractionEnabled,
+                        showDragHint: viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded && !viewModel.inputBarState.isMentionPopupVisible,
                         queuedMessages: viewModel.messageQueueState.queue
                     ),
                     actions: InputBarActions(
@@ -447,15 +448,6 @@ struct ChatView: View {
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .overlay(alignment: .center) {
-            // Arrow indicator when hold is active
-            if viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded && !viewModel.inputBarState.isMentionPopupVisible {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.tronEmerald.opacity(0.6))
-                    .transition(.opacity)
             }
         }
         .modifier(InputAreaDragModifier(

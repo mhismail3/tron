@@ -216,6 +216,15 @@ struct InputBar: View {
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .top) {
+                if config.showDragHint {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                        .offset(y: -20)
+                        .transition(.opacity)
+                }
+            }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showAttachmentButton)
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showMicButton)
             .animation(.tronStandard, value: shouldShowActionButton)
