@@ -323,6 +323,93 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
     }
 
+    // MARK: - Catch-Up Event Buffering Tests
+
+    func testIsCatchingUpSetBeforeGetAgentState() async {
+        // Given: Agent is running
+        mockContext.isConnected = true
+        mockContext.agentStateIsRunning = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: isCatchingUp should have been true when getAgentState was called
+        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
+    }
+
+    func testIsCatchingUpClearedWhenAgentNotRunning() async {
+        // Given: Agent is NOT running
+        mockContext.agentStateIsRunning = false
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: isCatchingUp should be cleared
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
+    func testConnectAndResumeSetsCatchingUpBeforeGetState() async {
+        // Given: Connection succeeds, agent running
+        mockContext.isConnected = true
+        mockContext.agentStateIsRunning = true
+
+        // When: Full connect and resume flow
+        await coordinator.connectAndResume(context: mockContext)
+
+        // Then: isCatchingUp was true during getAgentState
+        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
+        // And cleared after catch-up
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
+    func testReconnectAndResumeSetsCatchingUpBeforeGetState() async {
+        // Given: Already connected, agent running
+        mockContext.isConnected = true
+        mockContext.agentStateIsRunning = true
+
+        // When: Reconnect and resume flow
+        await coordinator.reconnectAndResume(context: mockContext)
+
+        // Then: isCatchingUp was true during getAgentState
+        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
+        // And cleared after catch-up
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
+    func testDrainCatchUpEventBufferCalledAfterCatchUp() async {
+        // Given: Agent is running
+        mockContext.agentStateIsRunning = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: Drain was called after catch-up
+        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
+    }
+
+    func testDrainCatchUpEventBufferCalledWhenAgentNotRunning() async {
+        // Given: Agent is NOT running
+        mockContext.agentStateIsRunning = false
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: Drain is still called (events may have buffered during getAgentState)
+        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
+    }
+
+    func testDrainCatchUpEventBufferCalledOnGetAgentStateError() async {
+        // Given: getAgentState will fail
+        mockContext.getAgentStateShouldFail = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: Drain is called even on error (buffered events must be replayed)
+        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
     // MARK: - Disconnect Tests
 
     func testDisconnectCallsRpcDisconnect() async {
@@ -456,6 +543,8 @@ final class MockConnectionContext: ConnectionContext {
     var cleanUpStreamingStateCalled = false
     var captureIsCatchingUpDuringCatchUp = false
     var wasCatchingUpDuringProcess = false
+    var wasCatchingUpDuringGetState = false
+    var drainCatchUpEventBufferCalled = false
 
     // MARK: - Test Configuration
     var connectWillSucceed = true
@@ -488,6 +577,7 @@ final class MockConnectionContext: ConnectionContext {
 
     func getAgentState(sessionId: String) async throws -> AgentStateResult {
         getAgentStateCalled = true
+        wasCatchingUpDuringGetState = isCatchingUp
         if getAgentStateShouldFail {
             throw ConnectionTestError.generic
         }
@@ -552,6 +642,10 @@ final class MockConnectionContext: ConnectionContext {
 
     func cleanUpStreamingState() {
         cleanUpStreamingStateCalled = true
+    }
+
+    func drainCatchUpEventBuffer() {
+        drainCatchUpEventBufferCalled = true
     }
 
     func showError(_ message: String) {

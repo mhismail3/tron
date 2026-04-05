@@ -120,6 +120,37 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                         &tool_ctx,
                     )
                     .await;
+
+                    // Persist tool.result immediately so the DB reflects
+                    // completion even while other parallel tools are still running.
+                    if let Some(persister) = params.persister {
+                        let result_text = extract_result_text(&result);
+                        let is_error = result.result.is_error.unwrap_or(false);
+                        if let Err(error) = persister
+                            .append_background(
+                                params.session_id,
+                                EventType::ToolResult,
+                                json!({
+                                    "toolCallId": tool_call.id,
+                                    "name": tool_call.name,
+                                    "content": result_text,
+                                    "isError": is_error,
+                                    "duration": result.duration_ms,
+                                    "details": result.result.details,
+                                }),
+                            )
+                            .await
+                        {
+                            warn!(
+                                params.session_id,
+                                turn = params.turn,
+                                tool_call_id = %tool_call.id,
+                                error = %error,
+                                "failed to queue tool-result event"
+                            );
+                        }
+                    }
+
                     (idx, result)
                 }
             })
@@ -149,35 +180,11 @@ async fn process_tool_results(
         };
         outcome.tool_calls_executed += 1;
 
-        let result_text = extract_result_text(&exec_result);
         let result_content = extract_result_content(&exec_result);
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        // Persist text-only to events DB (no images — too large for storage)
-        if let Some(persister) = params.persister
-            && let Err(error) = persister
-                .append_background(
-                    params.session_id,
-                    EventType::ToolResult,
-                    json!({
-                        "toolCallId": tool_call.id,
-                        "name": tool_call.name,
-                        "content": result_text,
-                        "isError": is_error,
-                        "duration": exec_result.duration_ms,
-                        "details": exec_result.result.details,
-                    }),
-                )
-                .await
-        {
-            warn!(
-                params.session_id,
-                turn = params.turn,
-                tool_call_id = %tool_call.id,
-                error = %error,
-                "failed to queue tool-result event"
-            );
-        }
+        // tool.result persistence is handled per-tool inside the execution future
+        // (before join_all) so the DB reflects completion immediately.
 
         // Add full content (including images) to LLM conversation context
         params.context_manager.add_message(Message::ToolResult {

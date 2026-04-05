@@ -43,6 +43,9 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 
     /// Clean up stale streaming state before catch-up processing
     func cleanUpStreamingState()
+
+    /// Replay events that were buffered during catch-up
+    func drainCatchUpEventBuffer()
 }
 
 /// Coordinates session connection, reconnection, and catch-up for ChatViewModel.
@@ -160,15 +163,18 @@ final class ConnectionCoordinator {
     ///
     /// - Parameter context: The context providing access to state and dependencies
     func checkAndResumeAgentState(context: ConnectionContext) async {
+        // Suppress events BEFORE the getAgentState network call.
+        // Between resumeSession() and here there's no suspension point, so no events
+        // can interleave. But getAgentState() awaits a network call, during which the
+        // event task can run. Without this, events would be processed against empty/stale
+        // message state and then wiped by cleanUpStreamingState, permanently losing
+        // tool_end events for parallel tool calls.
+        context.isCatchingUp = true
+
         do {
             let agentState = try await context.getAgentState(sessionId: context.sessionId)
             if agentState.isRunning {
                 context.logInfo("Agent is currently running - setting up streaming state for in-progress session")
-
-                // Suppress real-time events during catch-up to prevent duplicates.
-                // defer guarantees reset even if an intermediate async call throws.
-                context.isCatchingUp = true
-                defer { context.isCatchingUp = false }
 
                 // Clean up stale streaming state from previous connection
                 context.cleanUpStreamingState()
@@ -198,9 +204,14 @@ final class ConnectionCoordinator {
                 context.logDebug("Agent is not running - normal session resume")
             }
         } catch {
-            context.isCatchingUp = false
             context.logWarning("Failed to check agent state: \(error.localizedDescription)")
         }
+
+        // Always reset and drain, whether agent was running, idle, or getState failed.
+        // Buffered events (e.g., tool_end for a tool that completed during catch-up)
+        // are replayed against the now-correct message state.
+        context.isCatchingUp = false
+        context.drainCatchUpEventBuffer()
     }
 
     // MARK: - Session Resume Error Handling

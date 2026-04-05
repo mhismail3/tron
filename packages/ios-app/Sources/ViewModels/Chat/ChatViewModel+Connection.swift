@@ -70,11 +70,36 @@ extension ChatViewModel: ConnectionContext {
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }
 
+    /// Replay events that were buffered during catch-up.
+    /// Called by ConnectionCoordinator after catch-up completes and isCatchingUp is reset.
+    func drainCatchUpEventBuffer() {
+        guard !catchUpEventBuffer.isEmpty else { return }
+        let buffered = catchUpEventBuffer
+        catchUpEventBuffer.removeAll()
+        logger.info("Draining \(buffered.count) buffered catch-up events", category: .session)
+        for event in buffered {
+            dispatchEvent(event)
+        }
+    }
+
     // Note: The following methods are already defined in other extensions:
     // - setSessionProcessing(_:) in ChatViewModel+TurnLifecycleContext.swift
     // - showErrorAlert(_:) in ChatViewModel.swift
     // - logVerbose/Debug/Info/Warning/Error in ChatViewModel.swift
     // ConnectionContext conformance uses those existing implementations.
+}
+
+// MARK: - Test Support
+
+extension ChatViewModel {
+
+    /// Route an event through the buffer/dispatch pipeline. Test-only entry point.
+    func handleEventForTesting(_ event: ParsedEventV2) {
+        handleEventV2(event)
+    }
+
+    /// Number of events currently buffered during catch-up.
+    var catchUpEventBufferCount: Int { catchUpEventBuffer.count }
 }
 
 // MARK: - Connection & Session Management
@@ -313,9 +338,6 @@ extension ChatViewModel {
             timestamp: Date()
         )
 
-        // Track in currentToolMessages for result updates
-        currentToolMessages[messageId] = toolMessage
-
         // If tool call is already completed, update with result
         if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
             var durationMs: Int? = nil
@@ -338,6 +360,9 @@ extension ChatViewModel {
             logger.debug("Resume catch-up: tool \(toolCall.toolName) already completed, updated with result", category: .session)
         }
 
+        // Track in currentToolMessages AFTER content is finalized
+        // (ensures completed tools are stored as .toolResult, not stale .toolUse)
+        currentToolMessages[messageId] = toolMessage
         messages.append(toolMessage)
 
         // CRITICAL: Make tool visible in AnimationCoordinator so it renders

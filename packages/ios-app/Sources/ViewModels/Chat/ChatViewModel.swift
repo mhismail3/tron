@@ -149,8 +149,11 @@ final class ChatViewModel {
     var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
     var catchingUpMessageId: UUID?
-    /// True while catch-up content is being processed — suppresses real-time events to prevent duplicates
+    /// True while catch-up content is being processed — buffers real-time events for replay after catch-up
     var isCatchingUp = false
+    /// Events buffered during catch-up, replayed when catch-up completes.
+    @ObservationIgnored
+    var catchUpEventBuffer: [ParsedEventV2] = []
     /// IDs of messages created during catch-up processing.
     /// Used by the preservation filter to retain ALL catch-up content (text, tools, thinking)
     /// across DB reloads, since in-progress turn content has no DB counterpart.
@@ -455,16 +458,21 @@ final class ChatViewModel {
         }
     }
 
-    /// Unified event handler - dispatches ParsedEventV2 to specific handlers
-    private func handleEventV2(_ event: ParsedEventV2) {
+    /// Unified event handler - buffers during catch-up, dispatches otherwise
+    func handleEventV2(_ event: ParsedEventV2) {
+        if isCatchingUp {
+            catchUpEventBuffer.append(event)
+            return
+        }
+        dispatchEvent(event)
+    }
+
+    /// Dispatch a single event to the appropriate handler
+    func dispatchEvent(_ event: ParsedEventV2) {
         switch event {
         case .plugin(let type, _, _, let transform):
-            // Suppress real-time events during catch-up to prevent duplicates
-            guard !isCatchingUp else { return }
             handlePluginEvent(type: type, transform: transform)
-
         case .unknown(let type):
-            guard !isCatchingUp else { return }
             logger.debug("Unknown event type: \(type)", category: .events)
         }
     }
