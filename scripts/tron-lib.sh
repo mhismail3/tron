@@ -13,8 +13,13 @@
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 BIN_DIR="$HOME/.local/bin"
 
-# Installed binary
-INSTALLED_BINARY="$TRON_HOME/system/bin/tron"
+# App bundle paths — macOS TCC identifies apps by CFBundleIdentifier, so wrapping
+# the binary in a .app bundle ensures permissions persist across binary replacements.
+TRON_BUNDLE_ID="com.tron.agent"
+INSTALLED_BUNDLE="$TRON_HOME/system/Tron.app"
+INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
+DEV_BUNDLE="$TRON_HOME/system/dev/Tron.app"
+DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 
 # Service configuration
 PLIST_NAME="com.tron.server"
@@ -37,13 +42,6 @@ ANTHROPIC_OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
 ANTHROPIC_OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
 ANTHROPIC_OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
 ANTHROPIC_OAUTH_SCOPES="org:create_api_key user:profile user:inference"
-
-# Legacy aliases (for backwards compatibility in any sourced scripts)
-OAUTH_CLIENT_ID="$ANTHROPIC_OAUTH_CLIENT_ID"
-OAUTH_AUTH_ENDPOINT="$ANTHROPIC_OAUTH_AUTH_ENDPOINT"
-OAUTH_TOKEN_ENDPOINT="$ANTHROPIC_OAUTH_TOKEN_ENDPOINT"
-OAUTH_REDIRECT_URI="$ANTHROPIC_OAUTH_REDIRECT_URI"
-OAUTH_SCOPES="$ANTHROPIC_OAUTH_SCOPES"
 
 # OpenAI OAuth
 OPENAI_OAUTH_CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"
@@ -90,7 +88,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/system/{bin,db,deployment,mods/apns}
+    mkdir -p "$TRON_HOME"/system/{bin,database,deployment,mods/apns}
     mkdir -p "$TRON_HOME"/workspace/{sessions,knowledge,cron,scratch,rules}
     mkdir -p "$TRON_HOME"/skills
     mkdir -p "$TRON_HOME"/user/voice
@@ -137,9 +135,8 @@ ensure_prod_binary() {
 
     if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        cp "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
-        chmod +x "$INSTALLED_BINARY"
-        codesign_binary "$INSTALLED_BINARY"
+        create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+        codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
     fi
@@ -196,18 +193,140 @@ health_check() {
     [ "$response" = "200" ]
 }
 
-# Sign binary with first available codesigning identity so macOS TCC
-# permissions (Full Disk Access, folder access) persist across updates.
-codesign_binary() {
-    local binary="$1"
-    local identity
-    identity=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed -n 's/.*"\(.*\)".*/\1/p')
+# Create a minimal headless .app bundle for macOS TCC identity.
+# macOS identifies app bundles by CFBundleIdentifier — a stable string that
+# survives binary replacements. This is how permissions persist across deploys.
+create_app_bundle() {
+    local bundle_path="$1"
+    local binary_src="$2"
+    local version="${3:-1.0.0}"
+
+    mkdir -p "$bundle_path/Contents/MacOS"
+    mkdir -p "$bundle_path/Contents/Resources"
+
+    cat > "$bundle_path/Contents/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>$TRON_BUNDLE_ID</string>
+    <key>CFBundleName</key>
+    <string>Tron</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tron</string>
+    <key>CFBundleExecutable</key>
+    <string>tron</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleVersion</key>
+    <string>$version</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$version</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSBackgroundOnly</key>
+    <true/>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+    # Copy icon if available
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    for candidate in \
+        "$script_dir/AppIcon.icns" \
+        "$DEPLOY_DIR/AppIcon.icns"; do
+        if [ -f "$candidate" ]; then
+            cp "$candidate" "$bundle_path/Contents/Resources/AppIcon.icns"
+            break
+        fi
+    done
+
+    cp "$binary_src" "$bundle_path/Contents/MacOS/tron"
+    chmod +x "$bundle_path/Contents/MacOS/tron"
+}
+
+# Sign an app bundle with the best available codesigning identity.
+# Priority: Developer ID Application > Apple Development > any valid cert > ad-hoc.
+# Uses hardened runtime + entitlements when possible, with tiered fallback.
+codesign_bundle() {
+    local bundle="$1"
+    local identity entitlements
+
+    # Find valid identity — filter revoked, prefer Developer ID > Apple Development
+    identity=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep -v "REVOKED" \
+        | grep '"Developer ID Application' \
+        | head -1 \
+        | sed -n 's/.*"\(.*\)".*/\1/p')
     if [ -z "$identity" ]; then
+        identity=$(security find-identity -v -p codesigning 2>/dev/null \
+            | grep -v "REVOKED" \
+            | grep '"Apple Development' \
+            | head -1 \
+            | sed -n 's/.*"\(.*\)".*/\1/p')
+    fi
+    if [ -z "$identity" ]; then
+        identity=$(security find-identity -v -p codesigning 2>/dev/null \
+            | grep -v "REVOKED" \
+            | grep '"' \
+            | head -1 \
+            | sed -n 's/.*"\(.*\)".*/\1/p')
+    fi
+
+    # Locate entitlements file
+    entitlements=""
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    for candidate in \
+        "$script_dir/tron-agent.entitlements" \
+        "$DEPLOY_DIR/tron-agent.entitlements"; do
+        if [ -f "$candidate" ]; then
+            entitlements="$candidate"
+            break
+        fi
+    done
+
+    # Tier 1: Full signing (cert + hardened runtime + entitlements)
+    if [ -n "$identity" ] && [ -n "$entitlements" ]; then
+        if codesign --force --deep --sign "$identity" \
+               --identifier "$TRON_BUNDLE_ID" \
+               --options runtime \
+               --entitlements "$entitlements" \
+               "$bundle" 2>/dev/null && \
+           codesign --verify --strict "$bundle" 2>/dev/null; then
+            print_status "Signed bundle (${identity})"
+            return 0
+        fi
+    fi
+
+    # Tier 2: Cert + hardened runtime without entitlements
+    if [ -n "$identity" ]; then
+        if codesign --force --deep --sign "$identity" \
+               --identifier "$TRON_BUNDLE_ID" \
+               --options runtime \
+               "$bundle" 2>/dev/null && \
+           codesign --verify --strict "$bundle" 2>/dev/null; then
+            print_status "Signed bundle without entitlements (${identity})"
+            return 0
+        fi
+    fi
+
+    # Tier 3: Ad-hoc signing (no cert — works for dev, not distribution)
+    if codesign --force --deep --sign - \
+           --identifier "$TRON_BUNDLE_ID" \
+           "$bundle" 2>/dev/null; then
+        print_status "Ad-hoc signed bundle"
         return 0
     fi
-    if codesign --force --sign "$identity" "$binary" 2>/dev/null; then
-        print_status "Signed binary (${identity})"
-    fi
+
+    print_status "Code signing failed — bundle will be unsigned"
 }
 
 #=============================================================================
@@ -517,8 +636,8 @@ cmd_rollback() {
 
     # Restore backup
     print_status "Restoring backup..."
-    mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
-    codesign_binary "$INSTALLED_BINARY"
+    create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+    codesign_bundle "$INSTALLED_BUNDLE"
 
     # Start service
     launchctl load "$PLIST_PATH"

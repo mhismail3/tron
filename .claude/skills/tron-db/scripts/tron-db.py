@@ -50,7 +50,7 @@ def get_db_path():
     if os.environ.get("TRON_DB"):
         return os.environ["TRON_DB"]
 
-    db_path = Path.home() / ".tron" / "system" / "db" / "log.db"
+    db_path = Path.home() / ".tron" / "system" / "database" / "log.db"
     if db_path.exists():
         return str(db_path)
 

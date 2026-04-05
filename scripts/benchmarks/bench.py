@@ -317,7 +317,7 @@ def main():
             # Use a temp HOME to isolate from production data.
             tmpdir = tempfile.mkdtemp(prefix="tron-bench-")
             fake_home = tmpdir
-            db_dir = os.path.join(fake_home, ".tron", "system", "db")
+            db_dir = os.path.join(fake_home, ".tron", "system", "database")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "log.db")
 
