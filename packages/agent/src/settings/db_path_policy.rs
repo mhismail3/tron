@@ -1,7 +1,7 @@
 //! Production database path policy.
 //!
 //! Production startup is intentionally strict: the server may only open the
-//! canonical `log.db` path under `~/.tron/system/db`.
+//! canonical `log.db` path under `~/.tron/system/database`.
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +32,7 @@ pub fn default_production_db_path() -> PathBuf {
 
 /// Resolve and validate the production database path using `$HOME`.
 ///
-/// Returns the canonical allowed path (`~/.tron/system/db/log.db`) when valid.
+/// Returns the canonical allowed path (`~/.tron/system/database/log.db`) when valid.
 pub fn resolve_production_db_path(cli_db_path: Option<PathBuf>) -> Result<PathBuf> {
     let home = crate::core::paths::home_dir();
     resolve_production_db_path_for_home(cli_db_path, &PathBuf::from(home))
@@ -68,7 +68,7 @@ pub fn resolve_production_db_path_for_home(
 ///
 /// Rules:
 /// - filename must be exactly `log.db`
-/// - parent directory must resolve exactly to `~/.tron/system/db`
+/// - parent directory must resolve exactly to `~/.tron/system/database`
 /// - symlink DB files are rejected
 pub fn validate_production_db_path_for_home(db_path: &Path, home: &Path) -> Result<()> {
     let filename_ok = db_path

@@ -600,7 +600,7 @@ When enabled, the top-k most relevant memories (default 5) are injected into the
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/db/log.db`. WAL mode with 5s busy timeout for concurrent access.
+All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5s busy timeout for concurrent access.
 
 ### Core Tables
 
@@ -821,7 +821,7 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
 
-8. **Production DB guard**: Startup validates the database path is `~/.tron/system/db/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
+8. **Production DB guard**: Startup validates the database path is `~/.tron/system/database/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
 
 ---
 

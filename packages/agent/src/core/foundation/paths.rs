@@ -38,7 +38,7 @@ pub mod dirs {
     /// Executable binaries.
     pub const BIN: &str = "bin";
     /// SQLite databases.
-    pub const DB: &str = "db";
+    pub const DB: &str = "database";
     /// Deployment artifacts and rollback state.
     pub const DEPLOYMENT: &str = "deployment";
     /// Optional extension modules (APNS, etc.).
@@ -129,7 +129,7 @@ pub fn bin_dir() -> PathBuf {
     system_dir().join(dirs::BIN)
 }
 
-/// `~/.tron/system/db/`
+/// `~/.tron/system/database/`
 pub fn db_dir() -> PathBuf {
     system_dir().join(dirs::DB)
 }

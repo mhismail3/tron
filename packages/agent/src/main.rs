@@ -33,7 +33,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/system/db/log.db`
+//! 7. Production DB target is strictly `~/.tron/system/database/log.db`
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

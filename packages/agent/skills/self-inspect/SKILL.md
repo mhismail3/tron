@@ -70,7 +70,7 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 ## Quick Access
 
 ```bash
-DB="$HOME/.tron/system/db/log.db"
+DB="$HOME/.tron/system/database/log.db"
 
 # Recent sessions
 sqlite3 "$DB" "SELECT id, title, origin, datetime(last_activity_at) as last_active, event_count, printf('\$%.4f', total_cost) as cost FROM sessions ORDER BY last_activity_at DESC LIMIT 10;"

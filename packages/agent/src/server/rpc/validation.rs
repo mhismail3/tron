@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn sanitize_internal_error_strips_details() {
         let err = RpcError::Internal {
-            message: "failed at /Users/user/.tron/system/db/events.db: disk full".into(),
+            message: "failed at /Users/user/.tron/system/database/events.db: disk full".into(),
         };
         let sanitized = sanitize_error_message(&err);
         assert_eq!(sanitized, "Internal error");

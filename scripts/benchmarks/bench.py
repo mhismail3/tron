@@ -313,7 +313,7 @@ def main():
     try:
         if not args.external:
             binary = find_binary()
-            # DB path policy restricts to $HOME/.tron/system/db/log.db.
+            # DB path policy restricts to $HOME/.tron/system/database/log.db.
             # Use a temp HOME to isolate from production data.
             tmpdir = tempfile.mkdtemp(prefix="tron-bench-")
             fake_home = tmpdir

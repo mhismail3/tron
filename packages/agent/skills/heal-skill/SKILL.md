@@ -106,7 +106,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/system/bin/tron` | Server binary |
 | `~/.tron/system/auth.json` | OAuth tokens and API keys |
 | `~/.tron/system/settings.json` | Configuration |
-| `~/.tron/system/db/log.db` | Main SQLite database |
+| `~/.tron/system/database/log.db` | Main SQLite database |
 | `~/.tron/system/deployment/` | Deploy scripts and state |
 | `~/.tron/system/mods/` | Optional modules (apns, google, transcribe, twitter) |
 | `~/.tron/skills/` | Installed skills |
@@ -121,7 +121,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 
 | Old path | Current path |
 |----------|-------------|
-| `~/.tron/database/tron.db` | `~/.tron/system/db/log.db` |
+| `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` |
 | `~/.tron/settings.json` | `~/.tron/system/settings.json` |
 | `~/.tron/auth.json` | `~/.tron/system/auth.json` |
 | `~/.tron/tron` (binary) | `~/.tron/system/bin/tron` |
@@ -129,13 +129,13 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/artifacts/` | `~/.tron/system/deployment/` |
 | `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` |
 | `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` |
-| `~/.tron/database/` | `~/.tron/system/db/` |
+| `~/.tron/database/` | `~/.tron/system/database/` |
 
 ### 6. Validate Database References
 
 If the skill contains SQL queries or references database tables, verify against the actual schema.
 
-**Existing tables** (in `~/.tron/system/db/log.db`):
+**Existing tables** (in `~/.tron/system/database/log.db`):
 `sessions`, `events`, `blobs`, `branches`, `logs`, `workspaces`, `cron_jobs`, `cron_runs`, `device_tokens`, `notification_read_state`, `schema_version`
 
 **Tables that do NOT exist** (remove any references):
@@ -261,7 +261,7 @@ Tools:
   [PASS] "Bash" is valid
 
 Paths:
-  [FAIL] ~/.tron/database/tron.db → should be ~/.tron/system/db/log.db
+  [FAIL] ~/.tron/database/tron.db → should be ~/.tron/system/database/log.db
   [PASS] ~/.tron/skills/ is current
 
 Database:

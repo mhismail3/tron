@@ -271,4 +271,4 @@ Use the `sandbox` skill for container management. Containers are single-use — 
 
 ### Self-investigation
 
-Use the `@self-inspect` skill to investigate the tron server itself. It provides instructions for querying `~/.tron/system/db/` directly via Bash + sqlite3 — sessions, events, logs, and stats are all accessible. This replaces any need for a dedicated memory tool.
+Use the `@self-inspect` skill to investigate the tron server itself. It provides instructions for querying `~/.tron/system/database/` directly via Bash + sqlite3 — sessions, events, logs, and stats are all accessible. This replaces any need for a dedicated memory tool.

@@ -3,7 +3,7 @@
 All workflows use direct sqlite3 queries and system commands. Set `DB` first:
 
 ```bash
-DB="$HOME/.tron/system/db/log.db"
+DB="$HOME/.tron/system/database/log.db"
 ```
 
 ## Workflow 1: Installation Health Check
@@ -149,7 +149,7 @@ FROM sessions GROUP BY origin;
 3. Verify key files exist:
    ```bash
    ls -la ~/.tron/system/bin/tron
-   ls -la ~/.tron/system/db/log.db
+   ls -la ~/.tron/system/database/log.db
    ls -la ~/.tron/system/settings.json
    ls -la ~/.tron/system/auth.json
    ```

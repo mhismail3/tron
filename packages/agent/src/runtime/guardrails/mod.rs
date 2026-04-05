@@ -354,7 +354,7 @@ mod tests {
     fn path_edit_tron_system_db_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/system/db/prod.db")));
+        let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/system/{}/prod.db", crate::core::paths::dirs::DB)));
         assert!(eval.blocked);
         assert!(
             eval.triggered_rules
@@ -450,7 +450,7 @@ mod tests {
     fn path_bash_cp_to_tron_system_db_blocked() {
         let home = crate::core::paths::home_dir();
         let mut engine = default_engine();
-        let cmd = format!("cp foo.db {home}/.tron/system/db/prod.db");
+        let cmd = format!("cp foo.db {home}/.tron/system/{}/prod.db", crate::core::paths::dirs::DB);
         let eval = engine.evaluate(&make_bash_ctx(&cmd));
         assert!(eval.blocked);
     }

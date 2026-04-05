@@ -163,7 +163,7 @@ Dev mode takes over port **9847** from production. It stops the launchd service,
 | Deep health | `http://localhost:9847/health/deep` | N/A |
 | Deploy status | `http://localhost:9847/deploy/status` | N/A (not the deployed binary) |
 | Binary | `~/.tron/system/bin/tron` | `cargo run --release` (source) |
-| Database | `~/.tron/system/db/log.db` | `~/.tron/system/db/log.db` (same) |
+| Database | `~/.tron/system/database/log.db` | `~/.tron/system/database/log.db` (same) |
 | Managed by | launchd (`com.tron.server`) | Foreground process with EXIT trap |
 | Log | `~/.tron/system/deployment/server.log` | stdout (or `tron dev --log` tails same file) |
 

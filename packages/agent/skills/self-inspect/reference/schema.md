@@ -3,7 +3,7 @@
 ## Database
 
 ```bash
-DB="$HOME/.tron/system/db/log.db"
+DB="$HOME/.tron/system/database/log.db"
 sqlite3 "$DB" "PRAGMA query_only = ON;"  # safety: read-only
 ```
 

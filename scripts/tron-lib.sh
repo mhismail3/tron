@@ -26,7 +26,7 @@ DEPLOY_DIR="$TRON_HOME/system/deployment"
 DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
 
 # Database
-DB_PATH="$TRON_HOME/system/db/log.db"
+DB_PATH="$TRON_HOME/system/database/log.db"
 
 # OAuth
 AUTH_FILE="$TRON_HOME/system/auth.json"
