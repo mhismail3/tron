@@ -8,6 +8,7 @@ import UIKit
 @available(iOS 26.0, *)
 struct InputAreaDragModifier: ViewModifier {
     @Bindable var panelState: PullUpPanelState
+    var isDisabled: Bool = false
     var onWillExpand: (() -> Void)?
 
     func body(content: Content) -> some View {
@@ -19,8 +20,8 @@ struct InputAreaDragModifier: ViewModifier {
                 radius: panelState.isHoldActive ? 8 : 0,
                 y: panelState.isHoldActive ? 4 : 0
             )
-            .gesture(panelState.isExpanded ? dismissDragGesture : nil)
-            .gesture(panelState.isExpanded ? nil : holdAndDragGesture)
+            .gesture(!isDisabled && panelState.isExpanded ? dismissDragGesture : nil)
+            .gesture(!isDisabled && !panelState.isExpanded ? holdAndDragGesture : nil)
     }
 
     // MARK: - Expand Gesture (long press + drag)

@@ -460,6 +460,7 @@ struct ChatView: View {
         }
         .modifier(InputAreaDragModifier(
             panelState: viewModel.pullUpPanelState,
+            isDisabled: KeyboardObserver.shared.isKeyboardVisible,
             onWillExpand: { [viewModel] in
                 UIApplication.shared.sendAction(
                     #selector(UIResponder.resignFirstResponder),
