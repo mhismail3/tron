@@ -205,9 +205,9 @@ pub fn auth_path() -> PathBuf {
     system_dir().join(files::AUTH_JSON)
 }
 
-/// `~/.tron/<workspace>/automations.json`
+/// `~/.tron/<workspace>/cron/automations.json`
 pub fn automations_path() -> PathBuf {
-    workspace_dir().join(files::AUTOMATIONS_JSON)
+    cron_dir().join(files::AUTOMATIONS_JSON)
 }
 
 /// `~/.tron/<workspace>/rules/SYSTEM.md`
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn automations_path_correct() {
         let p = automations_path();
-        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, files::AUTOMATIONS_JSON)));
+        assert!(p.ends_with(format!("{}/{}/{}", dirs::WORKSPACE, dirs::CRON, files::AUTOMATIONS_JSON)));
     }
 
     #[test]

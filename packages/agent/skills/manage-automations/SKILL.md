@@ -7,9 +7,9 @@ tags: [automations, cron, scheduling, jobs]
 
 # Manage Automations
 
-Manage scheduled automations (cron jobs) stored in `~/.tron/workspace/automations.json`. The scheduler watches this file (polling every 5 seconds via SHA256 fingerprint) and auto-reconciles on change — no restart needed.
+Manage scheduled automations (cron jobs) stored in `~/.tron/workspace/cron/automations.json`. The scheduler watches this file (polling every 5 seconds via SHA256 fingerprint) and auto-reconciles on change — no restart needed.
 
-Use the standard **Read**, **Write**, and **Edit** tools to manage this file directly. Always use the absolute path `~/.tron/workspace/automations.json`.
+Use the standard **Read**, **Write**, and **Edit** tools to manage this file directly. Always use the absolute path `~/.tron/workspace/cron/automations.json`.
 
 ## Before Creating or Updating
 
@@ -279,7 +279,7 @@ For state files that must persist a single value across runs, use a fixed filena
 ### Read (list all automations)
 
 ```
-Read ~/.tron/workspace/automations.json
+Read ~/.tron/workspace/cron/automations.json
 ```
 
 ### Create
