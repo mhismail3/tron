@@ -35,8 +35,8 @@ pub mod dirs {
 
     // ── Under system/ ──
 
-    /// Executable binaries.
-    pub const BIN: &str = "bin";
+    /// App bundle name (macOS TCC identifies apps by CFBundleIdentifier inside the bundle).
+    pub const APP_BUNDLE: &str = "Tron.app";
     /// SQLite databases.
     pub const DB: &str = "database";
     /// Deployment artifacts and rollback state.
@@ -124,9 +124,12 @@ pub fn skills_dir() -> PathBuf {
 
 // ── System subdirectory helpers ────────────────────────────────────────
 
-/// `~/.tron/system/bin/`
+/// `~/.tron/system/Tron.app/Contents/MacOS/`
 pub fn bin_dir() -> PathBuf {
-    system_dir().join(dirs::BIN)
+    system_dir()
+        .join(dirs::APP_BUNDLE)
+        .join("Contents")
+        .join("MacOS")
 }
 
 /// `~/.tron/system/database/`
@@ -190,7 +193,7 @@ pub fn voice_dir() -> PathBuf {
 
 // ── Composite file path helpers ────────────────────────────────────────
 
-/// `~/.tron/system/bin/tron`
+/// `~/.tron/system/Tron.app/Contents/MacOS/tron`
 pub fn tron_binary_path() -> PathBuf {
     bin_dir().join("tron")
 }
@@ -325,7 +328,7 @@ mod tests {
     #[test]
     fn tron_binary_path_correct() {
         let p = tron_binary_path();
-        assert!(p.ends_with(format!("{}/{}/tron", dirs::SYSTEM, dirs::BIN)));
+        assert!(p.ends_with(format!("{}/{}/Contents/MacOS/tron", dirs::SYSTEM, dirs::APP_BUNDLE)));
     }
 
     #[test]

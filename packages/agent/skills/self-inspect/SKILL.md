@@ -37,15 +37,16 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 ```
 ~/.tron/
 ├── system/                        # Operational state
-│   ├── bin/tron                   # Server binary (Rust, launchd-managed)
+│   ├── Tron.app/                  # App bundle (macOS TCC identity)
+│   │   └── Contents/MacOS/tron    # Server binary (Rust, launchd-managed)
 │   ├── auth.json                  # OAuth tokens and API keys
 │   ├── settings.json              # All configuration
-│   ├── .fda-granted               # Full Disk Access marker
-│   ├── db/
+│   ├── database/
 │   │   └── log.db                 # Main SQLite database
 │   ├── deployment/                # Deploy scripts and state
 │   │   ├── tron-cli               # CLI wrapper
 │   │   ├── tron-lib.sh            # Shared deployment library
+│   │   ├── tron-agent.entitlements # Hardened runtime entitlements
 │   │   ├── deployed-commit        # Current git commit hash
 │   │   ├── last-deployment.json   # Last deploy metadata
 │   │   ├── restart-sentinel.json  # Restart state tracking

@@ -327,9 +327,13 @@ async fn main() -> Result<()> {
         use tron::core::paths::dirs;
         let tron_home = tron::settings::tron_home_dir();
         let system = tron_home.join(dirs::SYSTEM);
-        for subdir in &[dirs::BIN, dirs::DB, dirs::DEPLOYMENT] {
+        for subdir in &[dirs::DB, dirs::DEPLOYMENT] {
             let _ = std::fs::create_dir_all(system.join(subdir));
         }
+        // Ensure app bundle directory structure exists
+        let _ = std::fs::create_dir_all(
+            system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS")
+        );
         for subdir in &[dirs::SESSIONS, dirs::KNOWLEDGE, dirs::REPORTS, dirs::CRON, dirs::SCRATCH, dirs::SCREENSHOTS] {
             let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(subdir));
         }

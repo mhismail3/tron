@@ -665,14 +665,24 @@ pub async fn atomic_binary_install(
     Ok(backup)
 }
 
-/// Sign a binary with the first available code signing identity.
+/// Sign the app bundle containing the given binary.
 ///
-/// Uses `security find-identity` to locate a signing cert, then `codesign --force --sign`.
-/// This ensures macOS TCC (Full Disk Access, folder access) persists across binary updates
-/// since permissions are tied to code signing identity, not binary hash.
+/// Walks up from the binary path to find the `.app` bundle root, then signs
+/// the entire bundle with the best available code signing identity.
+/// Priority: Developer ID Application > Apple Development > any valid cert > ad-hoc.
 /// Failures are logged but non-fatal — the binary still works unsigned.
 pub fn codesign_binary(path: &Path) {
-    // Find the first valid codesigning identity
+    // Find the .app bundle root by walking up from the binary
+    // Expected layout: Tron.app/Contents/MacOS/tron
+    let bundle = path
+        .ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"));
+    let Some(bundle) = bundle else {
+        debug!("binary is not inside an .app bundle, skipping signing");
+        return;
+    };
+
+    // Find valid (non-revoked) codesigning identity
     let identity = std::process::Command::new("security")
         .args(["find-identity", "-v", "-p", "codesigning"])
         .output()
@@ -681,36 +691,61 @@ pub fn codesign_binary(path: &Path) {
             if !o.status.success() {
                 return None;
             }
-            String::from_utf8(o.stdout).ok().and_then(|out| {
-                // Parse first identity line: "  1) HEXHASH \"Name (ID)\""
-                out.lines()
-                    .find(|l| l.contains(')') && l.contains('"'))
-                    .and_then(|line| {
-                        let start = line.find('"')?;
-                        let end = line.rfind('"')?;
-                        if end > start {
-                            Some(line[start + 1..end].to_string())
-                        } else {
-                            None
-                        }
-                    })
+            let out = String::from_utf8(o.stdout).ok()?;
+            // Prefer Developer ID > Apple Development > any valid cert
+            let lines: Vec<&str> = out
+                .lines()
+                .filter(|l| l.contains('"') && !l.contains("REVOKED"))
+                .collect();
+            let best = lines
+                .iter()
+                .find(|l| l.contains("Developer ID Application"))
+                .or_else(|| lines.iter().find(|l| l.contains("Apple Development")))
+                .or_else(|| lines.first());
+            best.and_then(|line| {
+                let start = line.find('"')?;
+                let end = line.rfind('"')?;
+                if end > start {
+                    Some(line[start + 1..end].to_string())
+                } else {
+                    None
+                }
             })
         });
 
-    let Some(identity) = identity else {
-        debug!("no codesigning identity found, skipping binary signing");
-        return;
-    };
+    let bundle_str = bundle.to_string_lossy();
+    let bundle_id = "com.tron.agent";
 
+    if let Some(ref identity) = identity {
+        // Try full signing with hardened runtime
+        let result = std::process::Command::new("codesign")
+            .args([
+                "--force", "--deep", "--sign", identity,
+                "--identifier", bundle_id,
+                "--options", "runtime",
+                &bundle_str,
+            ])
+            .output();
+
+        if let Ok(o) = result {
+            if o.status.success() {
+                info!(identity = identity.as_str(), "signed app bundle for TCC persistence");
+                return;
+            }
+        }
+    }
+
+    // Fallback: ad-hoc signing
     match std::process::Command::new("codesign")
-        .args(["--force", "--sign", &identity, &path.to_string_lossy()])
+        .args([
+            "--force", "--deep", "--sign", "-",
+            "--identifier", bundle_id,
+            &bundle_str,
+        ])
         .output()
     {
         Ok(o) if o.status.success() => {
-            info!(
-                identity = identity.as_str(),
-                "binary signed for TCC persistence"
-            );
+            info!("ad-hoc signed app bundle");
         }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
@@ -805,7 +840,7 @@ mod tests {
         let resp = DeployStatusResponse {
             version: "0.1.0".into(),
             deployed_commit: "abc123".into(),
-            binary_path: "/home/user/.tron/system/bin/tron".into(),
+            binary_path: "/home/user/.tron/system/Tron.app/Contents/MacOS/tron".into(),
             binary_exists: true,
             binary_modified: Some("2026-02-23T10:00:00Z".into()),
             restart_initiated: false,

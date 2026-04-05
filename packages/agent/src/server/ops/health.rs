@@ -80,7 +80,7 @@ pub fn deep_health_check(
         // 4. Skills
         check_skills(&tron_home.join(crate::core::paths::dirs::SKILLS)),
         // 5. Binary
-        check_binary(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::dirs::BIN).join("tron")),
+        check_binary(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::dirs::APP_BUNDLE).join("Contents").join("MacOS").join("tron")),
         // 6. Deploy
         check_deploy(deploy_dir),
         // 7. Disk

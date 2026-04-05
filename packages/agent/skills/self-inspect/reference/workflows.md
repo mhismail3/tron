@@ -148,7 +148,7 @@ FROM sessions GROUP BY origin;
    ```
 3. Verify key files exist:
    ```bash
-   ls -la ~/.tron/system/bin/tron
+   ls -la ~/.tron/system/Tron.app/Contents/MacOS/tron
    ls -la ~/.tron/system/database/log.db
    ls -la ~/.tron/system/settings.json
    ls -la ~/.tron/system/auth.json

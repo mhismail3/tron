@@ -65,7 +65,7 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Guard preventing double-restart during deploy.
     pub deploy_restart_initiated: Arc<AtomicBool>,
-    /// Path to the installed server binary (e.g. `~/.tron/system/bin/tron`).
+    /// Path to the installed server binary (e.g. `~/.tron/system/Tron.app/Contents/MacOS/tron`).
     pub deploy_binary_path: PathBuf,
     /// Deployment directory (e.g. `~/.tron/system/deployment/`).
     pub deploy_dir: PathBuf,

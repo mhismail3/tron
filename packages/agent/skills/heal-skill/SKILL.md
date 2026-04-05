@@ -103,7 +103,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 
 | Correct path | Purpose |
 |-------------|---------|
-| `~/.tron/system/bin/tron` | Server binary |
+| `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary (inside app bundle) |
 | `~/.tron/system/auth.json` | OAuth tokens and API keys |
 | `~/.tron/system/settings.json` | Configuration |
 | `~/.tron/system/database/log.db` | Main SQLite database |
@@ -124,7 +124,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` |
 | `~/.tron/settings.json` | `~/.tron/system/settings.json` |
 | `~/.tron/auth.json` | `~/.tron/system/auth.json` |
-| `~/.tron/tron` (binary) | `~/.tron/system/bin/tron` |
+| `~/.tron/tron` (binary) | `~/.tron/system/Tron.app/Contents/MacOS/tron` |
 | `~/.tron/mods/` | `~/.tron/system/mods/` |
 | `~/.tron/artifacts/` | `~/.tron/system/deployment/` |
 | `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` |

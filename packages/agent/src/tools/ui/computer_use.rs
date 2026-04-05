@@ -1008,16 +1008,178 @@ impl ComputerUseTool {
 
 // MARK: - Startup Permission Check
 
-/// Check macOS permissions needed by the agent at server startup.
+/// Result of probing a single macOS TCC permission.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PermissionStatus {
+    Granted,
+    Denied { guidance: String },
+    Unknown { reason: String },
+}
+
+// ─── Pure parsing functions (no I/O — fully unit-testable) ───
+
+fn parse_accessibility_result(stdout: &str, success: bool) -> PermissionStatus {
+    if !success {
+        return PermissionStatus::Unknown {
+            reason: "swift process failed".into(),
+        };
+    }
+    match stdout.trim() {
+        "granted" => PermissionStatus::Granted,
+        "denied" => PermissionStatus::Denied {
+            guidance: "System Settings > Privacy & Security > Accessibility".into(),
+        },
+        other => PermissionStatus::Unknown {
+            reason: format!("unexpected output: {other}"),
+        },
+    }
+}
+
+fn parse_automation_result(_stdout: &str, stderr: &str, success: bool) -> PermissionStatus {
+    if success {
+        return PermissionStatus::Granted;
+    }
+    if stderr.contains("not allowed") || stderr.contains("1002") || stderr.contains("assistive") {
+        PermissionStatus::Denied {
+            guidance: "System Settings > Privacy & Security > Automation".into(),
+        }
+    } else {
+        PermissionStatus::Unknown {
+            reason: stderr.trim().to_string(),
+        }
+    }
+}
+
+fn parse_screen_recording_result(success: bool, file_exists: bool, file_size: u64) -> PermissionStatus {
+    if success && file_exists && file_size > 0 {
+        PermissionStatus::Granted
+    } else {
+        PermissionStatus::Denied {
+            guidance: "System Settings > Privacy & Security > Screen Recording".into(),
+        }
+    }
+}
+
+fn parse_fda_result(
+    mail_err: Option<std::io::ErrorKind>,
+    safari_err: Option<std::io::ErrorKind>,
+) -> PermissionStatus {
+    // None = read_dir succeeded = FDA granted
+    match (mail_err, safari_err) {
+        (None, _) => PermissionStatus::Granted,
+        (Some(std::io::ErrorKind::PermissionDenied), _) => PermissionStatus::Denied {
+            guidance: "System Settings > Privacy & Security > Full Disk Access".into(),
+        },
+        // Mail dir doesn't exist — try Safari
+        (Some(_), None) => PermissionStatus::Granted,
+        (Some(_), Some(std::io::ErrorKind::PermissionDenied)) => PermissionStatus::Denied {
+            guidance: "System Settings > Privacy & Security > Full Disk Access".into(),
+        },
+        // Both dirs missing (no Mail.app, no Safari) — can't test, assume granted
+        (Some(_), Some(_)) => PermissionStatus::Granted,
+    }
+}
+
+// ─── Async check functions (thin wrappers with timeouts) ───
+
+async fn check_accessibility() -> PermissionStatus {
+    use std::time::Duration;
+    // AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt triggers
+    // the native macOS Accessibility permission dialog when not yet granted.
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::task::spawn_blocking(|| {
+            std::process::Command::new("swift")
+                .args(["-e", concat!(
+                    "import ApplicationServices\n",
+                    "let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary\n",
+                    "print(AXIsProcessTrustedWithOptions(opts) ? \"granted\" : \"denied\")",
+                )])
+                .output()
+        }).await
+    }).await;
+
+    match result {
+        Ok(Ok(Ok(output))) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parse_accessibility_result(&stdout, output.status.success())
+        }
+        _ => PermissionStatus::Unknown {
+            reason: "check timed out or failed to spawn".into(),
+        },
+    }
+}
+
+async fn check_automation() -> PermissionStatus {
+    use std::time::Duration;
+    let result = tokio::time::timeout(Duration::from_secs(5), {
+        tokio::process::Command::new("osascript")
+            .args(["-e", r#"tell application "System Events" to return name of first process"#])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+    }).await;
+
+    match result {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            parse_automation_result(&stdout, &stderr, output.status.success())
+        }
+        _ => PermissionStatus::Unknown {
+            reason: "check timed out or failed to spawn".into(),
+        },
+    }
+}
+
+async fn check_screen_recording() -> PermissionStatus {
+    use std::time::Duration;
+    let tmp = format!("/tmp/tron-permission-check-{}.png", std::process::id());
+    let result = tokio::time::timeout(Duration::from_secs(5), {
+        tokio::process::Command::new("screencapture")
+            .args(["-x", "-t", "png", &tmp])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+    }).await;
+
+    let (success, file_exists, file_size) = match result {
+        Ok(Ok(output)) => {
+            let meta = tokio::fs::metadata(&tmp).await;
+            let exists = meta.is_ok();
+            let size = meta.map(|m| m.len()).unwrap_or(0);
+            let _ = tokio::fs::remove_file(&tmp).await;
+            (output.status.success(), exists, size)
+        }
+        _ => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return PermissionStatus::Unknown {
+                reason: "check timed out or failed to spawn".into(),
+            };
+        }
+    };
+
+    parse_screen_recording_result(success, file_exists, file_size)
+}
+
+async fn check_full_disk_access() -> PermissionStatus {
+    let home = crate::core::paths::home_dir();
+
+    let mail_result = tokio::fs::read_dir(format!("{home}/Library/Mail")).await;
+    let mail_err = mail_result.err().map(|e| e.kind());
+
+    let safari_result = tokio::fs::read_dir(format!("{home}/Library/Safari")).await;
+    let safari_err = safari_result.err().map(|e| e.kind());
+
+    parse_fda_result(mail_err, safari_err)
+}
+
+/// Check macOS permissions at server startup.
 ///
-/// Probes two capabilities and logs results:
-/// 1. **Screen Recording** — needed for screencapture.
-///    Tested with a silent capture. Triggers the native OS prompt on first run.
-/// 2. **Full Disk Access** — needed for reading/writing protected locations.
-///    No native prompt exists for FDA, so we open System Settings on first detection.
-///
-/// Note: Accessibility for input simulation is handled by the enigo crate, which
-/// auto-prompts via `Settings::open_prompt_to_get_permissions = true` on first use.
+/// Probes four capabilities concurrently and logs results:
+/// 1. **Accessibility** — needed for CGEvent-based mouse/keyboard input (enigo).
+/// 2. **Automation** — needed for osascript to System Events.
+/// 3. **Screen Recording** — needed for screencapture.
+/// 4. **Full Disk Access** — needed for reading/writing protected locations.
 ///
 /// No-op on non-macOS platforms.
 pub async fn check_permissions_on_startup() {
@@ -1027,98 +1189,38 @@ pub async fn check_permissions_on_startup() {
 
     tracing::info!("checking macOS permissions...");
 
-    // 2. Screen Recording: test with a silent screencapture. On first run, macOS
-    //    shows its native Screen Recording permission dialog.
-    let tmp = format!("/tmp/tron-permission-check-{}.png", std::process::id());
-    let screen_recording = tokio::process::Command::new("screencapture")
-        .args(["-x", "-t", "png", &tmp])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await;
+    let (ax, auto, screen, fda) = tokio::join!(
+        check_accessibility(),
+        check_automation(),
+        check_screen_recording(),
+        check_full_disk_access(),
+    );
 
-    let file_ok = tokio::fs::metadata(&tmp).await.map(|m| m.len() > 0).unwrap_or(false);
-    let _ = tokio::fs::remove_file(&tmp).await;
-
-    match screen_recording {
-        Ok(output) if output.status.success() && file_ok => {
-            tracing::info!("Screen Recording permission: granted");
-        }
-        Ok(_) => {
-            tracing::warn!(
-                "Screen Recording permission not granted. \
-                 ComputerUse screenshots will not work. \
-                 Grant via: System Settings > Privacy & Security > Screen Recording \
-                 (add your terminal app)"
-            );
-        }
-        Err(e) => {
-            tracing::warn!("could not check Screen Recording permission: {e}");
-        }
-    }
-
-    // 3. Full Disk Access: test by reading a protected path. Unlike Accessibility
-    //    and Screen Recording, FDA has NO native prompt — the only way to grant it
-    //    is via System Settings. We use a sentinel file so we only prompt once.
-    let sentinel = format!("{}/.tron/system/.fda-granted", crate::core::paths::home_dir());
-    if tokio::fs::metadata(&sentinel).await.is_ok() {
-        tracing::info!("Full Disk Access: previously granted (sentinel exists)");
-        return;
-    }
-
-    // Try reading a protected path to check FDA status
-    let fda_check = tokio::fs::read_dir(
-        format!("{}/Library/Mail", crate::core::paths::home_dir())
-    ).await;
-
-    match fda_check {
-        Ok(_) => {
-            tracing::info!("Full Disk Access: granted");
-            // Write sentinel so we don't check again
-            let _ = tokio::fs::write(&sentinel, "granted").await;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            tracing::warn!(
-                "Full Disk Access not granted. The agent may hang when accessing \
-                 protected system locations. Opening System Settings to grant FDA..."
-            );
-            // FDA has no native prompt — System Settings is the only way.
-            // Open directly to the Full Disk Access pane.
-            let _ = tokio::process::Command::new("open")
-                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-        }
-        Err(_) => {
-            // Path doesn't exist or other non-permission error — FDA likely granted
-            // or Mail.app not installed. Check an alternative path.
-            let alt_check = tokio::fs::read_dir(
-                format!("{}/Library/Safari", crate::core::paths::home_dir())
-            ).await;
-            match alt_check {
-                Ok(_) => {
-                    tracing::info!("Full Disk Access: granted");
-                    let _ = tokio::fs::write(&sentinel, "granted").await;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                    tracing::warn!(
-                        "Full Disk Access not granted. Opening System Settings..."
-                    );
-                    let _ = tokio::process::Command::new("open")
-                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status()
-                        .await;
-                }
-                Err(_) => {
-                    tracing::info!("Full Disk Access: likely granted (no protected paths to test)");
-                    let _ = tokio::fs::write(&sentinel, "granted").await;
-                }
+    for (name, status) in [
+        ("Accessibility", &ax),
+        ("Automation", &auto),
+        ("Screen Recording", &screen),
+        ("Full Disk Access", &fda),
+    ] {
+        match status {
+            PermissionStatus::Granted => tracing::info!("{name}: granted"),
+            PermissionStatus::Denied { guidance } => {
+                tracing::warn!("{name}: denied — grant via {guidance}");
+            }
+            PermissionStatus::Unknown { reason } => {
+                tracing::warn!("{name}: could not check ({reason})");
             }
         }
+    }
+
+    // FDA is the only permission without a native prompt — open System Settings directly
+    if matches!(fda, PermissionStatus::Denied { .. }) {
+        let _ = tokio::process::Command::new("open")
+            .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
     }
 }
 
@@ -2501,5 +2603,147 @@ mod tests {
         assert_eq!(d["pid"], 5678);
         assert_eq!(d["activated"], true);
         assert_eq!(d["verified"], true);
+    }
+
+    // ─── Permission parsing tests ───
+
+    #[test]
+    fn parse_accessibility_granted() {
+        assert_eq!(
+            parse_accessibility_result("granted\n", true),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_accessibility_denied() {
+        let status = parse_accessibility_result("denied\n", true);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Accessibility")));
+    }
+
+    #[test]
+    fn parse_accessibility_swift_error() {
+        let status = parse_accessibility_result("", false);
+        assert!(matches!(status, PermissionStatus::Unknown { .. }));
+    }
+
+    #[test]
+    fn parse_accessibility_empty_output() {
+        let status = parse_accessibility_result("", true);
+        assert!(matches!(status, PermissionStatus::Unknown { reason } if reason.contains("unexpected")));
+    }
+
+    #[test]
+    fn parse_accessibility_unexpected_output() {
+        let status = parse_accessibility_result("something weird", true);
+        assert!(matches!(status, PermissionStatus::Unknown { reason } if reason.contains("unexpected")));
+    }
+
+    #[test]
+    fn parse_automation_granted() {
+        assert_eq!(
+            parse_automation_result("loginwindow\n", "", true),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_automation_denied_not_allowed() {
+        let status = parse_automation_result("", "not allowed to send Apple events", false);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Automation")));
+    }
+
+    #[test]
+    fn parse_automation_denied_error_1002() {
+        let status = parse_automation_result("", "error -1002", false);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Automation")));
+    }
+
+    #[test]
+    fn parse_automation_denied_assistive() {
+        let status = parse_automation_result("", "assistive access", false);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Automation")));
+    }
+
+    #[test]
+    fn parse_automation_unknown_error() {
+        let status = parse_automation_result("", "some other error", false);
+        assert!(matches!(status, PermissionStatus::Unknown { .. }));
+    }
+
+    #[test]
+    fn parse_screen_recording_granted() {
+        assert_eq!(
+            parse_screen_recording_result(true, true, 1024),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_screen_recording_denied_no_file() {
+        let status = parse_screen_recording_result(true, false, 0);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Screen Recording")));
+    }
+
+    #[test]
+    fn parse_screen_recording_denied_empty_file() {
+        let status = parse_screen_recording_result(true, true, 0);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Screen Recording")));
+    }
+
+    #[test]
+    fn parse_screen_recording_command_failed() {
+        let status = parse_screen_recording_result(false, false, 0);
+        assert!(matches!(status, PermissionStatus::Denied { .. }));
+    }
+
+    #[test]
+    fn parse_fda_granted_mail() {
+        assert_eq!(
+            parse_fda_result(None, None),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_fda_granted_mail_safari_irrelevant() {
+        // If Mail dir is readable, FDA is granted regardless of Safari
+        assert_eq!(
+            parse_fda_result(None, Some(std::io::ErrorKind::PermissionDenied)),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_fda_denied_mail() {
+        let status = parse_fda_result(Some(std::io::ErrorKind::PermissionDenied), None);
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Full Disk Access")));
+    }
+
+    #[test]
+    fn parse_fda_granted_via_safari() {
+        // Mail doesn't exist but Safari is readable → granted
+        assert_eq!(
+            parse_fda_result(Some(std::io::ErrorKind::NotFound), None),
+            PermissionStatus::Granted,
+        );
+    }
+
+    #[test]
+    fn parse_fda_denied_via_safari() {
+        let status = parse_fda_result(
+            Some(std::io::ErrorKind::NotFound),
+            Some(std::io::ErrorKind::PermissionDenied),
+        );
+        assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Full Disk Access")));
+    }
+
+    #[test]
+    fn parse_fda_both_missing_assumes_granted() {
+        // Neither Mail nor Safari exist — can't test, assume granted
+        assert_eq!(
+            parse_fda_result(Some(std::io::ErrorKind::NotFound), Some(std::io::ErrorKind::NotFound)),
+            PermissionStatus::Granted,
+        );
     }
 }

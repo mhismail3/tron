@@ -12,9 +12,9 @@ Deploy the Tron Rust server to production with automated safety guarantees.
 
 ## Architecture
 
-Tron is a single Rust binary. One server on port **9847**. Deployment copies the release binary to `~/.tron/system/bin/tron` and restarts via a server-side HTTP API (the server exits gracefully after a delay, launchd restarts it with the new binary).
+Tron is a single Rust binary. One server on port **9847**. Deployment copies the release binary into the app bundle at `~/.tron/system/Tron.app/` and restarts via a server-side HTTP API (the server exits gracefully after a delay, launchd restarts it with the new binary).
 
-- **Server**: launchd-managed, port **9847**, binary at `~/.tron/system/bin/tron`
+- **Server**: launchd-managed, port **9847**, binary at `~/.tron/system/Tron.app/Contents/MacOS/tron`
 - **Dev mode**: `tron dev` stops prod, runs `cargo run` on the same port, restarts prod on exit
 - **Build**: `cargo build --release` → `packages/agent/target/release/tron`
 - **Service**: `com.tron.server` (launchd)
@@ -162,7 +162,7 @@ Dev mode takes over port **9847** from production. It stops the launchd service,
 | Health | `http://localhost:9847/health` | `http://localhost:9847/health` |
 | Deep health | `http://localhost:9847/health/deep` | N/A |
 | Deploy status | `http://localhost:9847/deploy/status` | N/A (not the deployed binary) |
-| Binary | `~/.tron/system/bin/tron` | `cargo run --release` (source) |
+| Binary | `~/.tron/system/Tron.app/Contents/MacOS/tron` | `cargo run --release` (source) |
 | Database | `~/.tron/system/database/log.db` | `~/.tron/system/database/log.db` (same) |
 | Managed by | launchd (`com.tron.server`) | Foreground process with EXIT trap |
 | Log | `~/.tron/system/deployment/server.log` | stdout (or `tron dev --log` tails same file) |

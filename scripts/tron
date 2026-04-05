@@ -92,18 +92,16 @@ ensure_prod_binary() {
 
     if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        cp "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
-        chmod +x "$INSTALLED_BINARY"
-        codesign_binary "$INSTALLED_BINARY"
+        create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+        codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
     fi
 
     if [ -f "$RELEASE_BINARY" ] && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from release build..."
-        cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
-        chmod +x "$INSTALLED_BINARY"
-        codesign_binary "$INSTALLED_BINARY"
+        create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
+        codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from release build"
         return 0
     fi
@@ -305,6 +303,9 @@ create_launchd_plist() {
         <key>NumberOfFiles</key>
         <integer>4096</integer>
     </dict>
+
+    <key>AssociatedBundleIdentifiers</key>
+    <string>$TRON_BUNDLE_ID</string>
 </dict>
 </plist>
 PLIST
@@ -432,9 +433,15 @@ dev_start_foreground() {
     echo ""
     echo -e "${YELLOW}Prod stopped. Ctrl+C to stop dev and restart prod.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --profile dev-server \
-        --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
-        --bin tron -- --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
+
+    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
+    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
+    create_app_bundle "$DEV_BUNDLE" "$dev_src"
+    codesign_bundle "$DEV_BUNDLE"
+
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" "$DEV_BINARY" \
+        --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
 }
 
 dev_start_background() {
@@ -460,9 +467,14 @@ dev_start_background() {
         fi
     fi
 
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" cargo run --profile dev-server \
-        --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
-        --bin tron -- --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
+    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
+    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
+    create_app_bundle "$DEV_BUNDLE" "$dev_src"
+    codesign_bundle "$DEV_BUNDLE"
+
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" "$DEV_BINARY" \
+        --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
         >/dev/null 2>&1 &
 
     local pid=$!
@@ -711,11 +723,14 @@ cmd_deploy() {
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     sleep 1
 
-    # Copy new binary
-    print_status "Installing new binary..."
-    cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
-    chmod +x "$INSTALLED_BINARY"
-    codesign_binary "$INSTALLED_BINARY"
+    # Create app bundle with new binary
+    print_status "Creating app bundle..."
+    create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
+    codesign_bundle "$INSTALLED_BUNDLE"
+
+    # Clean up old bare binary path (pre-bundle migration)
+    rm -f "$TRON_HOME/system/bin/tron"
+    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
@@ -727,8 +742,8 @@ cmd_deploy() {
     print_status "Syncing managed skills..."
     sync_managed_skills
 
-    # Install runtime CLI and shared library (only if changed)
-    for f in tron-cli tron-lib.sh; do
+    # Install runtime CLI, shared library, and entitlements (only if changed)
+    for f in tron-cli tron-lib.sh tron-agent.entitlements AppIcon.icns; do
         if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$DEPLOY_DIR/$f"; then
             cp "$SCRIPT_DIR/$f" "$DEPLOY_DIR/$f"
             [ "$f" = "tron-cli" ] && chmod +x "$DEPLOY_DIR/$f"
@@ -792,8 +807,9 @@ SENTINEL
         # Auto-rollback
         if [ -f "$DEPLOY_DIR/tron.bak" ]; then
             print_status "Rolling back..."
-            mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
-            codesign_binary "$INSTALLED_BINARY"
+            create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+            codesign_bundle "$INSTALLED_BUNDLE"
+            rm -f "$DEPLOY_DIR/tron.bak"
             launchctl load "$PLIST_PATH"
             sleep 2
             if service_is_running; then
@@ -831,13 +847,15 @@ cmd_install() {
         build_rust
     fi
 
-    # Copy binary
-    print_status "Installing binary to $INSTALLED_BINARY..."
-    mkdir -p "$(dirname "$INSTALLED_BINARY")"
-    cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
-    chmod +x "$INSTALLED_BINARY"
-    codesign_binary "$INSTALLED_BINARY"
-    print_success "Installed binary"
+    # Create app bundle with binary
+    print_status "Creating app bundle..."
+    create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
+    codesign_bundle "$INSTALLED_BUNDLE"
+    print_success "Installed app bundle"
+
+    # Clean up old bare binary path (pre-bundle migration)
+    rm -f "$TRON_HOME/system/bin/tron"
+    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
@@ -855,9 +873,11 @@ cmd_install() {
     create_launchd_plist
     print_success "Created: $PLIST_PATH"
 
-    # Install runtime CLI and shared library
+    # Install runtime CLI, shared library, and entitlements
     cp "$SCRIPT_DIR/tron-lib.sh" "$DEPLOY_DIR/tron-lib.sh"
     cp "$SCRIPT_DIR/tron-cli" "$DEPLOY_DIR/tron-cli"
+    cp "$SCRIPT_DIR/tron-agent.entitlements" "$DEPLOY_DIR/tron-agent.entitlements"
+    cp "$SCRIPT_DIR/AppIcon.icns" "$DEPLOY_DIR/AppIcon.icns" 2>/dev/null || true
     chmod +x "$DEPLOY_DIR/tron-cli"
     print_success "Installed runtime CLI"
 
@@ -922,8 +942,11 @@ cmd_uninstall() {
     print_status "Removing CLI..."
     rm -f "$BIN_DIR/tron"
 
-    print_status "Removing installed binary..."
-    rm -f "$INSTALLED_BINARY" "$DEPLOY_DIR/tron.bak"
+    print_status "Removing app bundle and binary..."
+    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$DEPLOY_DIR/tron.bak"
+    # Clean up old bare binary path if it exists
+    rm -f "$TRON_HOME/system/bin/tron"
+    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
 
     echo ""
     print_success "Service uninstalled"
