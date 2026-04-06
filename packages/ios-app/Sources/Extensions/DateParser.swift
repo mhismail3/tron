@@ -210,6 +210,32 @@ enum DateParser: Sendable {
         }
     }
 
+    /// Compact relative format for dashboard cards: "2m ago", "3h ago", "Jan 5".
+    static func formatCompactRelative(_ dateString: String) -> String {
+        guard let date = parse(dateString) else { return dateString }
+
+        let now = Date()
+        let interval = now.timeIntervalSince(date)
+
+        guard interval >= 0 else { return "now" }
+
+        if interval < 60 {
+            return "now"
+        } else if interval < 3600 {
+            let mins = Int(interval / 60)
+            return "\(mins)m ago"
+        } else if interval < 86400 {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        }
+
+        if Calendar.current.isDate(date, equalTo: now, toGranularity: .year) {
+            return shortMonthDay.withLock { $0.string(from: date) }
+        } else {
+            return shortMonthDayYear.withLock { $0.string(from: date) }
+        }
+    }
+
     // MARK: - Smart Formatting (Date extensions)
 
     /// "2:30 PM" — time only

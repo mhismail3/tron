@@ -101,6 +101,10 @@ struct CachedSession: Identifiable, Codable {
         DateParser.formatRelativeOrAbsolute(lastActivityAt)
     }
 
+    var compactDate: String {
+        DateParser.formatCompactRelative(lastActivityAt)
+    }
+
     var shortModel: String {
         if model.contains("opus") { return "Opus" }
         if model.contains("sonnet") { return "Sonnet" }

@@ -218,27 +218,42 @@ struct CachedSessionSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Title + date
-            HStack(spacing: 6) {
-                if session.isFork == true {
-                    Image(systemName: "tuningfork")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 11, height: 11)
-                        .foregroundStyle(.tronPurple)
-                }
-                Text(session.displayTitle)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-                    .lineLimit(1)
+            // Header: title, stats, path
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    if session.isFork == true {
+                        Image(systemName: "tuningfork")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 11, height: 11)
+                            .foregroundStyle(.tronPurple)
+                    }
+                    Text(session.displayTitle)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
 
-                Text(session.formattedDate)
+                    HStack(spacing: 4) {
+                        Text("↑\(session.totalInputTokens.formattedTokenCount)")
+                        Text("↓\(session.outputTokens.formattedTokenCount)")
+                        Text(session.formattedCost)
+                        Text("·")
+                        Text(session.compactDate)
+                    }
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
+                    .fixedSize()
+                }
+
+                Text(session.displayDirectory)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.bottom, 2)
 
             // Mini-chat content — unified rendering for both live and persisted
             let activityLines: [CachedActivityLine] = {
@@ -254,26 +269,6 @@ struct CachedSessionSidebarRow: View {
             // Processing bar
             if session.isProcessing == true {
                 ProcessingBar()
-            }
-
-            // Bottom row: path + stats
-            HStack(spacing: 6) {
-                Text(session.displayDirectory)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-
-                Spacer(minLength: 4)
-
-                HStack(spacing: 4) {
-                    Text("↑\(session.totalInputTokens.formattedTokenCount)")
-                    Text("↓\(session.outputTokens.formattedTokenCount)")
-                    Text(session.formattedCost)
-                }
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronTextMuted)
-                .fixedSize()
             }
         }
         .padding(.vertical, 10)
