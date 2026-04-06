@@ -151,6 +151,10 @@ final class EventStoreManager {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: true)
                 dashboardStreamManager.handleTurnStart(sessionId: sessionId)
+                // Inject user prompt into stream buffer if available
+                if let prompt = sessions.first(where: { $0.id == sessionId })?.lastUserPrompt, !prompt.isEmpty {
+                    dashboardStreamManager.handleUserPrompt(sessionId: sessionId, text: prompt)
+                }
             }
 
         case CompletePlugin.eventType:
@@ -214,7 +218,8 @@ final class EventStoreManager {
                 dashboardStreamManager.handleToolEnd(
                     sessionId: sessionId,
                     toolName: result.toolName,
-                    success: result.success
+                    success: result.success,
+                    durationMs: result.duration
                 )
             }
 
@@ -311,7 +316,9 @@ final class EventStoreManager {
             if let c = result.cost { session.cost = c }
             if let activity = result.lastActivity { session.lastActivityAt = activity }
             if let prompt = result.lastUserPrompt { session.lastUserPrompt = prompt }
-            if let response = result.lastAssistantResponse { session.lastAssistantResponse = response }
+            if let response = result.lastAssistantResponse {
+                session.lastAssistantResponse = response
+            }
         }
 
         // Also persist to local DB so the data survives app restarts
@@ -500,12 +507,13 @@ final class EventStoreManager {
     private func _loadSessionsImmediate() {
         do {
             // Preserve existing transient state before reloading
-            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, isProcessing: Bool?)] = [:]
+            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, activityLines: [CachedActivityLine]?, isProcessing: Bool?)] = [:]
             for session in sessions {
                 preservedDashboardInfo[session.id] = (
                     session.lastUserPrompt,
                     session.lastAssistantResponse,
                     session.lastToolCount,
+                    session.lastActivityLines,
                     session.isProcessing
                 )
             }
@@ -522,6 +530,9 @@ final class EventStoreManager {
 
                 if let preserved = preservedDashboardInfo[sessionId] {
                     sessions[i].isProcessing = preserved.isProcessing
+                    if let activityLines = preserved.activityLines {
+                        sessions[i].lastActivityLines = activityLines
+                    }
                 }
 
                 if processingSessionIds.contains(sessionId) {

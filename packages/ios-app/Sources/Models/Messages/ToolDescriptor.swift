@@ -7,6 +7,8 @@ struct ToolDescriptor: @unchecked Sendable {
     let icon: String
     /// Icon color
     let iconColor: Color
+    /// Icon color as a string name for serialization (e.g., "tronSlate")
+    let iconColorName: String
     /// Human-readable display name (imperative: "Edit")
     let displayName: String
     /// Past-tense display name for completed state ("Edited"). Nil = use displayName always.
@@ -60,6 +62,7 @@ enum ToolRegistry {
         "read": ToolDescriptor(
             icon: "doc.text",
             iconColor: .tronSlate,
+            iconColorName: "tronSlate",
             displayName: "Read",
             completedDisplayName: "Read",
             summaryExtractor: { args in
@@ -75,6 +78,7 @@ enum ToolRegistry {
         "write": ToolDescriptor(
             icon: "doc.badge.plus",
             iconColor: .tronPink,
+            iconColorName: "tronPink",
             displayName: "Write",
             completedDisplayName: "Wrote",
             summaryExtractor: { args in
@@ -91,6 +95,7 @@ enum ToolRegistry {
         "edit": ToolDescriptor(
             icon: "pencil.line",
             iconColor: .orange,
+            iconColorName: "orange",
             displayName: "Edit",
             completedDisplayName: "Edited",
             summaryExtractor: { args in
@@ -106,6 +111,7 @@ enum ToolRegistry {
         "bash": ToolDescriptor(
             icon: "terminal",
             iconColor: .tronEmerald,
+            iconColorName: "tronEmerald",
             displayName: "Bash",
             completedDisplayName: "Ran",
             summaryExtractor: { args in
@@ -121,6 +127,7 @@ enum ToolRegistry {
         "search": ToolDescriptor(
             icon: "magnifyingglass",
             iconColor: .purple,
+            iconColorName: "purple",
             displayName: "File Search",
             completedDisplayName: "Searched",
             summaryExtractor: { args in
@@ -141,6 +148,7 @@ enum ToolRegistry {
         "find": ToolDescriptor(
             icon: "doc.text.magnifyingglass",
             iconColor: .cyan,
+            iconColorName: "cyan",
             displayName: "Find",
             completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
@@ -154,6 +162,7 @@ enum ToolRegistry {
         "glob": ToolDescriptor(
             icon: "doc.text.magnifyingglass",
             iconColor: .cyan,
+            iconColorName: "cyan",
             displayName: "Glob",
             completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
@@ -167,6 +176,7 @@ enum ToolRegistry {
         "webfetch": ToolDescriptor(
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
+            iconColorName: "tronInfo",
             displayName: "Web Fetch",
             completedDisplayName: "Fetched",
             summaryExtractor: { args in
@@ -205,6 +215,7 @@ enum ToolRegistry {
         "websearch": ToolDescriptor(
             icon: "magnifyingglass.circle",
             iconColor: .tronInfo,
+            iconColorName: "tronInfo",
             displayName: "Web Search",
             completedDisplayName: "Searched",
             summaryExtractor: { args in
@@ -223,6 +234,7 @@ enum ToolRegistry {
         "computeruse": ToolDescriptor(
             icon: "desktopcomputer",
             iconColor: .purple,
+            iconColorName: "purple",
             displayName: "Computer Use",
             completedDisplayName: "Used",
             summaryExtractor: { args in
@@ -237,6 +249,7 @@ enum ToolRegistry {
         "display": ToolDescriptor(
             icon: "rectangle.on.rectangle",
             iconColor: .tronIndigo,
+            iconColorName: "tronIndigo",
             displayName: "Display",
             completedDisplayName: "Displayed",
             summaryExtractor: { args in
@@ -250,6 +263,7 @@ enum ToolRegistry {
         "mcpsearch": ToolDescriptor(
             icon: "magnifyingglass.circle",
             iconColor: .tronInfo,
+            iconColorName: "tronInfo",
             displayName: "MCP Search",
             completedDisplayName: "Searched MCP",
             summaryExtractor: { args in
@@ -265,6 +279,7 @@ enum ToolRegistry {
         "mcpcall": ToolDescriptor(
             icon: "server.rack",
             iconColor: .tronEmerald,
+            iconColorName: "tronEmerald",
             displayName: "MCP Call",
             completedDisplayName: "Called MCP",
             summaryExtractor: { args in
@@ -280,6 +295,7 @@ enum ToolRegistry {
         "askuserquestion": ToolDescriptor(
             icon: "questionmark.circle.fill",
             iconColor: .tronAmber,
+            iconColorName: "tronAmber",
             displayName: "Ask User",
             completedDisplayName: "Asked",
             summaryExtractor: { _ in "" },
@@ -288,6 +304,7 @@ enum ToolRegistry {
         "getconfirmation": ToolDescriptor(
             icon: "checkmark.shield",
             iconColor: .orange,
+            iconColorName: "orange",
             displayName: "Confirm",
             completedDisplayName: "Confirmed",
             summaryExtractor: { args in
@@ -298,6 +315,7 @@ enum ToolRegistry {
         "managejob": ToolDescriptor(
             icon: "gearshape.2",
             iconColor: .tronSlate,
+            iconColorName: "tronSlate",
             displayName: "Jobs",
             completedDisplayName: "Managed",
             summaryExtractor: { args in
@@ -308,6 +326,7 @@ enum ToolRegistry {
         "wait": ToolDescriptor(
             icon: "clock.arrow.circlepath",
             iconColor: .tronTeal,
+            iconColorName: "tronTeal",
             displayName: "Wait",
             completedDisplayName: "Waited",
             summaryExtractor: { args in
@@ -316,12 +335,46 @@ enum ToolRegistry {
             },
             viewerFactory: nil
         ),
+        // Aliases for tool names that differ between streaming events and registry
+        "grep": ToolDescriptor(
+            icon: "magnifyingglass",
+            iconColor: .purple,
+            iconColorName: "purple",
+            displayName: "Grep",
+            completedDisplayName: "Searched",
+            summaryExtractor: { args in
+                let pattern = ToolArgumentParser.pattern(from: args)
+                guard !pattern.isEmpty else { return "" }
+                return "\"\(ToolArgumentParser.truncate(pattern, maxLength: 30))\""
+            },
+            viewerFactory: nil
+        ),
+        // Special tools — not command chips, but need metadata for dashboard cards
+        "notifyapp": ToolDescriptor(
+            icon: "bell.badge",
+            iconColor: .tronAmber,
+            iconColorName: "tronAmber",
+            displayName: "Notify",
+            completedDisplayName: "Notified",
+            summaryExtractor: { _ in "" },
+            viewerFactory: nil
+        ),
+        "spawnsubagent": ToolDescriptor(
+            icon: "person.2",
+            iconColor: .tronPurple,
+            iconColorName: "tronPurple",
+            displayName: "Agent",
+            completedDisplayName: "Agent",
+            summaryExtractor: { args in ToolArgumentParser.string("task", from: args) ?? "" },
+            viewerFactory: nil
+        ),
     ]
 
     private static func defaultDescriptor(for toolName: String) -> ToolDescriptor {
         ToolDescriptor(
             icon: "gearshape",
             iconColor: .tronTextMuted,
+            iconColorName: "tronTextMuted",
             displayName: toolName.capitalized,
             completedDisplayName: nil,
             summaryExtractor: { _ in "" },

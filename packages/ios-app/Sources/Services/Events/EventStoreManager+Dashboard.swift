@@ -143,6 +143,7 @@ extension EventStoreManager {
     func extractDashboardInfoFromEvents(sessionId: String) {
         do {
             let events = try eventDB.events.getBySession(sessionId)
+
             let info = ContentExtractor.extractDashboardInfo(from: events)
 
             updateSessionDashboardInfo(
@@ -152,7 +153,7 @@ extension EventStoreManager {
                 lastToolCount: info.lastToolCount
             )
 
-            // Build activity lines from stored events for cold-start display
+            // Build activity lines from stored events for card display
             let activityLines = ContentExtractor.extractActivityLines(from: events)
             if !activityLines.isEmpty {
                 updateSessionActivityLines(sessionId: sessionId, lines: activityLines)

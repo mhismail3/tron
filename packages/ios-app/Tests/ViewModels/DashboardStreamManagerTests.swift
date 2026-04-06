@@ -45,42 +45,47 @@ final class SessionStreamBufferTests: XCTestCase {
         XCTAssertEqual(buffer.lines[1].kind, .toolStart)
     }
 
-    func testToolStartFormatsFileName() {
+    func testToolStartExtractsSummaryFileName() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Edit", arguments: ["file_path": AnyCodable("/a/b/c.rs")])
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].text, "Edit c.rs")
+        XCTAssertEqual(buffer.lines[0].text, "Edit")
+        XCTAssertEqual(buffer.lines[0].summary, "c.rs")
     }
 
-    func testToolStartFormatsBashCommand() {
+    func testToolStartExtractsSummaryBashCommand() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Bash", arguments: ["command": AnyCodable("cargo test")])
 
-        XCTAssertEqual(buffer.lines[0].text, "$ cargo test")
+        XCTAssertEqual(buffer.lines[0].text, "Bash")
+        XCTAssertEqual(buffer.lines[0].summary, "cargo test")
     }
 
-    func testToolStartFormatsGrepPattern() {
+    func testToolStartExtractsSummaryGrepPattern() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Grep", arguments: ["pattern": AnyCodable("TODO")])
 
-        XCTAssertEqual(buffer.lines[0].text, "Grep \"TODO\"")
+        XCTAssertEqual(buffer.lines[0].text, "Grep")
+        XCTAssertEqual(buffer.lines[0].summary, "\"TODO\"")
     }
 
-    func testToolStartFormatsBashTruncatesLongCommand() {
+    func testToolStartTruncatesLongSummary() {
         var buffer = SessionStreamBuffer()
         let longCommand = String(repeating: "x", count: 60)
         buffer.addToolStart(name: "Bash", arguments: ["command": AnyCodable(longCommand)])
 
-        XCTAssertTrue(buffer.lines[0].text.count <= 44) // "$ " + 40 chars + "…"
-        XCTAssertTrue(buffer.lines[0].text.hasSuffix("…"))
+        XCTAssertNotNil(buffer.lines[0].summary)
+        // ToolRegistry uses ToolArgumentParser.truncate which appends "..."
+        XCTAssertTrue(buffer.lines[0].summary!.hasSuffix("..."))
     }
 
-    func testToolStartFormatsUnknownTool() {
+    func testToolStartUnknownToolNoSummary() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "CustomTool", arguments: nil)
 
         XCTAssertEqual(buffer.lines[0].text, "CustomTool")
+        XCTAssertNil(buffer.lines[0].summary)
     }
 
     // MARK: - Tool End
@@ -91,14 +96,16 @@ final class SessionStreamBufferTests: XCTestCase {
 
         XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].kind, .toolEnd)
-        XCTAssertEqual(buffer.lines[0].text, "✓ Edit")
+        XCTAssertEqual(buffer.lines[0].toolName, "Edit")
+        XCTAssertEqual(buffer.lines[0].status, "success")
     }
 
     func testToolEndCreatesLineFailure() {
         var buffer = SessionStreamBuffer()
         buffer.addToolEnd(name: "Bash", success: false)
 
-        XCTAssertEqual(buffer.lines[0].text, "✗ Bash")
+        XCTAssertEqual(buffer.lines[0].toolName, "Bash")
+        XCTAssertEqual(buffer.lines[0].status, "error")
     }
 
     // MARK: - Subagent Events
@@ -264,11 +271,14 @@ final class SessionStreamBufferTests: XCTestCase {
         buffer.addToolEnd(name: "Edit", success: true)
         buffer.appendTextDelta("second text")
 
-        XCTAssertEqual(buffer.lines.count, 4)
+        // addToolEnd updates the toolStart in-place (no new line), so 3 lines total
+        XCTAssertEqual(buffer.lines.count, 3)
         XCTAssertEqual(buffer.lines[0].kind, .text)
         XCTAssertEqual(buffer.lines[0].text, "first text")
-        XCTAssertEqual(buffer.lines[3].kind, .text)
-        XCTAssertEqual(buffer.lines[3].text, "second text")
+        XCTAssertEqual(buffer.lines[1].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[1].status, "success")
+        XCTAssertEqual(buffer.lines[2].kind, .text)
+        XCTAssertEqual(buffer.lines[2].text, "second text")
     }
 }
 
@@ -575,102 +585,337 @@ final class DashboardStreamManagerTests: XCTestCase {
     }
 }
 
-// MARK: - Parallel Tool Aggregation Tests
+// MARK: - Parallel Tool & Tool End Tests
 
 @MainActor
-final class SessionStreamBufferParallelTests: XCTestCase {
+final class SessionStreamBufferToolTests: XCTestCase {
 
-    func testParallelToolStartsAggregate() {
+    func testParallelToolStartsShowIndividualChips() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Edit", arguments: nil)
         buffer.addToolStart(name: "Bash", arguments: nil)
 
-        // Should aggregate into a single toolBatch line
-        XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
-        XCTAssertTrue(buffer.lines[0].text.contains("2"))
-        XCTAssertTrue(buffer.lines[0].text.contains("Edit"))
-        XCTAssertTrue(buffer.lines[0].text.contains("Bash"))
+        XCTAssertEqual(buffer.lines.count, 2)
+        XCTAssertEqual(buffer.lines[0].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[0].toolName, "Edit")
+        XCTAssertEqual(buffer.lines[1].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[1].toolName, "Bash")
     }
 
-    func testThreeParallelToolsAggregate() {
+    func testToolEndUpdatesExistingToolStartInPlace() {
         var buffer = SessionStreamBuffer()
-        buffer.addToolStart(name: "Edit", arguments: nil)
-        buffer.addToolStart(name: "Bash", arguments: nil)
-        buffer.addToolStart(name: "Read", arguments: nil)
+        buffer.addToolStart(name: "Edit", arguments: ["file_path": AnyCodable("/a/b/c.rs")])
+        XCTAssertEqual(buffer.lines[0].status, "running")
 
-        XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
-        XCTAssertTrue(buffer.lines[0].text.contains("3"))
-    }
+        buffer.addToolEnd(name: "Edit", success: true, durationMs: 50)
 
-    func testFourPlusToolsShowCount() {
-        var buffer = SessionStreamBuffer()
-        buffer.addToolStart(name: "Edit", arguments: nil)
-        buffer.addToolStart(name: "Bash", arguments: nil)
-        buffer.addToolStart(name: "Read", arguments: nil)
-        buffer.addToolStart(name: "Grep", arguments: nil)
-
-        XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
-        XCTAssertTrue(buffer.lines[0].text.contains("4"))
-        XCTAssertTrue(buffer.lines[0].text.contains("running"))
-    }
-
-    func testSingleToolStartNoAggregation() {
-        var buffer = SessionStreamBuffer()
-        buffer.addToolStart(name: "Edit", arguments: nil)
-
+        // Same line count — updated in place
         XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[0].status, "success")
+        XCTAssertEqual(buffer.lines[0].duration, "50ms")
+        XCTAssertEqual(buffer.lines[0].summary, "c.rs") // preserved
     }
 
-    func testTextBetweenToolStartsBreaksBatch() {
+    func testToolEndErrorStatus() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Read", arguments: ["file_path": AnyCodable("/missing.txt")])
+        buffer.addToolEnd(name: "Read", success: false, durationMs: 2)
+
+        XCTAssertEqual(buffer.lines[0].status, "error")
+        XCTAssertEqual(buffer.lines[0].duration, "2ms")
+    }
+
+    func testParallelToolEndsUpdateCorrectChips() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Edit", arguments: nil)
-        buffer.appendTextDelta("some output")
         buffer.addToolStart(name: "Bash", arguments: nil)
+        buffer.addToolStart(name: "Read", arguments: nil)
 
-        // Should be 3 separate lines, not aggregated
+        buffer.addToolEnd(name: "Bash", success: true, durationMs: 100)
+        buffer.addToolEnd(name: "Edit", success: true, durationMs: 50)
+        buffer.addToolEnd(name: "Read", success: false, durationMs: 5)
+
         XCTAssertEqual(buffer.lines.count, 3)
-        XCTAssertEqual(buffer.lines[0].kind, .toolStart)
-        XCTAssertEqual(buffer.lines[1].kind, .text)
-        XCTAssertEqual(buffer.lines[2].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[0].toolName, "Edit")
+        XCTAssertEqual(buffer.lines[0].status, "success")
+        XCTAssertEqual(buffer.lines[1].toolName, "Bash")
+        XCTAssertEqual(buffer.lines[1].status, "success")
+        XCTAssertEqual(buffer.lines[2].toolName, "Read")
+        XCTAssertEqual(buffer.lines[2].status, "error")
     }
 
-    func testToolEndAfterBatch() {
+    func testToolEndWithDurationFormatting() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Bash", arguments: nil)
+        buffer.addToolEnd(name: "Bash", success: true, durationMs: 1500)
+
+        XCTAssertEqual(buffer.lines[0].duration, "1.5s")
+    }
+
+    func testToolEndFallbackWhenNoMatchingStart() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolEnd(name: "Bash", success: true, durationMs: 100)
+
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].kind, .toolEnd)
+        XCTAssertEqual(buffer.lines[0].toolName, "Bash")
+    }
+}
+
+// MARK: - Tool Metadata Tests
+
+@MainActor
+final class SessionStreamBufferToolMetaTests: XCTestCase {
+
+    func testToolStartHasIconAndColor() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Bash", arguments: nil)
+
+        XCTAssertEqual(buffer.lines[0].icon, "terminal")
+        XCTAssertEqual(buffer.lines[0].iconColor, "tronEmerald")
+    }
+
+    func testToolStartUnknownToolHasDefaultIcon() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "SomeCustomMCPTool", arguments: nil)
+
+        // ToolRegistry default: gearshape icon, tronTextMuted color
+        XCTAssertEqual(buffer.lines[0].icon, "gearshape")
+        XCTAssertEqual(buffer.lines[0].iconColor, "tronTextMuted")
+    }
+
+    func testToolEndHasIconAndColor() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolEnd(name: "Edit", success: true)
+
+        XCTAssertEqual(buffer.lines[0].icon, "pencil.line")
+        XCTAssertEqual(buffer.lines[0].iconColor, "orange")
+    }
+
+    func testToolStartHasToolName() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: ["file_path": AnyCodable("/a/b/c.rs")])
+
+        XCTAssertEqual(buffer.lines[0].toolName, "Edit")
+        XCTAssertEqual(buffer.lines[0].displayName, "Edit")
+        XCTAssertEqual(buffer.lines[0].text, "Edit")
+        XCTAssertEqual(buffer.lines[0].summary, "c.rs")
+    }
+
+    func testToolStartDisplayNameFromRegistry() {
+        var buffer = SessionStreamBuffer()
+        // "WebSearch" → ToolRegistry displayName is "Web Search"
+        buffer.addToolStart(name: "WebSearch", arguments: nil)
+        XCTAssertEqual(buffer.lines[0].toolName, "WebSearch")
+        XCTAssertEqual(buffer.lines[0].displayName, "Web Search")
+    }
+
+    func testParallelToolStartsEachHaveIcon() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Edit", arguments: nil)
         buffer.addToolStart(name: "Bash", arguments: nil)
-        buffer.addToolStart(name: "Read", arguments: nil)
-        buffer.addToolEnd(name: "Edit", success: true)
-        buffer.addToolEnd(name: "Bash", success: true)
-        buffer.addToolEnd(name: "Read", success: true)
 
-        // Batch line + aggregated completion
-        let lastLine = buffer.lines.last!
-        XCTAssertEqual(lastLine.kind, .toolEnd)
-        XCTAssertTrue(lastLine.text.contains("3"))
+        XCTAssertEqual(buffer.lines.count, 2)
+        XCTAssertEqual(buffer.lines[0].icon, "pencil.line")
+        XCTAssertEqual(buffer.lines[1].icon, "terminal")
+    }
+}
+
+// MARK: - Snapshot & Visible Lines Tests
+
+@MainActor
+final class DashboardStreamManagerSnapshotTests: XCTestCase {
+
+    func testSnapshotIncludesIconColorAndDisplayName() {
+        let manager = DashboardStreamManager()
+        manager.handleToolStart(sessionId: "s1", toolName: "Bash", arguments: nil)
+
+        let snapshot = manager.snapshotLines(for: "s1", count: 3)
+        XCTAssertEqual(snapshot[0].icon, "terminal")
+        XCTAssertEqual(snapshot[0].iconColor, "tronEmerald")
+        XCTAssertEqual(snapshot[0].displayName, "Bash")
     }
 
-    func testToolEndSingleTool() {
-        var buffer = SessionStreamBuffer()
-        buffer.addToolStart(name: "Edit", arguments: nil)
-        buffer.addToolEnd(name: "Edit", success: true)
+    func testSnapshotDisplayNameMatchesRegistry() {
+        let manager = DashboardStreamManager()
+        manager.handleToolStart(sessionId: "s1", toolName: "WebFetch", arguments: nil)
 
-        XCTAssertEqual(buffer.lines.last?.kind, .toolEnd)
-        XCTAssertEqual(buffer.lines.last?.text, "✓ Edit")
+        let snapshot = manager.snapshotLines(for: "s1", count: 3)
+        XCTAssertEqual(snapshot[0].displayName, "Web Fetch")
     }
 
-    func testPendingToolsFlushedOnTextDelta() {
-        var buffer = SessionStreamBuffer()
-        buffer.addToolStart(name: "Edit", arguments: nil)
-        buffer.addToolStart(name: "Bash", arguments: nil)
-        XCTAssertEqual(buffer.lines.count, 1) // aggregated
+    func testVisibleLinesDefaultCount5() {
+        let manager = DashboardStreamManager()
+        for i in 0..<8 {
+            manager.handleTextDelta(sessionId: "s1", delta: "line\(i)\n")
+            // Force new text line by inserting a tool between
+            if i < 7 {
+                manager.handleToolStart(sessionId: "s1", toolName: "Tool\(i)", arguments: nil)
+            }
+        }
 
-        buffer.appendTextDelta("output")
-        // Pending tools flushed, text line added
-        XCTAssertTrue(buffer.lines.contains { $0.kind == .text })
+        // Default count should return up to 5
+        let lines = manager.visibleLines(for: "s1")
+        XCTAssertEqual(lines.count, 5)
+    }
+}
+
+// MARK: - ContentExtractor Activity Lines Tests
+
+@MainActor
+final class ContentExtractorActivityLineTests: XCTestCase {
+
+    /// Build a SessionEvent with the given type and payload.
+    private func makeEvent(type: String, payload: [String: AnyCodable]) -> SessionEvent {
+        SessionEvent(
+            id: UUID().uuidString,
+            parentId: nil,
+            sessionId: "test-session",
+            workspaceId: "ws",
+            type: type,
+            timestamp: "2026-01-01T00:00:00Z",
+            sequence: 0,
+            payload: payload
+        )
+    }
+
+    func testExtractActivityLinesWithToolUseSummary() {
+        // Simulate a message.assistant event with a tool_use content block
+        let content: [Any] = [
+            [
+                "type": "tool_use",
+                "id": "toolu_abc",
+                "name": "Bash",
+                "input": ["command": "cargo test"]
+            ] as [String: Any]
+        ]
+
+        let assistantEvent = makeEvent(type: "message.assistant", payload: [
+            "content": AnyCodable(content)
+        ])
+
+        let lines = ContentExtractor.extractActivityLines(from: [assistantEvent])
+
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].kind, "toolStart")
+        XCTAssertEqual(lines[0].displayName, "Bash")
+        // Summary should be extracted from input arguments
+        XCTAssertNotNil(lines[0].summary, "Summary should be extracted from tool input")
+        XCTAssertTrue(lines[0].summary?.contains("cargo test") == true,
+                      "Bash summary should contain the command, got: \(lines[0].summary ?? "nil")")
+    }
+
+    func testExtractActivityLinesWithMultipleTools() {
+        let content: [Any] = [
+            [
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Read",
+                "input": ["file_path": "/Users/test/example.swift"]
+            ] as [String: Any],
+            [
+                "type": "text",
+                "text": "Let me read that file."
+            ] as [String: Any],
+            [
+                "type": "tool_use",
+                "id": "toolu_2",
+                "name": "WebSearch",
+                "input": ["query": "current time UTC"]
+            ] as [String: Any]
+        ]
+
+        let toolResult1 = makeEvent(type: "tool.result", payload: [
+            "tool_use_id": AnyCodable("toolu_1"),
+            "is_error": AnyCodable(false),
+            "duration_ms": AnyCodable(25)
+        ])
+
+        let toolResult2 = makeEvent(type: "tool.result", payload: [
+            "tool_use_id": AnyCodable("toolu_2"),
+            "is_error": AnyCodable(false),
+            "duration_ms": AnyCodable(703)
+        ])
+
+        let assistantEvent = makeEvent(type: "message.assistant", payload: [
+            "content": AnyCodable(content)
+        ])
+
+        let lines = ContentExtractor.extractActivityLines(from: [assistantEvent, toolResult1, toolResult2])
+
+        // Should have: Read tool, text, WebSearch tool
+        let toolLines = lines.filter { $0.kind == "toolStart" }
+        XCTAssertEqual(toolLines.count, 2)
+
+        // Read tool should have file summary
+        let readLine = toolLines.first { $0.displayName == "Read" }
+        XCTAssertNotNil(readLine)
+        XCTAssertEqual(readLine?.summary, "example.swift")
+        XCTAssertEqual(readLine?.duration, "25ms")
+        XCTAssertEqual(readLine?.status, "success")
+
+        // WebSearch tool should have query summary
+        let searchLine = toolLines.first { $0.displayName == "Web Search" }
+        XCTAssertNotNil(searchLine)
+        XCTAssertNotNil(searchLine?.summary)
+        XCTAssertTrue(searchLine?.summary?.contains("current time UTC") == true)
+        XCTAssertEqual(searchLine?.duration, "703ms")
+    }
+
+    func testExtractActivityLinesWithAnyCodablePayload() {
+        // Simulate what AnyCodable.init(from decoder:) produces:
+        // Nested dicts stored as [String: Any], not [String: AnyCodable]
+        let toolUseBlock: [String: Any] = [
+            "type": "tool_use",
+            "id": "toolu_xyz",
+            "name": "Edit",
+            "input": ["file_path": "/src/main.rs", "old_string": "foo", "new_string": "bar"] as [String: Any]
+        ]
+
+        let content: [Any] = [toolUseBlock]
+
+        let assistantEvent = makeEvent(type: "message.assistant", payload: [
+            "content": AnyCodable(content)
+        ])
+
+        let lines = ContentExtractor.extractActivityLines(from: [assistantEvent])
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].displayName, "Edit")
+        XCTAssertEqual(lines[0].summary, "main.rs")
+    }
+
+    func testExtractActivityLinesWithArgumentsKey() {
+        // Server stores tool_use blocks with "arguments" key, NOT "input"
+        // This is the actual production format
+        let content: [Any] = [
+            [
+                "type": "tool_use",
+                "id": "toolu_abc",
+                "name": "Bash",
+                "arguments": ["command": "cargo test"] as [String: Any]
+            ] as [String: Any],
+            [
+                "type": "tool_use",
+                "id": "toolu_def",
+                "name": "Read",
+                "arguments": ["file_path": "/tmp/test.txt"] as [String: Any]
+            ] as [String: Any]
+        ]
+
+        let assistantEvent = makeEvent(type: "message.assistant", payload: [
+            "content": AnyCodable(content)
+        ])
+
+        let lines = ContentExtractor.extractActivityLines(from: [assistantEvent])
+        XCTAssertEqual(lines.count, 2)
+
+        XCTAssertEqual(lines[0].displayName, "Bash")
+        XCTAssertNotNil(lines[0].summary, "Should extract summary from 'arguments' key")
+        XCTAssertTrue(lines[0].summary?.contains("cargo test") == true)
+
+        XCTAssertEqual(lines[1].displayName, "Read")
+        XCTAssertEqual(lines[1].summary, "test.txt")
     }
 }
 
@@ -685,5 +930,21 @@ final class CachedActivityLineTests: XCTestCase {
         let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
         XCTAssertEqual(decoded.kind, "toolStart")
         XCTAssertEqual(decoded.text, "Edit server.rs")
+    }
+
+    func testCachedActivityLineWithOptionalFields() throws {
+        let line = CachedActivityLine(kind: "toolStart", text: "Bash", icon: "terminal", iconColor: "tronEmerald")
+        let data = try JSONEncoder().encode(line)
+        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
+        XCTAssertEqual(decoded.icon, "terminal")
+        XCTAssertEqual(decoded.iconColor, "tronEmerald")
+    }
+
+    func testCachedActivityLineWithNilFields() throws {
+        let line = CachedActivityLine(kind: "text", text: "hello")
+        let data = try JSONEncoder().encode(line)
+        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
+        XCTAssertNil(decoded.icon)
+        XCTAssertNil(decoded.iconColor)
     }
 }

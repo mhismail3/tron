@@ -217,8 +217,8 @@ struct CachedSessionSidebarRow: View {
     let streamManager: DashboardStreamManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Title row with message count
+        VStack(alignment: .leading, spacing: 4) {
+            // Title + date
             HStack(spacing: 6) {
                 if session.isFork == true {
                     Image(systemName: "tuningfork")
@@ -234,52 +234,29 @@ struct CachedSessionSidebarRow: View {
 
                 Spacer()
 
-                sessionTokenStats
-                    .fixedSize()
-
-                Text(session.formattedCost)
-                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(.tronEmerald.opacity(0.5))
-                    .fixedSize()
-
-                // Message count
-                HStack(spacing: 3) {
-                    Image(systemName: "bubble.left")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                    Text("\(session.messageCount)")
-                        .font(TronTypography.codeSM)
-                }
-                .foregroundStyle(.tronTextMuted)
+                Text(session.formattedDate)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronTextMuted)
             }
 
-            // Recent prompt (user's last message, right-aligned)
-            if let prompt = session.lastUserPrompt, !prompt.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Spacer(minLength: 0)
+            // Ellipsis — indicates truncated history above
+            Text("· · ·")
+                .font(TronTypography.codeSM)
+                .foregroundStyle(.tronTextMuted.opacity(0.4))
 
-                    Text(prompt)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.trailing)
-
-                    Image(systemName: "person.fill")
-                        .font(TronTypography.labelSM)
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
-                        .frame(width: 12)
-                        .offset(y: 2)
-                }
-            }
-
-            // Latest action — unified terminal style
+            // Mini-chat content
             if streamManager.hasContent(for: session.id) || session.isProcessing == true {
-                SessionStreamView(sessionId: session.id, streamManager: streamManager)
+                MiniChatStreamView(sessionId: session.id, streamManager: streamManager)
             } else if let activityLines = session.lastActivityLines, !activityLines.isEmpty {
-                ActivityLinesView(lines: activityLines)
+                MiniChatActivityView(lines: activityLines)
             }
 
-            // Bottom row: Working directory + date
+            // Processing bar
+            if session.isProcessing == true {
+                ProcessingBar()
+            }
+
+            // Bottom row: path + stats
             HStack(spacing: 6) {
                 Text(session.displayDirectory)
                     .font(TronTypography.codeSM)
@@ -289,9 +266,14 @@ struct CachedSessionSidebarRow: View {
 
                 Spacer(minLength: 4)
 
-                Text(session.formattedDate)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
+                HStack(spacing: 4) {
+                    Text("↑\(session.totalInputTokens.formattedTokenCount)")
+                    Text("↓\(session.outputTokens.formattedTokenCount)")
+                    Text(session.formattedCost)
+                }
+                .font(TronTypography.codeSM)
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize()
             }
         }
         .padding(.vertical, 10)
@@ -308,88 +290,52 @@ struct CachedSessionSidebarRow: View {
         .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
         .accessibilityAddTraits(.isButton)
     }
-
-    /// Token stats with SF Symbols (matching chat view MessageMetadataBadge style)
-    @ViewBuilder
-    private var sessionTokenStats: some View {
-        HStack(spacing: 4) {
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.up")
-                    .font(TronTypography.labelSM)
-                Text(session.totalInputTokens.formattedTokenCount)
-            }
-            .foregroundStyle(.tronTextDisabled)
-
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.down")
-                    .font(TronTypography.labelSM)
-                Text(session.outputTokens.formattedTokenCount)
-            }
-            .foregroundStyle(.tronTextDisabled)
-        }
-        .font(TronTypography.pill)
-    }
 }
 
-// MARK: - Session Stream View (Live Mini-Terminal)
+// MARK: - Mini-Chat Stream View (Live)
 
 @available(iOS 26.0, *)
-struct SessionStreamView: View {
+struct MiniChatStreamView: View {
     let sessionId: String
     let streamManager: DashboardStreamManager
 
     var body: some View {
-        let lines = streamManager.visibleLines(for: sessionId, count: 3)
-
-        if lines.isEmpty {
-            // Fallback: pulsing indicator when no content yet
-            HStack(spacing: 6) {
-                Image(systemName: "brain")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronEmerald)
-                    .symbolEffect(.pulse, options: .repeating)
-
-                Text("Thinking...")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronEmerald.opacity(0.9))
+        VStack(alignment: .leading, spacing: 3) {
+            let lines = streamManager.visibleLines(for: sessionId)
+            ForEach(lines) { line in
+                miniChatLine(line)
             }
-            .streamViewChrome()
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(lines) { line in
-                    streamLineView(line)
-                }
-            }
-            .streamViewChrome()
         }
     }
 
     @ViewBuilder
-    private func streamLineView(_ line: DashboardStreamLine) -> some View {
+    private func miniChatLine(_ line: DashboardStreamLine) -> some View {
         switch line.kind {
+        case .userPrompt:
+            MiniMessageRow(text: line.text, isUser: true)
+
         case .text:
-            Text(line.text)
-                .font(TronTypography.filePath)
-                .foregroundStyle(.tronEmeraldDark.opacity(0.8))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            MiniMessageRow(text: line.text, isUser: false)
 
         case .toolStart:
-            HStack(spacing: 4) {
-                Text(">")
-                    .foregroundStyle(.tronEmerald)
-                Text(line.text)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
-            .truncationMode(.tail)
+            MiniToolChip(
+                name: line.displayName ?? line.toolName ?? line.text,
+                icon: line.icon ?? "gearshape",
+                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
+                summary: line.summary,
+                duration: line.duration,
+                status: line.status
+            )
 
         case .toolEnd:
-            Text(line.text)
-                .font(TronTypography.filePath)
-                .foregroundStyle(line.text.hasPrefix("✗") ? .red.opacity(0.7) : .tronEmerald.opacity(0.7))
-                .lineLimit(1)
+            MiniToolChip(
+                name: line.displayName ?? line.toolName ?? line.text,
+                icon: line.icon ?? "gearshape",
+                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
+                summary: line.summary,
+                duration: line.duration,
+                status: line.status
+            )
 
         case .toolBatch:
             HStack(spacing: 4) {
@@ -398,9 +344,8 @@ struct SessionStreamView: View {
                 Text(line.text)
                     .foregroundStyle(.tronEmerald)
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
-            .truncationMode(.tail)
 
         case .subagentSpawn:
             HStack(spacing: 4) {
@@ -409,7 +354,7 @@ struct SessionStreamView: View {
                 Text(line.text)
                     .foregroundStyle(.tronPurple)
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
             .truncationMode(.tail)
 
@@ -420,7 +365,7 @@ struct SessionStreamView: View {
                 Text(line.text)
                     .foregroundStyle(.tronPurple.opacity(0.7))
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
 
         case .subagentFailed:
@@ -430,21 +375,12 @@ struct SessionStreamView: View {
                 Text(line.text)
                     .foregroundStyle(.red.opacity(0.7))
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
             .truncationMode(.tail)
 
         case .thinking:
-            HStack(spacing: 4) {
-                Image(systemName: "brain")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronEmerald)
-                    .symbolEffect(.pulse, options: .repeating)
-                Text("thinking…")
-                    .foregroundStyle(.tronEmerald.opacity(0.8))
-            }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
+            MiniThinkingRow()
 
         case .error:
             HStack(spacing: 4) {
@@ -453,71 +389,45 @@ struct SessionStreamView: View {
                 Text(line.text)
                     .foregroundStyle(.red.opacity(0.8))
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
             .truncationMode(.tail)
         }
     }
 }
 
-// MARK: - Stream View Chrome
-
-private extension View {
-    func streamViewChrome() -> some View {
-        self
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.tronEmerald.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
-            )
-    }
-}
-
-// MARK: - Activity Lines View (Persisted Terminal Display)
+// MARK: - Mini-Chat Activity View (Persisted)
 
 @available(iOS 26.0, *)
-struct ActivityLinesView: View {
+struct MiniChatActivityView: View {
     let lines: [CachedActivityLine]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                activityLineView(line)
+                miniChatLine(line)
             }
         }
-        .streamViewChrome()
     }
 
     @ViewBuilder
-    private func activityLineView(_ line: CachedActivityLine) -> some View {
+    private func miniChatLine(_ line: CachedActivityLine) -> some View {
         switch line.kind {
+        case "userPrompt":
+            MiniMessageRow(text: line.text, isUser: true)
+
         case "text":
-            Text(line.text)
-                .font(TronTypography.filePath)
-                .foregroundStyle(.tronEmeraldDark.opacity(0.8))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            MiniMessageRow(text: line.text, isUser: false)
 
-        case "toolStart":
-            HStack(spacing: 4) {
-                Text(">")
-                    .foregroundStyle(.tronEmerald)
-                Text(line.text)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
-            .truncationMode(.tail)
-
-        case "toolEnd":
-            Text(line.text)
-                .font(TronTypography.filePath)
-                .foregroundStyle(line.text.hasPrefix("✗") ? .red.opacity(0.7) : .tronEmerald.opacity(0.7))
-                .lineLimit(1)
+        case "toolStart", "toolEnd":
+            MiniToolChip(
+                name: line.displayName ?? line.text,
+                icon: line.icon ?? "gearshape",
+                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
+                summary: line.summary,
+                duration: line.duration,
+                status: line.status ?? "success"
+            )
 
         case "toolBatch":
             HStack(spacing: 4) {
@@ -526,59 +436,201 @@ struct ActivityLinesView: View {
                 Text(line.text)
                     .foregroundStyle(.tronEmerald)
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
-            .truncationMode(.tail)
 
         case "subagentSpawn":
             HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.tronPurple)
-                Text(line.text)
-                    .foregroundStyle(.tronPurple)
+                Text("◆").foregroundStyle(.tronPurple)
+                Text(line.text).foregroundStyle(.tronPurple)
             }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
-            .truncationMode(.tail)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+            .lineLimit(1).truncationMode(.tail)
 
         case "subagentDone":
             HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.tronPurple.opacity(0.7))
-                Text(line.text)
-                    .foregroundStyle(.tronPurple.opacity(0.7))
+                Text("◆").foregroundStyle(.tronPurple.opacity(0.7))
+                Text(line.text).foregroundStyle(.tronPurple.opacity(0.7))
             }
-            .font(TronTypography.filePath)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1)
 
         case "subagentFailed":
             HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.red.opacity(0.7))
-                Text(line.text)
-                    .foregroundStyle(.red.opacity(0.7))
+                Text("◆").foregroundStyle(.red.opacity(0.7))
+                Text(line.text).foregroundStyle(.red.opacity(0.7))
             }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
-            .truncationMode(.tail)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+            .lineLimit(1).truncationMode(.tail)
+
+        case "thinking":
+            MiniThinkingRow()
 
         case "error":
             HStack(spacing: 4) {
-                Text("⚠")
-                    .foregroundStyle(.red.opacity(0.8))
-                Text(line.text)
-                    .foregroundStyle(.red.opacity(0.8))
+                Text("⚠").foregroundStyle(.red.opacity(0.8))
+                Text(line.text).foregroundStyle(.red.opacity(0.8))
             }
-            .font(TronTypography.filePath)
-            .lineLimit(1)
-            .truncationMode(.tail)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+            .lineLimit(1).truncationMode(.tail)
 
         default:
-            Text(line.text)
-                .font(TronTypography.filePath)
-                .foregroundStyle(.tronEmeraldDark.opacity(0.6))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            MiniMessageRow(text: line.text, isUser: false)
+        }
+    }
+}
+
+// MARK: - Mini-Chat Shared Components
+
+@available(iOS 26.0, *)
+struct MiniMessageRow: View {
+    let text: String
+    let isUser: Bool
+
+    var body: some View {
+        if isUser {
+            // User message: right-aligned text with dimmed bar on right
+            HStack(alignment: .top, spacing: 0) {
+                Spacer(minLength: 0)
+
+                Text(text)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.trailing)
+
+                Rectangle()
+                    .fill(Color.tronEmerald.opacity(0.3))
+                    .frame(width: 2)
+                    .padding(.leading, 8)
+            }
+        } else {
+            // Assistant message: left-aligned text with emerald bar on left
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(Color.tronEmerald)
+                    .frame(width: 2)
+                    .padding(.trailing, 8)
+
+                Text(text)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(.tronEmeraldDark.opacity(0.9))
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+struct MiniThinkingRow: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(Color.tronTextMuted.opacity(0.4))
+                .frame(width: 2)
+                .padding(.trailing, 8)
+
+            Text("Thinking")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                .foregroundStyle(.tronTextMuted)
+                .italic()
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+struct MiniToolChip: View {
+    let name: String
+    let icon: String
+    let color: Color
+    var summary: String?
+    var duration: String?
+    var status: String?  // "running", "success", "error"
+
+    private var statusColor: Color {
+        status == "error" ? .tronError : color
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Status icon
+            if status == "running" {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 10, height: 10)
+                    .tint(color)
+            } else if status == "error" {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tronError)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(color)
+            }
+
+            Text(name)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(statusColor)
+
+            if let summary, !summary.isEmpty {
+                Text(summary)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(statusColor.opacity(0.6))
+                    .lineLimit(1)
+            }
+
+            if let duration {
+                Text(duration)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(statusColor.opacity(0.4))
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .chipStyle(statusColor, tintOpacity: 0.2, strokeOpacity: 0.25)
+        .animation(.smooth(duration: 0.3), value: summary)
+        .animation(.smooth(duration: 0.3), value: duration)
+        .animation(.smooth(duration: 0.3), value: status)
+    }
+}
+
+@available(iOS 26.0, *)
+struct ProcessingBar: View {
+    @State private var isPulsing = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.tronEmerald)
+            .frame(height: 2)
+            .opacity(isPulsing ? 0.3 : 0.8)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isPulsing)
+            .onAppear { isPulsing = true }
+    }
+}
+
+// MARK: - Tool Color Resolution
+
+extension String {
+    var resolvedToolColor: Color {
+        switch self {
+        case "tronSlate": return .tronSlate
+        case "tronPink": return .tronPink
+        case "orange": return .orange
+        case "tronEmerald": return .tronEmerald
+        case "purple": return .purple
+        case "cyan": return .cyan
+        case "tronInfo": return .tronInfo
+        case "tronAmber": return .tronAmber
+        case "tronPurple": return .tronPurple
+        case "tronIndigo": return .tronIndigo
+        case "tronTeal": return .tronTeal
+        case "tronTextMuted": return .tronTextMuted
+        default: return .tronTextMuted
         }
     }
 }

@@ -1,15 +1,23 @@
-import Foundation
+import SwiftUI
 
 // MARK: - DashboardStreamLine
 
-/// A single line in a dashboard session card's mini-terminal.
+/// A single line in a dashboard session card's mini-chat view.
 struct DashboardStreamLine: Identifiable {
     let id = UUID()
     let kind: Kind
     var text: String
+    var icon: String?
+    var iconColor: String?
+    var toolName: String?
+    var displayName: String?
+    var summary: String?
+    var duration: String?
+    var status: String?  // "running", "success", "error"
 
     enum Kind: String, Equatable {
         case text
+        case userPrompt
         case toolStart
         case toolEnd
         case toolBatch
@@ -25,8 +33,8 @@ struct DashboardStreamLine: Identifiable {
 
 /// Per-session ring buffer of recent activity lines for dashboard display.
 /// Capped at `maxLines` to bound memory. Text deltas coalesce into a single
-/// `.text` line until a non-text event arrives. Parallel tool calls aggregate
-/// into a single `.toolBatch` line.
+/// `.text` line until a non-text event arrives. Each tool call gets its own
+/// `.toolStart` line with summary, duration, and status.
 struct SessionStreamBuffer {
     static let maxLines = 8
     static let maxTextLineLength = 200
@@ -37,19 +45,21 @@ struct SessionStreamBuffer {
     /// Index into `lines` of the current text line being coalesced.
     private var currentTextLineIndex: Int?
 
-    /// Tool names accumulated during a parallel tool batch.
-    /// Reset when a non-tool event arrives.
-    private var pendingToolNames: [String] = []
 
-    /// Total tools in current batch (preserved after tools start ending)
-    private var batchSize: Int = 0
+    // MARK: - User Prompt
+
+    mutating func addUserPrompt(_ text: String) {
+        guard isActive else { return }
+        currentTextLineIndex = nil
+
+        let truncated = text.count > 200 ? String(text.suffix(200)) : text
+        appendLine(DashboardStreamLine(kind: .userPrompt, text: truncated))
+    }
 
     // MARK: - Text Deltas
 
     mutating func appendTextDelta(_ delta: String) {
         guard isActive else { return }
-        flushPendingTools()
-
         // Remove thinking line if present — real text replaces the placeholder
         let countBefore = lines.count
         lines.removeAll { $0.kind == .thinking }
@@ -77,43 +87,51 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let display = Self.formatToolDisplay(name: name, arguments: arguments)
-        pendingToolNames.append(name)
-        batchSize = pendingToolNames.count
+        let descriptor = ToolRegistry.descriptor(for: name)
+        let argsJSON = Self.serializeArguments(arguments)
+        let toolSummary = descriptor.summaryExtractor(argsJSON)
 
-        if pendingToolNames.count == 1 {
-            appendLine(DashboardStreamLine(kind: .toolStart, text: display))
-        } else {
-            // Parallel batch — remove previous toolStart/toolBatch and replace with aggregate
-            lines.removeAll { $0.kind == .toolStart || $0.kind == .toolBatch }
-            let batchText = Self.formatToolBatch(pendingToolNames)
-            appendLine(DashboardStreamLine(kind: .toolBatch, text: batchText))
-        }
+        var line = DashboardStreamLine(kind: .toolStart, text: name)
+        line.icon = descriptor.icon
+        line.iconColor = descriptor.iconColorName
+        line.toolName = name
+        line.displayName = descriptor.displayName
+        line.summary = toolSummary.isEmpty ? nil : toolSummary
+        line.status = "running"
+        appendLine(line)
     }
 
-    mutating func addToolEnd(name: String?, success: Bool) {
+    mutating func addToolEnd(name: String?, success: Bool, durationMs: Int? = nil) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        if let name = name {
-            pendingToolNames.removeAll { $0 == name }
-        } else {
-            pendingToolNames.removeAll()
+        let formattedDuration = durationMs.map { Self.formatDuration($0) }
+
+        // Update existing toolStart line in-place to show completed state
+        if let name = name,
+           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolName == name }) {
+            lines[idx].status = success ? "success" : "error"
+            lines[idx].duration = formattedDuration
+            return
         }
 
-        if batchSize > 1 {
-            // Show aggregated completion when all tools in batch have finished
-            if pendingToolNames.isEmpty {
-                let prefix = success ? "✓" : "✗"
-                appendLine(DashboardStreamLine(kind: .toolEnd, text: "\(prefix) \(batchSize) tools"))
-                batchSize = 0
-            }
-        } else {
-            let prefix = success ? "✓" : "✗"
-            let toolName = name ?? "Tool"
-            appendLine(DashboardStreamLine(kind: .toolEnd, text: "\(prefix) \(toolName)"))
-            batchSize = 0
-        }
+        // Fallback: create a new toolEnd line if no matching toolStart found
+        let toolName = name ?? "Tool"
+        let descriptor = ToolRegistry.descriptor(for: toolName)
+        var line = DashboardStreamLine(kind: .toolEnd, text: toolName)
+        line.icon = descriptor.icon
+        line.iconColor = descriptor.iconColorName
+        line.toolName = toolName
+        line.displayName = descriptor.displayName
+        line.duration = formattedDuration
+        line.status = success ? "success" : "error"
+        appendLine(line)
+    }
+
+    static func formatDuration(_ ms: Int) -> String {
+        if ms < 1000 { return "\(ms)ms" }
+        let seconds = Double(ms) / 1000.0
+        return String(format: "%.1fs", seconds)
     }
 
     // MARK: - Subagent Events
@@ -121,7 +139,7 @@ struct SessionStreamBuffer {
     mutating func addSubagentSpawn(task: String) {
         guard isActive else { return }
         currentTextLineIndex = nil
-        flushPendingTools()
+
         let truncated = task.count > 50 ? String(task.prefix(47)) + "…" : task
         appendLine(DashboardStreamLine(kind: .subagentSpawn, text: "Agent: \(truncated)"))
     }
@@ -145,7 +163,7 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         if lines.contains(where: { $0.kind == .thinking }) { return }
         currentTextLineIndex = nil
-        flushPendingTools()
+
         appendLine(DashboardStreamLine(kind: .thinking, text: "thinking"))
     }
 
@@ -154,7 +172,7 @@ struct SessionStreamBuffer {
     mutating func addError(message: String) {
         guard isActive else { return }
         currentTextLineIndex = nil
-        flushPendingTools()
+
         let truncated = message.count > 80 ? String(message.prefix(77)) + "…" : message
         appendLine(DashboardStreamLine(kind: .error, text: truncated))
     }
@@ -173,17 +191,10 @@ struct SessionStreamBuffer {
     mutating func clear() {
         lines.removeAll()
         currentTextLineIndex = nil
-        pendingToolNames.removeAll()
-        batchSize = 0
         isActive = true
     }
 
     // MARK: - Private
-
-    private mutating func flushPendingTools() {
-        pendingToolNames.removeAll()
-        batchSize = 0
-    }
 
     private mutating func appendLine(_ line: DashboardStreamLine) {
         lines.append(line)
@@ -197,54 +208,16 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Tool Display Formatting
+    // MARK: - Tool Metadata (delegates to ToolRegistry)
 
-    static func formatToolDisplay(name: String, arguments: [String: AnyCodable]?) -> String {
-        guard let args = arguments else { return name }
-
-        switch name {
-        case "Edit", "Write", "Read":
-            if let path = args["file_path"]?.value as? String {
-                let filename = URL(fileURLWithPath: path).lastPathComponent
-                return "\(name) \(filename)"
-            }
-            return name
-
-        case "Bash":
-            if let command = args["command"]?.value as? String {
-                let cleaned = command.replacingOccurrences(of: "\n", with: " ")
-                if cleaned.count > 40 {
-                    return "$ \(cleaned.prefix(40))…"
-                }
-                return "$ \(cleaned)"
-            }
-            return name
-
-        case "Grep":
-            if let pattern = args["pattern"]?.value as? String {
-                let truncated = pattern.count > 30 ? String(pattern.prefix(30)) + "…" : pattern
-                return "Grep \"\(truncated)\""
-            }
-            return name
-
-        case "Glob":
-            if let pattern = args["pattern"]?.value as? String {
-                let truncated = pattern.count > 30 ? String(pattern.prefix(30)) + "…" : pattern
-                return "Glob \(truncated)"
-            }
-            return name
-
-        default:
-            return name
-        }
-    }
-
-    static func formatToolBatch(_ names: [String]) -> String {
-        let count = names.count
-        if count <= 3 {
-            return "\(count) tools: \(names.joined(separator: ", "))"
-        }
-        return "\(count) tools running"
+    /// Serialize AnyCodable arguments to JSON string for ToolRegistry's summaryExtractor.
+    static func serializeArguments(_ arguments: [String: AnyCodable]?) -> String {
+        guard let args = arguments else { return "{}" }
+        let dict = args.mapValues { $0.value }
+        guard JSONSerialization.isValidJSONObject(dict) else { return "{}" }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let str = String(data: data, encoding: .utf8) else { return "{}" }
+        return str
     }
 }
 
@@ -266,7 +239,7 @@ final class DashboardStreamManager {
     /// Subagent session IDs spawned by hooks (nil toolCallId) — suppressed from display
     private var hookSubagentIds: Set<String> = []
 
-    func visibleLines(for sessionId: String, count: Int = 3) -> [DashboardStreamLine] {
+    func visibleLines(for sessionId: String, count: Int = 5) -> [DashboardStreamLine] {
         guard let buffer = buffers[sessionId] else { return [] }
         return Array(buffer.lines.suffix(count))
     }
@@ -276,13 +249,19 @@ final class DashboardStreamManager {
     }
 
     /// Snapshot visible lines as persistable `CachedActivityLine` values.
-    func snapshotLines(for sessionId: String, count: Int = 3) -> [CachedActivityLine] {
-        visibleLines(for: sessionId, count: count).map {
-            CachedActivityLine(kind: $0.kind.rawValue, text: $0.text)
+    func snapshotLines(for sessionId: String, count: Int = 5) -> [CachedActivityLine] {
+        let visible = visibleLines(for: sessionId, count: count)
+        return visible.map {
+            CachedActivityLine(kind: $0.kind.rawValue, text: $0.text, icon: $0.icon, iconColor: $0.iconColor, displayName: $0.displayName, summary: $0.summary, duration: $0.duration, status: $0.status)
         }
     }
 
     // MARK: - Event Handlers
+
+    func handleUserPrompt(sessionId: String, text: String) {
+        guard ensureBuffer(for: sessionId) else { return }
+        buffers[sessionId]?.addUserPrompt(text)
+    }
 
     func handleTextDelta(sessionId: String, delta: String) {
         guard ensureBuffer(for: sessionId) else { return }
@@ -299,9 +278,9 @@ final class DashboardStreamManager {
         buffers[sessionId]?.addToolStart(name: toolName, arguments: arguments)
     }
 
-    func handleToolEnd(sessionId: String, toolName: String?, success: Bool) {
+    func handleToolEnd(sessionId: String, toolName: String?, success: Bool, durationMs: Int? = nil) {
         guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addToolEnd(name: toolName, success: success)
+        buffers[sessionId]?.addToolEnd(name: toolName, success: success, durationMs: durationMs)
     }
 
     func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String) {
