@@ -1,0 +1,19 @@
+import Foundation
+
+/// Clean boundary between the event/plugin layer and the dashboard streaming layer.
+/// EventStoreManager maps plugin results to this enum; DashboardStreamManager consumes it.
+/// Neither layer imports the other's types.
+enum DashboardEvent {
+    case turnStart
+    case userPrompt(text: String)
+    case textDelta(delta: String)
+    case thinkingDelta
+    case toolStart(toolName: String, toolCallId: String?, arguments: [String: AnyCodable]?)
+    case toolEnd(toolName: String?, toolCallId: String?, success: Bool, durationMs: Int?)
+    case subagentSpawned(task: String, toolCallId: String?, subagentSessionId: String)
+    case subagentCompleted(turns: Int, subagentSessionId: String)
+    case subagentFailed(error: String, subagentSessionId: String)
+    case turnFailed(error: String)
+    case complete
+    case error(message: String)
+}

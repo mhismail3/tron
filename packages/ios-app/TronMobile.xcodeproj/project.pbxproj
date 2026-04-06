@@ -577,6 +577,7 @@
 		DCB3FF33E969E64ACB4F24A1 /* TronShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F0AA1A9F9B42CCBC0E6BD0EB /* TronShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DE697ED282ADD5F00BA2EB3C /* MediaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6E57FDBBD6080C970423AF /* MediaClient.swift */; };
 		DEA7492C9198251ADE6B9C73 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B009CA6162B3DE62CCAADC /* ChatViewModel.swift */; };
+		DF94524371E19B43F21FE530 /* DashboardEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37AB1C9655886345E087CCEC /* DashboardEvent.swift */; };
 		DFD1465183617D8EE8B69A5F /* UIUpdateQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A89FCC25E15C1B84685F30 /* UIUpdateQueue.swift */; };
 		DFF60B79CE9713805EBAFEFA /* FolderCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B48561A985D4D19269729A /* FolderCreationTests.swift */; };
 		E072FE9D6AD3FA003D12052D /* ToolStatusRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 190803332776868C6AC75EA2 /* ToolStatusRow.swift */; };
@@ -837,6 +838,7 @@
 		36D5C1A94E170CFF37A3544A /* ToolPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPayloads.swift; sourceTree = "<group>"; };
 		36D732E1A6C2929176A5B88D /* WorktreeStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusView.swift; sourceTree = "<group>"; };
 		3740E0093C7AA75C04BB7E2B /* TurnEndPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnEndPlugin.swift; sourceTree = "<group>"; };
+		37AB1C9655886345E087CCEC /* DashboardEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardEvent.swift; sourceTree = "<group>"; };
 		383FE16A63ADA54DF31C7F10 /* MediaClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaClientTests.swift; sourceTree = "<group>"; };
 		3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPillTests.swift; sourceTree = "<group>"; };
 		38A55381A199C9A004F1135B /* FilesystemClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesystemClient.swift; sourceTree = "<group>"; };
@@ -2039,6 +2041,7 @@
 			isa = PBXGroup;
 			children = (
 				49A38C826117C42F3C25FF4B /* ActivityLine.swift */,
+				37AB1C9655886345E087CCEC /* DashboardEvent.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -3400,6 +3403,7 @@
 				8E47281EC7DDAF43ADA30993 /* ContextTrackingState.swift in Sources */,
 				F2D7335139565BC49B3E2499 /* CostAnalyticsViews.swift in Sources */,
 				EAAA7C27F2EB5D00998F5CB2 /* CronClient.swift in Sources */,
+				DF94524371E19B43F21FE530 /* DashboardEvent.swift in Sources */,
 				A0B7C3024025D622BEE7E153 /* DashboardPoller.swift in Sources */,
 				F6E112A7375A8FD91F9D09BE /* DashboardStreamManager.swift in Sources */,
 				969B40EC839ACACE4DE38498 /* DashboardToolbarActions.swift in Sources */,

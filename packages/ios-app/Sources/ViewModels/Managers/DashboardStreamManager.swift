@@ -276,6 +276,40 @@ final class DashboardStreamManager {
         return Array((persisted ?? []).suffix(count))
     }
 
+    // MARK: - Event Router
+
+    /// Single entry point for dashboard events. Routes to individual handlers.
+    /// Provides a clean boundary — callers construct a DashboardEvent enum value
+    /// instead of calling individual handleXxx methods with different signatures.
+    func handleEvent(_ event: DashboardEvent, sessionId: String) {
+        switch event {
+        case .turnStart:
+            handleTurnStart(sessionId: sessionId)
+        case .userPrompt(let text):
+            handleUserPrompt(sessionId: sessionId, text: text)
+        case .textDelta(let delta):
+            handleTextDelta(sessionId: sessionId, delta: delta)
+        case .thinkingDelta:
+            handleThinkingDelta(sessionId: sessionId)
+        case .toolStart(let name, let id, let args):
+            handleToolStart(sessionId: sessionId, toolName: name, toolCallId: id, arguments: args)
+        case .toolEnd(let name, let id, let success, let ms):
+            handleToolEnd(sessionId: sessionId, toolName: name, toolCallId: id, success: success, durationMs: ms)
+        case .subagentSpawned(let task, let toolCallId, let subId):
+            handleSubagentSpawned(sessionId: sessionId, task: task, toolCallId: toolCallId, subagentSessionId: subId)
+        case .subagentCompleted(let turns, let subId):
+            handleSubagentCompleted(sessionId: sessionId, turns: turns, subagentSessionId: subId)
+        case .subagentFailed(let error, let subId):
+            handleSubagentFailed(sessionId: sessionId, error: error, subagentSessionId: subId)
+        case .turnFailed(let error):
+            handleTurnFailed(sessionId: sessionId, error: error)
+        case .complete:
+            handleComplete(sessionId: sessionId)
+        case .error(let msg):
+            handleError(sessionId: sessionId, message: msg)
+        }
+    }
+
     // MARK: - Event Handlers
 
     func handleUserPrompt(sessionId: String, text: String) {

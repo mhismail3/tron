@@ -150,10 +150,10 @@ final class EventStoreManager {
             if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: true)
-                dashboardStreamManager.handleTurnStart(sessionId: sessionId)
+                dashboardStreamManager.handleEvent(.turnStart, sessionId: sessionId)
                 // Inject user prompt into stream buffer if available
                 if let prompt = sessions.first(where: { $0.id == sessionId })?.lastUserPrompt, !prompt.isEmpty {
-                    dashboardStreamManager.handleUserPrompt(sessionId: sessionId, text: prompt)
+                    dashboardStreamManager.handleEvent(.userPrompt(text: prompt), sessionId: sessionId)
                 }
             }
 
@@ -161,7 +161,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
-                dashboardStreamManager.handleComplete(sessionId: sessionId)
+                dashboardStreamManager.handleEvent(.complete, sessionId: sessionId)
                 Task { await self.finalizeSessionCompletion(sessionId: sessionId) }
             }
 
@@ -170,84 +170,70 @@ final class EventStoreManager {
                let result = event.getResult() as? ErrorPlugin.Result {
                 logger.info("Global: Session \(sessionId) error: \(result.message)", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
-                dashboardStreamManager.handleError(sessionId: sessionId, message: result.message)
+                dashboardStreamManager.handleEvent(.error(message: result.message), sessionId: sessionId)
                 updateSessionDashboardInfo(
                     sessionId: sessionId,
                     lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
                 )
             }
 
-        // MARK: - Dashboard Streaming Events
+        // MARK: - Dashboard Streaming Events (routed via DashboardEvent)
 
         case TextDeltaPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? TextDeltaPlugin.Result {
-                dashboardStreamManager.handleTextDelta(sessionId: sessionId, delta: result.delta)
+                dashboardStreamManager.handleEvent(.textDelta(delta: result.delta), sessionId: sessionId)
             }
 
         case ThinkingDeltaPlugin.eventType:
             if let sessionId = event.sessionId {
-                dashboardStreamManager.handleThinkingDelta(sessionId: sessionId)
+                dashboardStreamManager.handleEvent(.thinkingDelta, sessionId: sessionId)
             }
 
         case ToolStartPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? ToolStartPlugin.Result {
-                dashboardStreamManager.handleToolStart(
-                    sessionId: sessionId,
-                    toolName: result.toolName,
-                    toolCallId: result.toolCallId,
-                    arguments: result.arguments
-                )
+                dashboardStreamManager.handleEvent(
+                    .toolStart(toolName: result.toolName, toolCallId: result.toolCallId, arguments: result.arguments),
+                    sessionId: sessionId)
             }
 
         case ToolEndPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? ToolEndPlugin.Result {
-                dashboardStreamManager.handleToolEnd(
-                    sessionId: sessionId,
-                    toolName: result.toolName,
-                    toolCallId: result.toolCallId,
-                    success: result.success,
-                    durationMs: result.duration
-                )
+                dashboardStreamManager.handleEvent(
+                    .toolEnd(toolName: result.toolName, toolCallId: result.toolCallId, success: result.success, durationMs: result.duration),
+                    sessionId: sessionId)
             }
 
         case SubagentSpawnedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentSpawnedPlugin.Result {
-                dashboardStreamManager.handleSubagentSpawned(
-                    sessionId: sessionId,
-                    task: result.task,
-                    toolCallId: result.toolCallId,
-                    subagentSessionId: result.subagentSessionId
-                )
+                dashboardStreamManager.handleEvent(
+                    .subagentSpawned(task: result.task, toolCallId: result.toolCallId, subagentSessionId: result.subagentSessionId),
+                    sessionId: sessionId)
             }
 
         case SubagentCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentCompletedPlugin.Result {
-                dashboardStreamManager.handleSubagentCompleted(
-                    sessionId: sessionId,
-                    turns: result.totalTurns,
-                    subagentSessionId: result.subagentSessionId
-                )
+                dashboardStreamManager.handleEvent(
+                    .subagentCompleted(turns: result.totalTurns, subagentSessionId: result.subagentSessionId),
+                    sessionId: sessionId)
             }
 
         case SubagentFailedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentFailedPlugin.Result {
-                dashboardStreamManager.handleSubagentFailed(
-                    sessionId: sessionId,
-                    error: result.error,
-                    subagentSessionId: result.subagentSessionId
-                )
+                dashboardStreamManager.handleEvent(
+                    .subagentFailed(error: result.error, subagentSessionId: result.subagentSessionId),
+                    sessionId: sessionId)
             }
 
         case TurnFailedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? TurnFailedPlugin.Result {
-                dashboardStreamManager.handleTurnFailed(sessionId: sessionId, error: result.error)
+                dashboardStreamManager.handleEvent(.turnFailed(error: result.error), sessionId: sessionId)
             }
 
         // MARK: - Session Lifecycle Events
