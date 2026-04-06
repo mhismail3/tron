@@ -237,6 +237,33 @@ impl EventStore {
         EventRepo::get_since(&conn, session_id, after_sequence)
     }
 
+    /// Get the most recent N events for a session, in sequence ASC order.
+    pub fn get_latest_events(
+        &self,
+        session_id: &str,
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_latest_events(&conn, session_id, limit)
+    }
+
+    /// Get events with sequence < `before_sequence`, in sequence ASC order.
+    pub fn get_events_before(
+        &self,
+        session_id: &str,
+        before_sequence: i64,
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_events_before(&conn, session_id, before_sequence, limit)
+    }
+
+    /// Check if events exist before a given sequence number.
+    pub fn has_events_before(&self, session_id: &str, before_sequence: i64) -> Result<bool> {
+        let conn = self.conn()?;
+        EventRepo::has_events_before(&conn, session_id, before_sequence)
+    }
+
     /// Get token usage summary for a session.
     pub fn get_token_usage_summary(&self, session_id: &str) -> Result<TokenTotals> {
         let conn = self.conn()?;

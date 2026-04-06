@@ -81,6 +81,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("session.getHead", session::GetHeadHandler);
     registry.register("session.getState", session::GetStateHandler);
     registry.register("session.getHistory", session::GetHistoryHandler);
+    registry.register("session.reconstruct", session::ReconstructHandler);
     registry.register("session.archive", session::ArchiveSessionHandler);
     registry.register("session.unarchive", session::UnarchiveSessionHandler);
     registry.register("session.getChat", session::GetChatSessionHandler);
@@ -524,8 +525,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            127,
-            "expected 127 methods, got {}",
+            128,
+            "expected 128 methods, got {}",
             reg.methods().len()
         );
     }

@@ -3,7 +3,7 @@
 //! JSON-RPC 2.0 protocol layer, method registry, and handlers.
 //!
 //! Implements the full RPC surface that clients connect to:
-//! - Session: create, resume, list, delete, fork, getHead, getState
+//! - Session: create, resume, list, delete, fork, getHead, getState, reconstruct
 //! - Agent: prompt, abort, getState
 //! - Model: list, switch
 //! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
@@ -29,6 +29,7 @@ pub(crate) mod sandbox_service;
 pub(crate) mod session_commands;
 pub mod session_context;
 pub(crate) mod session_queries;
+pub(crate) mod session_reconstruct;
 pub(crate) mod settings_service;
 pub mod types;
 pub mod validation;

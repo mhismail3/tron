@@ -220,6 +220,80 @@ impl EventRepo {
         Ok(rows)
     }
 
+    /// Get the most recent N events for a session, returned in sequence ASC order.
+    ///
+    /// If `limit` is `None`, returns all events. This is used for the initial
+    /// `session.reconstruct` call to load the tail of history.
+    pub fn get_latest_events(
+        conn: &Connection,
+        session_id: &str,
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let sql = if let Some(n) = limit {
+            // Subquery to get the last N by sequence DESC, then re-order ASC
+            format!(
+                "SELECT * FROM (SELECT {EVENT_COLUMNS} FROM events \
+                 WHERE session_id = ?1 ORDER BY sequence DESC LIMIT {n}) \
+                 ORDER BY sequence ASC"
+            )
+        } else {
+            format!(
+                "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 ORDER BY sequence ASC"
+            )
+        };
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt
+            .query_map(params![session_id], Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Get events with sequence < `before_sequence`, returned in sequence ASC order.
+    ///
+    /// Used for backward pagination in `session.reconstruct` (load-more).
+    pub fn get_events_before(
+        conn: &Connection,
+        session_id: &str,
+        before_sequence: i64,
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let sql = if let Some(n) = limit {
+            format!(
+                "SELECT * FROM (SELECT {EVENT_COLUMNS} FROM events \
+                 WHERE session_id = ?1 AND sequence < ?2 \
+                 ORDER BY sequence DESC LIMIT {n}) \
+                 ORDER BY sequence ASC"
+            )
+        } else {
+            format!(
+                "SELECT {EVENT_COLUMNS} FROM events \
+                 WHERE session_id = ?1 AND sequence < ?2 \
+                 ORDER BY sequence ASC"
+            )
+        };
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt
+            .query_map(params![session_id, before_sequence], Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Check if events exist with sequence < `before_sequence`.
+    ///
+    /// Used to determine `hasMoreEvents` in `session.reconstruct` responses.
+    pub fn has_events_before(
+        conn: &Connection,
+        session_id: &str,
+        before_sequence: i64,
+    ) -> Result<bool> {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE session_id = ?1 AND sequence < ?2)",
+            params![session_id, before_sequence],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
+
     /// Get the latest event for a session.
     pub fn get_latest(conn: &Connection, session_id: &str) -> Result<Option<EventRow>> {
         let sql = format!(
@@ -2054,5 +2128,144 @@ mod tests {
         assert_eq!(desc.len(), 1);
         assert_eq!(desc[0].model.as_deref(), Some("gpt-4"));
         assert_eq!(desc[0].provider_type.as_deref(), Some("openai"));
+    }
+
+    // ── get_latest_events tests ──
+
+    #[test]
+    fn get_latest_events_all() {
+        let conn = setup();
+        for i in 1..=5 {
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
+            EventRepo::insert(&conn, &event).unwrap();
+        }
+
+        let events = EventRepo::get_latest_events(&conn, "sess_1", None).unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0].sequence, 1);
+        assert_eq!(events[4].sequence, 5);
+    }
+
+    #[test]
+    fn get_latest_events_with_limit() {
+        let conn = setup();
+        for i in 1..=10 {
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
+            EventRepo::insert(&conn, &event).unwrap();
+        }
+
+        let events = EventRepo::get_latest_events(&conn, "sess_1", Some(3)).unwrap();
+        assert_eq!(events.len(), 3);
+        // Should be the LAST 3 events, in ASC order
+        assert_eq!(events[0].sequence, 8);
+        assert_eq!(events[1].sequence, 9);
+        assert_eq!(events[2].sequence, 10);
+    }
+
+    #[test]
+    fn get_latest_events_empty_session() {
+        let conn = setup();
+        let events = EventRepo::get_latest_events(&conn, "sess_1", Some(5)).unwrap();
+        assert!(events.is_empty());
+    }
+
+    // ── get_events_before tests ──
+
+    #[test]
+    fn get_events_before_basic() {
+        let conn = setup();
+        for i in 1..=10 {
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
+            EventRepo::insert(&conn, &event).unwrap();
+        }
+
+        let events = EventRepo::get_events_before(&conn, "sess_1", 5, None).unwrap();
+        assert_eq!(events.len(), 4); // sequences 1, 2, 3, 4
+        assert_eq!(events[0].sequence, 1);
+        assert_eq!(events[3].sequence, 4);
+    }
+
+    #[test]
+    fn get_events_before_with_limit() {
+        let conn = setup();
+        for i in 1..=10 {
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
+            EventRepo::insert(&conn, &event).unwrap();
+        }
+
+        // Get last 2 events before sequence 8
+        let events = EventRepo::get_events_before(&conn, "sess_1", 8, Some(2)).unwrap();
+        assert_eq!(events.len(), 2);
+        // Should be sequences 6, 7 (the last 2 before 8, in ASC order)
+        assert_eq!(events[0].sequence, 6);
+        assert_eq!(events[1].sequence, 7);
+    }
+
+    #[test]
+    fn get_events_before_first_returns_empty() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let events = EventRepo::get_events_before(&conn, "sess_1", 1, None).unwrap();
+        assert!(events.is_empty());
+    }
+
+    // ── has_events_before tests ──
+
+    #[test]
+    fn has_events_before_true() {
+        let conn = setup();
+        for i in 1..=5 {
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
+            EventRepo::insert(&conn, &event).unwrap();
+        }
+
+        assert!(EventRepo::has_events_before(&conn, "sess_1", 3).unwrap());
+    }
+
+    #[test]
+    fn has_events_before_false() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        assert!(!EventRepo::has_events_before(&conn, "sess_1", 1).unwrap());
+    }
+
+    #[test]
+    fn has_events_before_empty_session() {
+        let conn = setup();
+        assert!(!EventRepo::has_events_before(&conn, "sess_1", 100).unwrap());
     }
 }

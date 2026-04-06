@@ -11,7 +11,7 @@ use crate::server::rpc::handlers::{opt_array, opt_string, require_param, require
 use crate::server::rpc::registry::MethodHandler;
 
 /// Convert an `EventRow` to wire format (camelCase).
-fn event_row_to_wire(row: &EventRow) -> Value {
+pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
     let mut obj = serde_json::json!({
         "id": row.id,
         "type": row.event_type,

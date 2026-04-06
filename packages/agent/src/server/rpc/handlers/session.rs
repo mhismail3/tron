@@ -1,4 +1,4 @@
-//! Session handlers: create, resume, list, delete, fork, getHead, getState, getHistory.
+//! Session handlers: create, resume, list, delete, fork, getHead, getState, getHistory, reconstruct.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -10,6 +10,7 @@ use crate::server::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::session_commands::{CreateSessionRequest, SessionCommandService};
 use crate::server::rpc::session_queries::SessionQueryService;
+use crate::server::rpc::session_reconstruct::SessionReconstructService;
 
 /// Create a new session.
 pub struct CreateSessionHandler;
@@ -184,6 +185,26 @@ impl MethodHandler for UnarchiveSessionHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         SessionCommandService::unarchive(ctx, session_id).await
+    }
+}
+
+/// Reconstruct full session state for reconnection.
+pub struct ReconstructHandler;
+
+#[async_trait]
+impl MethodHandler for ReconstructHandler {
+    #[instrument(skip(self, ctx), fields(method = "session.reconstruct", session_id))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_i64);
+        let before_sequence = params
+            .as_ref()
+            .and_then(|p| p.get("beforeSequence"))
+            .and_then(Value::as_i64);
+        SessionReconstructService::reconstruct(ctx, session_id, limit, before_sequence).await
     }
 }
 
@@ -1373,5 +1394,462 @@ mod tests {
         assert_eq!(e1.event_type(), "session_archived");
         let e2 = rx.try_recv().unwrap();
         assert_eq!(e2.event_type(), "session_created");
+    }
+
+    // ── session.reconstruct tests ──
+
+    #[tokio::test]
+    async fn reconstruct_empty_session() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // Empty session has the session.start event
+        let events = result["events"].as_array().unwrap();
+        assert!(events.len() <= 1); // session.start or empty
+        assert_eq!(result["isRunning"], false);
+        assert!(result["inFlight"].is_null());
+        assert_eq!(result["hasMoreEvents"], false);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_session_with_history() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Add some events
+        for i in 0..5 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        // session.start + 5 messages
+        assert!(events.len() >= 5);
+        assert_eq!(result["isRunning"], false);
+        assert!(result["inFlight"].is_null());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_with_limit() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Add 20 events
+        for i in 0..20 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid, "limit": 5})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(result["hasMoreEvents"], true);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_with_before_sequence() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Add 10 events (session.start is seq 0, so these are seq 1-10)
+        for i in 0..10 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        // Get events before sequence 5
+        let result = ReconstructHandler
+            .handle(
+                Some(json!({"sessionId": sid, "beforeSequence": 5})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        // All events should have sequence < 5
+        for ev in events {
+            assert!(ev["sequence"].as_i64().unwrap() < 5);
+        }
+    }
+
+    #[tokio::test]
+    async fn reconstruct_pagination_combined() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Add 20 events
+        for i in 0..20 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        // Get last 3 events before sequence 10
+        let result = ReconstructHandler
+            .handle(
+                Some(json!({"sessionId": sid, "beforeSequence": 10, "limit": 3})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 3);
+        for ev in events {
+            assert!(ev["sequence"].as_i64().unwrap() < 10);
+        }
+        // Should still have more events before these
+        assert_eq!(result["hasMoreEvents"], true);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_oldest_sequence_correct() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        for i in 0..5 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        let oldest = result["oldestSequence"].as_i64().unwrap();
+        assert_eq!(oldest, events[0]["sequence"].as_i64().unwrap());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_idle_no_inflight() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["isRunning"], false);
+        assert!(result["inFlight"].is_null());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_nonexistent_session() {
+        let ctx = make_test_context();
+        let err = ReconstructHandler
+            .handle(
+                Some(json!({"sessionId": "nonexistent-session-xyz"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "SESSION_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn reconstruct_events_wire_format() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx
+            .event_store
+            .append(&crate::events::AppendOptions {
+                session_id: &sid,
+                event_type: crate::events::EventType::MessageUser,
+                payload: json!({"text": "hello"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        // Check wire format has required fields (camelCase)
+        let last_event = events.last().unwrap();
+        assert!(last_event.get("id").is_some());
+        assert!(last_event.get("type").is_some());
+        assert!(last_event.get("sessionId").is_some());
+        assert!(last_event.get("timestamp").is_some());
+        assert!(last_event.get("sequence").is_some());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_metadata_correct() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-test-model", "/tmp/test", Some("Test Session"))
+            .unwrap();
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let metadata = &result["metadata"];
+        assert_eq!(metadata["model"], "claude-test-model");
+        assert_eq!(metadata["workingDirectory"], "/tmp/test");
+        assert!(metadata.get("tokenUsage").is_some());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_last_sequence_matches_events() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        for i in 0..3 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        let last_seq = result["lastSequence"].as_i64().unwrap();
+        let max_event_seq = events.last().unwrap()["sequence"].as_i64().unwrap();
+        // lastSequence should be >= the max event sequence
+        assert!(last_seq >= max_event_seq);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_running_agent_has_inflight() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Simulate a running agent: begin_run + populate accumulator
+        let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
+        ctx.orchestrator
+            .turn_accumulators()
+            .handle_turn_start(&sid);
+        ctx.orchestrator
+            .turn_accumulators()
+            .handle_text_delta(&sid, "partial response");
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["isRunning"], true);
+        assert!(!result["inFlight"].is_null());
+        assert!(result["inFlight"]["contentSequence"].is_array());
+        assert!(result["inFlight"]["streaming"].is_object());
+        assert_eq!(result["inFlight"]["streaming"]["type"], "text");
+        assert_eq!(
+            result["inFlight"]["streaming"]["content"],
+            "partial response"
+        );
+    }
+
+    #[tokio::test]
+    async fn reconstruct_running_agent_tool_status() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
+        let acc = ctx.orchestrator.turn_accumulators();
+        acc.handle_turn_start(&sid);
+        acc.handle_text_delta(&sid, "I'll run two tools");
+        acc.handle_tool_generating(&sid, "tc_1", "bash");
+        acc.handle_tool_start(&sid, "tc_1", None);
+        acc.handle_tool_end(&sid, "tc_1", Some("output"), false);
+        acc.handle_tool_generating(&sid, "tc_2", "read");
+        acc.handle_tool_start(&sid, "tc_2", None);
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let in_flight = &result["inFlight"];
+        assert!(!in_flight.is_null());
+        let tools = in_flight["toolCalls"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["status"], "completed");
+        assert_eq!(tools[0]["toolName"], "bash");
+        assert_eq!(tools[1]["status"], "running");
+        assert_eq!(tools[1]["toolName"], "read");
+    }
+
+    #[tokio::test]
+    async fn reconstruct_running_agent_streaming_thinking() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
+        let acc = ctx.orchestrator.turn_accumulators();
+        acc.handle_turn_start(&sid);
+        acc.handle_thinking_delta(&sid, "Let me analyze this...");
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let in_flight = &result["inFlight"];
+        assert!(!in_flight.is_null());
+        let seq = in_flight["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 1);
+        assert_eq!(seq[0]["type"], "thinking");
+        assert_eq!(seq[0]["thinking"], "Let me analyze this...");
+        // streaming should be null when only thinking (no text yet)
+        assert!(in_flight["streaming"].is_null());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_inflight_content_sequence_ordering() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
+        let acc = ctx.orchestrator.turn_accumulators();
+        acc.handle_turn_start(&sid);
+        acc.handle_thinking_delta(&sid, "thinking...");
+        acc.handle_text_delta(&sid, "First I'll ");
+        acc.handle_tool_generating(&sid, "tc_1", "bash");
+        acc.handle_text_delta(&sid, "then more text");
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let seq = result["inFlight"]["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 4); // thinking, text, tool_ref, text
+        assert_eq!(seq[0]["type"], "thinking");
+        assert_eq!(seq[1]["type"], "text");
+        assert_eq!(seq[2]["type"], "tool_ref");
+        assert_eq!(seq[3]["type"], "text");
+    }
+
+    #[tokio::test]
+    async fn reconstruct_last_sequence_from_counter() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Init counter higher than DB events (simulates non-persisted events)
+        ctx.orchestrator.init_sequence_counter(&sid, 100);
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // lastSequence should come from counter, not from events
+        assert_eq!(result["lastSequence"], 100);
     }
 }
