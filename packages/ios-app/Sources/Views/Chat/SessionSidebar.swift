@@ -239,11 +239,6 @@ struct CachedSessionSidebarRow: View {
                     .foregroundStyle(.tronTextMuted)
             }
 
-            // Ellipsis — indicates truncated history above
-            Text("· · ·")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronTextMuted.opacity(0.4))
-
             // Mini-chat content — unified rendering for both live and persisted
             let activityLines: [CachedActivityLine] = {
                 if streamManager.hasContent(for: session.id) {
@@ -387,56 +382,57 @@ struct MiniMessageRow: View {
     let text: String
     let isUser: Bool
 
+    private let font = TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular)
+
     var body: some View {
         if isUser {
-            // User message: right-aligned text with dimmed bar on right
-            HStack(alignment: .top, spacing: 0) {
+            HStack(spacing: 0) {
                 Spacer(minLength: 0)
-
                 Text(text)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .font(font)
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .multilineTextAlignment(.trailing)
-
-                Rectangle()
-                    .fill(Color.tronEmerald.opacity(0.3))
-                    .frame(width: 2)
+                accentBar(color: .tronEmerald.opacity(0.3))
                     .padding(.leading, 8)
             }
+            .fixedSize(horizontal: false, vertical: true)
         } else {
-            // Assistant message: left-aligned text with emerald bar on left
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(Color.tronEmerald)
-                    .frame(width: 2)
+            HStack(spacing: 0) {
+                accentBar(color: .tronEmerald)
                     .padding(.trailing, 8)
-
                 Text(text)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .font(font)
                     .foregroundStyle(.tronEmeraldDark.opacity(0.9))
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .truncationMode(.tail)
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func accentBar(color: Color) -> some View {
+        Rectangle()
+            .fill(color)
+            .frame(width: 2)
     }
 }
 
 @available(iOS 26.0, *)
 struct MiniThinkingRow: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(spacing: 0) {
             Rectangle()
                 .fill(Color.tronTextMuted.opacity(0.4))
                 .frame(width: 2)
                 .padding(.trailing, 8)
 
             Text("Thinking")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .regular))
                 .foregroundStyle(.tronTextMuted)
                 .italic()
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
