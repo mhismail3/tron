@@ -176,6 +176,16 @@ impl McpClient {
         for arg in &config.args {
             let _ = cmd.arg(arg);
         }
+
+        // Inject the user's login-shell PATH so that tools installed via nvm,
+        // Homebrew, cargo, etc. are discoverable. Without this, launchd gives
+        // only a minimal system PATH and binaries like `npx` aren't found.
+        if !config.env.contains_key("PATH") {
+            let full_path = resolve_login_path();
+            if !full_path.is_empty() {
+                let _ = cmd.env("PATH", &full_path);
+            }
+        }
         for (key, value) in &config.env {
             let _ = cmd.env(key, value);
         }
@@ -605,6 +615,38 @@ impl McpClient {
     }
 }
 
+/// Resolve the user's full PATH by spawning a login shell.
+///
+/// Caches the result so the shell is only invoked once per process lifetime.
+/// Returns the empty string if resolution fails (callers fall back to the
+/// inherited environment).
+fn resolve_login_path() -> String {
+    use std::sync::OnceLock;
+
+    static CACHED: OnceLock<String> = OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".into());
+            match std::process::Command::new(&shell)
+                .args(["-l", "-c", "echo $PATH"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    debug!(path_len = path.len(), "resolved login-shell PATH for MCP servers");
+                    path
+                }
+                _ => {
+                    warn!("failed to resolve login-shell PATH; MCP servers may not find binaries");
+                    String::new()
+                }
+            }
+        })
+        .clone()
+}
+
 /// Redact secret-looking values in MCP server arguments for safe logging.
 fn redact_args(args: &[String]) -> String {
     use regex::Regex;
@@ -811,5 +853,14 @@ mod tests {
     fn redact_args_empty() {
         let result = redact_args(&[]);
         assert_eq!(result, "[]");
+    }
+
+    // ── resolve_login_path tests ────────────────────────────
+
+    #[test]
+    fn resolve_login_path_returns_non_empty() {
+        let path = resolve_login_path();
+        assert!(!path.is_empty(), "login-shell PATH should not be empty");
+        assert!(path.contains("/usr/bin"), "PATH should contain /usr/bin: {path}");
     }
 }
