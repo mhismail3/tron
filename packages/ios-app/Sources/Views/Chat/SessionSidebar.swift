@@ -491,25 +491,6 @@ struct ProcessingBar: View {
     }
 }
 
-// MARK: - CachedSession Extension for Display
-
-extension CachedSession {
-    var displayDirectory: String {
-        let path = workingDirectory
-
-        // Replace /Users/<username>/ with ~/
-        let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        if components.count >= 3,
-           components[0] == "",
-           components[1] == "Users" {
-            // Path is /Users/<username>/...
-            let afterUser = components.dropFirst(3).joined(separator: "/")
-            return afterUser.isEmpty ? "~" : "~/" + afterUser
-        }
-        return path
-    }
-}
-
 // MARK: - Empty Sessions View
 
 @available(iOS 26.0, *)

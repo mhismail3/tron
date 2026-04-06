@@ -27,9 +27,6 @@ struct CachedSession: Identifiable, Codable {
     var cacheCreationTokens: Int = 0
     var cost: Double
 
-    /// Backward compatibility: expose latestModel as model
-    var model: String { latestModel }
-
     /// Whether session has been archived
     var isArchived: Bool { archivedAt != nil }
 
@@ -53,47 +50,4 @@ struct CachedSession: Identifiable, Codable {
     var totalInputTokens: Int { inputTokens + cacheReadTokens }
 
     var totalTokens: Int { totalInputTokens + outputTokens }
-
-    var formattedTokens: String {
-        TokenFormatter.formatPair(input: totalInputTokens, output: outputTokens)
-    }
-
-    /// Formatted cache tokens - separate read/creation for visibility
-    var formattedCacheTokens: String? {
-        if cacheReadTokens == 0 && cacheCreationTokens == 0 { return nil }
-        return "⚡\(cacheReadTokens.formattedTokenCount) read, ✏\(cacheCreationTokens.formattedTokenCount) write"
-    }
-
-    /// Formatted cost string (e.g., "$0.12")
-    var formattedCost: String {
-        if cost < 0.01 {
-            return "<$0.01"
-        }
-        return String(format: "$%.2f", cost)
-    }
-
-    var displayTitle: String {
-        if let title = title, !title.isEmpty {
-            return title
-        }
-        if isChat {
-            return "Chat"
-        }
-        return URL(fileURLWithPath: workingDirectory).lastPathComponent
-    }
-
-    var formattedDate: String {
-        DateParser.formatRelativeOrAbsolute(lastActivityAt)
-    }
-
-    var compactDate: String {
-        DateParser.formatCompactRelative(lastActivityAt)
-    }
-
-    var shortModel: String {
-        if model.contains("opus") { return "Opus" }
-        if model.contains("sonnet") { return "Sonnet" }
-        if model.contains("haiku") { return "Haiku" }
-        return model
-    }
 }
