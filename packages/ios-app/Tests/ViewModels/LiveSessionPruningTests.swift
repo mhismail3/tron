@@ -272,34 +272,6 @@ final class LiveSessionPruningTests: XCTestCase {
         XCTAssertEqual(afterIds, keptIds)
     }
 
-    // MARK: - catchUpMessageIds Cleanup
-
-    func test_pruneCleansStaleCatchUpIds() {
-        // Given: messages with some IDs tracked as catch-up
-        populateMessages(count: 250)
-        let prunedMessageId = viewModel.messages[0].id  // Will be pruned
-        viewModel.catchUpMessageIds.insert(prunedMessageId)
-
-        // When
-        viewModel.pruneOldMessagesIfNeeded()
-
-        // Then: pruned ID removed from catch-up set
-        XCTAssertFalse(viewModel.catchUpMessageIds.contains(prunedMessageId))
-    }
-
-    func test_prunePreservesValidCatchUpIds() {
-        // Given: catch-up ID for a message that will be kept
-        populateMessages(count: 250)
-        let keptMessageId = viewModel.messages.last!.id
-        viewModel.catchUpMessageIds.insert(keptMessageId)
-
-        // When
-        viewModel.pruneOldMessagesIfNeeded()
-
-        // Then: kept ID preserved in catch-up set
-        XCTAssertTrue(viewModel.catchUpMessageIds.contains(keptMessageId))
-    }
-
     // MARK: - Multiple Pruning Cycles
 
     func test_multiplePrunesAccumulateInBuffer() {

@@ -17,6 +17,12 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Whether currently connected to server
     var isConnected: Bool { get }
 
+    /// Whether reconstruction is in progress (suppresses real-time events)
+    var isReconstructing: Bool { get set }
+
+    /// Highest processed event sequence (for WebSocket dedup)
+    var sequenceHighWaterMark: Int64 { get set }
+
     /// Connect to the server
     func connect() async
 
@@ -26,36 +32,26 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Resume a session on the server
     func resumeSession(sessionId: String) async throws
 
-    /// Get agent state from the server
-    func getAgentState(sessionId: String) async throws -> AgentStateResult
+    /// Reconstruct full session state from the server
+    func reconstructSession(sessionId: String, limit: Int?, beforeSequence: Int64?) async throws -> SessionReconstructResult
 
-    /// Append a "catching up" message and return its ID
-    func appendCatchingUpMessage() -> UUID
+    /// Process the reconstruction result (events → messages, in-flight → streaming)
+    func processReconstructionResult(_ result: SessionReconstructResult) async
 
-    /// Process catch-up content from resumed session
-    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async
-
-    /// Remove the catching-up notification message after processing is complete
-    func removeCatchingUpMessage()
-
-    /// Whether a catch-up is currently in progress (suppresses real-time events)
-    var isCatchingUp: Bool { get set }
-
-    /// Clean up stale streaming state before catch-up processing
+    /// Clean up stale streaming state before reconstruction
     func cleanUpStreamingState()
 
-    /// Replay events that were buffered during catch-up
-    func drainCatchUpEventBuffer()
+    /// Drain events that were buffered during reconstruction
+    func drainEventBuffer()
 }
 
-/// Coordinates session connection, reconnection, and catch-up for ChatViewModel.
+/// Coordinates session connection, reconnection, and state reconstruction for ChatViewModel.
 ///
 /// Responsibilities:
 /// - Connecting to server and resuming sessions
 /// - Reconnecting after app returns to foreground
-/// - Checking agent state and setting up streaming for in-progress sessions
-/// - Fetching tasks on resume
-/// - Converting history messages to chat messages
+/// - Reconstructing session state via single `session.reconstruct` RPC call
+/// - Setting sequence high-water mark for deterministic event dedup
 ///
 /// This coordinator extracts connection logic from ChatViewModel+Connection.swift,
 /// making it independently testable while maintaining the same behavior.
@@ -66,152 +62,89 @@ final class ConnectionCoordinator {
 
     init() {}
 
-    // MARK: - Connect and Resume
+    // MARK: - Connect and Reconstruct
 
-    /// Connect and resume the session.
+    /// Connect, resume, and reconstruct the session.
     ///
-    /// - Parameter context: The context providing access to state and dependencies
-    func connectAndResume(context: ConnectionContext) async {
-        context.logInfo("connectAndResume() called for session \(context.sessionId)")
+    /// Single flow for both initial connect and reconnection. The server's
+    /// `session.reconstruct` response provides everything: persisted events,
+    /// in-flight state, and session metadata.
+    func connectAndReconstruct(context: ConnectionContext) async {
+        context.logInfo("connectAndReconstruct() called for session \(context.sessionId)")
+
+        // Suppress events BEFORE connecting. Events that arrive during reconstruction
+        // are buffered and filtered by sequence after the high-water mark is set.
+        context.isReconstructing = true
 
         // Connect to server
-        context.logDebug("Calling connect()...")
         await context.connect()
 
-        // Only wait if not already connected (avoid unnecessary delay)
         if !context.isConnected {
-            context.logVerbose("Waiting briefly for connection...")
             try? await Task.sleep(for: .milliseconds(100))
         }
 
         guard context.isConnected else {
             context.logWarning("Failed to connect to server - isConnected=false")
+            context.isReconstructing = false
             return
         }
         context.logInfo("Connected to server successfully")
 
-        // Resume the session
+        // Resume the session (binds session to this WebSocket connection)
         do {
-            context.logDebug("Calling resumeSession for \(context.sessionId)...")
             try await context.resumeSession(sessionId: context.sessionId)
             context.logInfo("Session resumed successfully")
         } catch {
             context.logError("Failed to resume session: \(error.localizedDescription)")
             handleSessionResumeFailure(error, context: context)
+            context.isReconstructing = false
             return
         }
 
-        // CRITICAL: Check if agent is currently running (handles resuming into in-progress session)
-        // This must happen BEFORE loading messages so isProcessing flag is set correctly
-        await checkAndResumeAgentState(context: context)
+        // Reconstruct session state from server (single RPC call)
+        do {
+            let result = try await context.reconstructSession(
+                sessionId: context.sessionId,
+                limit: 50,
+                beforeSequence: nil
+            )
 
-        // Fetch current tasks
+            // Clean up stale streaming state from previous connection
+            context.cleanUpStreamingState()
 
+            // Process the reconstruction result
+            await context.processReconstructionResult(result)
 
-        context.logDebug("Session resumed, using local EventDatabase for message history")
+            // Set high-water mark from server's lastSequence
+            context.sequenceHighWaterMark = result.lastSequence
+
+            // Update processing state based on agent status
+            if result.isRunning {
+                context.isProcessing = true
+                context.setSessionProcessing(true)
+            }
+
+            context.logInfo("Reconstruction complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence)")
+        } catch {
+            context.logWarning("Reconstruction failed: \(error.localizedDescription)")
+        }
+
+        // Always reset reconstruction flag and drain buffered events
+        context.isReconstructing = false
+        context.drainEventBuffer()
     }
 
-    // MARK: - Reconnect and Resume
-
-    /// Reconnect to server and resume streaming state after app returns to foreground.
-    ///
-    /// - Parameter context: The context providing access to state and dependencies
-    func reconnectAndResume(context: ConnectionContext) async {
-        context.logInfo("reconnectAndResume() - checking connection state")
+    /// Reconnect to server and reconstruct session state.
+    /// Same flow as initial connect — no separate reconnect path.
+    func reconnectAndReconstruct(context: ConnectionContext) async {
+        context.logInfo("reconnectAndReconstruct() - checking connection state")
 
         if !context.isConnected {
             context.logInfo("Not connected, reconnecting...")
-            await context.connect()
-
-            if !context.isConnected {
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-
-            guard context.isConnected else {
-                context.logWarning("Failed to reconnect")
-                return
-            }
         }
 
-        // Always re-resume the session to bind it to the new WebSocket connection.
-        // After disconnect/reconnect, the new connection has a different client ID
-        // and won't receive session-scoped events until session.resume is called.
-        do {
-            try await context.resumeSession(sessionId: context.sessionId)
-            context.logInfo("Session re-resumed on new connection")
-        } catch {
-            context.logError("Failed to re-resume session: \(error)")
-            handleSessionResumeFailure(error, context: context)
-            return
-        }
-
-        // Check if agent is running and catch up on any missed content
-        await checkAndResumeAgentState(context: context)
-
-        // Refresh tasks in case they changed while disconnected
-
-    }
-
-    // MARK: - Fetch Tasks
-
-    /// Fetch current tasks when resuming a session.
-    ///
-    /// - Parameter context: The context providing access to state and dependencies
-    // MARK: - Check Agent State
-
-    /// Check agent state and set up streaming if agent is currently running.
-    ///
-    /// - Parameter context: The context providing access to state and dependencies
-    func checkAndResumeAgentState(context: ConnectionContext) async {
-        // Suppress events BEFORE the getAgentState network call.
-        // Between resumeSession() and here there's no suspension point, so no events
-        // can interleave. But getAgentState() awaits a network call, during which the
-        // event task can run. Without this, events would be processed against empty/stale
-        // message state and then wiped by cleanUpStreamingState, permanently losing
-        // tool_end events for parallel tool calls.
-        context.isCatchingUp = true
-
-        do {
-            let agentState = try await context.getAgentState(sessionId: context.sessionId)
-            if agentState.isRunning {
-                context.logInfo("Agent is currently running - setting up streaming state for in-progress session")
-
-                // Clean up stale streaming state from previous connection
-                context.cleanUpStreamingState()
-
-                context.isProcessing = true
-
-                // Add in-chat catching-up notification
-                let _ = context.appendCatchingUpMessage()
-
-                context.setSessionProcessing(true)
-
-                // Use accumulated content from server if available (catch-up content)
-                let accumulatedText = agentState.currentTurnText ?? ""
-                let toolCalls = agentState.currentTurnToolCalls ?? []
-                let contentSequence = agentState.contentSequence
-
-                context.logInfo("Resume catch-up: \(accumulatedText.count) chars text, \(toolCalls.count) tool calls, sequence=\(contentSequence?.count ?? 0)")
-
-                // Process catch-up content
-                await context.processCatchUpContent(accumulatedText: accumulatedText, toolCalls: toolCalls, contentSequence: contentSequence)
-
-                // Remove the catching-up notification now that content has been processed.
-                context.removeCatchingUpMessage()
-
-                context.logInfo("Processed catch-up content for in-progress turn")
-            } else {
-                context.logDebug("Agent is not running - normal session resume")
-            }
-        } catch {
-            context.logWarning("Failed to check agent state: \(error.localizedDescription)")
-        }
-
-        // Always reset and drain, whether agent was running, idle, or getState failed.
-        // Buffered events (e.g., tool_end for a tool that completed during catch-up)
-        // are replayed against the now-correct message state.
-        context.isCatchingUp = false
-        context.drainCatchUpEventBuffer()
+        // Reuse the same flow — session.reconstruct handles everything
+        await connectAndReconstruct(context: context)
     }
 
     // MARK: - Session Resume Error Handling
@@ -236,29 +169,7 @@ final class ConnectionCoordinator {
     // MARK: - Disconnect
 
     /// Disconnect from the server.
-    ///
-    /// - Parameter context: The context providing access to state and dependencies
     func disconnect(context: ConnectionContext) async {
         await context.disconnect()
-    }
-
-    // MARK: - History Conversion
-
-    /// Convert a history message to a chat message.
-    ///
-    /// - Parameter history: The history message to convert
-    /// - Returns: A ChatMessage with the appropriate role and content
-    func historyToMessage(_ history: HistoryMessage) -> ChatMessage {
-        let role: MessageRole = switch history.role {
-        case "user": .user
-        case "assistant": .assistant
-        case "system": .system
-        default: .assistant
-        }
-
-        return ChatMessage(
-            role: role,
-            content: .text(history.content)
-        )
     }
 }

@@ -37,9 +37,6 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
     /// Current model being used
     var currentModel: String { get }
 
-    /// ID of the catching-up notification message
-    var catchingUpMessageId: UUID? { get set }
-
     // MARK: - Thinking State
 
     /// Notify ThinkingState of new turn

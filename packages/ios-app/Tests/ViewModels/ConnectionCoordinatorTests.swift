@@ -1,8 +1,7 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for ConnectionCoordinator - handles session connection, reconnection, and catch-up
-/// Uses TDD: Tests written first, then implementation follows
+/// Tests for ConnectionCoordinator - handles session connection, reconnection, and reconstruction.
 @MainActor
 final class ConnectionCoordinatorTests: XCTestCase {
 
@@ -19,473 +18,143 @@ final class ConnectionCoordinatorTests: XCTestCase {
         mockContext = nil
     }
 
-    // MARK: - Connect and Resume Tests
+    // MARK: - Connect and Reconstruct Tests
 
-    func testConnectAndResumeCallsConnect() async {
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should call connect
+    func testConnectAndReconstructCallsConnect() async {
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.connectCalled)
     }
 
-    func testConnectAndResumeCallsResumeSession() async {
-        // Given: Connection will succeed
+    func testConnectAndReconstructCallsResumeSession() async {
         mockContext.isConnected = true
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should call resume session
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.resumeSessionCalled)
         XCTAssertEqual(mockContext.lastResumeSessionId, "test-session")
     }
 
-    func testConnectAndResumeDoesNotResumeIfNotConnected() async {
-        // Given: Connection will fail
+    func testConnectAndReconstructDoesNotResumeIfNotConnected() async {
         mockContext.connectWillSucceed = false
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should NOT call resume session
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.resumeSessionCalled)
     }
 
-    func testConnectAndResumeChecksAgentStateAfterResume() async {
-        // Given: Connection succeeds
+    func testConnectAndReconstructCallsReconstruct() async {
         mockContext.isConnected = true
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should check agent state
-        XCTAssertTrue(mockContext.getAgentStateCalled)
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.reconstructSessionCalled)
     }
 
-    func testConnectAndResumeSetsShouldDismissOnSessionNotFound() async {
-        // Given: Session not found error
+    func testConnectAndReconstructSetsShouldDismissOnSessionNotFound() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should set shouldDismiss and show error
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.shouldDismiss)
         XCTAssertTrue(mockContext.showErrorAlertCalled)
     }
 
-    func testConnectAndResumeDoesNotDismissOnOtherErrors() async {
-        // Given: Generic error
+    func testConnectAndReconstructDoesNotDismissOnOtherErrors() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.generic
-
-        // When: Connect and resume
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: Should NOT set shouldDismiss
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.shouldDismiss)
-        XCTAssertFalse(mockContext.showErrorAlertCalled)
     }
 
-    // MARK: - Reconnect and Resume Tests
-
-    func testReconnectAndResumeSkipsConnectIfAlreadyConnected() async {
-        // Given: Already connected
+    func testConnectAndReconstructSetsProcessingWhenRunning() async {
         mockContext.isConnected = true
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should NOT call connect (already connected)
-        XCTAssertFalse(mockContext.connectCalled)
-        // But MUST always resume session to bind new connection
-        XCTAssertTrue(mockContext.resumeSessionCalled)
-        // And should check agent state
-        XCTAssertTrue(mockContext.getAgentStateCalled)
-    }
-
-    func testReconnectAndResumeConnectsIfNotConnected() async {
-        // Given: Not connected, but connect will succeed
-        mockContext.isConnected = false
-        mockContext.connectWillSucceed = true
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should call connect
-        XCTAssertTrue(mockContext.connectCalled)
-    }
-
-    func testReconnectAndResumeResumesSessionAfterReconnect() async {
-        // Given: Not connected, connect will succeed
-        mockContext.isConnected = false
-        mockContext.connectWillSucceed = true
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should resume session
-        XCTAssertTrue(mockContext.resumeSessionCalled)
-    }
-
-    func testReconnectAndResumeStopsIfReconnectFails() async {
-        // Given: Not connected, connect will fail
-        mockContext.isConnected = false
-        mockContext.connectWillSucceed = false
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should NOT check agent state
-        XCTAssertFalse(mockContext.getAgentStateCalled)
-    }
-
-    func testReconnectAndResumeSetsShouldDismissOnSessionNotFound() async {
-        // Given: Connected, but session not found on server
-        mockContext.isConnected = true
-        mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should set shouldDismiss and show error (same behavior as connectAndResume)
-        XCTAssertTrue(mockContext.shouldDismiss)
-        XCTAssertTrue(mockContext.showErrorAlertCalled)
-    }
-
-    func testReconnectAndResumeDoesNotDismissOnOtherErrors() async {
-        // Given: Connected, generic resume error
-        mockContext.isConnected = true
-        mockContext.resumeSessionError = ConnectionTestError.generic
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should NOT set shouldDismiss (same behavior as connectAndResume)
-        XCTAssertFalse(mockContext.shouldDismiss)
-        XCTAssertFalse(mockContext.showErrorAlertCalled)
-    }
-
-    // MARK: - Check and Resume Agent State Tests
-
-    func testCheckAgentStateSetsProcessingWhenAgentRunning() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isProcessing should be true
+        mockContext.reconstructResultIsRunning = true
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.isProcessing)
-    }
-
-    func testCheckAgentStateAppendsCatchingUpMessageWhenRunning() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should append catching up message
-        XCTAssertTrue(mockContext.appendCatchingUpMessageCalled)
-    }
-
-    func testCheckAgentStateUpdatesSessionProcessingWhenRunning() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should set session processing
         XCTAssertTrue(mockContext.setSessionProcessingCalled)
-        XCTAssertTrue(mockContext.lastSessionProcessingValue ?? false)
     }
 
-    func testCheckAgentStateDoesNotSetProcessingWhenNotRunning() async {
-        // Given: Agent is not running
-        mockContext.agentStateIsRunning = false
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isProcessing should remain false
+    func testConnectAndReconstructDoesNotSetProcessingWhenIdle() async {
+        mockContext.isConnected = true
+        mockContext.reconstructResultIsRunning = false
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.isProcessing)
     }
 
-    func testCheckAgentStateProcessesCatchUpContent() async {
-        // Given: Agent is running with accumulated content
-        mockContext.agentStateIsRunning = true
-        mockContext.agentStateCurrentTurnText = "Hello world"
-        mockContext.agentStateToolCalls = [
-            TestToolCall(
-                toolCallId: "tool-1",
-                toolName: "Read",
-                status: "completed",
-                result: "file contents",
-                isError: false,
-                startedAt: "2024-01-01T00:00:00Z",
-                completedAt: "2024-01-01T00:00:01Z"
-            )
-        ]
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should process catch-up content
-        XCTAssertTrue(mockContext.processCatchUpContentCalled)
-        XCTAssertEqual(mockContext.lastCatchUpText, "Hello world")
-        XCTAssertEqual(mockContext.lastCatchUpToolCalls?.count, 1)
+    func testConnectAndReconstructSetsHighWaterMark() async {
+        mockContext.isConnected = true
+        mockContext.reconstructResultLastSequence = 42
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertEqual(mockContext.sequenceHighWaterMark, 42)
     }
 
-    func testCheckAgentStateHandlesError() async {
-        // Given: Get state will fail
-        mockContext.getAgentStateShouldFail = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should not crash, isProcessing stays false
-        XCTAssertFalse(mockContext.isProcessing)
-    }
-
-    // MARK: - isCatchingUp Tests
-
-    func testCatchUpSetsAndClearsIsCatchingUpFlag() async {
-        // Given: Agent is running with content
-        mockContext.agentStateIsRunning = true
-        mockContext.agentStateCurrentTurnText = "content"
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: After catch-up completes, flag should be cleared
-        XCTAssertFalse(mockContext.isCatchingUp)
-    }
-
-    func testCatchUpSetsIsCatchingUpBeforeProcessing() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-        mockContext.agentStateCurrentTurnText = "content"
-        mockContext.captureIsCatchingUpDuringCatchUp = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isCatchingUp should have been true when processCatchUpContent was called
-        XCTAssertTrue(mockContext.wasCatchingUpDuringProcess)
-    }
-
-    func testCatchUpClearsIsCatchingUpOnError() async {
-        // Given: Get state will fail
-        mockContext.getAgentStateShouldFail = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isCatchingUp should be cleared even on error
-        XCTAssertFalse(mockContext.isCatchingUp)
-    }
-
-    func testCatchUpCallsCleanUpStreamingState() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should clean up stale streaming state
+    func testConnectAndReconstructCallsCleanUpStreamingState() async {
+        mockContext.isConnected = true
+        await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
     }
 
-    func testCatchUpDoesNotCleanUpWhenNotRunning() async {
-        // Given: Agent is NOT running
-        mockContext.agentStateIsRunning = false
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Should NOT clean up streaming state
-        XCTAssertFalse(mockContext.cleanUpStreamingStateCalled)
-    }
-
-    func testReconnectAndResumeCallsCleanUpStreamingState() async {
-        // Given: Already connected, agent running
+    func testConnectAndReconstructProcessesResult() async {
         mockContext.isConnected = true
-        mockContext.agentStateIsRunning = true
-
-        // When: Reconnect and resume
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: Should clean up stale streaming state during catch-up
-        XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.processReconstructionResultCalled)
     }
 
-    // MARK: - Catch-Up Event Buffering Tests
+    // MARK: - Reconstruction Flag Tests
 
-    func testIsCatchingUpSetBeforeGetAgentState() async {
-        // Given: Agent is running
+    func testIsReconstructingSetBeforeConnect() async {
+        mockContext.captureReconstructingDuringConnect = true
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.wasReconstructingDuringConnect)
+    }
+
+    func testIsReconstructingClearedAfterReconstruction() async {
         mockContext.isConnected = true
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isCatchingUp should have been true when getAgentState was called
-        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertFalse(mockContext.isReconstructing)
     }
 
-    func testIsCatchingUpClearedWhenAgentNotRunning() async {
-        // Given: Agent is NOT running
-        mockContext.agentStateIsRunning = false
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: isCatchingUp should be cleared
-        XCTAssertFalse(mockContext.isCatchingUp)
+    func testIsReconstructingClearedOnConnectionFailure() async {
+        mockContext.connectWillSucceed = false
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertFalse(mockContext.isReconstructing)
     }
 
-    func testConnectAndResumeSetsCatchingUpBeforeGetState() async {
-        // Given: Connection succeeds, agent running
+    func testIsReconstructingClearedOnResumeFailure() async {
         mockContext.isConnected = true
-        mockContext.agentStateIsRunning = true
-
-        // When: Full connect and resume flow
-        await coordinator.connectAndResume(context: mockContext)
-
-        // Then: isCatchingUp was true during getAgentState
-        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
-        // And cleared after catch-up
-        XCTAssertFalse(mockContext.isCatchingUp)
+        mockContext.resumeSessionError = ConnectionTestError.generic
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertFalse(mockContext.isReconstructing)
     }
 
-    func testReconnectAndResumeSetsCatchingUpBeforeGetState() async {
-        // Given: Already connected, agent running
+    func testDrainEventBufferCalledAfterReconstruction() async {
         mockContext.isConnected = true
-        mockContext.agentStateIsRunning = true
-
-        // When: Reconnect and resume flow
-        await coordinator.reconnectAndResume(context: mockContext)
-
-        // Then: isCatchingUp was true during getAgentState
-        XCTAssertTrue(mockContext.wasCatchingUpDuringGetState)
-        // And cleared after catch-up
-        XCTAssertFalse(mockContext.isCatchingUp)
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.drainEventBufferCalled)
     }
 
-    func testDrainCatchUpEventBufferCalledAfterCatchUp() async {
-        // Given: Agent is running
-        mockContext.agentStateIsRunning = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Drain was called after catch-up
-        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
+    func testDrainEventBufferCalledOnReconstructionError() async {
+        mockContext.isConnected = true
+        mockContext.reconstructShouldFail = true
+        await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.drainEventBufferCalled)
+        XCTAssertFalse(mockContext.isReconstructing)
     }
 
-    func testDrainCatchUpEventBufferCalledWhenAgentNotRunning() async {
-        // Given: Agent is NOT running
-        mockContext.agentStateIsRunning = false
+    // MARK: - Reconnect Tests
 
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Drain is still called (events may have buffered during getAgentState)
-        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
+    func testReconnectAndReconstructCallsReconstruct() async {
+        mockContext.isConnected = true
+        await coordinator.reconnectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.reconstructSessionCalled)
     }
 
-    func testDrainCatchUpEventBufferCalledOnGetAgentStateError() async {
-        // Given: getAgentState will fail
-        mockContext.getAgentStateShouldFail = true
-
-        // When: Check agent state
-        await coordinator.checkAndResumeAgentState(context: mockContext)
-
-        // Then: Drain is called even on error (buffered events must be replayed)
-        XCTAssertTrue(mockContext.drainCatchUpEventBufferCalled)
-        XCTAssertFalse(mockContext.isCatchingUp)
+    func testReconnectAndReconstructConnectsIfNeeded() async {
+        mockContext.isConnected = false
+        mockContext.connectWillSucceed = true
+        await coordinator.reconnectAndReconstruct(context: mockContext)
+        XCTAssertTrue(mockContext.connectCalled)
     }
 
     // MARK: - Disconnect Tests
 
     func testDisconnectCallsRpcDisconnect() async {
-        // When: Disconnect
         await coordinator.disconnect(context: mockContext)
-
-        // Then: Should call disconnect
         XCTAssertTrue(mockContext.disconnectCalled)
     }
-
-    // MARK: - History to Message Tests
-
-    func testHistoryToMessageConvertsUserRole() {
-        // Given: User history message
-        let history = createMockHistoryMessage(role: "user", content: "Hello")
-
-        // When: Convert to message
-        let message = coordinator.historyToMessage(history)
-
-        // Then: Should have user role
-        XCTAssertEqual(message.role, .user)
-        if case .text(let text) = message.content {
-            XCTAssertEqual(text, "Hello")
-        } else {
-            XCTFail("Expected text content")
-        }
-    }
-
-    func testHistoryToMessageConvertsAssistantRole() {
-        // Given: Assistant history message
-        let history = createMockHistoryMessage(role: "assistant", content: "Hi there")
-
-        // When: Convert to message
-        let message = coordinator.historyToMessage(history)
-
-        // Then: Should have assistant role
-        XCTAssertEqual(message.role, .assistant)
-    }
-
-    func testHistoryToMessageConvertsSystemRole() {
-        // Given: System history message
-        let history = createMockHistoryMessage(role: "system", content: "System message")
-
-        // When: Convert to message
-        let message = coordinator.historyToMessage(history)
-
-        // Then: Should have system role
-        XCTAssertEqual(message.role, .system)
-    }
-
-    func testHistoryToMessageDefaultsToAssistantForUnknownRole() {
-        // Given: Unknown role
-        let history = createMockHistoryMessage(role: "unknown", content: "Content")
-
-        // When: Convert to message
-        let message = coordinator.historyToMessage(history)
-
-        // Then: Should default to assistant
-        XCTAssertEqual(message.role, .assistant)
-    }
-
-    // MARK: - Helpers
-
-    private func createMockHistoryMessage(role: String, content: String) -> HistoryMessage {
-        // Decode from JSON since HistoryMessage is Decodable only
-        let json = """
-        {
-            "id": "msg_\(UUID().uuidString)",
-            "role": "\(role)",
-            "content": "\(content)",
-            "timestamp": "2024-01-01T00:00:00Z"
-        }
-        """.data(using: .utf8)!
-        return try! JSONDecoder().decode(HistoryMessage.self, from: json)
-    }
-
 }
 
 // MARK: - Test Error
@@ -502,22 +171,8 @@ enum ConnectionTestError: Error, LocalizedError {
     }
 }
 
-// MARK: - Test Tool Call Helper
-
-/// Test-specific struct to configure tool calls (since CurrentTurnToolCall is Decodable only)
-struct TestToolCall {
-    let toolCallId: String
-    let toolName: String
-    let status: String
-    let result: String?
-    let isError: Bool?
-    let startedAt: String?
-    let completedAt: String?
-}
-
 // MARK: - Mock Context
 
-/// Mock implementation of ConnectionContext for testing
 @MainActor
 final class MockConnectionContext: ConnectionContext {
     // MARK: - State
@@ -525,38 +180,38 @@ final class MockConnectionContext: ConnectionContext {
     var agentPhase: AgentPhase = .idle
     var shouldDismiss: Bool = false
     var isConnected: Bool = false
+    var isReconstructing: Bool = false
+    var sequenceHighWaterMark: Int64 = -1
 
-    // MARK: - Tracking for Assertions
+    // MARK: - Tracking
     var connectCalled = false
     var disconnectCalled = false
     var resumeSessionCalled = false
     var lastResumeSessionId: String?
-    var getAgentStateCalled = false
+    var reconstructSessionCalled = false
+    var processReconstructionResultCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
     var showErrorAlertCalled = false
-    var appendCatchingUpMessageCalled = false
-    var processCatchUpContentCalled = false
-    var lastCatchUpText: String?
-    var lastCatchUpToolCalls: [CurrentTurnToolCall]?
-    var isCatchingUp = false
     var cleanUpStreamingStateCalled = false
-    var captureIsCatchingUpDuringCatchUp = false
-    var wasCatchingUpDuringProcess = false
-    var wasCatchingUpDuringGetState = false
-    var drainCatchUpEventBufferCalled = false
+    var drainEventBufferCalled = false
+    var captureReconstructingDuringConnect = false
+    var wasReconstructingDuringConnect = false
 
-    // MARK: - Test Configuration
+    // MARK: - Configuration
     var connectWillSucceed = true
     var resumeSessionError: Error?
-    var getAgentStateShouldFail = false
-    var agentStateIsRunning = false
-    var agentStateCurrentTurnText: String?
-    var agentStateToolCalls: [TestToolCall] = []
+    var reconstructShouldFail = false
+    var reconstructResultIsRunning = false
+    var reconstructResultLastSequence: Int64 = 0
+
     // MARK: - Protocol Methods
 
     func connect() async {
         connectCalled = true
+        if captureReconstructingDuringConnect {
+            wasReconstructingDuringConnect = isReconstructing
+        }
         if connectWillSucceed {
             isConnected = true
         }
@@ -570,49 +225,41 @@ final class MockConnectionContext: ConnectionContext {
     func resumeSession(sessionId: String) async throws {
         resumeSessionCalled = true
         lastResumeSessionId = sessionId
-        if let error = resumeSessionError {
-            throw error
-        }
+        if let error = resumeSessionError { throw error }
     }
 
-    func getAgentState(sessionId: String) async throws -> AgentStateResult {
-        getAgentStateCalled = true
-        wasCatchingUpDuringGetState = isCatchingUp
-        if getAgentStateShouldFail {
-            throw ConnectionTestError.generic
-        }
-        // Build tool calls JSON manually since CurrentTurnToolCall is not Encodable
-        let toolCallsJson: String
-        if agentStateToolCalls.isEmpty {
-            toolCallsJson = "null"
-        } else {
-            let toolCallJsons = agentStateToolCalls.map { tc in
-                """
-                {
-                    "toolCallId": "\(tc.toolCallId)",
-                    "toolName": "\(tc.toolName)",
-                    "status": "\(tc.status)",
-                    "result": \(tc.result.map { "\"\($0)\"" } ?? "null"),
-                    "isError": \(tc.isError ?? false),
-                    "startedAt": \(tc.startedAt.map { "\"\($0)\"" } ?? "null"),
-                    "completedAt": \(tc.completedAt.map { "\"\($0)\"" } ?? "null")
-                }
-                """
-            }
-            toolCallsJson = "[\(toolCallJsons.joined(separator: ","))]"
-        }
-        let currentTurnTextJson = agentStateCurrentTurnText.map { "\"\($0)\"" } ?? "null"
+    func reconstructSession(sessionId: String, limit: Int?, beforeSequence: Int64?) async throws -> SessionReconstructResult {
+        reconstructSessionCalled = true
+        if reconstructShouldFail { throw ConnectionTestError.generic }
+
         let json = """
         {
-            "isRunning": \(agentStateIsRunning),
-            "currentTurn": 0,
-            "messageCount": 0,
-            "model": "test-model",
-            "currentTurnText": \(currentTurnTextJson),
-            "currentTurnToolCalls": \(toolCallsJson)
+            "events": [],
+            "hasMoreEvents": false,
+            "oldestSequence": null,
+            "inFlight": null,
+            "lastSequence": \(reconstructResultLastSequence),
+            "isRunning": \(reconstructResultIsRunning),
+            "metadata": {
+                "model": "test-model",
+                "turnCount": 0,
+                "workingDirectory": "/tmp"
+            }
         }
         """.data(using: .utf8)!
-        return try! JSONDecoder().decode(AgentStateResult.self, from: json)
+        return try! JSONDecoder().decode(SessionReconstructResult.self, from: json)
+    }
+
+    func processReconstructionResult(_ result: SessionReconstructResult) async {
+        processReconstructionResultCalled = true
+    }
+
+    func cleanUpStreamingState() {
+        cleanUpStreamingStateCalled = true
+    }
+
+    func drainEventBuffer() {
+        drainEventBufferCalled = true
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {
@@ -620,39 +267,11 @@ final class MockConnectionContext: ConnectionContext {
         lastSessionProcessingValue = isProcessing
     }
 
-    func appendCatchingUpMessage() -> UUID {
-        appendCatchingUpMessageCalled = true
-        return UUID()
-    }
-
-    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async {
-        processCatchUpContentCalled = true
-        lastCatchUpText = accumulatedText
-        lastCatchUpToolCalls = toolCalls
-        if captureIsCatchingUpDuringCatchUp {
-            wasCatchingUpDuringProcess = isCatchingUp
-        }
-    }
-
-    var removeCatchingUpMessageCalled = false
-
-    func removeCatchingUpMessage() {
-        removeCatchingUpMessageCalled = true
-    }
-
-    func cleanUpStreamingState() {
-        cleanUpStreamingStateCalled = true
-    }
-
-    func drainCatchUpEventBuffer() {
-        drainCatchUpEventBufferCalled = true
-    }
-
     func showError(_ message: String) {
         showErrorAlertCalled = true
     }
 
-    // MARK: - Logging (no-op for tests)
+    // MARK: - Logging (no-op)
     func logVerbose(_ message: String) {}
     func logDebug(_ message: String) {}
     func logInfo(_ message: String) {}

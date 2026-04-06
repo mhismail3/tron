@@ -18,7 +18,7 @@ extension ChatViewModel {
     }
 
     /// Set the event store manager reference (used when injected via environment)
-    /// Call this BEFORE connectAndResume() so agent state check can update processing state
+    /// Call this BEFORE connectAndReconstruct() so event store is available for fallback loading
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
@@ -27,14 +27,8 @@ extension ChatViewModel {
         setupMessageWindowManager()
     }
 
-    /// Sync events from server and load persisted messages
-    /// Call this AFTER connectAndResume() so isProcessing flag is already set if agent is running
-    func syncAndLoadMessagesForResume() async {
-        await syncAndLoadMessages()
-    }
-
-    /// Sync events from server, then load messages from local database
-    /// PERFORMANCE OPTIMIZATION: Load cached messages first for instant UI, then sync in background
+    /// Sync events from server, then load messages from local database.
+    /// Used as a fallback when reconstruction is unavailable (e.g., offline with local DB cache).
     func syncAndLoadMessages() async {
         guard let manager = eventStoreManager else { return }
 
@@ -83,48 +77,6 @@ extension ChatViewModel {
     /// Load messages from EventDatabase using the unified transformer.
     func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
-
-        // =============================================================================
-        // CATCH-UP STATE PRESERVATION
-        // =============================================================================
-        //
-        // When resuming an in-progress session, we have TWO sources of messages:
-        // 1. PERSISTED EVENTS (from DB) - all completed turns and events synced from server
-        // 2. CATCH-UP CONTENT - current turn's in-progress state from getAgentState()
-        //
-        // Key insight: message.assistant events are only created at TURN END.
-        // So during an in-progress turn, history won't have the current turn's text.
-        // Catch-up supplements history with in-progress content.
-        //
-        // We must be careful to only preserve ACTUAL catch-up content, not history:
-        // - Streaming text (isStreaming = true)
-        // - Running tools (toolUse with status = .running)
-        // - System notifications (catching-up, etc.)
-        //
-        // We do NOT preserve:
-        // - History messages (text from completed turns) - these come from DB
-        // - Completed tools - these will be in DB after sync
-        // =============================================================================
-
-        let preserveStreamingState = isProcessing || streamingManager.streamingMessageId != nil
-        var catchUpMessagesToRestore: [ChatMessage] = []
-
-        if preserveStreamingState {
-            // Preserve ALL messages created during catch-up processing.
-            // These represent in-progress turn content (text, thinking, tools, AskUserQuestion)
-            // that has no DB counterpart until turn_end persists them.
-            // Also preserve transient system notifications (catching-up spinner, etc.).
-            catchUpMessagesToRestore = messages.filter { msg in
-                if catchUpMessageIds.contains(msg.id) {
-                    return true
-                }
-                if case .systemEvent = msg.content {
-                    return true
-                }
-                return false
-            }
-            logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages (filtered from \(messages.count) total)", category: .session)
-        }
 
         await Task.yield()
 
@@ -250,74 +202,6 @@ extension ChatViewModel {
                 clearAllMessages()
             }
 
-            // Restore catch-up messages at the end, with final deduplication.
-            // Even after filtering above, a tool might have completed between catch-up
-            // and sync, so we still check for duplicates by toolCallId.
-            if !catchUpMessagesToRestore.isEmpty {
-                // Pre-compute sets for O(1) dedup lookups (thinking + system events scan all messages)
-                let existingThinkingTexts: Set<String> = Set(
-                    messages.compactMap { msg in
-                        if case .thinking(let visible, _, _) = msg.content { return visible }
-                        return nil
-                    }
-                )
-                let existingSystemEvents: Set<SystemEvent> = Set(
-                    messages.compactMap { msg in
-                        if case .systemEvent(let event) = msg.content { return event }
-                        return nil
-                    }
-                )
-
-                let filteredCatchUp = catchUpMessagesToRestore.filter { catchUpMsg in
-                    // Tool messages: check if tool already in history (includes .subagent after conversion)
-                    if let toolCallId = catchUpMsg.toolCallId {
-                        return !MessageFinder.hasToolMessage(toolCallId: toolCallId, in: messages)
-                    }
-
-                    // Streaming text: deduplicate against reconstructed text messages
-                    if catchUpMsg.isStreaming {
-                        if case .streaming(let text) = catchUpMsg.content, !text.isEmpty {
-                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            return !messages.suffix(10).contains { msg in
-                                if case .text(let existingText) = msg.content {
-                                    return existingText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
-                                }
-                                return false
-                            }
-                        }
-                    }
-
-                    // Static text: deduplicate against DB messages
-                    // (if turn completed between catch-up and sync, DB now has the same text)
-                    if case .text(let text) = catchUpMsg.content, catchUpMsg.role == .assistant {
-                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return !messages.suffix(20).contains { msg in
-                            if case .text(let existingText) = msg.content, msg.role == .assistant {
-                                return existingText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
-                            }
-                            return false
-                        }
-                    }
-
-                    // Thinking: O(1) lookup via pre-computed set
-                    if case .thinking(let visible, _, _) = catchUpMsg.content {
-                        return !existingThinkingTexts.contains(visible)
-                    }
-
-                    // System events: O(1) lookup via pre-computed set
-                    if case .systemEvent(let catchUpEvent) = catchUpMsg.content {
-                        return !existingSystemEvents.contains(catchUpEvent)
-                    }
-
-                    return true
-                }
-
-                if !filteredCatchUp.isEmpty {
-                    appendToMessages(contentsOf: filteredCatchUp)
-                }
-                logger.info("Restored \(filteredCatchUp.count)/\(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
-            }
-
             // =============================================================================
             // TOKEN STATE FROM RECONSTRUCTED STATE (SERVER EVENTS = SINGLE SOURCE OF TRUTH)
             // =============================================================================
@@ -416,10 +300,7 @@ extension ChatViewModel {
             prunedLiveMessages.removeFirst(overflow)
         }
 
-        // Remove stale catch-up IDs
         let kept = Array(messages.suffix(Self.liveSessionPruneTarget))
-        let keptIds = Set(kept.map { $0.id })
-        catchUpMessageIds = catchUpMessageIds.intersection(keptIds)
 
         // Replace display array (rebuilds MessageIndex)
         replaceAllMessages(with: kept)

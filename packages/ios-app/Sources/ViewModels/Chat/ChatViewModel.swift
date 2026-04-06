@@ -147,17 +147,15 @@ final class ChatViewModel {
     private var eventTask: Task<Void, Never>?
     /// ID of the thinking message for the current turn (thinking appears before text response)
     var thinkingMessageId: UUID?
-    /// ID of the catching-up notification message (removed on turn_end/complete)
-    var catchingUpMessageId: UUID?
-    /// True while catch-up content is being processed — buffers real-time events for replay after catch-up
-    var isCatchingUp = false
-    /// Events buffered during catch-up, replayed when catch-up completes.
+    /// True while reconstruction is in progress — buffers real-time events for replay after
+    var isReconstructing = false
+    /// Events buffered during reconstruction, drained after sequenceHighWaterMark is set.
     @ObservationIgnored
-    var catchUpEventBuffer: [ParsedEventV2] = []
-    /// IDs of messages created during catch-up processing.
-    /// Used by the preservation filter to retain ALL catch-up content (text, tools, thinking)
-    /// across DB reloads, since in-progress turn content has no DB counterpart.
-    var catchUpMessageIds: Set<UUID> = []
+    var eventBuffer: [ParsedEventV2] = []
+    /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
+    var sequenceHighWaterMark: Int64 = -1
+    /// Oldest sequence from the last reconstruction (for pagination cursor).
+    var reconstructionOldestSequence: Int64?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
     /// ID of the memory-retain-in-progress notification (replaced when retain completes)
@@ -460,8 +458,8 @@ final class ChatViewModel {
 
     /// Unified event handler - buffers during catch-up, dispatches otherwise
     func handleEventV2(_ event: ParsedEventV2) {
-        if isCatchingUp {
-            catchUpEventBuffer.append(event)
+        if isReconstructing {
+            eventBuffer.append(event)
             return
         }
         dispatchEvent(event)

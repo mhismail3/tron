@@ -235,15 +235,10 @@ struct ChatView: View {
                 await viewModel.requestWorktreeStatus()
             }
 
-            // Connect and resume - this is required before loading messages
-            logger.debug("[INIT] starting connectAndResume", category: .ui)
-            await viewModel.connectAndResume()
-            logger.debug("[INIT] connectAndResume done, messages=\(viewModel.messages.count)", category: .ui)
-
-            // Load messages after connection is established
-            logger.debug("[INIT] starting syncAndLoadMessagesForResume", category: .ui)
-            await viewModel.syncAndLoadMessagesForResume()
-            logger.debug("[INIT] syncAndLoad done, messages=\(viewModel.messages.count) scrollProxy=\(scrollProxy != nil)", category: .ui)
+            // Connect, resume, and reconstruct session state in one flow
+            logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
+            await viewModel.connectAndReconstruct()
+            logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
@@ -256,14 +251,12 @@ struct ChatView: View {
             if newState.isConnected && !oldState.isConnected {
                 Task {
                     if initialLoadComplete {
-                        // Reconnection after initial setup — use reconnect flow + reload messages
-                        await viewModel.reconnectAndResume()
-                        await viewModel.syncAndLoadMessagesForResume()
-                        // Drain queued messages that survived disconnect
+                        // Reconnection after initial setup — reconstruct state
+                        await viewModel.reconnectAndReconstruct()
                         viewModel.drainMessageQueue()
                     } else {
                         // First connection — use initial connect flow
-                        await viewModel.connectAndResume()
+                        await viewModel.connectAndReconstruct()
                     }
                 }
             }

@@ -228,24 +228,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(record?.computed.contextWindowTokens, 1000)
     }
 
-    func testTurnEndRemovesCatchingUpMessage() {
-        // Given
-        let catchUpId = UUID()
-        mockContext.catchingUpMessageId = catchUpId
-        mockContext.messages = [
-            makeTextMessage("response"),
-            ChatMessage(id: catchUpId, role: .system, content: .text("Catching up..."))
-        ]
-
-        // When
-        let pluginResult = makeTurnEndPluginResult(turnNumber: 1, duration: 1000)
-        coordinator.handleTurnEnd(pluginResult, context: mockContext)
-
-        // Then
-        XCTAssertEqual(mockContext.messages.count, 1)
-        XCTAssertNil(mockContext.catchingUpMessageId)
-    }
-
     func testTurnEndUpdatesContextStateFromTokenRecord() {
         // Given
         let tokenRecord = makeTokenRecord(
@@ -459,23 +441,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.agentPhase, .processing)
     }
 
-    func testCompleteRemovesCatchingUpMessage() {
-        // Given
-        let catchUpId = UUID()
-        mockContext.catchingUpMessageId = catchUpId
-        mockContext.messages = [
-            makeTextMessage("response"),
-            ChatMessage(id: catchUpId, role: .system, content: .text("Catching up..."))
-        ]
-
-        // When
-        coordinator.handleComplete(streamingText: "", context: mockContext)
-
-        // Then
-        XCTAssertEqual(mockContext.messages.count, 1)
-        XCTAssertNil(mockContext.catchingUpMessageId)
-    }
-
     func testCompleteClearsToolTracking() {
         // Given
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
@@ -577,7 +542,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var hasActiveStreaming: Bool = false
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
-    var catchingUpMessageId: UUID?
+    // catchingUpMessageId removed — replaced by sequence-based reconstruction
     var sessionId: String = "test-session"
 
     // Context state tracking

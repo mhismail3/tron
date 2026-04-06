@@ -117,6 +117,34 @@ final class SessionClient {
         return result.messages
     }
 
+    // MARK: - Reconstruction
+
+    /// Reconstruct full session state for reconnection.
+    ///
+    /// Returns persisted events + in-flight state + metadata in one response.
+    /// The client uses `lastSequence` as its high-water mark for WebSocket dedup.
+    func reconstruct(
+        sessionId: String,
+        limit: Int? = nil,
+        beforeSequence: Int64? = nil
+    ) async throws -> SessionReconstructResult {
+        let ws = try requireTransport().requireConnection()
+
+        let params = SessionReconstructParams(
+            sessionId: sessionId,
+            limit: limit,
+            beforeSequence: beforeSequence
+        )
+
+        let result: SessionReconstructResult = try await ws.send(
+            method: "session.reconstruct",
+            params: params
+        )
+
+        logger.info("Reconstructed session \(sessionId): \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence)", category: .session)
+        return result
+    }
+
     // MARK: - Chat Session
 
     func getChat() async throws -> ChatSessionResult {
