@@ -100,6 +100,7 @@ extension EventStoreManager {
                     logger.error("Failed to sync events after processing ended for \(sessionId): \(error)", category: .database)
                 }
                 extractDashboardInfoFromEvents(sessionId: sessionId)
+                dashboardStreamManager.clearBuffer(for: sessionId)
             }
         }
     }

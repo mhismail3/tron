@@ -53,7 +53,8 @@ struct SessionSidebar: View {
                         ForEach(eventStoreManager.sortedSessions) { session in
                             CachedSessionSidebarRow(
                                 session: session,
-                                isSelected: session.id == selectedSessionId
+                                isSelected: session.id == selectedSessionId,
+                                streamManager: eventStoreManager.dashboardStreamManager
                             )
                             .tag(session.id)
                             .listRowBackground(Color.clear)
@@ -102,6 +103,7 @@ struct SessionSidebar: View {
                     FloatingChatPill(
                         session: chat,
                         isSelected: chat.id == selectedSessionId,
+                        streamManager: eventStoreManager.dashboardStreamManager,
                         onTap: { selectedSessionId = chat.id }
                     )
                 }
@@ -140,6 +142,7 @@ struct SessionSidebar: View {
 struct FloatingChatPill: View {
     let session: CachedSession
     let isSelected: Bool
+    let streamManager: DashboardStreamManager
     let onTap: () -> Void
 
     var body: some View {
@@ -157,6 +160,15 @@ struct FloatingChatPill: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronMint)
                     .symbolEffect(.pulse, options: .repeating)
+
+                if let lastLine = streamManager.visibleLines(for: session.id, count: 1).last {
+                    Text(lastLine.text)
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.tronMint.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 120)
+                }
             }
         }
         .padding(.horizontal, 18)
@@ -202,6 +214,7 @@ struct FloatingNewSessionButton: View {
 struct CachedSessionSidebarRow: View {
     let session: CachedSession
     let isSelected: Bool
+    let streamManager: DashboardStreamManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -260,9 +273,8 @@ struct CachedSessionSidebarRow: View {
             }
 
             // Latest action/response or processing state
-            if session.isProcessing == true {
-                // Thinking indicator with pulse animation
-                SessionProcessingIndicator()
+            if streamManager.hasContent(for: session.id) || session.isProcessing == true {
+                SessionStreamView(sessionId: session.id, streamManager: streamManager)
             } else if let response = session.lastAssistantResponse, !response.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "cpu")
@@ -277,7 +289,6 @@ struct CachedSessionSidebarRow: View {
                         .lineLimit(2)
                         .truncationMode(.tail)
 
-                    // Tool count badge
                     if let toolCount = session.lastToolCount, toolCount > 0 {
                         Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
                             .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
@@ -338,34 +349,138 @@ struct CachedSessionSidebarRow: View {
     }
 }
 
-// MARK: - Session Processing Indicator (Pulsing "Thinking...")
+// MARK: - Session Stream View (Live Mini-Terminal)
 
 @available(iOS 26.0, *)
-struct SessionProcessingIndicator: View {
-    @State private var isPulsing = false
+struct SessionStreamView: View {
+    let sessionId: String
+    let streamManager: DashboardStreamManager
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "brain")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronEmerald)
-                .symbolEffect(.pulse, options: .repeating, value: isPulsing)
+        let lines = streamManager.visibleLines(for: sessionId, count: 3)
 
-            Text("Thinking...")
+        if lines.isEmpty {
+            // Fallback: pulsing indicator when no content yet
+            HStack(spacing: 6) {
+                Image(systemName: "brain")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronEmerald)
+                    .symbolEffect(.pulse, options: .repeating)
+
+                Text("Thinking...")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.tronEmerald.opacity(0.9))
+            }
+            .streamViewChrome()
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(lines) { line in
+                    streamLineView(line)
+                }
+            }
+            .streamViewChrome()
+        }
+    }
+
+    @ViewBuilder
+    private func streamLineView(_ line: DashboardStreamLine) -> some View {
+        switch line.kind {
+        case .text:
+            Text(line.text)
                 .font(TronTypography.filePath)
-                .foregroundStyle(.tronEmerald.opacity(0.9))
+                .foregroundStyle(.tronEmeraldDark.opacity(0.8))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+        case .toolStart:
+            HStack(spacing: 4) {
+                Text(">")
+                    .foregroundStyle(.tronEmerald)
+                Text(line.text)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case .toolEnd:
+            Text(line.text)
+                .font(TronTypography.filePath)
+                .foregroundStyle(line.text.hasPrefix("✗") ? .red.opacity(0.7) : .tronEmerald.opacity(0.7))
+                .lineLimit(1)
+
+        case .subagentSpawn:
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.tronPurple)
+                Text(line.text)
+                    .foregroundStyle(.tronPurple)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case .subagentDone:
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.tronPurple.opacity(0.7))
+                Text(line.text)
+                    .foregroundStyle(.tronPurple.opacity(0.7))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+
+        case .subagentFailed:
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.red.opacity(0.7))
+                Text(line.text)
+                    .foregroundStyle(.red.opacity(0.7))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case .thinking:
+            HStack(spacing: 4) {
+                Image(systemName: "brain")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronEmerald)
+                    .symbolEffect(.pulse, options: .repeating)
+                Text("thinking…")
+                    .foregroundStyle(.tronEmerald.opacity(0.8))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+
+        case .error:
+            HStack(spacing: 4) {
+                Text("⚠")
+                    .foregroundStyle(.red.opacity(0.8))
+                Text(line.text)
+                    .foregroundStyle(.red.opacity(0.8))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.tronEmerald.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
-        )
-        .onAppear {
-            isPulsing = true
-        }
+    }
+}
+
+// MARK: - Stream View Chrome
+
+private extension View {
+    func streamViewChrome() -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.tronEmerald.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
+            )
     }
 }
 

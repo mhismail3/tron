@@ -26,7 +26,8 @@ paths:
 
 | Manager | Purpose |
 |---------|---------|
-| `StreamingManager` | Batches streaming deltas |
+| `StreamingManager` | Batches streaming deltas (chat view, single session) |
+| `DashboardStreamManager` | Live activity buffers for sidebar cards (all sessions) |
 | `ScrollStateCoordinator` | Scroll position tracking |
 | `AnimationCoordinator` | Animation timing |
 | `MessageWindowManager` | Visible message range |

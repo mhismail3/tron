@@ -78,6 +78,10 @@ final class EventStoreManager {
         SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB, cache: turnContentCache)
     }()
 
+    /// Manages live streaming buffers for dashboard session cards
+    @ObservationIgnored
+    private(set) lazy var dashboardStreamManager = DashboardStreamManager()
+
     // MARK: - Processing State
 
     /// Deterministic counter for full-scan polling (triggers every 10th cycle)
@@ -143,17 +147,17 @@ final class EventStoreManager {
     private func handleGlobalEventV2(_ event: ParsedEventV2) {
         switch event.eventType {
         case TurnStartPlugin.eventType:
-            // Processing started for a session
             if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: true)
+                dashboardStreamManager.handleTurnStart(sessionId: sessionId)
             }
 
         case CompletePlugin.eventType:
-            // Processing completed for a session
             if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
+                dashboardStreamManager.handleComplete(sessionId: sessionId)
                 Task {
                     do {
                         try await self.syncSessionEvents(sessionId: sessionId)
@@ -161,20 +165,81 @@ final class EventStoreManager {
                         logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
                     }
                     self.extractDashboardInfoFromEvents(sessionId: sessionId)
+                    // Clear frozen stream buffer now that lastAssistantResponse is populated
+                    self.dashboardStreamManager.clearBuffer(for: sessionId)
                 }
             }
 
         case ErrorPlugin.eventType:
-            // Error occurred in a session
             if let sessionId = event.sessionId,
                let result = event.getResult() as? ErrorPlugin.Result {
                 logger.info("Global: Session \(sessionId) error: \(result.message)", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
+                dashboardStreamManager.handleError(sessionId: sessionId, message: result.message)
                 updateSessionDashboardInfo(
                     sessionId: sessionId,
                     lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
                 )
             }
+
+        // MARK: - Dashboard Streaming Events
+
+        case TextDeltaPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? TextDeltaPlugin.Result {
+                dashboardStreamManager.handleTextDelta(sessionId: sessionId, delta: result.delta)
+            }
+
+        case ThinkingDeltaPlugin.eventType:
+            if let sessionId = event.sessionId {
+                dashboardStreamManager.handleThinkingDelta(sessionId: sessionId)
+            }
+
+        case ToolStartPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? ToolStartPlugin.Result {
+                dashboardStreamManager.handleToolStart(
+                    sessionId: sessionId,
+                    toolName: result.toolName,
+                    arguments: result.arguments
+                )
+            }
+
+        case ToolEndPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? ToolEndPlugin.Result {
+                dashboardStreamManager.handleToolEnd(
+                    sessionId: sessionId,
+                    toolName: result.toolName,
+                    success: result.success
+                )
+            }
+
+        case SubagentSpawnedPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? SubagentSpawnedPlugin.Result {
+                dashboardStreamManager.handleSubagentSpawned(sessionId: sessionId, task: result.task)
+            }
+
+        case SubagentCompletedPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? SubagentCompletedPlugin.Result {
+                dashboardStreamManager.handleSubagentCompleted(sessionId: sessionId, turns: result.totalTurns)
+            }
+
+        case SubagentFailedPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? SubagentFailedPlugin.Result {
+                dashboardStreamManager.handleSubagentFailed(sessionId: sessionId, error: result.error)
+            }
+
+        case TurnFailedPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? TurnFailedPlugin.Result {
+                dashboardStreamManager.handleTurnFailed(sessionId: sessionId, error: result.error)
+            }
+
+        // MARK: - Session Lifecycle Events
 
         case SessionUpdatedPlugin.eventType:
             if let result = event.getResult() as? SessionUpdatedPlugin.Result {
@@ -202,7 +267,6 @@ final class EventStoreManager {
             }
 
         default:
-            // Other events are handled by session-specific subscribers
             break
         }
     }
@@ -304,8 +368,9 @@ final class EventStoreManager {
             chatSessionId = nil
         }
 
-        // Remove from in-memory list
+        // Remove from in-memory list and clear stream buffer
         sessions.removeAll { $0.id == sessionId }
+        dashboardStreamManager.clearBuffer(for: sessionId)
 
         // Remove from local DB
         do {
@@ -331,6 +396,7 @@ final class EventStoreManager {
         logger.info("Global: session.deleted for \(sessionId)", category: .session)
 
         sessions.removeAll { $0.id == sessionId }
+        dashboardStreamManager.clearBuffer(for: sessionId)
         do {
             try eventDB.events.deleteBySession(sessionId)
             try eventDB.sessions.delete(sessionId)
