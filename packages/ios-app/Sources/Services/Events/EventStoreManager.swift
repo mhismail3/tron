@@ -151,10 +151,6 @@ final class EventStoreManager {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: true)
                 dashboardStreamManager.handleEvent(.turnStart, sessionId: sessionId)
-                // Inject user prompt into stream buffer if available
-                if let prompt = sessions.first(where: { $0.id == sessionId })?.lastUserPrompt, !prompt.isEmpty {
-                    dashboardStreamManager.handleEvent(.userPrompt(text: prompt), sessionId: sessionId)
-                }
             }
 
         case CompletePlugin.eventType:

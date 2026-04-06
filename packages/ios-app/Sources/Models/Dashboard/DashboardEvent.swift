@@ -5,7 +5,6 @@ import Foundation
 /// Neither layer imports the other's types.
 enum DashboardEvent {
     case turnStart
-    case userPrompt(text: String)
     case textDelta(delta: String)
     case thinkingDelta
     case toolStart(toolName: String, toolCallId: String?, arguments: [String: AnyCodable]?)

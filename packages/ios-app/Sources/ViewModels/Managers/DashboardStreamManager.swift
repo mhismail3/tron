@@ -16,20 +16,6 @@ struct SessionStreamBuffer {
     private var currentTextRaw: String = ""
 
 
-    // MARK: - User Prompt
-
-    mutating func addUserPrompt(_ text: String) {
-        guard isActive else { return }
-        currentTextLineIndex = nil
-        currentTextRaw = ""
-
-        let firstLine = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
-        let maxLen = DashboardConstants.maxUserPromptLength
-        let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
-        appendLine(ActivityLine(kind: .userPrompt, text: truncated))
-    }
-
     // MARK: - Text Deltas
 
     mutating func appendTextDelta(_ delta: String) {
@@ -285,8 +271,6 @@ final class DashboardStreamManager {
         switch event {
         case .turnStart:
             handleTurnStart(sessionId: sessionId)
-        case .userPrompt(let text):
-            handleUserPrompt(sessionId: sessionId, text: text)
         case .textDelta(let delta):
             handleTextDelta(sessionId: sessionId, delta: delta)
         case .thinkingDelta:
@@ -311,12 +295,6 @@ final class DashboardStreamManager {
     }
 
     // MARK: - Event Handlers
-
-    func handleUserPrompt(sessionId: String, text: String) {
-        guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addUserPrompt(text)
-        flushSession(sessionId)
-    }
 
     func handleTextDelta(sessionId: String, delta: String) {
         guard ensurePendingBuffer(for: sessionId) else { return }
@@ -367,13 +345,19 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleTurnStart(sessionId: String) {
+    /// Handle a turn start event. Returns `true` if a fresh buffer was created
+    /// (new session or resuming after completion), `false` if the existing buffer
+    /// was preserved (tool-use continuation turn within the same processing cycle).
+    @discardableResult
+    func handleTurnStart(sessionId: String) -> Bool {
         let wasCompleted = completedSessionIds.remove(sessionId) != nil
-        if wasCompleted || pendingBuffers[sessionId] == nil {
+        let isFresh = wasCompleted || pendingBuffers[sessionId] == nil
+        if isFresh {
             let fresh = SessionStreamBuffer()
             pendingBuffers[sessionId] = fresh
             buffers[sessionId] = fresh
         }
+        return isFresh
     }
 
     func handleComplete(sessionId: String) {
