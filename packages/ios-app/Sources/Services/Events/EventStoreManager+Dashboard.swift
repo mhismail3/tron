@@ -94,17 +94,20 @@ extension EventStoreManager {
             setSessionProcessing(sessionId, isProcessing: isNowProcessing)
 
             if wasProcessing && !isNowProcessing {
+                // Snapshot live buffer lines immediately before clearing
+                let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
+                if !snapshot.isEmpty {
+                    updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
+                }
+                dashboardStreamManager.clearBuffer(for: sessionId)
+
+                // Sync events for metadata
                 do {
                     try await syncSessionEvents(sessionId: sessionId)
                 } catch {
                     logger.error("Failed to sync events after processing ended for \(sessionId): \(error)", category: .database)
                 }
                 extractDashboardInfoFromEvents(sessionId: sessionId)
-                let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
-                if !snapshot.isEmpty {
-                    updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
-                }
-                dashboardStreamManager.clearBuffer(for: sessionId)
             }
         }
     }
@@ -154,9 +157,14 @@ extension EventStoreManager {
             )
 
             // Build activity lines from stored events for card display
-            let activityLines = ContentExtractor.extractActivityLines(from: events)
-            if !activityLines.isEmpty {
-                updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
+            // Skip if session already has activity lines with summaries (e.g., from live snapshot)
+            let existingLines = sessions.first(where: { $0.id == sessionId })?.lastActivityLines
+            let hasGoodLines = existingLines?.contains(where: { $0.summary != nil }) ?? false
+            if !hasGoodLines {
+                let activityLines = ContentExtractor.extractActivityLines(from: events)
+                if !activityLines.isEmpty {
+                    updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
+                }
             }
         } catch {
             logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")

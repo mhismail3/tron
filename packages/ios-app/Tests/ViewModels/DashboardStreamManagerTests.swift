@@ -348,15 +348,29 @@ final class DashboardStreamManagerTests: XCTestCase {
 
     // MARK: - Turn Start
 
-    func testHandleTurnStartClearsOldBuffer() {
+    func testHandleTurnStartPreservesBufferAcrossToolTurns() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "old content")
+        manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
         XCTAssertTrue(manager.hasContent(for: "s1"))
 
+        // Mid-processing turn start should NOT clear the buffer
         manager.handleTurnStart(sessionId: "s1")
 
-        // Buffer exists but is empty (cleared)
-        XCTAssertFalse(manager.hasContent(for: "s1"))
+        XCTAssertTrue(manager.hasContent(for: "s1"), "Buffer should persist across tool-use turns")
+    }
+
+    func testHandleTurnStartClearsAfterCompletion() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "old content")
+        manager.handleComplete(sessionId: "s1")
+
+        // New turn after completion (new user message) — fresh buffer
+        manager.handleTurnStart(sessionId: "s1")
+
+        XCTAssertFalse(manager.hasContent(for: "s1"), "Buffer should be fresh after completion + new turn")
+        manager.handleTextDelta(sessionId: "s1", delta: "new content")
+        XCTAssertTrue(manager.hasContent(for: "s1"))
     }
 
     func testHandleTurnStartCreatesBuffer() {

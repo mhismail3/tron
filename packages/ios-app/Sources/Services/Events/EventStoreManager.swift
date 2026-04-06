@@ -162,6 +162,15 @@ final class EventStoreManager {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
                 dashboardStreamManager.handleComplete(sessionId: sessionId)
+                // Snapshot live buffer lines before clearing — these have rich metadata
+                // from the streaming path (summaries, durations, display names)
+                let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
+                if !snapshot.isEmpty {
+                    updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
+                }
+                dashboardStreamManager.clearBuffer(for: sessionId)
+
+                // Sync events in background for metadata (tokens, prompts)
                 Task {
                     do {
                         try await self.syncSessionEvents(sessionId: sessionId)
@@ -169,11 +178,6 @@ final class EventStoreManager {
                         logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
                     }
                     self.extractDashboardInfoFromEvents(sessionId: sessionId)
-                    let snapshot = self.dashboardStreamManager.snapshotLines(for: sessionId)
-                    if !snapshot.isEmpty {
-                        self.updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
-                    }
-                    self.dashboardStreamManager.clearBuffer(for: sessionId)
                 }
             }
 

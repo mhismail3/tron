@@ -306,8 +306,12 @@ final class DashboardStreamManager {
     }
 
     func handleTurnStart(sessionId: String) {
-        completedSessionIds.remove(sessionId)
-        buffers[sessionId] = SessionStreamBuffer()
+        let wasCompleted = completedSessionIds.remove(sessionId) != nil
+        if wasCompleted || buffers[sessionId] == nil {
+            // New user message after completion, or first turn — fresh buffer
+            buffers[sessionId] = SessionStreamBuffer()
+        }
+        // Otherwise keep accumulating across tool-use turns within the same cycle
     }
 
     func handleComplete(sessionId: String) {
