@@ -244,10 +244,14 @@ struct CachedSessionSidebarRow: View {
                 .font(TronTypography.codeSM)
                 .foregroundStyle(.tronTextMuted.opacity(0.4))
 
-            // Mini-chat content
-            if streamManager.hasContent(for: session.id) || session.isProcessing == true {
-                MiniChatStreamView(sessionId: session.id, streamManager: streamManager)
-            } else if let activityLines = session.lastActivityLines, !activityLines.isEmpty {
+            // Mini-chat content — unified rendering for both live and persisted
+            let activityLines: [CachedActivityLine] = {
+                if streamManager.hasContent(for: session.id) {
+                    return streamManager.snapshotLines(for: session.id)
+                }
+                return session.lastActivityLines ?? []
+            }()
+            if !activityLines.isEmpty {
                 MiniChatActivityView(lines: activityLines)
             }
 
@@ -292,111 +296,7 @@ struct CachedSessionSidebarRow: View {
     }
 }
 
-// MARK: - Mini-Chat Stream View (Live)
-
-@available(iOS 26.0, *)
-struct MiniChatStreamView: View {
-    let sessionId: String
-    let streamManager: DashboardStreamManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            let lines = streamManager.visibleLines(for: sessionId)
-            ForEach(lines) { line in
-                miniChatLine(line)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func miniChatLine(_ line: DashboardStreamLine) -> some View {
-        switch line.kind {
-        case .userPrompt:
-            MiniMessageRow(text: line.text, isUser: true)
-
-        case .text:
-            MiniMessageRow(text: line.text, isUser: false)
-
-        case .toolStart:
-            MiniToolChip(
-                name: line.displayName ?? line.toolName ?? line.text,
-                icon: line.icon ?? "gearshape",
-                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
-                summary: line.summary,
-                duration: line.duration,
-                status: line.status
-            )
-
-        case .toolEnd:
-            MiniToolChip(
-                name: line.displayName ?? line.toolName ?? line.text,
-                icon: line.icon ?? "gearshape",
-                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
-                summary: line.summary,
-                duration: line.duration,
-                status: line.status
-            )
-
-        case .toolBatch:
-            HStack(spacing: 4) {
-                Text("⚡")
-                    .foregroundStyle(.tronEmerald)
-                Text(line.text)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-
-        case .subagentSpawn:
-            HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.tronPurple)
-                Text(line.text)
-                    .foregroundStyle(.tronPurple)
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-
-        case .subagentDone:
-            HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.tronPurple.opacity(0.7))
-                Text(line.text)
-                    .foregroundStyle(.tronPurple.opacity(0.7))
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-
-        case .subagentFailed:
-            HStack(spacing: 4) {
-                Text("◆")
-                    .foregroundStyle(.red.opacity(0.7))
-                Text(line.text)
-                    .foregroundStyle(.red.opacity(0.7))
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-
-        case .thinking:
-            MiniThinkingRow()
-
-        case .error:
-            HStack(spacing: 4) {
-                Text("⚠")
-                    .foregroundStyle(.red.opacity(0.8))
-                Text(line.text)
-                    .foregroundStyle(.red.opacity(0.8))
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-        }
-    }
-}
-
-// MARK: - Mini-Chat Activity View (Persisted)
+// MARK: - Mini-Chat Activity View
 
 @available(iOS 26.0, *)
 struct MiniChatActivityView: View {
