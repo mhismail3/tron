@@ -692,6 +692,29 @@ mod tests {
         assert_eq!(orch.current_sequence("s1"), Some(2));
     }
 
+    #[test]
+    fn init_counter_simulates_server_restart() {
+        // Simulates: server restarts, queries MAX(sequence) = 42 from DB, inits counter at 42
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 42);
+        // Next sequence should be 43, not 1
+        assert_eq!(orch.next_sequence("s1"), 43);
+        assert_eq!(orch.next_sequence("s1"), 44);
+    }
+
+    #[test]
+    fn reinit_counter_resets_to_new_start() {
+        // Simulates: counter existed, then session is re-initialized
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 0);
+        assert_eq!(orch.next_sequence("s1"), 1);
+        assert_eq!(orch.next_sequence("s1"), 2);
+
+        // Re-init to a higher value (e.g., after DB sync)
+        orch.init_sequence_counter("s1", 100);
+        assert_eq!(orch.next_sequence("s1"), 101);
+    }
+
     // --- Orphaned run cleanup ---
 
     #[tokio::test]

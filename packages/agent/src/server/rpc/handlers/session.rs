@@ -1852,4 +1852,74 @@ mod tests {
         // lastSequence should come from counter, not from events
         assert_eq!(result["lastSequence"], 100);
     }
+
+    // ── Phase 6 edge case tests ──
+
+    #[tokio::test]
+    async fn reconstruct_limit_zero_returns_no_events() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Add some events
+        for i in 0..5 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(Some(json!({"sessionId": sid, "limit": 0})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 0);
+        // isRunning and metadata should still be populated
+        assert_eq!(result["isRunning"], false);
+        assert!(result["metadata"].is_object());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_before_sequence_zero_returns_empty() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        for i in 0..5 {
+            let _ = ctx
+                .event_store
+                .append(&crate::events::AppendOptions {
+                    session_id: &sid,
+                    event_type: crate::events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = ReconstructHandler
+            .handle(
+                Some(json!({"sessionId": sid, "beforeSequence": 0})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 0);
+        assert_eq!(result["hasMoreEvents"], false);
+    }
 }

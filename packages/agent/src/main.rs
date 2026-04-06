@@ -403,6 +403,8 @@ async fn main() -> Result<()> {
     let recovered = tron::runtime::orchestrator::recovery::recover_incomplete_turns(&event_store);
     if !recovered.is_empty() {
         tracing::info!(count = recovered.len(), "recovered sessions from crash journals");
+    } else {
+        tracing::debug!("no orphaned journals found, clean startup");
     }
 
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));

@@ -9,6 +9,8 @@ extension ChatViewModel {
     /// Transforms persisted events into messages, updates metadata, and
     /// processes in-flight state if the agent is currently running.
     func processReconstructionResult(_ result: SessionReconstructResult) async {
+        logger.info("[RECONSTRUCT] Processing: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), hasMore=\(result.hasMoreEvents), inFlight=\(result.inFlight != nil)", category: .session)
+
         // 1. Transform persisted events into messages using the unified transformer
         let reconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(result.events)
 
@@ -37,7 +39,7 @@ extension ChatViewModel {
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
-        logger.info("Reconstruction: \(reconstructedMessages.count) messages, displaying \(batchSize), inFlight=\(result.inFlight != nil)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(reconstructedMessages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
     }
 
     /// Process in-flight state from a running agent turn.
@@ -45,6 +47,8 @@ extension ChatViewModel {
     /// Builds streaming messages, tool chips, and thinking blocks from the
     /// server's content sequence and tool call state.
     private func processInFlightState(_ inFlight: InFlightState) async {
+        logger.info("[RECONSTRUCT] Processing in-flight: \(inFlight.contentSequence.count) sequence items, \(inFlight.toolCalls.count) tools, streaming=\(inFlight.streaming?.type ?? "none")", category: .session)
+
         // Initialize turn tracking for in-flight content
         turnStartMessageIndex = messages.count
         firstTextMessageIdForTurn = nil
@@ -100,7 +104,7 @@ extension ChatViewModel {
         }
 
         messageIndex.rebuild(from: messages)
-        logger.debug("In-flight: processed \(inFlight.contentSequence.count) sequence items, \(inFlight.toolCalls.count) tools", category: .session)
+        logger.info("[RECONSTRUCT] In-flight done: \(inFlight.contentSequence.count) items processed, messages now \(messages.count)", category: .session)
     }
 
     /// Process a single in-flight tool call into a UI message.

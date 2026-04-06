@@ -51,14 +51,17 @@ extension ChatViewModel: ConnectionContext {
     /// Drain events that were buffered during reconstruction.
     /// Called by ConnectionCoordinator after reconstruction completes and sequenceHighWaterMark is set.
     func drainEventBuffer() {
-        guard !eventBuffer.isEmpty else { return }
+        guard !eventBuffer.isEmpty else {
+            logger.debug("[RECONSTRUCT] Event buffer empty, nothing to drain", category: .session)
+            return
+        }
         let buffered = eventBuffer
         eventBuffer.removeAll()
-        logger.info("Draining \(buffered.count) buffered events (highWaterMark=\(sequenceHighWaterMark))", category: .session)
+        logger.info("[RECONSTRUCT] Draining \(buffered.count) buffered events (highWaterMark=\(sequenceHighWaterMark))", category: .session)
         for event in buffered {
-            // Sequence filtering happens in handleEventV2
             dispatchEvent(event)
         }
+        logger.info("[RECONSTRUCT] Buffer drain complete, messages now \(messages.count)", category: .session)
     }
 
     // Note: The following methods are already defined in other extensions:

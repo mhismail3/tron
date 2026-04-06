@@ -124,13 +124,14 @@ final class ConnectionCoordinator {
                 context.setSessionProcessing(true)
             }
 
-            context.logInfo("Reconstruction complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence)")
+            context.logInfo("[RECONSTRUCT] Complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), highWaterMark=\(context.sequenceHighWaterMark)")
         } catch {
-            context.logWarning("Reconstruction failed: \(error.localizedDescription)")
+            context.logWarning("[RECONSTRUCT] Failed: \(error.localizedDescription)")
         }
 
         // Always reset reconstruction flag and drain buffered events
         context.isReconstructing = false
+        context.logInfo("[RECONSTRUCT] Draining event buffer, isReconstructing=false")
         context.drainEventBuffer()
     }
 

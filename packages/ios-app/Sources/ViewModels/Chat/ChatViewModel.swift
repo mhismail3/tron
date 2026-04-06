@@ -456,9 +456,13 @@ final class ChatViewModel {
         }
     }
 
-    /// Unified event handler - buffers during catch-up, dispatches otherwise
+    /// Unified event handler - buffers during reconstruction, dispatches otherwise
     func handleEventV2(_ event: ParsedEventV2) {
         if isReconstructing {
+            if eventBuffer.count < 3 {
+                // Log first few buffered events for debugging
+                logger.debug("[RECONSTRUCT] Buffering event during reconstruction: \(event.eventType) (buffer=\(eventBuffer.count + 1))", category: .events)
+            }
             eventBuffer.append(event)
             return
         }

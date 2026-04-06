@@ -97,7 +97,17 @@ impl SessionReconstructService {
         // 2. Check agent status + get in-flight state (non-blocking)
         let is_running = orchestrator.has_active_run(&session_id);
         let in_flight = if is_running {
-            Self::build_in_flight_state(&orchestrator, &session_id)
+            let state = Self::build_in_flight_state(&orchestrator, &session_id);
+            if let Some(ref s) = state {
+                debug!(
+                    session_id,
+                    tool_count = s.get("toolCalls").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                    seq_count = s.get("contentSequence").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                    has_streaming = s.get("streaming").map(|v| !v.is_null()).unwrap_or(false),
+                    "in-flight state built for running agent"
+                );
+            }
+            state
         } else {
             None
         };
