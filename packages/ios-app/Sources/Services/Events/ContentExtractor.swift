@@ -155,8 +155,9 @@ enum ContentExtractor {
             case PersistedEventType.messageUser.rawValue:
                 let text = extractText(from: event.payload["content"]?.value)
                 if !text.isEmpty {
-                    let lastLine = text.split(separator: "\n").last.map(String.init) ?? text
-                    let truncated = lastLine.count > 100 ? String(lastLine.suffix(100)) : lastLine
+                    let firstLine = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
+                    let truncated = firstLine.count > 100 ? String(firstLine.prefix(100)) : firstLine
                     lines.append(CachedActivityLine(kind: "userPrompt", text: truncated.trimmingCharacters(in: .whitespacesAndNewlines)))
                 }
 
@@ -199,8 +200,8 @@ enum ContentExtractor {
                     } else if type == ContentBlockType.text.rawValue, let text = block["text"] as? String {
                         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
-                            let lastLine = trimmed.split(separator: "\n").last.map(String.init) ?? trimmed
-                            let truncated = lastLine.count > 200 ? String(lastLine.suffix(200)) : lastLine
+                            let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
+                            let truncated = firstLine.count > 200 ? String(firstLine.prefix(200)) : firstLine
                             lines.append(CachedActivityLine(kind: "text", text: truncated))
                         }
 

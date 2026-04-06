@@ -18,19 +18,22 @@ final class SessionStreamBufferTests: XCTestCase {
         XCTAssertEqual(buffer.lines[0].kind, .text)
     }
 
-    func testAppendTextDeltaTruncatesTail() {
+    func testAppendTextDeltaKeepsFirstLine() {
         var buffer = SessionStreamBuffer()
-        let longText = String(repeating: "A", count: 150)
-        buffer.appendTextDelta(longText)
-        // Now add more to exceed maxTextLineLength (200)
-        let moreText = String(repeating: "B", count: 100)
-        buffer.appendTextDelta(moreText)
+        buffer.appendTextDelta("First line\nSecond line\nThird line")
 
         XCTAssertEqual(buffer.lines.count, 1)
-        // Total would be 250, should keep tail 200
+        XCTAssertEqual(buffer.lines[0].text, "First line")
+    }
+
+    func testAppendTextDeltaTruncatesLongFirstLine() {
+        var buffer = SessionStreamBuffer()
+        let longText = String(repeating: "A", count: 250)
+        buffer.appendTextDelta(longText)
+
+        XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].text.count, SessionStreamBuffer.maxTextLineLength)
-        // Tail should be all B's and some A's
-        XCTAssertTrue(buffer.lines[0].text.hasSuffix(moreText))
+        XCTAssertTrue(buffer.lines[0].text.hasPrefix("AAA"))
     }
 
     // MARK: - Tool Start

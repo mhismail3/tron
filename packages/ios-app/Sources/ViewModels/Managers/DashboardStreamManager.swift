@@ -43,6 +43,8 @@ struct SessionStreamBuffer {
 
     /// Index into `lines` of the current text line being coalesced.
     private var currentTextLineIndex: Int?
+    /// Raw accumulated text for the current text block (used to extract first line).
+    private var currentTextRaw: String = ""
 
 
     // MARK: - User Prompt
@@ -50,8 +52,11 @@ struct SessionStreamBuffer {
     mutating func addUserPrompt(_ text: String) {
         guard isActive else { return }
         currentTextLineIndex = nil
+        currentTextRaw = ""
 
-        let truncated = text.count > 200 ? String(text.suffix(200)) : text
+        let firstLine = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
+        let truncated = firstLine.count > 100 ? String(firstLine.prefix(100)) : firstLine
         appendLine(DashboardStreamLine(kind: .userPrompt, text: truncated))
     }
 
@@ -69,13 +74,18 @@ struct SessionStreamBuffer {
         }
 
         if let idx = currentTextLineIndex, idx < lines.count {
-            lines[idx].text.append(delta)
-            if lines[idx].text.count > Self.maxTextLineLength {
-                let start = lines[idx].text.index(lines[idx].text.endIndex, offsetBy: -Self.maxTextLineLength)
-                lines[idx].text = String(lines[idx].text[start...])
-            }
+            // Accumulate raw text, then extract first non-empty line for display
+            currentTextRaw.append(delta)
+            let firstLine = currentTextRaw
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .first.map(String.init) ?? currentTextRaw
+            lines[idx].text = String(firstLine.prefix(Self.maxTextLineLength))
         } else {
-            appendLine(DashboardStreamLine(kind: .text, text: delta))
+            currentTextRaw = delta
+            let firstLine = delta
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .first.map(String.init) ?? delta
+            appendLine(DashboardStreamLine(kind: .text, text: String(firstLine.prefix(Self.maxTextLineLength))))
             currentTextLineIndex = lines.count - 1
         }
     }
@@ -190,6 +200,7 @@ struct SessionStreamBuffer {
     mutating func clear() {
         lines.removeAll()
         currentTextLineIndex = nil
+        currentTextRaw = ""
         isActive = true
     }
 

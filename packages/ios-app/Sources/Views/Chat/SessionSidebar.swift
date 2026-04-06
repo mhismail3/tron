@@ -382,6 +382,8 @@ struct MiniMessageRow: View {
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(maxWidth: UIScreen.main.bounds.width * 0.55)
                 accentBar(color: .tronEmerald.opacity(0.3))
                     .padding(.leading, 8)
             }
