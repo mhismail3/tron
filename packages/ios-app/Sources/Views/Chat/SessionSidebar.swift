@@ -371,14 +371,14 @@ struct MiniMessageRow: View {
     let text: String
     let isUser: Bool
 
-    private let font = TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular)
+    private static let captionSize = TronTypography.sizeCaption
 
     var body: some View {
         if isUser {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Text(text)
-                    .font(font)
+                    .font(TronTypography.mono(size: Self.captionSize, weight: .regular))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -392,8 +392,7 @@ struct MiniMessageRow: View {
             HStack(spacing: 0) {
                 accentBar(color: .tronEmerald)
                     .padding(.trailing, 8)
-                Text(text)
-                    .font(font)
+                Text(inlineMarkdown(from: text, size: Self.captionSize))
                     .foregroundStyle(.tronEmeraldDark.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)

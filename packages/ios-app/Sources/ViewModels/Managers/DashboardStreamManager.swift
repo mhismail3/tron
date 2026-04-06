@@ -237,17 +237,34 @@ struct SessionStreamBuffer {
 /// Each in-progress session accumulates activity lines that the sidebar
 /// cards render as a mini-terminal. Suppresses hook subagent events and
 /// blocks post-completion events from leaking into cards.
+///
+/// Text deltas are batched at ~60fps to avoid choppy re-renders. Structural
+/// events (tool start/end, completion) flush immediately for responsiveness.
 @Observable
 @MainActor
 final class DashboardStreamManager {
 
+    /// Published buffers — SwiftUI observes this. Updated at ~60fps during streaming.
     private(set) var buffers: [String: SessionStreamBuffer] = [:]
+
+    /// Staging area for rapid mutations. Not observed by SwiftUI.
+    /// Flushed to `buffers` by the render timer or on structural events.
+    private var pendingBuffers: [String: SessionStreamBuffer] = [:]
 
     /// Sessions that have completed — prevents post-completion events from creating new buffers
     private var completedSessionIds: Set<String> = []
 
     /// Subagent session IDs spawned by hooks (nil toolCallId) — suppressed from display
     private var hookSubagentIds: Set<String> = []
+
+    /// Sessions with pending text deltas that need flushing
+    private var dirtySessionIds: Set<String> = []
+
+    /// Render timer for batching text delta updates at ~60fps
+    private var renderTimer: Task<Void, Never>?
+
+    /// Batch interval (~60fps)
+    private static let batchIntervalNanos: UInt64 = 16_000_000
 
     func visibleLines(for sessionId: String, count: Int = 5) -> [DashboardStreamLine] {
         guard let buffer = buffers[sessionId] else { return [] }
@@ -269,77 +286,89 @@ final class DashboardStreamManager {
     // MARK: - Event Handlers
 
     func handleUserPrompt(sessionId: String, text: String) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addUserPrompt(text)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addUserPrompt(text)
+        flushSession(sessionId)
     }
 
     func handleTextDelta(sessionId: String, delta: String) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.appendTextDelta(delta)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.appendTextDelta(delta)
+        dirtySessionIds.insert(sessionId)
+        scheduleRenderFlush()
     }
 
     func handleThinkingDelta(sessionId: String) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.setThinking()
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.setThinking()
+        flushSession(sessionId)
     }
 
     func handleToolStart(sessionId: String, toolName: String, arguments: [String: AnyCodable]?) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addToolStart(name: toolName, arguments: arguments)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addToolStart(name: toolName, arguments: arguments)
+        flushSession(sessionId)
     }
 
     func handleToolEnd(sessionId: String, toolName: String?, success: Bool, durationMs: Int? = nil) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addToolEnd(name: toolName, success: success, durationMs: durationMs)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addToolEnd(name: toolName, success: success, durationMs: durationMs)
+        flushSession(sessionId)
     }
 
     func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String) {
         if toolCallId == nil {
-            // Hook-spawned subagent — suppress
             hookSubagentIds.insert(subagentSessionId)
             return
         }
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addSubagentSpawn(task: task)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addSubagentSpawn(task: task)
+        flushSession(sessionId)
     }
 
     func handleSubagentCompleted(sessionId: String, turns: Int, subagentSessionId: String) {
         if hookSubagentIds.remove(subagentSessionId) != nil { return }
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addSubagentComplete(turns: turns)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addSubagentComplete(turns: turns)
+        flushSession(sessionId)
     }
 
     func handleSubagentFailed(sessionId: String, error: String, subagentSessionId: String) {
         if hookSubagentIds.remove(subagentSessionId) != nil { return }
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addSubagentFailed(error: error)
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addSubagentFailed(error: error)
+        flushSession(sessionId)
     }
 
     func handleTurnStart(sessionId: String) {
         let wasCompleted = completedSessionIds.remove(sessionId) != nil
-        if wasCompleted || buffers[sessionId] == nil {
-            // New user message after completion, or first turn — fresh buffer
-            buffers[sessionId] = SessionStreamBuffer()
+        if wasCompleted || pendingBuffers[sessionId] == nil {
+            let fresh = SessionStreamBuffer()
+            pendingBuffers[sessionId] = fresh
+            buffers[sessionId] = fresh
         }
-        // Otherwise keep accumulating across tool-use turns within the same cycle
     }
 
     func handleComplete(sessionId: String) {
+        flushAllDirty()
         buffers[sessionId]?.freeze()
+        pendingBuffers[sessionId]?.freeze()
         completedSessionIds.insert(sessionId)
     }
 
     func handleError(sessionId: String, message: String) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addError(message: message)
-        buffers[sessionId]?.freeze()
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addError(message: message)
+        pendingBuffers[sessionId]?.freeze()
+        flushSession(sessionId)
         completedSessionIds.insert(sessionId)
     }
 
     func handleTurnFailed(sessionId: String, error: String) {
-        guard ensureBuffer(for: sessionId) else { return }
-        buffers[sessionId]?.addTurnFailed(error: error)
-        buffers[sessionId]?.freeze()
+        guard ensurePendingBuffer(for: sessionId) else { return }
+        pendingBuffers[sessionId]?.addTurnFailed(error: error)
+        pendingBuffers[sessionId]?.freeze()
+        flushSession(sessionId)
         completedSessionIds.insert(sessionId)
     }
 
@@ -347,23 +376,72 @@ final class DashboardStreamManager {
 
     func clearBuffer(for sessionId: String) {
         buffers.removeValue(forKey: sessionId)
+        pendingBuffers.removeValue(forKey: sessionId)
+        dirtySessionIds.remove(sessionId)
         completedSessionIds.remove(sessionId)
     }
 
     func clearAll() {
         buffers.removeAll()
+        pendingBuffers.removeAll()
+        dirtySessionIds.removeAll()
         completedSessionIds.removeAll()
         hookSubagentIds.removeAll()
+        renderTimer?.cancel()
+        renderTimer = nil
+    }
+
+    // MARK: - Render Batching
+
+    /// Force-flush all pending changes to the observed `buffers` immediately.
+    /// Used by tests and completion paths that need synchronous visibility.
+    func flush() {
+        flushAllDirty()
+    }
+
+    /// Flush a single session's pending buffer to the observed `buffers` immediately.
+    /// Used for structural events (tool start/end, errors) that should appear instantly.
+    private func flushSession(_ sessionId: String) {
+        dirtySessionIds.remove(sessionId)
+        if let pending = pendingBuffers[sessionId] {
+            buffers[sessionId] = pending
+        }
+    }
+
+    /// Flush all dirty sessions to the observed `buffers`.
+    private func flushAllDirty() {
+        guard !dirtySessionIds.isEmpty else { return }
+        for sessionId in dirtySessionIds {
+            if let pending = pendingBuffers[sessionId] {
+                buffers[sessionId] = pending
+            }
+        }
+        dirtySessionIds.removeAll()
+    }
+
+    /// Schedule a render flush at ~60fps. Only one timer runs at a time.
+    private func scheduleRenderFlush() {
+        guard renderTimer == nil else { return }
+        renderTimer = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.batchIntervalNanos)
+            guard let self, !Task.isCancelled else { return }
+            self.flushAllDirty()
+            self.renderTimer = nil
+            // If more deltas arrived during sleep, schedule again
+            if !self.dirtySessionIds.isEmpty {
+                self.scheduleRenderFlush()
+            }
+        }
     }
 
     // MARK: - Private
 
-    /// Ensure a buffer exists for the session. Returns false if the session
-    /// has completed and should not accept new events.
+    /// Ensure a pending buffer exists for the session. Returns false if completed.
     @discardableResult
-    private func ensureBuffer(for sessionId: String) -> Bool {
+    private func ensurePendingBuffer(for sessionId: String) -> Bool {
         if completedSessionIds.contains(sessionId) { return false }
-        if buffers[sessionId] == nil {
+        if pendingBuffers[sessionId] == nil {
+            pendingBuffers[sessionId] = SessionStreamBuffer()
             buffers[sessionId] = SessionStreamBuffer()
         }
         return true

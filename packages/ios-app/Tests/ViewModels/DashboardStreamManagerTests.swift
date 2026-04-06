@@ -295,6 +295,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHandleTextDeltaCreatesBuffer() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "Hello")
+        manager.flush()
 
         XCTAssertTrue(manager.hasContent(for: "s1"))
     }
@@ -303,6 +304,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "Hello")
         manager.handleTextDelta(sessionId: "s2", delta: "World")
+        manager.flush()
 
         let s1Lines = manager.visibleLines(for: "s1", count: 3)
         let s2Lines = manager.visibleLines(for: "s2", count: 3)
@@ -339,6 +341,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHasContentTrue() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "text")
+        manager.flush()
 
         XCTAssertTrue(manager.hasContent(for: "s1"))
     }
@@ -366,6 +369,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHandleTurnStartClearsAfterCompletion() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "old content")
+        manager.flush()
         manager.handleComplete(sessionId: "s1")
 
         // New turn after completion (new user message) — fresh buffer
@@ -373,6 +377,7 @@ final class DashboardStreamManagerTests: XCTestCase {
 
         XCTAssertFalse(manager.hasContent(for: "s1"), "Buffer should be fresh after completion + new turn")
         manager.handleTextDelta(sessionId: "s1", delta: "new content")
+        manager.flush()
         XCTAssertTrue(manager.hasContent(for: "s1"))
     }
 
@@ -384,6 +389,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         XCTAssertFalse(manager.hasContent(for: "new-session"))
         // But we can now write to it
         manager.handleTextDelta(sessionId: "new-session", delta: "text")
+        manager.flush()
         XCTAssertTrue(manager.hasContent(for: "new-session"))
     }
 
@@ -392,6 +398,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHandleCompleteFreezes() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "result")
+        manager.flush()
         manager.handleComplete(sessionId: "s1")
 
         // Content preserved
@@ -399,6 +406,7 @@ final class DashboardStreamManagerTests: XCTestCase {
 
         // Further events ignored
         manager.handleTextDelta(sessionId: "s1", delta: " more")
+        manager.flush()
         let lines = manager.visibleLines(for: "s1", count: 3)
         XCTAssertEqual(lines.count, 1)
         XCTAssertEqual(lines[0].text, "result")
@@ -416,6 +424,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testClearBufferRemoves() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "text")
+        manager.flush()
         manager.clearBuffer(for: "s1")
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
@@ -426,6 +435,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "a")
         manager.handleTextDelta(sessionId: "s2", delta: "b")
+        manager.flush()
         manager.clearAll()
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
@@ -437,6 +447,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testMultipleSessionsIndependent() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "session1")
+        manager.flush()
         manager.handleToolStart(sessionId: "s2", toolName: "Edit", arguments: nil)
 
         let s1 = manager.visibleLines(for: "s1", count: 3)
@@ -453,6 +464,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHandleErrorFreezes() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "partial")
+        manager.flush()
         manager.handleError(sessionId: "s1", message: "API error")
 
         // Error line added
@@ -462,12 +474,14 @@ final class DashboardStreamManagerTests: XCTestCase {
 
         // Frozen — no further events
         manager.handleTextDelta(sessionId: "s1", delta: "ignored")
+        manager.flush()
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 5).count, 2)
     }
 
     func testHandleTurnFailedFreezes() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "partial")
+        manager.flush()
         manager.handleTurnFailed(sessionId: "s1", error: "Token limit exceeded")
 
         let lines = manager.visibleLines(for: "s1", count: 3)
@@ -476,6 +490,7 @@ final class DashboardStreamManagerTests: XCTestCase {
 
         // Frozen
         manager.handleTextDelta(sessionId: "s1", delta: "ignored")
+        manager.flush()
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 5).count, 2)
     }
 
@@ -484,6 +499,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testEventsIgnoredAfterFreeze() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "text")
+        manager.flush()
         manager.handleComplete(sessionId: "s1")
 
         let before = manager.visibleLines(for: "s1", count: 10)
@@ -492,6 +508,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
         manager.handleThinkingDelta(sessionId: "s1")
         manager.handleSubagentSpawned(sessionId: "s1", task: "task", toolCallId: "tc1", subagentSessionId: "sub1")
+        manager.flush()
 
         let after = manager.visibleLines(for: "s1", count: 10)
         XCTAssertEqual(before.count, after.count)
@@ -547,12 +564,14 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testPostCompletionEventsIgnored() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "done")
+        manager.flush()
         manager.handleComplete(sessionId: "s1")
 
         // Events after completion should not create a new buffer
         manager.handleTextDelta(sessionId: "s1", delta: "hook output")
         manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
         manager.handleThinkingDelta(sessionId: "s1")
+        manager.flush()
 
         let lines = manager.visibleLines(for: "s1", count: 10)
         XCTAssertEqual(lines.count, 1)
@@ -570,10 +589,12 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testTurnStartAfterCompleteAllowsNewBuffer() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "first turn")
+        manager.flush()
         manager.handleComplete(sessionId: "s1")
 
         manager.handleTurnStart(sessionId: "s1")
         manager.handleTextDelta(sessionId: "s1", delta: "second turn")
+        manager.flush()
 
         let lines = manager.visibleLines(for: "s1", count: 3)
         XCTAssertEqual(lines.count, 1)
@@ -585,6 +606,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testSnapshotLinesConvertsCorrectly() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "hello")
+        manager.flush()
         manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
 
         let snapshot = manager.snapshotLines(for: "s1", count: 3)
@@ -771,10 +793,46 @@ final class DashboardStreamManagerSnapshotTests: XCTestCase {
                 manager.handleToolStart(sessionId: "s1", toolName: "Tool\(i)", arguments: nil)
             }
         }
+        manager.flush()
 
         // Default count should return up to 5
         let lines = manager.visibleLines(for: "s1")
         XCTAssertEqual(lines.count, 5)
+    }
+
+    func testTextDeltasBatchedUntilFlush() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "Hello")
+
+        // Before flush, buffers should not reflect the text delta
+        XCTAssertFalse(manager.hasContent(for: "s1"), "Text deltas should be staged, not immediately visible")
+
+        // After flush, content appears
+        manager.flush()
+        XCTAssertTrue(manager.hasContent(for: "s1"))
+        XCTAssertEqual(manager.visibleLines(for: "s1", count: 1)[0].text, "Hello")
+    }
+
+    func testStructuralEventsFlushedImmediately() {
+        let manager = DashboardStreamManager()
+        manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
+
+        // Tool start should be immediately visible (no flush needed)
+        XCTAssertTrue(manager.hasContent(for: "s1"))
+        XCTAssertEqual(manager.visibleLines(for: "s1", count: 1)[0].kind, .toolStart)
+    }
+
+    func testToolStartFlushesProirTextDelta() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "thinking...")
+        // Text delta is staged
+        XCTAssertFalse(manager.hasContent(for: "s1"))
+
+        // Tool start should flush the pending text delta too
+        manager.handleToolStart(sessionId: "s1", toolName: "Bash", arguments: nil)
+        XCTAssertEqual(manager.visibleLines(for: "s1", count: 5).count, 2)
+        XCTAssertEqual(manager.visibleLines(for: "s1", count: 5)[0].kind, .text)
+        XCTAssertEqual(manager.visibleLines(for: "s1", count: 5)[1].kind, .toolStart)
     }
 }
 
