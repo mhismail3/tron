@@ -165,7 +165,10 @@ final class EventStoreManager {
                         logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
                     }
                     self.extractDashboardInfoFromEvents(sessionId: sessionId)
-                    // Clear frozen stream buffer now that lastAssistantResponse is populated
+                    let snapshot = self.dashboardStreamManager.snapshotLines(for: sessionId)
+                    if !snapshot.isEmpty {
+                        self.updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
+                    }
                     self.dashboardStreamManager.clearBuffer(for: sessionId)
                 }
             }
@@ -218,19 +221,32 @@ final class EventStoreManager {
         case SubagentSpawnedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentSpawnedPlugin.Result {
-                dashboardStreamManager.handleSubagentSpawned(sessionId: sessionId, task: result.task)
+                dashboardStreamManager.handleSubagentSpawned(
+                    sessionId: sessionId,
+                    task: result.task,
+                    toolCallId: result.toolCallId,
+                    subagentSessionId: result.subagentSessionId
+                )
             }
 
         case SubagentCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentCompletedPlugin.Result {
-                dashboardStreamManager.handleSubagentCompleted(sessionId: sessionId, turns: result.totalTurns)
+                dashboardStreamManager.handleSubagentCompleted(
+                    sessionId: sessionId,
+                    turns: result.totalTurns,
+                    subagentSessionId: result.subagentSessionId
+                )
             }
 
         case SubagentFailedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentFailedPlugin.Result {
-                dashboardStreamManager.handleSubagentFailed(sessionId: sessionId, error: result.error)
+                dashboardStreamManager.handleSubagentFailed(
+                    sessionId: sessionId,
+                    error: result.error,
+                    subagentSessionId: result.subagentSessionId
+                )
             }
 
         case TurnFailedPlugin.eventType:

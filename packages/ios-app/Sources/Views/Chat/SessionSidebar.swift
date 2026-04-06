@@ -272,29 +272,11 @@ struct CachedSessionSidebarRow: View {
                 }
             }
 
-            // Latest action/response or processing state
+            // Latest action — unified terminal style
             if streamManager.hasContent(for: session.id) || session.isProcessing == true {
                 SessionStreamView(sessionId: session.id, streamManager: streamManager)
-            } else if let response = session.lastAssistantResponse, !response.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "cpu")
-                        .font(TronTypography.labelSM)
-                        .foregroundStyle(.tronEmerald.opacity(0.8))
-                        .frame(width: 12)
-                        .offset(y: 2)
-
-                    Text(response)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronEmeraldDark.opacity(0.8))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-
-                    if let toolCount = session.lastToolCount, toolCount > 0 {
-                        Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
-                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                            .foregroundStyle(.tronEmerald.opacity(0.7))
-                    }
-                }
+            } else if let activityLines = session.lastActivityLines, !activityLines.isEmpty {
+                ActivityLinesView(lines: activityLines)
             }
 
             // Bottom row: Working directory + date
@@ -409,6 +391,17 @@ struct SessionStreamView: View {
                 .foregroundStyle(line.text.hasPrefix("✗") ? .red.opacity(0.7) : .tronEmerald.opacity(0.7))
                 .lineLimit(1)
 
+        case .toolBatch:
+            HStack(spacing: 4) {
+                Text("⚡")
+                    .foregroundStyle(.tronEmerald)
+                Text(line.text)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
         case .subagentSpawn:
             HStack(spacing: 4) {
                 Text("◆")
@@ -481,6 +474,112 @@ private extension View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
             )
+    }
+}
+
+// MARK: - Activity Lines View (Persisted Terminal Display)
+
+@available(iOS 26.0, *)
+struct ActivityLinesView: View {
+    let lines: [CachedActivityLine]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                activityLineView(line)
+            }
+        }
+        .streamViewChrome()
+    }
+
+    @ViewBuilder
+    private func activityLineView(_ line: CachedActivityLine) -> some View {
+        switch line.kind {
+        case "text":
+            Text(line.text)
+                .font(TronTypography.filePath)
+                .foregroundStyle(.tronEmeraldDark.opacity(0.8))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+        case "toolStart":
+            HStack(spacing: 4) {
+                Text(">")
+                    .foregroundStyle(.tronEmerald)
+                Text(line.text)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case "toolEnd":
+            Text(line.text)
+                .font(TronTypography.filePath)
+                .foregroundStyle(line.text.hasPrefix("✗") ? .red.opacity(0.7) : .tronEmerald.opacity(0.7))
+                .lineLimit(1)
+
+        case "toolBatch":
+            HStack(spacing: 4) {
+                Text("⚡")
+                    .foregroundStyle(.tronEmerald)
+                Text(line.text)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case "subagentSpawn":
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.tronPurple)
+                Text(line.text)
+                    .foregroundStyle(.tronPurple)
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case "subagentDone":
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.tronPurple.opacity(0.7))
+                Text(line.text)
+                    .foregroundStyle(.tronPurple.opacity(0.7))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+
+        case "subagentFailed":
+            HStack(spacing: 4) {
+                Text("◆")
+                    .foregroundStyle(.red.opacity(0.7))
+                Text(line.text)
+                    .foregroundStyle(.red.opacity(0.7))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        case "error":
+            HStack(spacing: 4) {
+                Text("⚠")
+                    .foregroundStyle(.red.opacity(0.8))
+                Text(line.text)
+                    .foregroundStyle(.red.opacity(0.8))
+            }
+            .font(TronTypography.filePath)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+        default:
+            Text(line.text)
+                .font(TronTypography.filePath)
+                .foregroundStyle(.tronEmeraldDark.opacity(0.6))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 }
 

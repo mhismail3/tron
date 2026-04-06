@@ -100,6 +100,10 @@ extension EventStoreManager {
                     logger.error("Failed to sync events after processing ended for \(sessionId): \(error)", category: .database)
                 }
                 extractDashboardInfoFromEvents(sessionId: sessionId)
+                let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
+                if !snapshot.isEmpty {
+                    updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
+                }
                 dashboardStreamManager.clearBuffer(for: sessionId)
             }
         }
@@ -127,6 +131,13 @@ extension EventStoreManager {
         }
     }
 
+    /// Update persisted activity lines for a session's card display.
+    func updateSessionActivityLines(sessionId: String, lines: [CachedActivityLine]) {
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            updateSession(at: index) { $0.lastActivityLines = lines }
+        }
+    }
+
     /// Extract dashboard info from events after sync.
     /// Delegates to ContentExtractor utility.
     func extractDashboardInfoFromEvents(sessionId: String) {
@@ -140,6 +151,12 @@ extension EventStoreManager {
                 lastAssistantResponse: info.lastAssistantResponse,
                 lastToolCount: info.lastToolCount
             )
+
+            // Build activity lines from stored events for cold-start display
+            let activityLines = ContentExtractor.extractActivityLines(from: events)
+            if !activityLines.isEmpty {
+                updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
+            }
         } catch {
             logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
         }

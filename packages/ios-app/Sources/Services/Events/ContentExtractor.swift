@@ -118,6 +118,67 @@ enum ContentExtractor {
         return 0
     }
 
+    // MARK: - Activity Lines Extraction
+
+    /// Extract activity lines from events for dashboard card display.
+    /// Builds terminal-style activity lines from the last assistant message's content blocks.
+    static func extractActivityLines(from events: [SessionEvent]) -> [CachedActivityLine] {
+        guard let lastAssistantEvent = events.last(where: { $0.type == PersistedEventType.messageAssistant.rawValue }),
+              let content = lastAssistantEvent.payload["content"]?.value else {
+            return []
+        }
+
+        var lines: [CachedActivityLine] = []
+
+        // Extract tool names from content blocks
+        let toolNames = extractToolNames(from: content)
+        if !toolNames.isEmpty {
+            if toolNames.count == 1 {
+                lines.append(CachedActivityLine(kind: "toolEnd", text: "✓ \(toolNames[0])"))
+            } else if toolNames.count <= 3 {
+                lines.append(CachedActivityLine(kind: "toolBatch", text: "\(toolNames.count) tools: \(toolNames.joined(separator: ", "))"))
+            } else {
+                lines.append(CachedActivityLine(kind: "toolBatch", text: "\(toolNames.count) tools"))
+            }
+        }
+
+        // Extract text summary (truncated)
+        let text = extractText(from: content)
+        if !text.isEmpty {
+            let truncated = text.count > 200 ? String(text.suffix(200)) : text
+            // Take last line of text for the summary
+            let lastLine = truncated.split(separator: "\n").last.map(String.init) ?? truncated
+            let finalLine = lastLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !finalLine.isEmpty {
+                lines.append(CachedActivityLine(kind: "text", text: finalLine))
+            }
+        }
+
+        return Array(lines.suffix(3))
+    }
+
+    /// Extract tool names from content blocks.
+    private static func extractToolNames(from content: Any) -> [String] {
+        if let blocks = content as? [[String: Any]] {
+            return blocks.compactMap { block in
+                guard let type = block["type"] as? String,
+                      type == ContentBlockType.toolUse.rawValue,
+                      let name = block["name"] as? String else { return nil }
+                return name
+            }
+        }
+        if let blocks = content as? [Any] {
+            return blocks.compactMap { element in
+                guard let block = element as? [String: Any],
+                      let type = block["type"] as? String,
+                      type == ContentBlockType.toolUse.rawValue,
+                      let name = block["name"] as? String else { return nil }
+                return name
+            }
+        }
+        return []
+    }
+
     // MARK: - Payload-Based Methods (for EventDatabase)
 
     /// Check if payload has tool_use or tool_result blocks.

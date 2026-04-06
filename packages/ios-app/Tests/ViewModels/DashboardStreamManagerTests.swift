@@ -205,14 +205,12 @@ final class SessionStreamBufferTests: XCTestCase {
     func testLineCappedAtMax() {
         var buffer = SessionStreamBuffer()
         for i in 0..<12 {
-            buffer.addToolStart(name: "Tool\(i)", arguments: nil)
+            buffer.addError(message: "Error \(i)")
         }
 
         XCTAssertEqual(buffer.lines.count, SessionStreamBuffer.maxLines)
-        // Oldest lines should have been dropped; last line should be Tool11
-        XCTAssertEqual(buffer.lines.last?.text, "Tool11")
-        // First line should be Tool4 (12 - 8 = 4)
-        XCTAssertEqual(buffer.lines.first?.text, "Tool4")
+        XCTAssertEqual(buffer.lines.last?.text, "Error 11")
+        XCTAssertEqual(buffer.lines.first?.text, "Error 4")
     }
 
     // MARK: - Freeze / Clear
@@ -466,7 +464,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         manager.handleTextDelta(sessionId: "s1", delta: "more")
         manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
         manager.handleThinkingDelta(sessionId: "s1")
-        manager.handleSubagentSpawned(sessionId: "s1", task: "task")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "task", toolCallId: "tc1", subagentSessionId: "sub1")
 
         let after = manager.visibleLines(for: "s1", count: 10)
         XCTAssertEqual(before.count, after.count)
@@ -481,5 +479,211 @@ final class DashboardStreamManagerTests: XCTestCase {
         let lines = manager.visibleLines(for: "s1", count: 3)
         XCTAssertEqual(lines.count, 1)
         XCTAssertEqual(lines[0].text, "Edit")
+    }
+
+    // MARK: - Hook Subagent Suppression
+
+    func testHookSubagentSuppressed() {
+        let manager = DashboardStreamManager()
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook task", toolCallId: nil, subagentSessionId: "sub1")
+
+        XCTAssertFalse(manager.hasContent(for: "s1"))
+    }
+
+    func testUserSubagentShown() {
+        let manager = DashboardStreamManager()
+        manager.handleSubagentSpawned(sessionId: "s1", task: "user task", toolCallId: "tc1", subagentSessionId: "sub1")
+
+        XCTAssertTrue(manager.hasContent(for: "s1"))
+        let lines = manager.visibleLines(for: "s1", count: 3)
+        XCTAssertEqual(lines[0].kind, .subagentSpawn)
+    }
+
+    func testHookSubagentCompleteSuppressed() {
+        let manager = DashboardStreamManager()
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1")
+        manager.handleSubagentCompleted(sessionId: "s1", turns: 3, subagentSessionId: "sub1")
+
+        XCTAssertFalse(manager.hasContent(for: "s1"))
+    }
+
+    func testHookSubagentFailedSuppressed() {
+        let manager = DashboardStreamManager()
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1")
+        manager.handleSubagentFailed(sessionId: "s1", error: "timeout", subagentSessionId: "sub1")
+
+        XCTAssertFalse(manager.hasContent(for: "s1"))
+    }
+
+    // MARK: - Post-Completion Event Blocking
+
+    func testPostCompletionEventsIgnored() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "done")
+        manager.handleComplete(sessionId: "s1")
+
+        // Events after completion should not create a new buffer
+        manager.handleTextDelta(sessionId: "s1", delta: "hook output")
+        manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
+        manager.handleThinkingDelta(sessionId: "s1")
+
+        let lines = manager.visibleLines(for: "s1", count: 10)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].text, "done")
+    }
+
+    func testPostCompletionToolStartIgnored() {
+        let manager = DashboardStreamManager()
+        manager.handleComplete(sessionId: "s1")
+
+        manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
+        XCTAssertFalse(manager.hasContent(for: "s1"))
+    }
+
+    func testTurnStartAfterCompleteAllowsNewBuffer() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "first turn")
+        manager.handleComplete(sessionId: "s1")
+
+        manager.handleTurnStart(sessionId: "s1")
+        manager.handleTextDelta(sessionId: "s1", delta: "second turn")
+
+        let lines = manager.visibleLines(for: "s1", count: 3)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].text, "second turn")
+    }
+
+    // MARK: - Snapshot
+
+    func testSnapshotLinesConvertsCorrectly() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "hello")
+        manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
+
+        let snapshot = manager.snapshotLines(for: "s1", count: 3)
+        XCTAssertEqual(snapshot.count, 2)
+        XCTAssertEqual(snapshot[0].kind, "text")
+        XCTAssertEqual(snapshot[0].text, "hello")
+        XCTAssertEqual(snapshot[1].kind, "toolStart")
+        XCTAssertEqual(snapshot[1].text, "Edit")
+    }
+
+    func testSnapshotEmptyForUnknownSession() {
+        let manager = DashboardStreamManager()
+        let snapshot = manager.snapshotLines(for: "unknown", count: 3)
+        XCTAssertTrue(snapshot.isEmpty)
+    }
+}
+
+// MARK: - Parallel Tool Aggregation Tests
+
+@MainActor
+final class SessionStreamBufferParallelTests: XCTestCase {
+
+    func testParallelToolStartsAggregate() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolStart(name: "Bash", arguments: nil)
+
+        // Should aggregate into a single toolBatch line
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
+        XCTAssertTrue(buffer.lines[0].text.contains("2"))
+        XCTAssertTrue(buffer.lines[0].text.contains("Edit"))
+        XCTAssertTrue(buffer.lines[0].text.contains("Bash"))
+    }
+
+    func testThreeParallelToolsAggregate() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolStart(name: "Bash", arguments: nil)
+        buffer.addToolStart(name: "Read", arguments: nil)
+
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
+        XCTAssertTrue(buffer.lines[0].text.contains("3"))
+    }
+
+    func testFourPlusToolsShowCount() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolStart(name: "Bash", arguments: nil)
+        buffer.addToolStart(name: "Read", arguments: nil)
+        buffer.addToolStart(name: "Grep", arguments: nil)
+
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].kind, .toolBatch)
+        XCTAssertTrue(buffer.lines[0].text.contains("4"))
+        XCTAssertTrue(buffer.lines[0].text.contains("running"))
+    }
+
+    func testSingleToolStartNoAggregation() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].kind, .toolStart)
+    }
+
+    func testTextBetweenToolStartsBreaksBatch() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.appendTextDelta("some output")
+        buffer.addToolStart(name: "Bash", arguments: nil)
+
+        // Should be 3 separate lines, not aggregated
+        XCTAssertEqual(buffer.lines.count, 3)
+        XCTAssertEqual(buffer.lines[0].kind, .toolStart)
+        XCTAssertEqual(buffer.lines[1].kind, .text)
+        XCTAssertEqual(buffer.lines[2].kind, .toolStart)
+    }
+
+    func testToolEndAfterBatch() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolStart(name: "Bash", arguments: nil)
+        buffer.addToolStart(name: "Read", arguments: nil)
+        buffer.addToolEnd(name: "Edit", success: true)
+        buffer.addToolEnd(name: "Bash", success: true)
+        buffer.addToolEnd(name: "Read", success: true)
+
+        // Batch line + aggregated completion
+        let lastLine = buffer.lines.last!
+        XCTAssertEqual(lastLine.kind, .toolEnd)
+        XCTAssertTrue(lastLine.text.contains("3"))
+    }
+
+    func testToolEndSingleTool() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolEnd(name: "Edit", success: true)
+
+        XCTAssertEqual(buffer.lines.last?.kind, .toolEnd)
+        XCTAssertEqual(buffer.lines.last?.text, "✓ Edit")
+    }
+
+    func testPendingToolsFlushedOnTextDelta() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", arguments: nil)
+        buffer.addToolStart(name: "Bash", arguments: nil)
+        XCTAssertEqual(buffer.lines.count, 1) // aggregated
+
+        buffer.appendTextDelta("output")
+        // Pending tools flushed, text line added
+        XCTAssertTrue(buffer.lines.contains { $0.kind == .text })
+    }
+}
+
+// MARK: - CachedActivityLine Tests
+
+@MainActor
+final class CachedActivityLineTests: XCTestCase {
+
+    func testCachedActivityLineCodable() throws {
+        let line = CachedActivityLine(kind: "toolStart", text: "Edit server.rs")
+        let data = try JSONEncoder().encode(line)
+        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
+        XCTAssertEqual(decoded.kind, "toolStart")
+        XCTAssertEqual(decoded.text, "Edit server.rs")
     }
 }
