@@ -94,22 +94,27 @@ extension EventStoreManager {
             setSessionProcessing(sessionId, isProcessing: isNowProcessing)
 
             if wasProcessing && !isNowProcessing {
-                // Snapshot live buffer lines immediately before clearing
-                let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
-                if !snapshot.isEmpty {
-                    updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
-                }
-                dashboardStreamManager.clearBuffer(for: sessionId)
-
-                // Sync events for metadata
-                do {
-                    try await syncSessionEvents(sessionId: sessionId)
-                } catch {
-                    logger.error("Failed to sync events after processing ended for \(sessionId): \(error)", category: .database)
-                }
-                extractDashboardInfoFromEvents(sessionId: sessionId)
+                await finalizeSessionCompletion(sessionId: sessionId)
             }
         }
+    }
+
+    /// Finalize a session that has stopped processing.
+    /// Snapshots live buffer, persists activity lines, syncs events, and extracts dashboard info.
+    /// Idempotent: safe to call from both the CompletePlugin event path and the polling path.
+    func finalizeSessionCompletion(sessionId: String) async {
+        let snapshot = dashboardStreamManager.snapshotLines(for: sessionId)
+        if !snapshot.isEmpty {
+            updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
+        }
+        dashboardStreamManager.clearBuffer(for: sessionId)
+
+        do {
+            try await syncSessionEvents(sessionId: sessionId)
+        } catch {
+            logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
+        }
+        extractDashboardInfoFromEvents(sessionId: sessionId)
     }
 
     /// Update dashboard display fields for a session.
