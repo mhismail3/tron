@@ -1,4 +1,3 @@
-#![allow(unused_results)]
 //! Main cron scheduling loop.
 //!
 //! [`CronScheduler`] owns the in-memory job state, the scheduling timer,
@@ -151,18 +150,18 @@ impl CronScheduler {
 
     /// Reload a single job into in-memory state (after RPC mutation).
     pub fn reload_job(&self, job: CronJob) {
-        self.jobs.write().insert(job.id.clone(), job);
+        let _ = self.jobs.write().insert(job.id.clone(), job);
     }
 
     /// Remove a job from in-memory state.
     pub fn remove_job(&self, job_id: &str) {
-        self.jobs.write().remove(job_id);
-        self.runtime.write().remove(job_id);
+        let _ = self.jobs.write().remove(job_id);
+        let _ = self.runtime.write().remove(job_id);
     }
 
     /// Update runtime state for a job in memory.
     pub fn update_runtime(&self, state: JobRuntimeState) {
-        self.runtime.write().insert(state.job_id.clone(), state);
+        let _ = self.runtime.write().insert(state.job_id.clone(), state);
     }
 
     /// Get an Arc handle to the runtime map (for spawned execution tasks).
@@ -225,7 +224,7 @@ impl CronScheduler {
                         "jobCount": jobs.len(),
                     });
                     let broadcaster = broadcaster.clone();
-                    tokio::spawn(async move {
+                    let _ = tokio::spawn(async move {
                         broadcaster
                             .broadcast_cron_event("cron.configError", payload)
                             .await;
@@ -251,7 +250,7 @@ impl CronScheduler {
         {
             let mut jobs = self.jobs.write();
             for job in &config.jobs {
-                jobs.insert(job.id.clone(), job.clone());
+                let _ = jobs.insert(job.id.clone(), job.clone());
             }
         }
 
@@ -298,8 +297,8 @@ impl CronScheduler {
                 compute_next_run(&job.schedule, now)
             };
 
-            store::update_next_run_at(&self.pool, &job.id, new_next)?;
-            self.runtime.write().insert(
+            let _ = store::update_next_run_at(&self.pool, &job.id, new_next)?;
+            let _ = self.runtime.write().insert(
                 job.id.clone(),
                 JobRuntimeState {
                     job_id: job.id.clone(),
@@ -381,8 +380,11 @@ impl CronScheduler {
                                     tracing::debug!(job_id = %job.id, "skipping overlapping execution");
                                     // Still update next_run_at
                                     if let Some(next) = compute_next_run(&job.schedule, *scheduled_at) {
-                                        let _ = store::update_next_run_at(&self.pool, &job.id, Some(next));
-                                        self.runtime.write().entry(job.id.clone()).and_modify(|s| s.next_run_at = Some(next));
+                                        if let Err(e) = store::update_next_run_at(&self.pool, &job.id, Some(next)) {
+                                            tracing::error!(job_id = %job.id, error = %e, "failed to update next_run_at on overlap skip");
+                                        } else {
+                                            let _ = self.runtime.write().entry(job.id.clone()).and_modify(|s| s.next_run_at = Some(next));
+                                        }
                                     }
                                     continue;
                                 }
@@ -399,13 +401,19 @@ impl CronScheduler {
 
                         // Update next_run_at immediately (before spawn)
                         let next = compute_next_run(&job.schedule, *scheduled_at);
-                        let _ = store::update_next_run_at(&self.pool, &job_id, next);
-                        self.runtime.write().entry(job_id.clone()).and_modify(|s| s.next_run_at = next);
+                        if let Err(e) = store::update_next_run_at(&self.pool, &job_id, next) {
+                            tracing::error!(job_id = %job_id, error = %e, "failed to update next_run_at, skipping execution");
+                            continue;
+                        }
+                        let _ = self.runtime.write().entry(job_id.clone()).and_modify(|s| s.next_run_at = next);
 
                         // Auto-disable one-shot after scheduling
                         if is_oneshot {
-                            let _ = store::disable_job(&self.pool, &job_id);
-                            self.jobs.write().entry(job_id.clone()).and_modify(|j| j.enabled = false);
+                            if let Err(e) = store::disable_job(&self.pool, &job_id) {
+                                tracing::error!(job_id = %job_id, error = %e, "failed to disable one-shot job, skipping execution");
+                                continue;
+                            }
+                            let _ = self.jobs.write().entry(job_id.clone()).and_modify(|j| j.enabled = false);
                         }
 
                         // Spawn execution
@@ -416,7 +424,7 @@ impl CronScheduler {
                         let cancel = self.cancel.child_token();
                         let runtime = self.runtime_ref();
 
-                        active_tasks.spawn(async move {
+                        let _ = active_tasks.spawn(async move {
                             let _permit = permit;
                             execute_job(&job, &deps, &pool, clock.as_ref(), cancel, &runtime).await;
                         });
@@ -424,9 +432,13 @@ impl CronScheduler {
 
                     // Periodic maintenance (every 5 minutes)
                     if (now - last_maintenance).num_seconds() >= 300 {
-                        self.detect_stuck_jobs().ok();
+                        if let Err(e) = self.detect_stuck_jobs() {
+                            tracing::error!(error = %e, "stuck job detection failed");
+                        }
                         let cutoff = now - chrono::Duration::days(7);
-                        store::gc_old_runs(&self.pool, cutoff, 100).ok();
+                        if let Err(e) = store::gc_old_runs(&self.pool, cutoff, 100) {
+                            tracing::error!(error = %e, "garbage collection failed");
+                        }
                         last_maintenance = now;
                     }
 
@@ -507,21 +519,25 @@ impl CronScheduler {
 
                 if schedule_changed || !has_runtime {
                     let next = compute_next_run(&job.schedule, now);
-                    let _ = store::update_next_run_at(&self.pool, &job.id, next);
-                    self.runtime
-                        .write()
-                        .entry(job.id.clone())
-                        .and_modify(|s| s.next_run_at = next)
-                        .or_insert(JobRuntimeState {
-                            job_id: job.id.clone(),
-                            next_run_at: next,
-                            last_run_at: None,
-                            consecutive_failures: 0,
-                            running_since: None,
-                        });
+                    if let Err(e) = store::update_next_run_at(&self.pool, &job.id, next) {
+                        tracing::error!(job_id = %job.id, error = %e, "failed to update next_run_at during reload");
+                    } else {
+                        let _ = self
+                            .runtime
+                            .write()
+                            .entry(job.id.clone())
+                            .and_modify(|s| s.next_run_at = next)
+                            .or_insert(JobRuntimeState {
+                                job_id: job.id.clone(),
+                                next_run_at: next,
+                                last_run_at: None,
+                                consecutive_failures: 0,
+                                running_since: None,
+                            });
+                    }
                 }
             }
-            jobs.insert(job.id.clone(), job);
+            let _ = jobs.insert(job.id.clone(), job);
         }
 
         Ok(())
@@ -544,14 +560,19 @@ impl CronScheduler {
 
                 // Update the original running run record(s) to timed_out
                 let error_msg = "stuck job cleared on startup/maintenance";
-                let updated =
-                    store::complete_stuck_runs(&self.pool, &job_id, now, error_msg).unwrap_or(0);
+                let updated = store::complete_stuck_runs(&self.pool, &job_id, now, error_msg)
+                    .unwrap_or_else(|e| {
+                        tracing::error!(job_id = %job_id, error = %e, "failed to complete stuck runs");
+                        0
+                    });
 
                 // If no records found (edge case: record deleted or DB inconsistency),
                 // create a synthetic timed_out record for audit trail
                 if updated == 0 {
                     let run_id = format!("cronrun_{}", Uuid::now_v7());
-                    let _ = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since);
+                    if let Err(e) = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since) {
+                        tracing::error!(job_id = %job_id, error = %e, "failed to insert synthetic stuck run");
+                    }
                     let run = crate::cron::types::CronRun {
                         id: run_id,
                         job_id: Some(job_id.clone()),
@@ -568,15 +589,20 @@ impl CronScheduler {
                         session_id: None,
                         delivery_status: None,
                     };
-                    let _ = store::complete_run(&self.pool, &run);
+                    if let Err(e) = store::complete_run(&self.pool, &run) {
+                        tracing::error!(job_id = %job_id, error = %e, "failed to complete synthetic stuck run");
+                    }
                 }
 
                 store::clear_running_since(&self.pool, &job_id)?;
-                self.runtime
+                let _ = self
+                    .runtime
                     .write()
                     .entry(job_id.clone())
                     .and_modify(|s| s.running_since = None);
-                let _ = store::increment_consecutive_failures(&self.pool, &job_id);
+                if let Err(e) = store::increment_consecutive_failures(&self.pool, &job_id) {
+                    tracing::error!(job_id = %job_id, error = %e, "failed to increment consecutive failures for stuck job");
+                }
             }
         }
 
@@ -601,8 +627,10 @@ async fn execute_job(
         tracing::error!(job_id = %job.id, error = %e, "failed to insert run record");
         return;
     }
-    let _ = store::set_running_since(pool, &job.id, started_at);
-    runtime
+    if let Err(e) = store::set_running_since(pool, &job.id, started_at) {
+        tracing::error!(job_id = %job.id, error = %e, "failed to set running_since");
+    }
+    let _ = runtime
         .write()
         .entry(job.id.clone())
         .and_modify(|s| s.running_since = Some(started_at));
@@ -620,22 +648,32 @@ async fn execute_job(
     .await;
 
     // Update run record (DB + in-memory)
-    let _ = store::complete_run(pool, &run);
-    let _ = store::clear_running_since(pool, &job.id);
-    let _ = store::update_last_run_at(pool, &job.id, clock.now_utc());
-    runtime.write().entry(job.id.clone()).and_modify(|s| {
+    if let Err(e) = store::complete_run(pool, &run) {
+        tracing::error!(job_id = %job.id, run_id = %run_id, error = %e, "failed to complete run record");
+    }
+    if let Err(e) = store::clear_running_since(pool, &job.id) {
+        tracing::error!(job_id = %job.id, error = %e, "failed to clear running_since");
+    }
+    if let Err(e) = store::update_last_run_at(pool, &job.id, clock.now_utc()) {
+        tracing::error!(job_id = %job.id, error = %e, "failed to update last_run_at");
+    }
+    let _ = runtime.write().entry(job.id.clone()).and_modify(|s| {
         s.running_since = None;
         s.last_run_at = Some(clock.now_utc());
     });
 
     // Update consecutive failures
     if run.status == RunStatus::Completed {
-        let _ = store::reset_consecutive_failures(pool, &job.id);
+        if let Err(e) = store::reset_consecutive_failures(pool, &job.id) {
+            tracing::error!(job_id = %job.id, error = %e, "failed to reset consecutive failures");
+        }
     } else if let Ok(failures) = store::increment_consecutive_failures(pool, &job.id)
         && job.auto_disable_after > 0
         && failures >= job.auto_disable_after
     {
-        let _ = store::disable_job(pool, &job.id);
+        if let Err(e) = store::disable_job(pool, &job.id) {
+            tracing::error!(job_id = %job.id, error = %e, "failed to auto-disable job");
+        }
         tracing::warn!(
             job_id = %job.id,
             job_name = %job.name,
@@ -644,14 +682,17 @@ async fn execute_job(
         );
         // Notify via push if available
         if let Some(ref notifier) = deps.push_notifier {
-            let _ = notifier
+            if let Err(e) = notifier
                 .notify(
                     &format!("Cron job '{}' auto-disabled", job.name),
                     &format!(
                         "Disabled after {failures} consecutive failures. Re-enable manually.",
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::error!(job_id = %job.id, error = %e, "failed to send auto-disable notification");
+            }
         }
         // Broadcast event for WebSocket clients
         if let Some(broadcaster) = deps.broadcaster.get() {

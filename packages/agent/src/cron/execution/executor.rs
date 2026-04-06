@@ -1,4 +1,3 @@
-#![allow(unused_results)]
 //! Payload execution: shell commands, webhooks, agent turns, system events.
 //!
 //! Uses callback traits for dependency injection — the binary crate provides
@@ -306,7 +305,8 @@ async fn execute_shell(
     );
 
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg("-c")
+    let _ = cmd
+        .arg("-c")
         .arg(command)
         .current_dir(&dir)
         .stdout(Stdio::piped())
@@ -314,9 +314,8 @@ async fn execute_shell(
         .kill_on_drop(true);
 
     // Create new process group so we can kill all children on timeout/cancel.
-    // `tokio::process::Command` supports `process_group` since it wraps std's Command.
     #[cfg(unix)]
-    cmd.process_group(0);
+    let _ = cmd.process_group(0);
 
     let mut child = cmd
         .spawn()
@@ -390,13 +389,13 @@ fn kill_child(child: &mut tokio::process::Child) {
             // SAFETY: sending signals to process groups is a standard Unix operation.
             // The negative PID targets the entire process group created by process_group(0).
             unsafe {
-                libc::kill(-(pid as i32), libc::SIGTERM);
+                let _ = libc::kill(-(pid as i32), libc::SIGTERM);
             }
             let pid_copy = pid;
-            std::thread::spawn(move || {
+            let _ = std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(2));
                 unsafe {
-                    libc::kill(-(pid_copy as i32), libc::SIGKILL);
+                    let _ = libc::kill(-(pid_copy as i32), libc::SIGKILL);
                 }
             });
         }
@@ -475,7 +474,7 @@ async fn read_bounded(
 ) -> Result<(String, bool), CronError> {
     let mut buf = Vec::with_capacity(max.min(65536));
     let mut limited = (&mut reader).take(max as u64);
-    tokio::io::copy(&mut limited, &mut buf)
+    let _ = tokio::io::copy(&mut limited, &mut buf)
         .await
         .map_err(|e| CronError::Execution(format!("read error: {e}")))?;
     let truncated = buf.len() >= max;

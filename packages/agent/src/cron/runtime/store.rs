@@ -1,4 +1,3 @@
-#![allow(unused_results)]
 //! `SQLite` repository for cron jobs and runs.
 //!
 //! Handles CRUD operations, runtime state management, and garbage collection.
@@ -26,7 +25,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let overlap = job.overlap_policy.as_sql();
     let misfire = job.misfire_policy.as_sql();
 
-    conn.execute(
+    let _ = conn.execute(
         "INSERT INTO cron_jobs (
             id, name, description, enabled, schedule_json, payload_json,
             delivery_json, overlap_policy, misfire_policy, max_retries,
@@ -113,7 +112,13 @@ pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
     )?;
     let jobs = stmt
         .query_map([], row_to_job)?
-        .filter_map(Result::ok)
+        .filter_map(|r| match r {
+            Ok(job) => Some(job),
+            Err(e) => {
+                tracing::error!(error = %e, "skipping corrupt job in SQLite fallback");
+                None
+            }
+        })
         .collect();
     Ok(jobs)
 }
@@ -182,7 +187,7 @@ pub fn update_next_run_at(
     next: Option<DateTime<Utc>>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET next_run_at = ?1 WHERE id = ?2",
         params![next.map(|t| t.to_rfc3339()), job_id],
     )?;
@@ -196,7 +201,7 @@ pub fn update_last_run_at(
     last: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET last_run_at = ?1 WHERE id = ?2",
         params![last.to_rfc3339(), job_id],
     )?;
@@ -210,7 +215,7 @@ pub fn set_running_since(
     since: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET running_since = ?1 WHERE id = ?2",
         params![since.to_rfc3339(), job_id],
     )?;
@@ -220,7 +225,7 @@ pub fn set_running_since(
 /// Clear `running_since` when execution finishes.
 pub fn clear_running_since(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET running_since = NULL WHERE id = ?1",
         params![job_id],
     )?;
@@ -233,7 +238,7 @@ pub fn increment_consecutive_failures(
     job_id: &str,
 ) -> Result<u32, CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET consecutive_failures = consecutive_failures + 1 WHERE id = ?1",
         params![job_id],
     )?;
@@ -248,7 +253,7 @@ pub fn increment_consecutive_failures(
 /// Reset consecutive failures to zero.
 pub fn reset_consecutive_failures(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET consecutive_failures = 0 WHERE id = ?1",
         params![job_id],
     )?;
@@ -258,7 +263,7 @@ pub fn reset_consecutive_failures(pool: &ConnectionPool, job_id: &str) -> Result
 /// Disable a job.
 pub fn disable_job(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_jobs SET enabled = 0 WHERE id = ?1",
         params![job_id],
     )?;
@@ -287,7 +292,7 @@ pub fn insert_run(
     started_at: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "INSERT INTO cron_runs (id, job_id, job_name, status, started_at)
          VALUES (?1, ?2, ?3, 'running', ?4)",
         params![run_id, job_id, job_name, started_at.to_rfc3339()],
@@ -298,7 +303,7 @@ pub fn insert_run(
 /// Complete a run record with the final status.
 pub fn complete_run(pool: &ConnectionPool, run: &CronRun) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_runs SET
             status = ?1, completed_at = ?2, duration_ms = ?3,
             output = ?4, output_truncated = ?5, error = ?6,
@@ -352,7 +357,13 @@ pub fn get_runs(
 
     let runs = stmt
         .query_map(rusqlite::params_from_iter(query_params.iter()), row_to_run)?
-        .filter_map(Result::ok)
+        .filter_map(|r| match r {
+            Ok(run) => Some(run),
+            Err(e) => {
+                tracing::error!(error = %e, "skipping corrupt run record");
+                None
+            }
+        })
         .collect();
 
     Ok((runs, total))
@@ -376,7 +387,7 @@ pub fn update_delivery_status(
     status: &DeliveryOutcome,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    conn.execute(
+    let _ = conn.execute(
         "UPDATE cron_runs SET delivery_status = ?1 WHERE id = ?2",
         params![status.as_str(), run_id],
     )?;
@@ -399,9 +410,21 @@ pub fn get_stuck_candidates(
             Ok((id, since_str, timeout))
         })?
         .filter_map(|r| {
-            let (id, since_str, timeout) = r.ok()?;
-            let since = DateTime::parse_from_rfc3339(&since_str).ok()?.to_utc();
-            Some((id, since, timeout))
+            match r {
+                Ok((id, since_str, timeout)) => {
+                    match DateTime::parse_from_rfc3339(&since_str) {
+                        Ok(since) => Some((id, since.to_utc(), timeout)),
+                        Err(e) => {
+                            tracing::error!(job_id = %id, error = %e, "corrupt running_since timestamp, skipping stuck detection");
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to read stuck job candidate row");
+                    None
+                }
+            }
         })
         .collect();
     Ok(results)
@@ -497,7 +520,7 @@ pub fn sync_from_config(
     // Remove jobs in DB but not in config
     for id in &existing_ids {
         if !config_ids.contains(id.as_str()) {
-            delete_job(pool, id)?;
+            let _ = delete_job(pool, id)?;
             removed += 1;
         }
     }
@@ -519,52 +542,80 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let updated_str: String = row.get(15)?;
     let tool_restrictions_json: Option<String> = row.get(16)?;
 
+    let schedule = serde_json::from_str(&schedule_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            format!("corrupt schedule_json for job {id}: {e}").into(),
+        )
+    })?;
+    let payload = serde_json::from_str(&payload_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            5,
+            rusqlite::types::Type::Text,
+            format!("corrupt payload_json for job {id}: {e}").into(),
+        )
+    })?;
+    let delivery = serde_json::from_str(&delivery_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            6,
+            rusqlite::types::Type::Text,
+            format!("corrupt delivery_json for job {id}: {e}").into(),
+        )
+    })?;
+    let tags = serde_json::from_str(&tags_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            12,
+            rusqlite::types::Type::Text,
+            format!("corrupt tags_json for job {id}: {e}").into(),
+        )
+    })?;
+    let tool_restrictions = tool_restrictions_json
+        .map(|s| serde_json::from_str(&s))
+        .transpose()
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                16,
+                rusqlite::types::Type::Text,
+                format!("corrupt tool_restrictions_json for job {id}: {e}").into(),
+            )
+        })?;
+    let created_at = DateTime::parse_from_rfc3339(&created_str)
+        .map(|t| t.to_utc())
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                14,
+                rusqlite::types::Type::Text,
+                format!("corrupt created_at for job {id}: {e}").into(),
+            )
+        })?;
+    let updated_at = DateTime::parse_from_rfc3339(&updated_str)
+        .map(|t| t.to_utc())
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                15,
+                rusqlite::types::Type::Text,
+                format!("corrupt updated_at for job {id}: {e}").into(),
+            )
+        })?;
+
     Ok(CronJob {
         name: row.get(1)?,
         description: row.get(2)?,
         enabled: row.get(3)?,
-        schedule: serde_json::from_str(&schedule_json).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, job_id = %id, "corrupt schedule_json in DB, using default");
-            crate::cron::types::Schedule::Every { interval_secs: 60, anchor: None }
-        }),
-        payload: serde_json::from_str(&payload_json).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, job_id = %id, "corrupt payload_json in DB, using default");
-            crate::cron::types::Payload::ShellCommand { command: "true".into(), working_directory: None, timeout_secs: 300 }
-        }),
-        delivery: serde_json::from_str(&delivery_json).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, job_id = %id, "corrupt delivery_json in DB, using default");
-            Vec::new()
-        }),
+        schedule,
+        payload,
+        delivery,
         overlap_policy: crate::cron::types::OverlapPolicy::from_sql(&overlap_str),
         misfire_policy: crate::cron::types::MisfirePolicy::from_sql(&misfire_str),
         max_retries: row.get(9)?,
         auto_disable_after: row.get(10)?,
         stuck_timeout_secs: row.get(11)?,
-        tags: serde_json::from_str(&tags_json).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, job_id = %id, "corrupt tags_json in DB, using default");
-            Vec::new()
-        }),
-        tool_restrictions: tool_restrictions_json.and_then(|s| {
-            serde_json::from_str(&s).unwrap_or_else(|e| {
-                tracing::warn!(error = %e, job_id = %id, "corrupt tool_restrictions_json in DB, ignoring");
-                None
-            })
-        }),
+        tags,
+        tool_restrictions,
         workspace_id: row.get(13)?,
-        created_at: DateTime::parse_from_rfc3339(&created_str).map_or_else(
-            |e| {
-                tracing::warn!(error = %e, job_id = %id, "corrupt created_at in DB, using now");
-                Utc::now()
-            },
-            |t| t.to_utc(),
-        ),
-        updated_at: DateTime::parse_from_rfc3339(&updated_str).map_or_else(
-            |e| {
-                tracing::warn!(error = %e, job_id = %id, "corrupt updated_at in DB, using now");
-                Utc::now()
-            },
-            |t| t.to_utc(),
-        ),
+        created_at,
+        updated_at,
         id,
     })
 }
@@ -575,22 +626,42 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
     let started_str: String = row.get(4)?;
     let completed_str: Option<String> = row.get(5)?;
 
+    let status = RunStatus::parse(&status_str).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            rusqlite::types::Type::Text,
+            format!("unknown RunStatus '{status_str}' for run {id}").into(),
+        )
+    })?;
+    let started_at = DateTime::parse_from_rfc3339(&started_str)
+        .map(|t| t.to_utc())
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                format!("corrupt started_at for run {id}: {e}").into(),
+            )
+        })?;
+    let completed_at = completed_str
+        .map(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .map(|t| t.to_utc())
+                .map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        format!("corrupt completed_at for run {id}: {e}").into(),
+                    )
+                })
+        })
+        .transpose()?;
+
     Ok(CronRun {
         job_id: row.get(1)?,
         job_name: row.get(2)?,
-        status: RunStatus::parse(&status_str).unwrap_or_else(|| {
-            tracing::warn!(status = %status_str, run_id = %id, "unknown RunStatus in DB");
-            RunStatus::Failed
-        }),
-        started_at: DateTime::parse_from_rfc3339(&started_str).map_or_else(
-            |e| {
-                tracing::warn!(error = %e, run_id = %id, "corrupt started_at in DB, using now");
-                Utc::now()
-            },
-            |t| t.to_utc(),
-        ),
-        completed_at: completed_str
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc())),
+        status,
+        started_at,
+        completed_at,
         duration_ms: row.get(6)?,
         output: row.get(7)?,
         output_truncated: row.get(8)?,
@@ -606,7 +677,12 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
 }
 
 fn parse_optional_datetime(s: Option<String>) -> Option<DateTime<Utc>> {
-    s.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc()))
+    s.and_then(|s| {
+        DateTime::parse_from_rfc3339(&s)
+            .map(|t| t.to_utc())
+            .map_err(|e| tracing::warn!(error = %e, value = %s, "corrupt datetime in runtime state"))
+            .ok()
+    })
 }
 
 fn build_run_filters(
@@ -864,12 +940,13 @@ mod tests {
         // Insert runs with explicit old timestamps
         let conn = pool.get().unwrap();
         for i in 0..5 {
-            conn.execute(
-                "INSERT INTO cron_runs (id, job_id, job_name, status, started_at, created_at)
-                 VALUES (?1, 'cron_1', 'Test', 'completed', ?2, ?2)",
-                params![format!("old_{i}"), "2025-01-01T00:00:00+00:00",],
-            )
-            .unwrap();
+            let _ = conn
+                .execute(
+                    "INSERT INTO cron_runs (id, job_id, job_name, status, started_at, created_at)
+                     VALUES (?1, 'cron_1', 'Test', 'completed', ?2, ?2)",
+                    params![format!("old_{i}"), "2025-01-01T00:00:00+00:00",],
+                )
+                .unwrap();
         }
         drop(conn);
 
@@ -1116,5 +1193,86 @@ mod tests {
         assert!(state.next_run_at.is_some());
         assert!(state.last_run_at.is_some());
         assert_eq!(state.consecutive_failures, 1);
+    }
+
+    // ── Corrupt data robustness tests ─────────────────────────────
+
+    #[test]
+    fn row_to_job_corrupt_schedule_returns_error() {
+        let pool = setup_pool();
+        let conn = pool.get().unwrap();
+        let _ = conn
+            .execute(
+                "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, created_at, updated_at)
+                 VALUES ('cron_bad', 'Bad', 'NOT VALID JSON', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(conn);
+
+        let result = get_job(&pool, "cron_bad");
+        assert!(result.is_err(), "corrupt schedule_json should return error, not default");
+    }
+
+    #[test]
+    fn row_to_job_corrupt_payload_returns_error() {
+        let pool = setup_pool();
+        let conn = pool.get().unwrap();
+        let _ = conn
+            .execute(
+                "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, created_at, updated_at)
+                 VALUES ('cron_bad2', 'Bad2', '{\"type\":\"every\",\"intervalSecs\":60}', 'CORRUPT', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(conn);
+
+        let result = get_job(&pool, "cron_bad2");
+        assert!(result.is_err(), "corrupt payload_json should return error, not default");
+    }
+
+    #[test]
+    fn row_to_job_corrupt_tags_returns_error() {
+        let pool = setup_pool();
+        let conn = pool.get().unwrap();
+        let _ = conn
+            .execute(
+                "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, tags, created_at, updated_at)
+                 VALUES ('cron_bad3', 'Bad3', '{\"type\":\"every\",\"intervalSecs\":60}', '{\"type\":\"shellCommand\",\"command\":\"echo\"}', 'NOT JSON', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(conn);
+
+        let result = get_job(&pool, "cron_bad3");
+        assert!(result.is_err(), "corrupt tags_json should return error, not default");
+    }
+
+    #[test]
+    fn row_to_job_valid_data_succeeds() {
+        let pool = setup_pool();
+        let job = make_job("cron_valid", "Valid Job");
+        upsert_job(&pool, &job).unwrap();
+
+        let loaded = get_job(&pool, "cron_valid").unwrap().unwrap();
+        assert_eq!(loaded.name, "Valid Job");
+        assert_eq!(loaded.id, "cron_valid");
+    }
+
+    #[test]
+    fn row_to_job_corrupt_created_at_returns_error() {
+        let pool = setup_pool();
+        let conn = pool.get().unwrap();
+        let _ = conn
+            .execute(
+                "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, created_at, updated_at)
+                 VALUES ('cron_bad4', 'Bad4', '{\"type\":\"every\",\"intervalSecs\":60}', '{\"type\":\"shellCommand\",\"command\":\"echo\"}', 'not-a-date', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(conn);
+
+        let result = get_job(&pool, "cron_bad4");
+        assert!(result.is_err(), "corrupt created_at should return error, not default to now");
     }
 }

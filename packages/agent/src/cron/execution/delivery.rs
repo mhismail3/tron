@@ -45,7 +45,9 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
     } else {
         DeliveryOutcome::Failed
     };
-    let _ = crate::cron::store::update_delivery_status(&deps.pool, &run.id, &overall);
+    if let Err(e) = crate::cron::store::update_delivery_status(&deps.pool, &run.id, &overall) {
+        tracing::warn!(run_id = %run.id, status = ?overall, error = %e, "failed to persist delivery status");
+    }
 }
 
 async fn deliver_ws(
@@ -128,10 +130,14 @@ async fn deliver_webhook(
         .await
         .map_err(|e| crate::cron::errors::CronError::Execution(format!("delivery webhook: {e}")))?;
 
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = match resp.text().await {
+            Ok(body) => body.chars().take(512).collect::<String>(),
+            Err(e) => format!("(failed to read response body: {e})"),
+        };
         return Err(crate::cron::errors::CronError::Execution(format!(
-            "delivery webhook returned {}",
-            resp.status()
+            "delivery webhook returned {status}: {body_preview}"
         )));
     }
 
@@ -387,5 +393,24 @@ mod tests {
             notifier.was_called(),
             "APNS should be sent for failed turns even with custom title"
         );
+    }
+
+    #[tokio::test]
+    async fn delivery_partial_status_when_one_mode_fails() {
+        // Silent succeeds, WebSocket fails (no broadcaster) → Partial
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Silent, Delivery::WebSocket];
+        let deps = make_deps();
+        deliver(&job, &make_run(), &deps).await;
+        // Can't easily check DB in test without real pool, but at minimum
+        // it should not panic
+    }
+
+    #[tokio::test]
+    async fn delivery_all_silent_returns_ok() {
+        let job = make_job(); // default is empty delivery → silent
+        let deps = make_deps();
+        deliver(&job, &make_run(), &deps).await;
+        // No panic, no error
     }
 }

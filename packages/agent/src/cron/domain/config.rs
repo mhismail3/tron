@@ -1,4 +1,3 @@
-#![allow(unused_results)]
 //! JSON configuration file management.
 //!
 //! The canonical job definitions live in `~/.tron/workspace/cron/automations.json`.
@@ -13,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::cron::errors::CronError;
 use crate::cron::schedule::CronExpression;
-use crate::cron::types::{CronConfig, CronJob, Payload, Schedule, ToolRestrictions};
+use crate::cron::types::{CronConfig, CronJob, Payload, Schedule};
 
 /// Load the cron config from a JSON file.
 ///
@@ -102,8 +101,8 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
             expression,
             timezone,
         } => {
-            CronExpression::parse(expression)?;
-            timezone
+            let _ = CronExpression::parse(expression)?;
+            let _ = timezone
                 .parse::<chrono_tz::Tz>()
                 .map_err(|_| CronError::InvalidTimezone(timezone.clone()))?;
         }
@@ -129,6 +128,9 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
                     "shell command must be non-empty".into(),
                 ));
             }
+            if *timeout_secs == 0 {
+                return Err(CronError::Validation("shell timeout must be >= 1s".into()));
+            }
             if *timeout_secs > 3600 {
                 return Err(CronError::Validation("shell timeout max is 3600s".into()));
             }
@@ -146,6 +148,9 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
                 return Err(CronError::Validation(format!(
                     "invalid HTTP method: {method}"
                 )));
+            }
+            if *timeout_secs == 0 {
+                return Err(CronError::Validation("webhook timeout must be >= 1s".into()));
             }
             if *timeout_secs > 300 {
                 return Err(CronError::Validation("webhook timeout max is 300s".into()));
@@ -183,7 +188,7 @@ pub struct FileFingerprint {
     pub mtime: Option<SystemTime>,
     /// File size in bytes.
     pub size: u64,
-    /// SHA-256 of the first 4KB.
+    /// SHA-256 of the full file content.
     pub hash: [u8; 32],
 }
 
@@ -197,8 +202,7 @@ impl FileFingerprint {
         let size = meta.len();
 
         let content = std::fs::read(path).ok()?;
-        let to_hash = &content[..content.len().min(4096)];
-        let hash: [u8; 32] = Sha256::digest(to_hash).into();
+        let hash: [u8; 32] = Sha256::digest(&content).into();
 
         Some(Self { mtime, size, hash })
     }
@@ -556,5 +560,90 @@ mod tests {
         std::fs::write(&path, "corrupt json no backup").unwrap();
 
         assert!(load_config(&path, &bak).is_err());
+    }
+
+    // ── Zero-timeout validation ─────────────────────────────────
+
+    #[test]
+    fn validation_rejects_zero_timeout_shell() {
+        let mut job = make_valid_job();
+        job.payload = Payload::ShellCommand {
+            command: "echo hi".into(),
+            working_directory: None,
+            timeout_secs: 0,
+        };
+        let result = validate_job(&job);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be >= 1s"));
+    }
+
+    #[test]
+    fn validation_rejects_zero_timeout_webhook() {
+        let mut job = make_valid_job();
+        job.payload = Payload::Webhook {
+            url: "https://example.com".into(),
+            method: "POST".into(),
+            headers: None,
+            body: None,
+            timeout_secs: 0,
+        };
+        let result = validate_job(&job);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be >= 1s"));
+    }
+
+    #[test]
+    fn validation_accepts_minimum_timeout() {
+        let mut job = make_valid_job();
+        job.payload = Payload::ShellCommand {
+            command: "echo hi".into(),
+            working_directory: None,
+            timeout_secs: 1,
+        };
+        assert!(validate_job(&job).is_ok());
+    }
+
+    // ── Fingerprint tests ───────────────────────────────────────
+
+    #[test]
+    fn config_fingerprint_detects_change_beyond_4kb() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.json");
+
+        // Write a file with content at the very end (well past 4KB)
+        let mut content = String::from("{\"version\":1,\"jobs\":[");
+        // Pad to 8KB with spaces
+        while content.len() < 8192 {
+            content.push(' ');
+        }
+        content.push_str("]}");
+        std::fs::write(&path, &content).unwrap();
+        let fp1 = FileFingerprint::compute(&path).unwrap();
+
+        // Modify only the end of the file (past 4KB boundary)
+        let mut content2 = content.clone();
+        let len = content2.len();
+        content2.replace_range(len - 3..len - 2, "x");
+        std::fs::write(&path, &content2).unwrap();
+        let fp2 = FileFingerprint::compute(&path).unwrap();
+
+        assert_ne!(fp1, fp2, "fingerprint should detect changes beyond 4KB");
+    }
+
+    #[test]
+    fn config_fingerprint_identical_for_same_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.json");
+
+        std::fs::write(&path, "{\"version\":1}").unwrap();
+        let fp1 = FileFingerprint::compute(&path).unwrap();
+
+        // Re-write same content
+        std::fs::write(&path, "{\"version\":1}").unwrap();
+        let fp2 = FileFingerprint::compute(&path).unwrap();
+
+        // Hash and size should match (mtime may differ)
+        assert_eq!(fp1.hash, fp2.hash);
+        assert_eq!(fp1.size, fp2.size);
     }
 }

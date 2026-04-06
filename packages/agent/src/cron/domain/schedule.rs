@@ -1,4 +1,3 @@
-#![allow(unused_results)]
 //! Cron expression parsing and next-run computation.
 //!
 //! Custom 5-field cron parser that handles DST transitions safely.
@@ -170,18 +169,18 @@ fn parse_field(field: &str, min: u32, max: u32) -> Result<BTreeSet<u32>, CronErr
 
             let mut v = start;
             while v <= end {
-                set.insert(v);
+                let _ = set.insert(v);
                 v += step;
             }
         } else if part.contains('-') {
             // Range: N-M
             let (start, end) = parse_range(part, min, max)?;
             for v in start..=end {
-                set.insert(v);
+                let _ = set.insert(v);
             }
         } else if part == "*" {
             for v in min..=max {
-                set.insert(v);
+                let _ = set.insert(v);
             }
         } else {
             // Single value
@@ -193,7 +192,7 @@ fn parse_field(field: &str, min: u32, max: u32) -> Result<BTreeSet<u32>, CronErr
                     "value {v} out of range [{min}..{max}]"
                 )));
             }
-            set.insert(v);
+            let _ = set.insert(v);
         }
     }
 
@@ -237,8 +236,13 @@ pub fn compute_next_run(schedule: &Schedule, after: DateTime<Utc>) -> Option<Dat
             expression,
             timezone,
         } => {
-            let parsed = CronExpression::parse(expression).ok()?;
-            let tz: Tz = timezone.parse().ok()?;
+            let parsed = CronExpression::parse(expression)
+                .map_err(|e| tracing::warn!(expression, error = %e, "failed to parse cron expression"))
+                .ok()?;
+            let tz: Tz = timezone
+                .parse()
+                .map_err(|e| tracing::warn!(timezone, error = %e, "failed to parse timezone"))
+                .ok()?;
             parsed.next_after(after, &tz)
         }
         Schedule::Every {

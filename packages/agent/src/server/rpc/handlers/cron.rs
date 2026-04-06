@@ -241,22 +241,13 @@ impl MethodHandler for CreateHandler {
                         .collect()
                 })
                 .unwrap_or_default(),
-            tool_restrictions: {
-                if let Some(tr) = job_param.get("toolRestrictions") {
-                    if tr.get("deniedTools").is_some() {
-                        return Err(RpcError::InvalidParams {
-                            message: "deniedTools is not supported for cron jobs; use allowedTools instead".into(),
-                        });
-                    }
-                }
-                job_param
-                    .get("toolRestrictions")
-                    .map(|v| serde_json::from_value(v.clone()))
-                    .transpose()
-                    .map_err(|e| RpcError::InvalidParams {
-                        message: format!("Invalid toolRestrictions: {e}"),
-                    })?
-            },
+            tool_restrictions: job_param
+                .get("toolRestrictions")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| RpcError::InvalidParams {
+                    message: format!("Invalid toolRestrictions: {e}"),
+                })?,
             workspace_id: job_param
                 .get("workspaceId")
                 .and_then(|v| v.as_str())
@@ -440,11 +431,6 @@ impl MethodHandler for UpdateHandler {
             if tr_val.is_null() {
                 job.tool_restrictions = None;
             } else {
-                if tr_val.get("deniedTools").is_some() {
-                    return Err(RpcError::InvalidParams {
-                        message: "deniedTools is not supported for cron jobs; use allowedTools instead".into(),
-                    });
-                }
                 job.tool_restrictions =
                     Some(serde_json::from_value(tr_val.clone()).map_err(|e| {
                         RpcError::InvalidParams {

@@ -10,6 +10,17 @@
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
 //!
+//! ## Invariants
+//!
+//! - **Fail-loud on corrupt data**: `store::row_to_job()` returns an error if any
+//!   JSON column is corrupt. Jobs with invalid data are skipped, not silently defaulted.
+//! - **DB-before-memory**: Runtime state updates always write to SQLite first. If
+//!   the DB write fails, the in-memory update is skipped to prevent divergence.
+//! - **Allowlist-only restrictions**: `ToolRestrictions` uses `deny_unknown_fields` —
+//!   legacy `deniedTools` JSON is rejected at parse time.
+//! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
+//! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
+//!
 //! ## Module Boundaries
 //!
 //! Depends on `core`, `events`, `settings`.

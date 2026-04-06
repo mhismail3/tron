@@ -112,23 +112,23 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         let model = model.unwrap_or(&settings.server.default_model);
 
         // Resolve workspace path
-        let workspace_path = workspace_id
-            .and_then(|wid| {
-                self.event_store.pool().get().ok().and_then(|conn| {
-                    crate::events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
-                        &conn, wid,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|ws| ws.path)
-                })
-            })
-            .or_else(|| {
-                let cron_dir = crate::core::paths::cron_dir();
-                let _ = std::fs::create_dir_all(&cron_dir);
-                Some(cron_dir.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| "/tmp".into());
+        let workspace_path = if let Some(wid) = workspace_id {
+            let conn = self
+                .event_store
+                .pool()
+                .get()
+                .map_err(|e| CronError::Execution(format!("pool error resolving workspace: {e}")))?;
+            let ws = crate::events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
+                &conn, wid,
+            )
+            .map_err(|e| CronError::Execution(format!("workspace lookup failed: {e}")))?
+            .ok_or_else(|| CronError::Execution(format!("workspace not found: {wid}")))?;
+            ws.path
+        } else {
+            let cron_dir = crate::core::paths::cron_dir();
+            std::fs::create_dir_all(&cron_dir)?;
+            cron_dir.to_string_lossy().into_owned()
+        };
 
         // 1. Create provider (with retry for transient errors)
         let provider = {
@@ -159,7 +159,10 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             .create_session(model, &workspace_path, Some(&title))
             .map_err(|e| CronError::Execution(format!("create session: {e}")))?;
 
-        let _ = self.event_store.update_source(&session_id, "cron");
+        let _ = self
+            .event_store
+            .update_source(&session_id, "cron")
+            .map_err(|e| CronError::Execution(format!("update session source: {e}")))?;
 
         // Ensure session is always cleaned up, even on error/panic
         let _session_guard = SessionGuard {
@@ -269,7 +272,9 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         //     persisted events instead of returning the stale empty snapshot
         //     cached at create_session() time (before the agent ran).
         if let Ok(active) = self.session_manager.resume_session(&session_id) {
-            let _ = active.context.persister.flush().await;
+            if let Err(e) = active.context.persister.flush().await {
+                tracing::error!(session_id = %session_id, error = %e, "failed to flush persister for cron session");
+            }
         }
         self.session_manager.invalidate_session(&session_id);
 

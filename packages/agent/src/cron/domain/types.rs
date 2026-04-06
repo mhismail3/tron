@@ -220,16 +220,13 @@ impl MisfirePolicy {
 
 // ── Tool Restrictions ──────────────────────────────────────────────
 
-/// Per-job tool restrictions for cron automations.
-///
-/// Only `allowedTools` is supported — the minimum-privilege model for automations.
-/// Old stored jobs with `deniedTools` become unrestricted (serde skips unknown fields).
+/// Per-job tool restrictions for cron automations (allowlist-only).
 ///
 /// For `AgentTurn` payloads, tool names map to LLM tool names (`Bash`, `Write`, etc.).
 /// For other payloads, the payload type name (`ShellCommand`, `Webhook`, `SystemEvent`)
 /// is the capability that gets checked.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ToolRestrictions {
     /// If set, ONLY these tools/capabilities are available (allowlist).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -815,19 +812,15 @@ mod tests {
     }
 
     #[test]
-    fn tool_restrictions_serde_ignores_denied_tools_in_json() {
-        // Old stored JSON with deniedTools should deserialize without error
+    fn tool_restrictions_serde_rejects_unknown_fields() {
         let json = r#"{"deniedTools": ["Bash"], "allowedTools": ["Read"]}"#;
-        let tr: ToolRestrictions = serde_json::from_str(json).unwrap();
-        assert_eq!(tr.allowed_tools, Some(vec!["Read".into()]));
-    }
+        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
 
-    #[test]
-    fn tool_restrictions_serde_old_denied_only_json_becomes_unrestricted() {
-        // Old stored JSON with only deniedTools → unrestricted
         let json = r#"{"deniedTools": ["Bash"]}"#;
-        let tr: ToolRestrictions = serde_json::from_str(json).unwrap();
-        assert!(tr.allowed_tools.is_none());
+        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
+
+        let json = r#"{"unknownField": true}"#;
+        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
     }
 
     #[test]
