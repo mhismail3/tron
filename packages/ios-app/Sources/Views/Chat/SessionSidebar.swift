@@ -238,6 +238,7 @@ struct CachedSessionSidebarRow: View {
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
+            .padding(.bottom, 2)
 
             // Mini-chat content — unified rendering for both live and persisted
             let activityLines: [CachedActivityLine] = {
@@ -428,8 +429,8 @@ struct MiniThinkingRow: View {
                 .padding(.trailing, 8)
 
             Text("Thinking")
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .regular))
-                .foregroundStyle(.tronTextMuted)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.tronTextMuted.opacity(0.5))
                 .italic()
         }
         .fixedSize(horizontal: false, vertical: true)
