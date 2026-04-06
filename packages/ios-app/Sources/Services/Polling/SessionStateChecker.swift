@@ -9,6 +9,9 @@ final class SessionStateChecker {
 
     private var rpcClient: RPCClient
 
+    /// Consecutive failure counts per session for exponential backoff.
+    private var consecutiveFailures: [String: Int] = [:]
+
     // MARK: - Initialization
 
     init(rpcClient: RPCClient) {
@@ -31,16 +34,27 @@ final class SessionStateChecker {
             if !rpcClient.isConnected {
                 await rpcClient.connect()
                 if !rpcClient.isConnected {
+                    consecutiveFailures[sessionId, default: 0] += 1
                     return nil
                 }
             }
 
             let state = try await rpcClient.agent.getState(sessionId: sessionId)
+            consecutiveFailures.removeValue(forKey: sessionId)
             return state.isRunning
         } catch {
             logger.debug("Failed to check session \(sessionId) state: \(error.localizedDescription)")
+            consecutiveFailures[sessionId, default: 0] += 1
             return nil
         }
+    }
+
+    /// Whether a session should be skipped this poll cycle due to repeated failures.
+    /// Uses exponential backoff: after N consecutive failures, skip with probability 1 - 1/2^N (capped at 2^5=32).
+    func shouldSkip(sessionId: String) -> Bool {
+        guard let count = consecutiveFailures[sessionId], count > 0 else { return false }
+        let exponent = min(count, 5) // cap at 2^5 = 32 cycle backoff
+        return Int.random(in: 0..<(1 << exponent)) != 0
     }
 
     /// Pre-warm the WebSocket connection for faster session entry.

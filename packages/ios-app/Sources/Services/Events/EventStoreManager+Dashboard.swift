@@ -60,22 +60,28 @@ extension EventStoreManager {
     /// Poll all sessions to check their processing state.
     /// Skips the active WebSocket session — it already receives real-time state via events.
     func pollAllSessionStates() async {
-        // Skip the session connected via WebSocket — polling it is redundant
-        // and the RPC round-trip competes with real-time delta delivery
         let connectedSessionId = rpcClient.currentSessionId
+        pollCycleCounter += 1
+        let isFullScan = pollCycleCounter % 10 == 0
 
-        let sessionsToCheck = sessions.filter { session in
-            session.id != connectedSessionId &&
-            (session.isProcessing == true || processingSessionIds.contains(session.id))
+        // Single pass: partition sessions into processing vs idle
+        var processing: [CachedSession] = []
+        var idle: [CachedSession] = []
+
+        for session in sessions where session.id != connectedSessionId {
+            if session.isProcessing == true || processingSessionIds.contains(session.id) {
+                processing.append(session)
+            } else if isFullScan {
+                processing.append(session)
+            } else {
+                idle.append(session)
+            }
         }
 
-        pollCycleCounter += 1
-        let shouldCheckAll = pollCycleCounter % 10 == 0
-        let candidates = shouldCheckAll
-            ? sessions.filter { $0.id != connectedSessionId }
-            : (sessionsToCheck.isEmpty ? Array(sessions.filter { $0.id != connectedSessionId }.prefix(3)) : sessionsToCheck)
+        let candidates = processing.isEmpty && !isFullScan ? Array(idle.prefix(3)) : processing
 
         for session in candidates {
+            guard !sessionStateChecker.shouldSkip(sessionId: session.id) else { continue }
             await checkSessionProcessingState(sessionId: session.id)
         }
     }
