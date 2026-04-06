@@ -35,6 +35,7 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::agent::stream_processor;
 use crate::runtime::errors::StopReason;
 use crate::runtime::orchestrator::event_persister::EventPersister;
+use crate::runtime::orchestrator::streaming_journal::StreamingJournal;
 use crate::runtime::types::{RunContext, TurnResult};
 
 /// Parameters for a single turn of the agent loop.
@@ -212,10 +213,19 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // 6. Process stream (drain after turn-stopping tools to capture token usage cleanly)
+    // 6. Create streaming journal for crash recovery (best-effort — failure is non-fatal)
+    let mut journal = match StreamingJournal::create(session_id, turn) {
+        Ok(j) => Some(j),
+        Err(e) => {
+            warn!(session_id, turn, error = %e, "failed to create streaming journal, continuing without crash recovery");
+            None
+        }
+    };
+
+    // 7. Process stream (drain after turn-stopping tools to capture token usage cleanly)
     let turn_stopping_tools = registry.turn_stopping_tool_names();
     let stream_result =
-        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools, sequence_counter).await {
+        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools, sequence_counter, journal.as_mut()).await {
             Ok(r) => {
                 if let Some(ht) = health_tracker {
                     ht.record_success(provider_name);
@@ -296,6 +306,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         )
         .await;
 
+        // Finalize journal — interrupted message was persisted successfully
+        if let Some(j) = journal.take() {
+            if let Err(e) = j.finalize_and_delete() {
+                warn!(session_id, turn, error = %e, "failed to finalize streaming journal after interruption");
+            }
+        }
+
         return TurnResult {
             success: true,
             interrupted: true,
@@ -306,7 +323,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    // 7. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
+    // 8. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
     let (token_record_json, cost) = build_token_record_json(
         stream_result.token_usage.as_ref(),
         provider.provider_type(),
@@ -344,6 +361,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
     )
     .await;
+
+    // Finalize journal — assistant message was persisted successfully
+    if let Some(j) = journal.take() {
+        if let Err(e) = j.finalize_and_delete() {
+            warn!(session_id, turn, error = %e, "failed to finalize streaming journal");
+        }
+    }
 
     let tool_phase = tools::execute_tool_phase(ToolPhaseParams {
         turn,

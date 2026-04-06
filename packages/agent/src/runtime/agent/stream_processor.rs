@@ -14,6 +14,7 @@ use crate::core::messages::{TokenUsage, ToolCall};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
+use crate::runtime::orchestrator::streaming_journal::StreamingJournal;
 use crate::runtime::types::StreamResult;
 use crate::llm::provider::{ProviderError, StreamEventStream};
 
@@ -253,6 +254,7 @@ pub async fn process_stream(
     cancel: &CancellationToken,
     turn_stopping_tools: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
+    mut journal: Option<&mut StreamingJournal>,
 ) -> Result<StreamResult, RuntimeError> {
     let mut state = StreamState::new();
     #[allow(unused_assignments)]
@@ -337,6 +339,11 @@ pub async fn process_stream(
 
                 match stream_event {
                     StreamEvent::TextDelta { delta } => {
+                        if let Some(ref mut j) = journal {
+                            if let Err(e) = j.append_delta("text", &delta) {
+                                tracing::warn!(session_id, error = %e, "journal write failed for text delta");
+                            }
+                        }
                         state.handle_text_delta(delta, session_id, emitter, sequence_counter);
                     }
 
@@ -357,6 +364,11 @@ pub async fn process_stream(
                     }
 
                     StreamEvent::ThinkingDelta { delta } => {
+                        if let Some(ref mut j) = journal {
+                            if let Err(e) = j.append_delta("thinking", &delta) {
+                                tracing::warn!(session_id, error = %e, "journal write failed for thinking delta");
+                            }
+                        }
                         state.handle_thinking_delta(delta, session_id, emitter, sequence_counter);
                     }
 
@@ -385,6 +397,13 @@ pub async fn process_stream(
                     }
 
                     StreamEvent::ToolCallEnd { tool_call } => {
+                        if let Some(ref mut j) = journal {
+                            if let Ok(serialized) = serde_json::to_string(&tool_call) {
+                                if let Err(e) = j.append_delta("tool_use", &serialized) {
+                                    tracing::warn!(session_id, error = %e, "journal write failed for tool call");
+                                }
+                            }
+                        }
                         let name = tool_call.name.clone();
                         state.handle_tool_call_end(tool_call);
                         if turn_stopping_tools.contains(&name) {
@@ -626,7 +645,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -644,7 +663,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -673,7 +692,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -706,7 +725,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -730,7 +749,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), RuntimeError::Provider(_)));
@@ -754,7 +773,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -792,7 +811,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
         assert!(!result.interrupted);
@@ -818,7 +837,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -837,7 +856,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -851,7 +870,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -866,7 +885,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -886,7 +905,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -981,7 +1000,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1085,7 +1104,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1161,7 +1180,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1217,7 +1236,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1285,7 +1304,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1338,7 +1357,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
         // AskUserQuestion is in the set, but Bash is not — no drain
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1380,7 +1399,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
             .await
             .unwrap();
 
@@ -1428,7 +1447,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
         // Empty set — no drain should happen
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
             .await
             .unwrap();
 

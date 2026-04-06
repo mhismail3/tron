@@ -39,6 +39,8 @@ pub mod dirs {
     pub const APP_BUNDLE: &str = "Tron.app";
     /// SQLite databases.
     pub const DB: &str = "database";
+    /// Streaming journals for crash recovery of partial LLM output.
+    pub const JOURNALS: &str = "journals";
     /// Deployment artifacts and rollback state.
     pub const DEPLOYMENT: &str = "deployment";
     /// Optional extension modules (APNS, etc.).
@@ -135,6 +137,11 @@ pub fn bin_dir() -> PathBuf {
 /// `~/.tron/system/database/`
 pub fn db_dir() -> PathBuf {
     system_dir().join(dirs::DB)
+}
+
+/// `~/.tron/system/database/journals/`
+pub fn journals_dir() -> PathBuf {
+    db_dir().join(dirs::JOURNALS)
 }
 
 /// `~/.tron/system/deployment/`
@@ -329,6 +336,12 @@ mod tests {
     fn tron_binary_path_correct() {
         let p = tron_binary_path();
         assert!(p.ends_with(format!("{}/{}/Contents/MacOS/tron", dirs::SYSTEM, dirs::APP_BUNDLE)));
+    }
+
+    #[test]
+    fn journals_dir_under_db() {
+        let p = journals_dir();
+        assert!(p.ends_with(format!("{}/{}/{}", dirs::SYSTEM, dirs::DB, dirs::JOURNALS)));
     }
 
     #[test]

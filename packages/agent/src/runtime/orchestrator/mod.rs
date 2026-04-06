@@ -13,6 +13,8 @@
 //! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
 //! | `subagent_manager` | Spawns/manages child agents for parallel tool execution |
 //! | `process_manager` | Centralized lifecycle management for deterministic processes |
+//! | `streaming_journal` | Per-turn append-only WAL for crash recovery of partial LLM output |
+//! | `recovery` | Startup crash recovery — persists orphaned journal content |
 //! | `tool_call_tracker` | Tracks in-flight tool calls for cancellation |
 //!
 //! ## Event Sequencing
@@ -23,6 +25,14 @@
 //! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
 //! StreamProcessor / ToolExecutor`. All emitted events carry `sequence` in both
 //! the `TronEvent` (via `BaseEvent.sequence`) and `RpcEvent.sequence` fields.
+//!
+//! ## Streaming Journal (Crash Recovery)
+//!
+//! Each active LLM turn writes streaming deltas to a journal file at
+//! `~/.tron/system/database/journals/{session_id}/turn_{n}.wal`. On normal
+//! completion the journal is deleted. If the server crashes mid-turn, orphaned
+//! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
+//! which persists partial content as assistant messages before accepting connections.
 //!
 //! ## Critical Event Ordering
 //!
@@ -38,9 +48,11 @@ pub mod job_manager;
 pub mod orchestrator;
 pub mod output_buffer;
 pub mod process_manager;
+pub mod recovery;
 pub mod session_context;
 pub mod session_manager;
 pub mod session_reconstructor;
+pub mod streaming_journal;
 pub mod subagent_manager;
 pub mod tool_call_tracker;
 pub mod turn_accumulator;

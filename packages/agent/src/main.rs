@@ -398,6 +398,13 @@ async fn main() -> Result<()> {
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
+
+    // Crash recovery: recover partial LLM output from orphaned streaming journals
+    let recovered = tron::runtime::orchestrator::recovery::recover_incomplete_turns(&event_store);
+    if !recovered.is_empty() {
+        tracing::info!(count = recovered.len(), "recovered sessions from crash journals");
+    }
+
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     // Load Brave API key for web search (matches TS server conditional registration)
