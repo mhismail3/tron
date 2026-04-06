@@ -19,6 +19,8 @@ struct PersistRequest {
     event_type: EventType,
     payload: Value,
     reply: Option<oneshot::Sender<Result<EventRow, RuntimeError>>>,
+    /// Pre-assigned sequence number from the orchestrator's per-session counter.
+    sequence: Option<i64>,
 }
 
 #[cfg(test)]
@@ -51,6 +53,17 @@ impl EventPersister {
         event_type: EventType,
         payload: Value,
     ) -> Result<EventRow, RuntimeError> {
+        self.append_with_sequence(session_id, event_type, payload, None).await
+    }
+
+    /// Append an event with a pre-assigned sequence and wait for persistence.
+    pub async fn append_with_sequence(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+        payload: Value,
+        sequence: Option<i64>,
+    ) -> Result<EventRow, RuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
 
         self.tx
@@ -59,6 +72,7 @@ impl EventPersister {
                 event_type,
                 payload,
                 reply: Some(reply_tx),
+                sequence,
             })
             .await
             .map_err(|_| self.map_send_error())?;
@@ -78,6 +92,17 @@ impl EventPersister {
         event_type: EventType,
         payload: Value,
     ) -> Result<(), RuntimeError> {
+        self.append_background_with_sequence(session_id, event_type, payload, None).await
+    }
+
+    /// Queue an event with a pre-assigned sequence for background persistence.
+    pub async fn append_background_with_sequence(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+        payload: Value,
+        sequence: Option<i64>,
+    ) -> Result<(), RuntimeError> {
         let enqueue_started = Instant::now();
         self.tx
             .send(PersistRequest {
@@ -85,6 +110,7 @@ impl EventPersister {
                 event_type,
                 payload,
                 reply: None,
+                sequence,
             })
             .await
             .map_err(|_| self.map_send_error())?;
@@ -108,6 +134,7 @@ impl EventPersister {
                 event_type: EventType::MetadataUpdate,
                 payload: Value::Null,
                 reply: Some(reply_tx),
+                sequence: None,
             })
             .await
             .map_err(|_| self.map_send_error())?;
@@ -169,7 +196,8 @@ async fn persist_worker(
             event_type: req.event_type,
             payload: req.payload,
             parent_id: None,
-        });
+            sequence: req.sequence,
+            });
 
         if let Some(reply) = req.reply {
             let mapped = result.map_err(|error| RuntimeError::Persistence(error.to_string()));
@@ -460,5 +488,55 @@ mod tests {
             err.contains("panicked or exited"),
             "expected descriptive error, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn append_with_preassigned_sequence() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone());
+        let sid = &session.session.id;
+
+        let event = persister
+            .append_with_sequence(
+                sid,
+                EventType::MessageUser,
+                serde_json::json!({"content": "hello"}),
+                Some(42),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(event.sequence, 42, "persisted event should use pre-assigned sequence");
+    }
+
+    #[tokio::test]
+    async fn append_background_with_preassigned_sequence() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone());
+        let sid = &session.session.id;
+
+        persister
+            .append_background_with_sequence(
+                sid,
+                EventType::MessageUser,
+                serde_json::json!({"content": "hello"}),
+                Some(99),
+            )
+            .await
+            .unwrap();
+
+        persister.flush().await.unwrap();
+
+        let events = store.get_events_since(sid, 0).unwrap();
+        let user_event = events.iter().find(|e| e.event_type == "message.user").unwrap();
+        assert_eq!(user_event.sequence, 99, "background-persisted event should use pre-assigned sequence");
     }
 }

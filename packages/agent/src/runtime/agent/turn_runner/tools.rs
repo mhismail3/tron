@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -39,6 +40,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub sequence_counter: Option<&'a AtomicI64>,
 }
 
 #[derive(Default)]
@@ -57,13 +59,15 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         params.emitter,
         params.session_id,
         &params.stream_result.tool_calls,
+        params.sequence_counter,
     );
     let working_dir = params.context_manager.get_working_directory().to_owned();
 
     for tool_call in &params.stream_result.tool_calls {
-        if let Some(persister) = params.persister
-            && let Err(error) = persister
-                .append_background(
+        if let Some(persister) = params.persister {
+            let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+            if let Err(error) = persister
+                .append_background_with_sequence(
                     params.session_id,
                     EventType::ToolCall,
                     json!({
@@ -72,16 +76,18 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                         "arguments": tool_call.arguments,
                         "turn": params.turn,
                     }),
+                    seq,
                 )
                 .await
-        {
-            warn!(
-                params.session_id,
-                turn = params.turn,
-                tool_call_id = %tool_call.id,
-                error = %error,
-                "failed to queue tool-call event"
-            );
+            {
+                warn!(
+                    params.session_id,
+                    turn = params.turn,
+                    tool_call_id = %tool_call.id,
+                    error = %error,
+                    "failed to queue tool-call event"
+                );
+            }
         }
     }
 
@@ -111,6 +117,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     process_manager: params.process_manager,
                     job_manager: params.job_manager,
                     output_buffer_registry: params.output_buffer_registry,
+                    sequence_counter: params.sequence_counter,
                 };
                 async move {
                     let result = tool_executor::execute_tool(
@@ -126,8 +133,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
+                        let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         if let Err(error) = persister
-                            .append_background(
+                            .append_background_with_sequence(
                                 params.session_id,
                                 EventType::ToolResult,
                                 json!({
@@ -138,6 +146,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                                     "duration": result.duration_ms,
                                     "details": result.result.details,
                                 }),
+                                seq,
                             )
                             .await
                         {

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde_json::{Value, json};
 use tracing::{error, warn};
@@ -15,28 +16,46 @@ use crate::runtime::orchestrator::event_persister::EventPersister;
 use crate::runtime::pipeline::persistence;
 use crate::runtime::types::StreamResult;
 
+/// Emit an event, using sequenced emission when a counter is available.
+fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Option<&AtomicI64>) {
+    if let Some(counter) = counter {
+        let _ = emitter.emit_sequenced(event, counter);
+    } else {
+        let _ = emitter.emit(event);
+    }
+}
+
+/// Get next sequence value from counter, or None.
+fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
+    counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1)
+}
+
 pub(super) async fn emit_turn_start(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
     session_id: &str,
     turn: u32,
+    sequence_counter: Option<&AtomicI64>,
 ) {
-    let _ = emitter.emit(TronEvent::TurnStart {
+    emit_maybe_sequenced(emitter, TronEvent::TurnStart {
         base: BaseEvent::now(session_id),
         turn,
-    });
-    if let Some(persister) = persister
-        && let Err(error) = persister
-            .append_background(
+    }, sequence_counter);
+    if let Some(persister) = persister {
+        let seq = next_seq(sequence_counter);
+        if let Err(error) = persister
+            .append_background_with_sequence(
                 session_id,
                 EventType::StreamTurnStart,
                 json!({
                     "turn": turn,
                 }),
+                seq,
             )
             .await
-    {
-        warn!(session_id, turn, error = %error, "failed to queue turn-start event");
+        {
+            warn!(session_id, turn, error = %error, "failed to queue turn-start event");
+        }
     }
 }
 
@@ -71,17 +90,20 @@ pub(super) async fn persist_interrupted_message(
     persister: Option<&EventPersister>,
     session_id: &str,
     payload: Option<Value>,
+    sequence_counter: Option<&AtomicI64>,
 ) {
-    if let (Some(persister), Some(payload)) = (persister, payload)
-        && let Err(error) = persister
-            .append(session_id, EventType::MessageAssistant, payload)
+    if let (Some(persister), Some(payload)) = (persister, payload) {
+        let seq = next_seq(sequence_counter);
+        if let Err(error) = persister
+            .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
             .await
-    {
-        error!(
-            session_id,
-            error = %error,
-            "failed to persist interrupted message.assistant"
-        );
+        {
+            error!(
+                session_id,
+                error = %error,
+                "failed to persist interrupted message.assistant"
+            );
+        }
     }
 }
 
@@ -128,6 +150,7 @@ pub(super) fn emit_response_complete(
     stream_result: &StreamResult,
     token_record_json: Option<Value>,
     model_name: &str,
+    sequence_counter: Option<&AtomicI64>,
 ) {
     let response_token_usage = stream_result
         .token_usage
@@ -142,7 +165,7 @@ pub(super) fn emit_response_complete(
             provider_type: None,
         });
 
-    let _ = emitter.emit(TronEvent::ResponseComplete {
+    emit_maybe_sequenced(emitter, TronEvent::ResponseComplete {
         base: BaseEvent::now(session_id),
         turn,
         stop_reason: stream_result.stop_reason.clone(),
@@ -151,7 +174,7 @@ pub(super) fn emit_response_complete(
         tool_call_count: stream_result.tool_calls.len() as u32,
         token_record: token_record_json,
         model: Some(model_name.to_owned()),
-    });
+    }, sequence_counter);
 }
 
 pub(super) fn add_assistant_message_to_context(
@@ -224,17 +247,20 @@ pub(super) async fn persist_completed_assistant_message(
     persister: Option<&EventPersister>,
     session_id: &str,
     payload: Value,
+    sequence_counter: Option<&AtomicI64>,
 ) {
-    if let Some(persister) = persister
-        && let Err(error) = persister
-            .append(session_id, EventType::MessageAssistant, payload)
+    if let Some(persister) = persister {
+        let seq = next_seq(sequence_counter);
+        if let Err(error) = persister
+            .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
             .await
-    {
-        error!(
-            session_id,
-            error = %error,
-            "failed to persist message.assistant"
-        );
+        {
+            error!(
+                session_id,
+                error = %error,
+                "failed to persist message.assistant"
+            );
+        }
     }
 }
 
@@ -244,10 +270,12 @@ pub(super) async fn persist_rules_activated(
     turn: u32,
     activated_rules: &[ActivatedRuleInfo],
     total_activated: u32,
+    sequence_counter: Option<&AtomicI64>,
 ) {
-    if let Some(persister) = persister
-        && let Err(error) = persister
-            .append_background(
+    if let Some(persister) = persister {
+        let seq = next_seq(sequence_counter);
+        if let Err(error) = persister
+            .append_background_with_sequence(
                 session_id,
                 EventType::RulesActivated,
                 json!({
@@ -257,15 +285,17 @@ pub(super) async fn persist_rules_activated(
                     })).collect::<Vec<_>>(),
                     "totalActivated": total_activated,
                 }),
+                seq,
             )
             .await
-    {
-        warn!(
-            session_id,
-            turn,
-            error = %error,
-            "failed to queue rules-activated event"
-        );
+        {
+            warn!(
+                session_id,
+                turn,
+                error = %error,
+                "failed to queue rules-activated event"
+            );
+        }
     }
 }
 
@@ -280,6 +310,7 @@ pub(super) async fn emit_turn_end(
     cost: Option<f64>,
     context_limit: u64,
     model_name: &str,
+    sequence_counter: Option<&AtomicI64>,
 ) {
     let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TurnTokenUsage {
         input_tokens: u.input_tokens,
@@ -289,7 +320,7 @@ pub(super) async fn emit_turn_end(
         ..TurnTokenUsage::default()
     });
 
-    let _ = emitter.emit(TronEvent::TurnEnd {
+    emit_maybe_sequenced(emitter, TronEvent::TurnEnd {
         base: BaseEvent::now(session_id),
         turn,
         duration: duration_ms,
@@ -299,7 +330,7 @@ pub(super) async fn emit_turn_end(
         stop_reason: Some(stream_result.stop_reason.clone()),
         context_limit: Some(context_limit),
         model: Some(model_name.to_owned()),
-    });
+    }, sequence_counter);
 
     if let Some(persister) = persister {
         let mut token_usage_object = json!({
@@ -328,8 +359,9 @@ pub(super) async fn emit_turn_end(
             payload["cost"] = json!(cost);
         }
 
+        let seq = next_seq(sequence_counter);
         if let Err(error) = persister
-            .append_background(session_id, EventType::StreamTurnEnd, payload)
+            .append_background_with_sequence(session_id, EventType::StreamTurnEnd, payload, seq)
             .await
         {
             warn!(
@@ -346,6 +378,7 @@ pub(super) fn emit_tool_use_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
     tool_calls: &[crate::core::messages::ToolCall],
+    sequence_counter: Option<&AtomicI64>,
 ) {
     let summaries: Vec<ToolCallSummary> = tool_calls
         .iter()
@@ -356,8 +389,8 @@ pub(super) fn emit_tool_use_batch(
         })
         .collect();
 
-    let _ = emitter.emit(TronEvent::ToolUseBatch {
+    emit_maybe_sequenced(emitter, TronEvent::ToolUseBatch {
         base: BaseEvent::now(session_id),
         tool_calls: summaries,
-    });
+    }, sequence_counter);
 }

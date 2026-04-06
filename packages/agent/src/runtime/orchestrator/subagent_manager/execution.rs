@@ -184,6 +184,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         event_type: EventType::MessageUser,
         payload: json!({"content": params.task}),
         parent_id: None,
+                sequence: None,
     });
 
     let result = agent_runner::run_agent(
@@ -195,6 +196,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         },
         &params.hooks,
         &child_broadcast,
+        None,
     )
     .await;
 
@@ -344,6 +346,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         event_type: EventType::MessageUser,
         payload: json!({"content": params.task}),
         parent_id: None,
+                sequence: None,
     });
 
     let (forward_cancel, forward_handle) = spawn_child_event_forwarder(
@@ -359,6 +362,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         RunContext::default(),
         &params.hooks,
         &child_broadcast,
+        None,
     )
     .await;
 
@@ -396,6 +400,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                     "model": params.model,
                 }),
                 parent_id: None,
+                sequence: None,
             });
         }
 
@@ -426,6 +431,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                     "duration": duration_ms,
                 }),
                 parent_id: None,
+                sequence: None,
             });
         }
 
@@ -457,6 +463,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             event_type: EventType::NotificationSubagentResult,
             payload,
             parent_id: None,
+            sequence: None,
         });
 
         let _ = params.broadcast.emit(TronEvent::SubagentResultAvailable {

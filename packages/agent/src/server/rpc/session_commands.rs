@@ -66,6 +66,8 @@ impl SessionCommandService {
                 title: request.title.clone(),
             });
 
+        ctx.orchestrator.init_sequence_counter(&session_id, 0);
+
         spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
 
         Ok(json!({
@@ -98,6 +100,8 @@ impl SessionCommandService {
             Ok(())
         })
         .await?;
+
+        ctx.orchestrator.remove_sequence_counter(&session_id);
 
         let _ = ctx
             .orchestrator
@@ -139,6 +143,8 @@ impl SessionCommandService {
             })
             .await?;
 
+        ctx.orchestrator.init_sequence_counter(&new_session_id, 0);
+
         let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionForked {
             base: BaseEvent::now(&session_id),
             new_session_id: new_session_id.clone(),
@@ -171,6 +177,8 @@ impl SessionCommandService {
             Ok(())
         })
         .await?;
+
+        ctx.orchestrator.remove_sequence_counter(&session_id);
 
         let _ = ctx
             .orchestrator
@@ -240,6 +248,8 @@ impl SessionCommandService {
             .await?;
 
         if created {
+            ctx.orchestrator.init_sequence_counter(&session_id, 0);
+
             let _ = ctx
                 .orchestrator
                 .broadcast()
@@ -318,6 +328,9 @@ impl SessionCommandService {
                 Ok((new_id, old_id, session))
             })
             .await?;
+
+        ctx.orchestrator.remove_sequence_counter(&old_id);
+        ctx.orchestrator.init_sequence_counter(&new_id, 0);
 
         let _ = ctx
             .orchestrator
@@ -455,6 +468,7 @@ fn emit_optimistic_context_events(
                 "dynamicRulesCount": 0,
             }),
             parent_id: None,
+            sequence: None,
         });
         let _ = broadcast.emit(TronEvent::RulesLoaded {
             base: BaseEvent::now(session_id),

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -44,6 +45,7 @@ struct PromptRunPlan {
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
+    sequence_counter: Option<Arc<AtomicI64>>,
     server_origin: String,
     run_id: String,
     model: String,
@@ -142,6 +144,17 @@ pub fn spawn_prompt_run(
         job_manager: ctx.job_manager.clone(),
         output_buffer_registry: ctx.output_buffer_registry.clone(),
         hook_abort_tracker: ctx.hook_abort_tracker.clone(),
+        sequence_counter: {
+            let sid = &request.session_id;
+            // Ensure counter is initialized (idempotent for already-initialized sessions).
+            // On first prompt after create, it was already initialized to 0 in session.create.
+            // On resume, re-initialize from DB max to pick up any externally-persisted events.
+            if ctx.orchestrator.get_sequence_counter(sid).is_none() {
+                let max_seq = ctx.event_store.get_max_sequence(sid).unwrap_or(0);
+                ctx.orchestrator.init_sequence_counter(sid, max_seq);
+            }
+            ctx.orchestrator.get_sequence_counter(sid)
+        },
         server_origin: ctx.origin.clone(),
         run_id,
         model: session.latest_model.clone(),
@@ -178,6 +191,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         job_manager,
         output_buffer_registry,
         hook_abort_tracker,
+        sequence_counter,
         server_origin,
         run_id,
         model,
@@ -645,7 +659,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     }
 
     debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
-    let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
+    let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast, sequence_counter).await;
 
     let _ = persister.flush().await;
 

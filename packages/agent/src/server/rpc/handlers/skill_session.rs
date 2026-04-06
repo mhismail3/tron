@@ -108,6 +108,7 @@ impl MethodHandler for ActivateHandler {
                 "source": source,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Invalidate cached session so next prompt picks up new skill
@@ -195,6 +196,7 @@ impl MethodHandler for DeactivateHandler {
                 "skillName": skill_name,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Invalidate cached session
@@ -251,6 +253,7 @@ impl MethodHandler for CastSpellHandler {
                 "source": source,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         Ok(serde_json::json!({

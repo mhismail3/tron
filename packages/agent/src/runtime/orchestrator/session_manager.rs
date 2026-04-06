@@ -195,6 +195,7 @@ impl SessionManager {
                 event_type: EventType::SessionEnd,
                 payload: json!({"reason": "completed"}),
                 parent_id: None,
+                sequence: None,
             })
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
         let _ = self
@@ -573,6 +574,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: serde_json::json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -584,6 +586,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageAssistant,
                 payload: serde_json::json!({"text": "world"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 

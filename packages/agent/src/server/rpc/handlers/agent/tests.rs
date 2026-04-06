@@ -665,6 +665,7 @@ async fn get_state_interrupted_when_no_turn_end() {
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": [{"type": "text", "text": "hello"}], "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
 
     let result = GetAgentStateHandler
@@ -688,12 +689,14 @@ async fn get_state_not_interrupted_when_turn_end_follows() {
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": [{"type": "text", "text": "hello"}], "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
         event_type: crate::events::EventType::StreamTurnEnd,
         payload: json!({"turn": 1}),
         parent_id: None,
+        sequence: None,
     });
 
     let result = GetAgentStateHandler
@@ -1448,6 +1451,7 @@ async fn prompt_restores_messages_from_session() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "hello"}),
         parent_id: None,
+        sequence: None,
     });
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
@@ -1457,6 +1461,7 @@ async fn prompt_restores_messages_from_session() {
             "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
         }),
         parent_id: None,
+        sequence: None,
     });
 
     // Prompt should succeed with history loaded
@@ -1846,12 +1851,14 @@ async fn gather_recent_events_returns_event_types() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "hello"}),
         parent_id: None,
+        sequence: None,
     });
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": []}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -1873,6 +1880,7 @@ async fn gather_recent_events_since_boundary() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "old"}),
         parent_id: None,
+        sequence: None,
     });
     // Boundary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1880,6 +1888,7 @@ async fn gather_recent_events_since_boundary() {
         event_type: crate::events::EventType::CompactBoundary,
         payload: json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10}),
         parent_id: None,
+        sequence: None,
     });
     // Events after boundary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1887,6 +1896,7 @@ async fn gather_recent_events_since_boundary() {
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": []}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -1908,12 +1918,14 @@ async fn gather_recent_events_no_boundary_returns_all() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "hi"}),
         parent_id: None,
+        sequence: None,
     });
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": []}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, _calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -1940,6 +1952,7 @@ async fn gather_recent_tool_calls_extracts_bash() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "ls -la"}, "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -1960,6 +1973,7 @@ async fn gather_recent_tool_calls_skips_non_bash() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-1", "name": "Read", "arguments": {"path": "/tmp"}, "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
 
     let (_types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -2138,6 +2152,7 @@ fn get_pending_with_notification_returns_it() {
                 "output": "result text"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2172,6 +2187,7 @@ fn get_pending_skips_consumed() {
                 "output": "result text"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2185,6 +2201,7 @@ fn get_pending_skips_consumed() {
                 "count": 1
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2217,6 +2234,7 @@ fn get_pending_partial_consumed() {
                 "completedAt": "2026-01-01T00:00:00Z"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2236,6 +2254,7 @@ fn get_pending_partial_consumed() {
                 "completedAt": "2026-01-01T00:00:00Z"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2249,6 +2268,7 @@ fn get_pending_partial_consumed() {
                 "count": 1
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2283,6 +2303,7 @@ fn get_pending_multiple_consumption_events() {
                 "completedAt": "2026-01-01T00:00:00Z"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2302,6 +2323,7 @@ fn get_pending_multiple_consumption_events() {
                 "completedAt": "2026-01-01T00:00:00Z"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2321,6 +2343,7 @@ fn get_pending_multiple_consumption_events() {
                 "completedAt": "2026-01-01T00:00:00Z"
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2334,6 +2357,7 @@ fn get_pending_multiple_consumption_events() {
                 "count": 1
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2346,6 +2370,7 @@ fn get_pending_multiple_consumption_events() {
                 "count": 1
             }),
             parent_id: None,
+            sequence: None,
         })
         .unwrap();
 
@@ -2722,6 +2747,7 @@ async fn gather_recent_events_uses_latest_boundary() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
     // First boundary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2729,6 +2755,7 @@ async fn gather_recent_events_uses_latest_boundary() {
         event_type: crate::events::EventType::CompactBoundary,
         payload: json!({"originalTokens": 1000, "compactedTokens": 100, "reason": "auto"}),
         parent_id: None,
+        sequence: None,
     });
     // Progress signal between boundaries (should also be excluded)
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2736,6 +2763,7 @@ async fn gather_recent_events_uses_latest_boundary() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-2", "name": "Bash", "arguments": {"command": "cargo test"}, "turn": 2}),
         parent_id: None,
+        sequence: None,
     });
     // Second (latest) boundary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2743,6 +2771,7 @@ async fn gather_recent_events_uses_latest_boundary() {
         event_type: crate::events::EventType::CompactBoundary,
         payload: json!({"originalTokens": 2000, "compactedTokens": 200, "reason": "auto"}),
         parent_id: None,
+        sequence: None,
     });
     // Events after latest boundary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2750,6 +2779,7 @@ async fn gather_recent_events_uses_latest_boundary() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "new prompt"}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -2779,6 +2809,7 @@ async fn gather_recent_events_falls_back_to_compact_summary() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
     // Only a compact.summary (no boundary — legacy session)
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2786,6 +2817,7 @@ async fn gather_recent_events_falls_back_to_compact_summary() {
         event_type: crate::events::EventType::CompactSummary,
         payload: json!({"summary": "...", "tokensBefore": 1000, "tokensAfter": 100, "compressionRatio": 0.9}),
         parent_id: None,
+        sequence: None,
     });
     // Events after summary
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2793,6 +2825,7 @@ async fn gather_recent_events_falls_back_to_compact_summary() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "new prompt"}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);
@@ -2822,6 +2855,7 @@ async fn stale_git_push_excluded_after_boundary() {
         event_type: crate::events::EventType::ToolCall,
         payload: json!({"toolCallId": "tc-1", "name": "Bash", "arguments": {"command": "git push origin main"}, "turn": 1}),
         parent_id: None,
+        sequence: None,
     });
     // Compaction boundary after that interaction
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2829,6 +2863,7 @@ async fn stale_git_push_excluded_after_boundary() {
         event_type: crate::events::EventType::CompactBoundary,
         payload: json!({"originalTokens": 5000, "compactedTokens": 500, "reason": "auto"}),
         parent_id: None,
+        sequence: None,
     });
     // New interaction: simple message exchange (no progress signals)
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -2836,12 +2871,14 @@ async fn stale_git_push_excluded_after_boundary() {
         event_type: crate::events::EventType::MessageUser,
         payload: json!({"text": "what time is it?"}),
         parent_id: None,
+        sequence: None,
     });
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
         event_type: crate::events::EventType::MessageAssistant,
         payload: json!({"content": []}),
         parent_id: None,
+        sequence: None,
     });
 
     let (types, calls) = prompt_runtime::gather_recent_events(&ctx.event_store, &sid);

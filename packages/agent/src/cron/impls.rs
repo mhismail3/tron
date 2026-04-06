@@ -236,6 +236,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 event_type: crate::events::EventType::MessageUser,
                 payload: serde_json::json!({"content": prompt}),
                 parent_id: None,
+                sequence: None,
             })
             .map_err(|e| CronError::Execution(format!("persist user message: {e}")))?;
 
@@ -250,6 +251,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 run_ctx,
                 &None,
                 &broadcast,
+                None,
             ) => r,
             () = cancel.cancelled() => {
                 return Err(CronError::Cancelled("agent turn cancelled".into()));
@@ -392,6 +394,7 @@ impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
                 "error": run.error,
             })),
             run_id: Some(run.id.clone()),
+            sequence: None,
         };
         self.broadcast.broadcast_all(&event).await;
     }
@@ -403,6 +406,7 @@ impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             data: Some(payload),
             run_id: None,
+            sequence: None,
         };
         self.broadcast.broadcast_all(&event).await;
     }
@@ -437,6 +441,7 @@ impl crate::cron::executor::SystemEventInjector for CronSystemEventInjector {
                 event_type: crate::events::EventType::MessageSystem,
                 payload,
                 parent_id: None,
+                sequence: None,
             })
             .map_err(|e| CronError::Execution(format!("inject system event: {e}")))?;
 

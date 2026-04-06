@@ -6,6 +6,7 @@ mod result;
 mod tools;
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::runtime::context::context_manager::ContextManager;
@@ -82,6 +83,8 @@ pub struct TurnParams<'a> {
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Optional per-session sequence counter for monotonic event ordering.
+    pub sequence_counter: Option<&'a AtomicI64>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -111,6 +114,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         process_manager,
         job_manager,
         output_buffer_registry,
+        sequence_counter,
     } = params;
     let turn_start = Instant::now();
 
@@ -122,6 +126,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             session_id,
             emitter,
             CompactionReason::ThresholdExceeded,
+            sequence_counter,
         )
         .await
     {
@@ -141,7 +146,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 
     // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
-    emit_turn_start(emitter, persister, session_id, turn).await;
+    emit_turn_start(emitter, persister, session_id, turn, sequence_counter).await;
     debug!(session_id, turn, "turn started");
 
     // 3. Build context (base from CM, external fields from RunContext/params)
@@ -176,15 +181,27 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 "provider stream error"
             );
 
-            let _ = emitter.emit(TronEvent::TurnFailed {
-                base: BaseEvent::now(session_id),
-                turn,
-                error: error_msg.clone(),
-                code: None,
-                category: Some(category),
-                recoverable,
-                partial_content: None,
-            });
+            if let Some(counter) = sequence_counter {
+                let _ = emitter.emit_sequenced(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: None,
+                    category: Some(category),
+                    recoverable,
+                    partial_content: None,
+                }, counter);
+            } else {
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: None,
+                    category: Some(category),
+                    recoverable,
+                    partial_content: None,
+                });
+            }
 
             return TurnResult {
                 success: false,
@@ -198,7 +215,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // 6. Process stream (drain after turn-stopping tools to capture token usage cleanly)
     let turn_stopping_tools = registry.turn_stopping_tool_names();
     let stream_result =
-        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools).await {
+        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools, sequence_counter).await {
             Ok(r) => {
                 if let Some(ht) = health_tracker {
                     ht.record_success(provider_name);
@@ -213,15 +230,27 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                     .record(request_start.elapsed().as_secs_f64());
                 let error_msg = e.to_string();
                 error!(session_id, turn, error = %error_msg, "stream failed");
-                let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
-                    turn,
-                    error: error_msg.clone(),
-                    code: None,
-                    category: Some(e.category().to_owned()),
-                    recoverable: e.is_recoverable(),
-                    partial_content: None,
-                });
+                if let Some(counter) = sequence_counter {
+                    let _ = emitter.emit_sequenced(TronEvent::TurnFailed {
+                        base: BaseEvent::now(session_id),
+                        turn,
+                        error: error_msg.clone(),
+                        code: None,
+                        category: Some(e.category().to_owned()),
+                        recoverable: e.is_recoverable(),
+                        partial_content: None,
+                    }, counter);
+                } else {
+                    let _ = emitter.emit(TronEvent::TurnFailed {
+                        base: BaseEvent::now(session_id),
+                        turn,
+                        error: error_msg.clone(),
+                        code: None,
+                        category: Some(e.category().to_owned()),
+                        recoverable: e.is_recoverable(),
+                        partial_content: None,
+                    });
+                }
                 return TurnResult {
                     success: false,
                     error: Some(error_msg),
@@ -263,6 +292,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 provider.model(),
                 provider.provider_type(),
             ),
+            sequence_counter,
         )
         .await;
 
@@ -293,6 +323,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &stream_result,
         token_record_json.clone(),
         &model_name,
+        sequence_counter,
     );
 
     let has_thinking = add_assistant_message_to_context(context_manager, &stream_result);
@@ -310,6 +341,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             token_record_json.as_ref(),
             cost,
         ),
+        sequence_counter,
     )
     .await;
 
@@ -331,6 +363,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         process_manager,
         job_manager,
         output_buffer_registry,
+        sequence_counter,
     })
     .await;
 
@@ -339,17 +372,26 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         let total = context_manager
             .rules_tracker()
             .activated_scoped_rules_count() as u32;
-        let _ = emitter.emit(TronEvent::RulesActivated {
-            base: BaseEvent::now(session_id),
-            rules: tool_phase.activated_rules.clone(),
-            total_activated: total,
-        });
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(TronEvent::RulesActivated {
+                base: BaseEvent::now(session_id),
+                rules: tool_phase.activated_rules.clone(),
+                total_activated: total,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::RulesActivated {
+                base: BaseEvent::now(session_id),
+                rules: tool_phase.activated_rules.clone(),
+                total_activated: total,
+            });
+        }
         persist_rules_activated(
             persister,
             session_id,
             turn,
             &tool_phase.activated_rules,
             total,
+            sequence_counter,
         )
         .await;
     }
@@ -367,6 +409,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cost,
         context_manager.get_context_limit(),
         &model_name,
+        sequence_counter,
     )
     .await;
 

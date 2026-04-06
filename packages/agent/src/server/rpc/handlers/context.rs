@@ -205,6 +205,7 @@ mod tests {
             event_type: crate::events::EventType::MessageUser,
             payload: json!({"content": "hello world this is a test message"}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
@@ -215,6 +216,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Invalidate cached session state so resume_session re-reconstructs
@@ -321,6 +323,7 @@ mod tests {
             event_type: crate::events::EventType::MessageUser,
             payload: json!({"content": "hello"}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
@@ -331,6 +334,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
             }),
             parent_id: None,
+            sequence: None,
         });
 
         ctx.session_manager.invalidate_session(&sid);
@@ -356,6 +360,7 @@ mod tests {
             event_type: crate::events::EventType::MessageUser,
             payload: json!({"content": "hello world"}),
             parent_id: None,
+            sequence: None,
         });
 
         ctx.session_manager.invalidate_session(&sid);
@@ -425,6 +430,7 @@ mod tests {
                 "totalActivated": 1,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         let result = GetDetailedSnapshotHandler
@@ -450,6 +456,7 @@ mod tests {
             event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "web-search", "source": "global", "addedVia": "mention"}),
             parent_id: None,
+            sequence: None,
         });
 
         let result = GetDetailedSnapshotHandler
@@ -474,12 +481,14 @@ mod tests {
             event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "web-search", "source": "global", "addedVia": "explicit"}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
             event_type: crate::events::EventType::SkillDeactivated,
             payload: json!({"skillName": "web-search"}),
             parent_id: None,
+            sequence: None,
         });
         // Activate another skill that stays
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -487,6 +496,7 @@ mod tests {
             event_type: crate::events::EventType::SkillActivated,
             payload: json!({"skillName": "commit", "source": "project", "addedVia": "explicit"}),
             parent_id: None,
+            sequence: None,
         });
 
         let result = GetDetailedSnapshotHandler
@@ -526,6 +536,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 875_000, "outputTokens": 5_000}
             }),
             parent_id: None,
+            sequence: None,
         });
 
         ctx.session_manager.invalidate_session(&sid);
@@ -564,6 +575,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 900_000, "outputTokens": 50_000}
             }),
             parent_id: None,
+            sequence: None,
         });
 
         ctx.session_manager.invalidate_session(&sid);
@@ -615,6 +627,7 @@ mod tests {
             event_type: crate::events::EventType::MessageUser,
             payload: json!({"content": "hello"}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
@@ -625,6 +638,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
             }),
             parent_id: None,
+            sequence: None,
         });
         ctx.session_manager.invalidate_session(&sid);
 
@@ -645,6 +659,7 @@ mod tests {
             event_type: crate::events::EventType::MessageUser,
             payload: json!({"content": "test"}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
@@ -655,6 +670,7 @@ mod tests {
                 "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
             }),
             parent_id: None,
+            sequence: None,
         });
         ctx.session_manager.invalidate_session(&sid);
 

@@ -4,6 +4,7 @@
 //! the critical `agent.complete` → `agent.ready` ordering.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 use crate::runtime::hooks::engine::HookEngine;
 use tokio::sync::broadcast;
@@ -32,9 +33,15 @@ pub async fn run_agent(
     ctx: RunContext,
     hooks: &Option<Arc<HookEngine>>,
     broadcast: &Arc<EventEmitter>,
+    sequence_counter: Option<Arc<AtomicI64>>,
 ) -> RunResult {
     let session_id = agent.session_id().to_owned();
     debug!(session_id = agent.session_id(), "agent runner starting");
+
+    // Inject sequence counter so the agent can assign monotonic sequences to events.
+    if let Some(ref counter) = sequence_counter {
+        agent.set_sequence_counter(counter.clone());
+    }
 
     // INVARIANT: drain background hooks before accepting a new prompt — prevents
     // stale hook state from previous run interfering with the new run.
@@ -203,6 +210,7 @@ mod tests {
             RunContext::default(),
             &None,
             &broadcast,
+            None,
         )
         .await;
 
@@ -237,7 +245,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = run_agent(&mut agent, "Review code", ctx, &None, &broadcast).await;
+        let result = run_agent(&mut agent, "Review code", ctx, &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 
@@ -251,7 +259,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = run_agent(&mut agent, "Check results", ctx, &None, &broadcast).await;
+        let result = run_agent(&mut agent, "Check results", ctx, &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 
@@ -267,6 +275,7 @@ mod tests {
             RunContext::default(),
             &None,
             &broadcast,
+            None,
         )
         .await;
 
@@ -332,7 +341,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast).await;
+        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::Error);
 
         // Should still emit agent_ready after error
@@ -412,7 +421,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast).await;
+        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 
         // Collect all forwarded events
@@ -455,6 +464,7 @@ mod tests {
                 RunContext::default(),
                 &None,
                 &broadcast,
+                None,
             ),
         )
         .await;
@@ -477,6 +487,7 @@ mod tests {
             RunContext::default(),
             &None,
             &broadcast,
+            None,
         )
         .await;
 

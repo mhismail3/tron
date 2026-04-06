@@ -118,6 +118,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -152,6 +153,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let event_id = event.id.clone();

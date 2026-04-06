@@ -145,6 +145,7 @@ mod tests {
                     "content": "hello"
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -158,6 +159,7 @@ mod tests {
                     "content": [{"type": "text", "text": "hi there"}]
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -185,6 +187,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "write a file"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -200,6 +203,7 @@ mod tests {
                 "turn": 1
             }),
             parent_id: None,
+            sequence: None,
         }).unwrap();
 
         let _ = store.append(&AppendOptions {
@@ -207,6 +211,7 @@ mod tests {
             event_type: EventType::ToolResult,
             payload: serde_json::json!({"toolCallId": "toolu_01abc", "content": "File written", "isError": false}),
             parent_id: None,
+            sequence: None,
         }).unwrap();
 
         let _ = store
@@ -218,6 +223,7 @@ mod tests {
                     "turn": 2
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -287,6 +293,7 @@ mod tests {
                     "newLevel": "high"
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -308,6 +315,7 @@ mod tests {
                 event_type: EventType::ConfigReasoningLevel,
                 payload: serde_json::json!({"previousLevel": null, "newLevel": "medium"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let _ = store
@@ -316,6 +324,7 @@ mod tests {
                 event_type: EventType::ConfigReasoningLevel,
                 payload: serde_json::json!({"previousLevel": "medium", "newLevel": "high"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -357,6 +366,7 @@ mod tests {
                     "previousModel": "model-a"
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -387,6 +397,7 @@ mod tests {
                     "imageCount": 1
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -399,6 +410,7 @@ mod tests {
                     "turn": 1
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 

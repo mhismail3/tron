@@ -288,6 +288,7 @@ impl ProcessManagerOps for ProcessManager {
                         "output": output_for_context,
                     }),
                     parent_id: None,
+                    sequence: None,
                 });
                 debug!(
                     process_id = %task_tracker.process_id,

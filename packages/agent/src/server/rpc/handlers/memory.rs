@@ -182,6 +182,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
                         "timestamp": ts_persist,
                     }),
                     parent_id: None,
+                    sequence: None,
                 })
                 .map(|row| row.id)
                 .map_err(|e| RpcError::Internal {

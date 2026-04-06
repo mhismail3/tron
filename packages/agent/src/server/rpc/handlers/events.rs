@@ -262,6 +262,7 @@ impl MethodHandler for AppendHandler {
                 event_type,
                 payload: payload.clone(),
                 parent_id: parent_id.as_deref(),
+                sequence: None,
             })
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -324,6 +325,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -353,6 +355,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -385,6 +388,7 @@ mod tests {
                     event_type: crate::events::EventType::MessageUser,
                     payload: json!({"text": format!("msg {i}")}),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -441,6 +445,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -471,6 +476,7 @@ mod tests {
                     event_type: crate::events::EventType::MessageUser,
                     payload: json!({"text": "hello"}),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -694,6 +700,7 @@ mod tests {
                     event_type: crate::events::EventType::MessageUser,
                     payload: json!({"text": format!("msg {i}")}),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
             event_ids.push(evt.id.clone());
@@ -728,6 +735,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -794,6 +802,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 

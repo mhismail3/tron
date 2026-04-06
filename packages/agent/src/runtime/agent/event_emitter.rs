@@ -1,8 +1,9 @@
 //! Broadcast-based event emitter for `TronEvent` dispatch.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use tokio::sync::broadcast;
+use tracing::trace;
 use crate::core::events::TronEvent;
 
 /// Default broadcast channel capacity.
@@ -37,6 +38,23 @@ impl EventEmitter {
     /// Returns the number of receivers that received the event.
     /// Returns 0 if there are no active subscribers.
     pub fn emit(&self, event: TronEvent) -> usize {
+        let _ = self.emit_count.fetch_add(1, Ordering::Relaxed);
+        self.tx.send(event).unwrap_or(0)
+    }
+
+    /// Emit an event with a sequence number from the given counter. Non-blocking.
+    ///
+    /// Atomically increments the counter and assigns the sequence to the event
+    /// before broadcasting. Returns the number of receivers that got the event.
+    pub fn emit_sequenced(&self, mut event: TronEvent, counter: &AtomicI64) -> usize {
+        let seq = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        event.set_sequence(seq);
+        trace!(
+            event_type = event.event_type(),
+            session_id = event.session_id(),
+            seq,
+            "emitting sequenced event"
+        );
         let _ = self.emit_count.fetch_add(1, Ordering::Relaxed);
         self.tx.send(event).unwrap_or(0)
     }
@@ -204,5 +222,32 @@ mod tests {
         let emitter = EventEmitter::default();
         assert_eq!(emitter.subscriber_count(), 0);
         assert_eq!(emitter.emit_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn emit_sequenced_assigns_monotonic_sequence() {
+        let emitter = EventEmitter::new();
+        let mut rx = emitter.subscribe();
+        let counter = AtomicI64::new(0);
+
+        let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+        let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+        let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+
+        let e1 = rx.recv().await.unwrap();
+        let e2 = rx.recv().await.unwrap();
+        let e3 = rx.recv().await.unwrap();
+        assert_eq!(e1.sequence(), Some(1));
+        assert_eq!(e2.sequence(), Some(2));
+        assert_eq!(e3.sequence(), Some(3));
+    }
+
+    #[test]
+    fn emit_sequenced_increments_emit_count() {
+        let emitter = EventEmitter::new();
+        let counter = AtomicI64::new(0);
+
+        let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+        assert_eq!(emitter.emit_count(), 1);
     }
 }

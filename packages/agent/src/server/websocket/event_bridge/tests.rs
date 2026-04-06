@@ -1593,3 +1593,24 @@ fn converts_worktree_renamed() {
     assert_eq!(data["oldBranch"], "session/abc123");
     assert_eq!(data["newBranch"], "session/fuzzy-purple-elephant");
 }
+
+#[test]
+fn bridged_event_includes_sequence() {
+    let mut event = TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1"),
+        content: "hello".into(),
+    };
+    event.set_sequence(42);
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.sequence, Some(42));
+}
+
+#[test]
+fn bridged_event_no_sequence_when_unset() {
+    let event = TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1"),
+        content: "hello".into(),
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert!(rpc.sequence.is_none());
+}

@@ -592,6 +592,7 @@ pub async fn load_prompt_bootstrap(
                         "count": pending.len(),
                     }),
                     parent_id: None,
+                    sequence: None,
                 });
             }
             formatted
@@ -612,6 +613,7 @@ pub async fn load_prompt_bootstrap(
                         "count": pending_procs.len(),
                     }),
                     parent_id: None,
+                    sequence: None,
                 });
             }
             formatted
@@ -632,6 +634,7 @@ pub async fn load_prompt_bootstrap(
                     "count": user_job_actions.len(),
                 }),
                 parent_id: None,
+                sequence: None,
             });
             Some(formatted)
         };
@@ -657,6 +660,7 @@ pub async fn persist_user_message_event(
             event_type: crate::events::EventType::MessageUser,
             payload,
             parent_id: None,
+            sequence: None,
         });
         Ok(())
     })
@@ -744,6 +748,7 @@ pub async fn build_skill_context_from_session(
                     "castEventId": spell.event_id,
                 }),
                 parent_id: None,
+                sequence: None,
             });
         }
 

@@ -153,6 +153,7 @@ impl EventChainBuilder {
             event_type,
             payload,
             parent_id: Some(&self.head),
+            sequence: None,
         })?;
         self.head.clone_from(&event.id);
         Ok(event)

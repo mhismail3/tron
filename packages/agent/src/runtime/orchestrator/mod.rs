@@ -4,16 +4,25 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `orchestrator` | Multi-session coordinator, broadcast channel, capacity limits |
+//! | `orchestrator` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
 //! | `session_manager` | Session CRUD, active session cache, fork |
 //! | `session_reconstructor` | Rebuild session state from persisted events |
 //! | `session_context` | Per-session context (workspace path, rules, skills) |
 //! | `agent_runner` | High-level agent run: skill injection → run → event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider/tools/hooks |
-//! | `event_persister` | Persists agent events to the event store |
+//! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
 //! | `subagent_manager` | Spawns/manages child agents for parallel tool execution |
 //! | `process_manager` | Centralized lifecycle management for deterministic processes |
 //! | `tool_call_tracker` | Tracks in-flight tool calls for cancellation |
+//!
+//! ## Event Sequencing
+//!
+//! Per-session monotonic sequence numbers are assigned at event emission time via
+//! `Orchestrator::sequence_counters` (`DashMap<String, Arc<AtomicI64>>`). The counter
+//! is initialized on session create (start=0) or resume (start=MAX from DB), and
+//! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
+//! StreamProcessor / ToolExecutor`. All emitted events carry `sequence` in both
+//! the `TronEvent` (via `BaseEvent.sequence`) and `RpcEvent.sequence` fields.
 //!
 //! ## Critical Event Ordering
 //!

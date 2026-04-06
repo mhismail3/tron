@@ -34,6 +34,7 @@ pub(super) fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<Value>) 
         timestamp: event.timestamp().to_string(),
         data,
         run_id: None,
+        sequence: event.sequence(),
     }
 }
 

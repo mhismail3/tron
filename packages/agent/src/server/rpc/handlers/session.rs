@@ -324,6 +324,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello user"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -476,6 +477,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "first"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let _ = ctx
@@ -485,6 +487,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageAssistant,
                 payload: json!({"text": "second"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -770,6 +773,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let _ = ctx
@@ -779,6 +783,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageAssistant,
                 payload: json!({"text": "world"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -806,6 +811,7 @@ mod tests {
                     event_type: crate::events::EventType::MessageUser,
                     payload: json!({"text": "msg"}),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -834,6 +840,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "first"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let _ = ctx
@@ -843,6 +850,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "second"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -881,6 +889,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -910,6 +919,7 @@ mod tests {
                 event_type: crate::events::EventType::ToolResult,
                 payload: json!({"toolCallId": "tc1", "content": "result data", "isError": false}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -939,6 +949,7 @@ mod tests {
                 event_type: crate::events::EventType::ToolResult,
                 payload: json!({"toolCallId": "tc1", "content": "file contents", "isError": false}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -965,6 +976,7 @@ mod tests {
                 event_type: crate::events::EventType::ToolResult,
                 payload: json!({"toolCallId": "tc1", "content": "error msg", "isError": true}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -997,6 +1009,7 @@ mod tests {
                     "latency": 1234
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1027,6 +1040,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: json!({"content": "read a file"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1036,6 +1050,7 @@ mod tests {
             event_type: crate::events::EventType::MessageAssistant,
             payload: json!({"content": [{"type": "tool_use", "id": "tc1", "name": "Read", "arguments": {"path": "/tmp/test"}}]}),
             parent_id: None,
+            sequence: None,
         }).unwrap();
 
         // Tool result (persisted as tool.result)
@@ -1044,6 +1059,7 @@ mod tests {
             event_type: crate::events::EventType::ToolResult,
             payload: json!({"toolCallId": "tc1", "content": "file contents here", "isError": false}),
             parent_id: None,
+            sequence: None,
         }).unwrap();
 
         let result = GetHistoryHandler

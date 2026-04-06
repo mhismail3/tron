@@ -120,6 +120,7 @@ impl MethodHandler for SwitchModelHandler {
                 "newModel": model,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Invalidate cached session so next resume reconstructs with new model
@@ -222,6 +223,7 @@ impl MethodHandler for SetReasoningLevelHandler {
                 "newLevel": new_level,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Invalidate cached session so next resume reconstructs with new level
@@ -639,6 +641,7 @@ mod tests {
                 "cost": 0.005,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         let mut rx = ctx.orchestrator.subscribe();

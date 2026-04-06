@@ -1,6 +1,7 @@
 //! Tool executor — guardrails → pre-hooks → execute → post-hooks pipeline.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
@@ -57,6 +58,8 @@ pub struct ToolExecutionContext<'a> {
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for on-demand process output streaming.
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Optional per-session sequence counter for monotonic event ordering.
+    pub sequence_counter: Option<&'a AtomicI64>,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -130,29 +133,52 @@ pub async fn execute_tool(
             tool_arguments: effective_args.clone(),
             tool_call_id: tool_call_id.clone(),
         };
-        let _ = ctx.emitter.emit(TronEvent::HookTriggered {
-            base: BaseEvent::now(session_id),
-            hook_names: vec![],
-            hook_event: "PreToolUse".into(),
-            tool_name: Some(tool_name.clone()),
-            tool_call_id: Some(tool_call_id.clone()),
-        });
+        if let Some(counter) = ctx.sequence_counter {
+            let _ = ctx.emitter.emit_sequenced(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreToolUse".into(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            }, counter);
+        } else {
+            let _ = ctx.emitter.emit(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreToolUse".into(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            });
+        }
         let result = hook_engine.execute(&hook_ctx).await;
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
             HookAction::Continue => EventHookResult::Continue,
         };
-        let _ = ctx.emitter.emit(TronEvent::HookCompleted {
-            base: BaseEvent::now(session_id),
-            hook_names: vec![],
-            hook_event: "PreToolUse".into(),
-            result: event_result,
-            duration: None,
-            reason: result.reason.clone(),
-            tool_name: Some(tool_name.clone()),
-            tool_call_id: Some(tool_call_id.clone()),
-        });
+        if let Some(counter) = ctx.sequence_counter {
+            let _ = ctx.emitter.emit_sequenced(TronEvent::HookCompleted {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreToolUse".into(),
+                result: event_result,
+                duration: None,
+                reason: result.reason.clone(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            }, counter);
+        } else {
+            let _ = ctx.emitter.emit(TronEvent::HookCompleted {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreToolUse".into(),
+                result: event_result,
+                duration: None,
+                reason: result.reason.clone(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            });
+        }
         match result.action {
             HookAction::Block => {
                 warn!(tool_name, "blocked by PreToolUse hook");
@@ -179,12 +205,21 @@ pub async fn execute_tool(
     }
 
     // 4. Emit ToolExecutionStart
-    let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
-        base: BaseEvent::now(session_id),
-        tool_call_id: tool_call_id.clone(),
-        tool_name: tool_name.clone(),
-        arguments: effective_args.as_object().cloned(),
-    });
+    if let Some(counter) = ctx.sequence_counter {
+        let _ = ctx.emitter.emit_sequenced(TronEvent::ToolExecutionStart {
+            base: BaseEvent::now(session_id),
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            arguments: effective_args.as_object().cloned(),
+        }, counter);
+    } else {
+        let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
+            base: BaseEvent::now(session_id),
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            arguments: effective_args.as_object().cloned(),
+        });
+    }
     debug!(
         tool_name,
         tool_call_id, session_id, "tool execution started"
@@ -251,14 +286,25 @@ pub async fn execute_tool(
         .record(start.elapsed().as_secs_f64());
 
     // 6. Emit ToolExecutionEnd
-    let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
-        base: BaseEvent::now(session_id),
-        tool_call_id: tool_call_id.clone(),
-        tool_name: tool_name.clone(),
-        duration: duration_ms,
-        is_error: tool_result.is_error,
-        result: Some(tool_result.clone()),
-    });
+    if let Some(counter) = ctx.sequence_counter {
+        let _ = ctx.emitter.emit_sequenced(TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now(session_id),
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            duration: duration_ms,
+            is_error: tool_result.is_error,
+            result: Some(tool_result.clone()),
+        }, counter);
+    } else {
+        let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now(session_id),
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            duration: duration_ms,
+            is_error: tool_result.is_error,
+            result: Some(tool_result.clone()),
+        });
+    }
     debug!(tool = %tool_name, duration_ms, "tool executed");
 
     // 7. Execute PostToolUse hooks (background, fire-and-forget)
@@ -271,13 +317,23 @@ pub async fn execute_tool(
             result: serde_json::to_value(&tool_result).unwrap_or_default(),
             duration_ms,
         };
-        let _ = ctx.emitter.emit(TronEvent::HookTriggered {
-            base: BaseEvent::now(session_id),
-            hook_names: vec![],
-            hook_event: "PostToolUse".into(),
-            tool_name: Some(tool_name.clone()),
-            tool_call_id: Some(tool_call_id.clone()),
-        });
+        if let Some(counter) = ctx.sequence_counter {
+            let _ = ctx.emitter.emit_sequenced(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PostToolUse".into(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            }, counter);
+        } else {
+            let _ = ctx.emitter.emit(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PostToolUse".into(),
+                tool_name: Some(tool_name.clone()),
+                tool_call_id: Some(tool_call_id.clone()),
+            });
+        }
         // PostToolUse hooks run fire-and-forget with a 30s timeout to prevent leaks.
         let engine = hook_engine.clone();
         let emitter_bg = ctx.emitter.clone();
@@ -362,6 +418,7 @@ mod tests {
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
+                sequence_counter: None,
             }
         };
     }

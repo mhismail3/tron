@@ -43,6 +43,7 @@ impl ContextCommandService {
                         "tokensAfter": 0,
                     }),
                     parent_id: None,
+                    sequence: None,
                 });
                 Ok(())
             })
@@ -129,6 +130,7 @@ async fn execute_compaction(
                     "preservedMessages": result.preserved_messages,
                 }),
                 parent_id: None,
+                sequence: None,
             });
             Ok(())
         })

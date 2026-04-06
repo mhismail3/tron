@@ -279,6 +279,7 @@ fn persist_user_action(
             "label": label,
         }),
         parent_id: None,
+        sequence: None,
     }) {
         Ok(event) => {
             tracing::info!(

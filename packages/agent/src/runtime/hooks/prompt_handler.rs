@@ -400,6 +400,7 @@ impl HookHandler for PromptHookHandler {
                             event_type: crate::events::EventType::LlmHookResult,
                             payload,
                             parent_id: None,
+                            sequence: None,
                         }) {
                             warn!(hook_id = %hook_id, error = %e, "failed to persist hook.llm_result event");
                         }
@@ -447,6 +448,7 @@ impl HookHandler for PromptHookHandler {
                             event_type: crate::events::EventType::LlmHookResult,
                             payload,
                             parent_id: None,
+                            sequence: None,
                         }) {
                             warn!(hook_id = %hook_id, error = %persist_err, "failed to persist hook.llm_result error event");
                         }
@@ -796,6 +798,7 @@ mod tests {
                     event_type: EventType::MessageUser,
                     payload: serde_json::json!({"content": "hello"}),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -818,6 +821,7 @@ mod tests {
                         "timestamp": "2026-01-01T00:00:00Z"
                     }),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -840,6 +844,7 @@ mod tests {
                         "timestamp": "2026-01-01T00:00:00Z"
                     }),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -854,6 +859,7 @@ mod tests {
                         "timestamp": "2026-01-01T00:00:00Z"
                     }),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }
@@ -867,6 +873,7 @@ mod tests {
                         "timestamp": "2026-01-01T00:00:00Z"
                     }),
                     parent_id: None,
+                    sequence: None,
                 })
                 .unwrap();
         }

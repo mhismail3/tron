@@ -61,6 +61,9 @@ pub struct RpcEvent {
     /// Associated run, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// Monotonic per-session sequence number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<i64>,
 }
 
 impl RpcResponse {
@@ -125,6 +128,7 @@ impl RpcEvent {
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             data,
             run_id: None,
+            sequence: None,
         }
     }
 
@@ -132,6 +136,13 @@ impl RpcEvent {
     #[must_use]
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
+        self
+    }
+
+    /// Attach a sequence number.
+    #[must_use]
+    pub fn with_sequence(mut self, seq: Option<i64>) -> Self {
+        self.sequence = seq;
         self
     }
 }
@@ -271,6 +282,7 @@ mod tests {
             timestamp: "2026-02-13T15:30:00.000Z".into(),
             data: Some(json!({"text": "hello"})),
             run_id: Some("run_1".into()),
+            sequence: Some(42),
         };
         let json = serde_json::to_string(&ev).unwrap();
         let back: RpcEvent = serde_json::from_str(&json).unwrap();
@@ -287,6 +299,7 @@ mod tests {
             timestamp: "2026-01-01T00:00:00.000Z".into(),
             data: None,
             run_id: None,
+            sequence: None,
         };
         let json = serde_json::to_string(&ev).unwrap();
         assert!(!json.contains("sessionId"));
@@ -392,5 +405,23 @@ mod tests {
         let resp = RpcResponse::error_with_details("id3", "C", "m", json!({"x": 1}));
         let err = resp.error.unwrap();
         assert_eq!(err.details.unwrap()["x"], 1);
+    }
+
+    // ── RpcEvent sequence tests ──
+
+    #[test]
+    fn rpc_event_sequence_serialized() {
+        let ev = RpcEvent::new("test.event", Some("s1".into()), None).with_sequence(Some(5));
+        let json = serde_json::to_string(&ev).unwrap();
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["sequence"], 5);
+    }
+
+    #[test]
+    fn rpc_event_no_sequence_omitted() {
+        let ev = RpcEvent::new("test.event", Some("s1".into()), None);
+        assert!(ev.sequence.is_none());
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(!json.contains("sequence"));
     }
 }

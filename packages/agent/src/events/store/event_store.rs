@@ -49,6 +49,8 @@ pub struct AppendOptions<'a> {
     pub payload: Value,
     /// Explicit parent. If `None`, chains from session head.
     pub parent_id: Option<&'a str>,
+    /// Pre-assigned sequence number. If `None`, falls back to MAX(sequence)+1 from DB.
+    pub sequence: Option<i64>,
 }
 
 /// Options for forking a session.
@@ -211,6 +213,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -235,6 +238,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -244,6 +248,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "Hi there!"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -264,6 +269,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -284,6 +290,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -300,6 +307,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -316,6 +324,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -355,6 +364,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -383,6 +393,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -411,6 +422,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -442,6 +454,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -471,6 +484,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -501,6 +515,7 @@ mod tests {
                     "cost": 0.005,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -519,6 +534,7 @@ mod tests {
                     "cost": 0.005,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -551,6 +567,7 @@ mod tests {
                     "cost": 0.01,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -563,6 +580,7 @@ mod tests {
                     "cost": 0.01,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -589,6 +607,7 @@ mod tests {
                 event_type: EventType::StreamTurnEnd,
                 payload: serde_json::json!({}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -613,6 +632,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -622,6 +642,7 @@ mod tests {
                 event_type: EventType::ToolResult,
                 payload: serde_json::json!({"toolCallId": "t1", "content": "ok"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -651,6 +672,7 @@ mod tests {
                     }
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -675,6 +697,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -687,6 +710,7 @@ mod tests {
                     "cost": 0.001,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -698,6 +722,7 @@ mod tests {
                     "cost": 0.001,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -708,6 +733,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "More"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -720,6 +746,7 @@ mod tests {
                     "cost": 0.002,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -731,6 +758,7 @@ mod tests {
                     "cost": 0.002,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -757,6 +785,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "First"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -767,6 +796,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Branch from root"}),
                 parent_id: Some(&cr.root_event.id),
+                sequence: None,
             })
             .unwrap();
 
@@ -782,6 +812,7 @@ mod tests {
             event_type: EventType::MessageUser,
             payload: serde_json::json!({"content": "Hello"}),
             parent_id: None,
+            sequence: None,
         });
         assert!(result.is_err());
     }
@@ -813,6 +844,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -837,6 +869,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -846,6 +879,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "Hi"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -871,6 +905,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -907,6 +942,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -963,6 +999,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Delete me"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1059,6 +1096,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1189,6 +1227,7 @@ mod tests {
                     "turn": 1,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1203,6 +1242,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 10, "outputTokens": 5},
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1266,6 +1306,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "List files", "turn": 1}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1279,6 +1320,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1290,6 +1332,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1303,6 +1346,7 @@ mod tests {
                     "turn": 1
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1317,6 +1361,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 300, "outputTokens": 20}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1328,6 +1373,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 300, "outputTokens": 20}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1359,6 +1405,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1368,6 +1415,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "World"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1381,6 +1429,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "Alternative response"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1457,6 +1506,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "What is Rust?"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1465,6 +1515,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "A systems language."}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1492,6 +1543,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1518,6 +1570,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "first"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let _ = store
@@ -1526,6 +1579,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "reply"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         let second_user = store
@@ -1534,6 +1588,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "second"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1561,6 +1616,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1569,6 +1625,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({"content": "Hi"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1595,6 +1652,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "A"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1603,6 +1661,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "B"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1629,6 +1688,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1650,6 +1710,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1661,6 +1722,7 @@ mod tests {
                     "turn": 1,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1683,6 +1745,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1694,6 +1757,7 @@ mod tests {
                     "turn": 1,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1722,6 +1786,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1734,6 +1799,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1744,6 +1810,7 @@ mod tests {
                     "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1782,6 +1849,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1793,6 +1861,7 @@ mod tests {
                     "turn": 1,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1822,6 +1891,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Use a tool"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1833,6 +1903,7 @@ mod tests {
                     "turn": 1,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1841,6 +1912,7 @@ mod tests {
                 event_type: EventType::ToolResult,
                 payload: serde_json::json!({"toolCallId": "c1", "content": "output", "isError": false}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1852,6 +1924,7 @@ mod tests {
                     "turn": 2,
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -1877,6 +1950,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "Old message"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1885,6 +1959,7 @@ mod tests {
                 event_type: EventType::CompactSummary,
                 payload: serde_json::json!({"summary": "User said hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         store
@@ -1893,6 +1968,7 @@ mod tests {
                 event_type: EventType::MessageUser,
                 payload: serde_json::json!({"content": "New message"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2027,6 +2103,7 @@ mod tests {
                                 event_type: EventType::MessageUser,
                                 payload: serde_json::json!({"content": "concurrent"}),
                                 parent_id: None,
+                                sequence: None,
                             })
                             .unwrap();
                         ids.push((event.id, event.sequence));
@@ -2075,6 +2152,7 @@ mod tests {
                                 event_type: EventType::MessageUser,
                                 payload: serde_json::json!({"content": "msg"}),
                                 parent_id: None,
+                                sequence: None,
                             })
                             .unwrap();
                     }
@@ -2117,6 +2195,7 @@ mod tests {
                         event_type: EventType::MessageUser,
                         payload: serde_json::json!({"content": "write"}),
                         parent_id: None,
+                        sequence: None,
                     })
                     .unwrap();
             }
@@ -2188,6 +2267,7 @@ mod tests {
                     "isolated": true
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2214,6 +2294,7 @@ mod tests {
                     "isolated": true
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2226,6 +2307,7 @@ mod tests {
                     "branchPreserved": true
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2250,6 +2332,7 @@ mod tests {
                     "path": "/first", "branch": "b1", "baseCommit": "aaa", "isolated": true
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2260,6 +2343,7 @@ mod tests {
                 event_type: EventType::WorktreeReleased,
                 payload: serde_json::json!({ "deleted": true, "branchPreserved": true }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 
@@ -2272,6 +2356,7 @@ mod tests {
                     "path": "/second", "branch": "b2", "baseCommit": "bbb", "isolated": true
                 }),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
 

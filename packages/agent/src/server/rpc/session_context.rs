@@ -677,12 +677,14 @@ mod tests {
                 "rules": [{"relativePath": "a/AGENTS.md", "scopeDir": "a"}]
             }),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&AppendOptions {
             session_id: &session_id,
             event_type: EventType::CompactBoundary,
             payload: serde_json::json!({}),
             parent_id: None,
+            sequence: None,
         });
         let _ = ctx.event_store.append(&AppendOptions {
             session_id: &session_id,
@@ -691,6 +693,7 @@ mod tests {
                 "rules": [{"relativePath": "b/AGENTS.md", "scopeDir": "b"}]
             }),
             parent_id: None,
+            sequence: None,
         });
 
         let paths = collect_dynamic_rule_paths(ctx.event_store.as_ref(), &session_id);

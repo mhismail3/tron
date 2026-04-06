@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use tokio::sync::Notify;
 
 use crate::runtime::context::context_manager::ContextManager;
@@ -233,6 +233,7 @@ impl CompactionHandler {
         session_id: &str,
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
+        sequence_counter: Option<&AtomicI64>,
     ) -> Result<bool, RuntimeError> {
         // Build trigger input from current state
         let current_tokens = context_manager.get_current_tokens();
@@ -263,7 +264,7 @@ impl CompactionHandler {
         );
 
         let success = self
-            .execute_compaction(context_manager, hooks, session_id, emitter, reason)
+            .execute_compaction(context_manager, hooks, session_id, emitter, reason, sequence_counter)
             .await?;
 
         if success {
@@ -282,6 +283,7 @@ impl CompactionHandler {
         session_id: &str,
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
+        sequence_counter: Option<&AtomicI64>,
     ) -> Result<bool, RuntimeError> {
         debug!(session_id, ?reason, "compaction requested");
 
@@ -308,17 +310,26 @@ impl CompactionHandler {
             emitter,
             tokens_before,
             context_manager.get_context_limit(),
+            sequence_counter,
         )
         .await
         {
             return Ok(false);
         }
 
-        let _ = emitter.emit(TronEvent::CompactionStart {
-            base: BaseEvent::now(session_id),
-            reason: reason.clone(),
-            tokens_before,
-        });
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(TronEvent::CompactionStart {
+                base: BaseEvent::now(session_id),
+                reason: reason.clone(),
+                tokens_before,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::CompactionStart {
+                base: BaseEvent::now(session_id),
+                reason: reason.clone(),
+                tokens_before,
+            });
+        }
 
         let compaction_start = std::time::Instant::now();
 
@@ -334,6 +345,7 @@ impl CompactionHandler {
             emitter,
             reason,
             self.persister.as_ref(),
+            sequence_counter,
         )
         .await)
     }
@@ -345,6 +357,7 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         current_tokens: u64,
         context_limit: u64,
+        sequence_counter: Option<&AtomicI64>,
     ) -> bool {
         let Some(hook_engine) = hooks else {
             return true;
@@ -356,29 +369,52 @@ impl CompactionHandler {
             current_tokens,
             target_tokens: (context_limit * 7) / 10,
         };
-        let _ = emitter.emit(TronEvent::HookTriggered {
-            base: BaseEvent::now(session_id),
-            hook_names: vec![],
-            hook_event: "PreCompact".into(),
-            tool_name: None,
-            tool_call_id: None,
-        });
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                tool_name: None,
+                tool_call_id: None,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                tool_name: None,
+                tool_call_id: None,
+            });
+        }
         let result = hook_engine.execute(&hook_ctx).await;
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
             HookAction::Continue => EventHookResult::Continue,
         };
-        let _ = emitter.emit(TronEvent::HookCompleted {
-            base: BaseEvent::now(session_id),
-            hook_names: vec![],
-            hook_event: "PreCompact".into(),
-            result: event_result,
-            duration: None,
-            reason: result.reason.clone(),
-            tool_name: None,
-            tool_call_id: None,
-        });
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(TronEvent::HookCompleted {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                result: event_result,
+                duration: None,
+                reason: result.reason.clone(),
+                tool_name: None,
+                tool_call_id: None,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::HookCompleted {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                result: event_result,
+                duration: None,
+                reason: result.reason.clone(),
+                tool_name: None,
+                tool_call_id: None,
+            });
+        }
         result.action != HookAction::Block
     }
 
@@ -417,6 +453,7 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
         persister: Option<&Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
+        sequence_counter: Option<&AtomicI64>,
     ) -> bool {
         match result {
             Ok(compaction_result) => {
@@ -432,18 +469,33 @@ impl CompactionHandler {
                     session_id,
                     tokens_before, tokens_after, "compaction complete"
                 );
-                let _ = emitter.emit(TronEvent::CompactionComplete {
-                    base: BaseEvent::now(session_id),
-                    success: compaction_result.success,
-                    tokens_before,
-                    tokens_after,
-                    compression_ratio: compaction_result.compression_ratio,
-                    reason: Some(reason.clone()),
-                    summary: summary_text.clone(),
-                    estimated_context_tokens: Some(tokens_after),
-                    preserved_turns: Some(compaction_result.preserved_turns),
-                    summarized_turns: Some(compaction_result.summarized_turns),
-                });
+                if let Some(counter) = sequence_counter {
+                    let _ = emitter.emit_sequenced(TronEvent::CompactionComplete {
+                        base: BaseEvent::now(session_id),
+                        success: compaction_result.success,
+                        tokens_before,
+                        tokens_after,
+                        compression_ratio: compaction_result.compression_ratio,
+                        reason: Some(reason.clone()),
+                        summary: summary_text.clone(),
+                        estimated_context_tokens: Some(tokens_after),
+                        preserved_turns: Some(compaction_result.preserved_turns),
+                        summarized_turns: Some(compaction_result.summarized_turns),
+                    }, counter);
+                } else {
+                    let _ = emitter.emit(TronEvent::CompactionComplete {
+                        base: BaseEvent::now(session_id),
+                        success: compaction_result.success,
+                        tokens_before,
+                        tokens_after,
+                        compression_ratio: compaction_result.compression_ratio,
+                        reason: Some(reason.clone()),
+                        summary: summary_text.clone(),
+                        estimated_context_tokens: Some(tokens_after),
+                        preserved_turns: Some(compaction_result.preserved_turns),
+                        summarized_turns: Some(compaction_result.summarized_turns),
+                    });
+                }
 
                 if compaction_result.success
                     && let Some(persister) = persister
@@ -461,11 +513,13 @@ impl CompactionHandler {
                         "summarizedTurns": compaction_result.summarized_turns,
                         "preservedMessages": compaction_result.preserved_messages,
                     });
+                    let seq = sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                     if let Err(error) = persister
-                        .append_background(
+                        .append_background_with_sequence(
                             session_id,
                             crate::events::EventType::CompactBoundary,
                             payload,
+                            seq,
                         )
                         .await
                     {
@@ -479,18 +533,33 @@ impl CompactionHandler {
                 true
             }
             Err(e) => {
-                let _ = emitter.emit(TronEvent::CompactionComplete {
-                    base: BaseEvent::now(session_id),
-                    success: false,
-                    tokens_before,
-                    tokens_after: tokens_before,
-                    compression_ratio: 1.0,
-                    reason: Some(reason),
-                    summary: Some(format!("Compaction failed: {e}")),
-                    estimated_context_tokens: Some(tokens_before),
-                    preserved_turns: None,
-                    summarized_turns: None,
-                });
+                if let Some(counter) = sequence_counter {
+                    let _ = emitter.emit_sequenced(TronEvent::CompactionComplete {
+                        base: BaseEvent::now(session_id),
+                        success: false,
+                        tokens_before,
+                        tokens_after: tokens_before,
+                        compression_ratio: 1.0,
+                        reason: Some(reason),
+                        summary: Some(format!("Compaction failed: {e}")),
+                        estimated_context_tokens: Some(tokens_before),
+                        preserved_turns: None,
+                        summarized_turns: None,
+                    }, counter);
+                } else {
+                    let _ = emitter.emit(TronEvent::CompactionComplete {
+                        base: BaseEvent::now(session_id),
+                        success: false,
+                        tokens_before,
+                        tokens_after: tokens_before,
+                        compression_ratio: 1.0,
+                        reason: Some(reason),
+                        summary: Some(format!("Compaction failed: {e}")),
+                        estimated_context_tokens: Some(tokens_before),
+                        preserved_turns: None,
+                        summarized_turns: None,
+                    });
+                }
                 counter!("compaction_total", "status" => "failure").increment(1);
                 tracing::warn!(session_id, tokens_before, error = %e, "compaction failed");
                 false

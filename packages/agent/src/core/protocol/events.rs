@@ -169,6 +169,9 @@ pub struct BaseEvent {
     pub session_id: String,
     /// ISO 8601 timestamp.
     pub timestamp: String,
+    /// Monotonic per-session sequence number, assigned at emission time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<i64>,
 }
 
 impl BaseEvent {
@@ -178,7 +181,15 @@ impl BaseEvent {
         Self {
             session_id: session_id.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            sequence: None,
         }
+    }
+
+    /// Attach a sequence number.
+    #[must_use]
+    pub fn with_sequence(mut self, seq: i64) -> Self {
+        self.sequence = Some(seq);
+        self
     }
 }
 
@@ -295,12 +306,24 @@ macro_rules! tron_events {
                 }
             }
 
+            /// Get a mutable reference to the base event fields.
+            pub fn base_mut(&mut self) -> &mut BaseEvent {
+                match self {
+                    $(Self::$variant { base, .. } => base,)*
+                }
+            }
+
             /// Get the event type string (for type discrimination).
             #[must_use]
             pub fn event_type(&self) -> &str {
                 match self {
                     $(Self::$variant { .. } => $rename,)*
                 }
+            }
+
+            /// Assign a sequence number to this event.
+            pub fn set_sequence(&mut self, seq: i64) {
+                self.base_mut().sequence = Some(seq);
             }
         }
 
@@ -1011,6 +1034,12 @@ impl TronEvent {
     #[must_use]
     pub fn timestamp(&self) -> &str {
         &self.base().timestamp
+    }
+
+    /// Get the sequence number, if assigned.
+    #[must_use]
+    pub fn sequence(&self) -> Option<i64> {
+        self.base().sequence
     }
 
     /// Whether this is a tool execution event.
@@ -2105,5 +2134,58 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let back: TronEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(original, back);
+    }
+
+    // ── BaseEvent sequence tests ──
+
+    #[test]
+    fn base_event_sequence_serialized() {
+        let base = BaseEvent::now("s1").with_sequence(5);
+        let json = serde_json::to_value(&base).unwrap();
+        assert_eq!(json["sequence"], 5);
+    }
+
+    #[test]
+    fn base_event_no_sequence_omitted() {
+        let base = BaseEvent::now("s1");
+        assert!(base.sequence.is_none());
+        let json = serde_json::to_value(&base).unwrap();
+        assert!(json.get("sequence").is_none());
+    }
+
+    #[test]
+    fn base_event_with_sequence_builder() {
+        let base = BaseEvent::now("s1").with_sequence(42);
+        assert_eq!(base.sequence, Some(42));
+        assert_eq!(base.session_id, "s1");
+    }
+
+    #[test]
+    fn tron_event_set_sequence() {
+        let mut e = agent_start_event("s1");
+        assert!(e.sequence().is_none());
+        e.set_sequence(7);
+        assert_eq!(e.sequence(), Some(7));
+    }
+
+    #[test]
+    fn tron_event_sequence_serialized_in_json() {
+        let mut e = TronEvent::TurnStart {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+        };
+        e.set_sequence(10);
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["sequence"], 10);
+    }
+
+    #[test]
+    fn tron_event_no_sequence_omitted_from_json() {
+        let e = TronEvent::TurnStart {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+        };
+        let json = serde_json::to_value(&e).unwrap();
+        assert!(json.get("sequence").is_none());
     }
 }

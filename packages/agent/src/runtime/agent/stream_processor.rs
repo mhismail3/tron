@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use futures::StreamExt;
@@ -56,22 +57,36 @@ impl StreamState {
         }
     }
 
-    fn handle_text_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter) {
+    fn handle_text_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter, counter: Option<&AtomicI64>) {
         self.record_ttft();
         self.text_acc.push_str(&delta);
-        let _ = emitter.emit(TronEvent::MessageUpdate {
-            base: BaseEvent::now(session_id),
-            content: delta,
-        });
+        if let Some(counter) = counter {
+            let _ = emitter.emit_sequenced(TronEvent::MessageUpdate {
+                base: BaseEvent::now(session_id),
+                content: delta,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::MessageUpdate {
+                base: BaseEvent::now(session_id),
+                content: delta,
+            });
+        }
     }
 
-    fn handle_thinking_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter) {
+    fn handle_thinking_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter, counter: Option<&AtomicI64>) {
         self.record_ttft();
         self.thinking_acc.push_str(&delta);
-        let _ = emitter.emit(TronEvent::ThinkingDelta {
-            base: BaseEvent::now(session_id),
-            delta,
-        });
+        if let Some(counter) = counter {
+            let _ = emitter.emit_sequenced(TronEvent::ThinkingDelta {
+                base: BaseEvent::now(session_id),
+                delta,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::ThinkingDelta {
+                base: BaseEvent::now(session_id),
+                delta,
+            });
+        }
     }
 
     fn handle_thinking_end(
@@ -80,13 +95,21 @@ impl StreamState {
         signature: Option<String>,
         session_id: &str,
         emitter: &EventEmitter,
+        counter: Option<&AtomicI64>,
     ) {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
-        let _ = emitter.emit(TronEvent::ThinkingEnd {
-            base: BaseEvent::now(session_id),
-            thinking,
-        });
+        if let Some(counter) = counter {
+            let _ = emitter.emit_sequenced(TronEvent::ThinkingEnd {
+                base: BaseEvent::now(session_id),
+                thinking,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::ThinkingEnd {
+                base: BaseEvent::now(session_id),
+                thinking,
+            });
+        }
     }
 
     fn handle_tool_call_start(
@@ -95,6 +118,7 @@ impl StreamState {
         name: String,
         session_id: &str,
         emitter: &EventEmitter,
+        counter: Option<&AtomicI64>,
     ) {
         finalize_tool_call(
             &mut self.tool_calls,
@@ -107,11 +131,19 @@ impl StreamState {
         self.current_tool_name = Some(name.clone());
         self.current_tool_args.clear();
 
-        let _ = emitter.emit(TronEvent::ToolCallGenerating {
-            base: BaseEvent::now(session_id),
-            tool_call_id,
-            tool_name: name,
-        });
+        if let Some(counter) = counter {
+            let _ = emitter.emit_sequenced(TronEvent::ToolCallGenerating {
+                base: BaseEvent::now(session_id),
+                tool_call_id,
+                tool_name: name,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::ToolCallGenerating {
+                base: BaseEvent::now(session_id),
+                tool_call_id,
+                tool_name: name,
+            });
+        }
     }
 
     fn handle_tool_call_delta(
@@ -120,14 +152,24 @@ impl StreamState {
         arguments_delta: String,
         session_id: &str,
         emitter: &EventEmitter,
+        counter: Option<&AtomicI64>,
     ) {
         self.current_tool_args.push_str(&arguments_delta);
-        let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
-            base: BaseEvent::now(session_id),
-            tool_call_id,
-            tool_name: self.current_tool_name.clone(),
-            arguments_delta,
-        });
+        if let Some(counter) = counter {
+            let _ = emitter.emit_sequenced(TronEvent::ToolCallArgumentDelta {
+                base: BaseEvent::now(session_id),
+                tool_call_id,
+                tool_name: self.current_tool_name.clone(),
+                arguments_delta,
+            }, counter);
+        } else {
+            let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
+                base: BaseEvent::now(session_id),
+                tool_call_id,
+                tool_name: self.current_tool_name.clone(),
+                arguments_delta,
+            });
+        }
     }
 
     fn handle_tool_call_end(&mut self, tool_call: ToolCall) {
@@ -210,6 +252,7 @@ pub async fn process_stream(
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
     turn_stopping_tools: &HashSet<String>,
+    sequence_counter: Option<&AtomicI64>,
 ) -> Result<StreamResult, RuntimeError> {
     let mut state = StreamState::new();
     #[allow(unused_assignments)]
@@ -267,14 +310,25 @@ pub async fn process_stream(
                             delay_ms,
                             error,
                         } => {
-                            let _ = emitter.emit(TronEvent::ApiRetry {
-                                base: BaseEvent::now(session_id),
-                                attempt,
-                                max_retries,
-                                delay_ms,
-                                error_category: error.category,
-                                error_message: error.message,
-                            });
+                            if let Some(counter) = sequence_counter {
+                                let _ = emitter.emit_sequenced(TronEvent::ApiRetry {
+                                    base: BaseEvent::now(session_id),
+                                    attempt,
+                                    max_retries,
+                                    delay_ms,
+                                    error_category: error.category,
+                                    error_message: error.message,
+                                }, counter);
+                            } else {
+                                let _ = emitter.emit(TronEvent::ApiRetry {
+                                    base: BaseEvent::now(session_id),
+                                    attempt,
+                                    max_retries,
+                                    delay_ms,
+                                    error_category: error.category,
+                                    error_message: error.message,
+                                });
+                            }
                         }
                         _ => {} // Skip all content events
                     }
@@ -283,7 +337,7 @@ pub async fn process_stream(
 
                 match stream_event {
                     StreamEvent::TextDelta { delta } => {
-                        state.handle_text_delta(delta, session_id, emitter);
+                        state.handle_text_delta(delta, session_id, emitter, sequence_counter);
                     }
 
                     StreamEvent::Start
@@ -291,24 +345,30 @@ pub async fn process_stream(
                     | StreamEvent::TextEnd { .. } => {}
 
                     StreamEvent::ThinkingStart => {
-                        let _ = emitter.emit(TronEvent::ThinkingStart {
-                            base: BaseEvent::now(session_id),
-                        });
+                        if let Some(counter) = sequence_counter {
+                            let _ = emitter.emit_sequenced(TronEvent::ThinkingStart {
+                                base: BaseEvent::now(session_id),
+                            }, counter);
+                        } else {
+                            let _ = emitter.emit(TronEvent::ThinkingStart {
+                                base: BaseEvent::now(session_id),
+                            });
+                        }
                     }
 
                     StreamEvent::ThinkingDelta { delta } => {
-                        state.handle_thinking_delta(delta, session_id, emitter);
+                        state.handle_thinking_delta(delta, session_id, emitter, sequence_counter);
                     }
 
                     StreamEvent::ThinkingEnd {
                         thinking,
                         signature,
                     } => {
-                        state.handle_thinking_end(thinking, signature, session_id, emitter);
+                        state.handle_thinking_end(thinking, signature, session_id, emitter, sequence_counter);
                     }
 
                     StreamEvent::ToolCallStart { tool_call_id, name } => {
-                        state.handle_tool_call_start(tool_call_id, name, session_id, emitter);
+                        state.handle_tool_call_start(tool_call_id, name, session_id, emitter, sequence_counter);
                     }
 
                     StreamEvent::ToolCallDelta {
@@ -320,6 +380,7 @@ pub async fn process_stream(
                             arguments_delta,
                             session_id,
                             emitter,
+                            sequence_counter,
                         );
                     }
 
@@ -351,14 +412,25 @@ pub async fn process_stream(
                         delay_ms,
                         error,
                     } => {
-                        let _ = emitter.emit(TronEvent::ApiRetry {
-                            base: BaseEvent::now(session_id),
-                            attempt,
-                            max_retries,
-                            delay_ms,
-                            error_category: error.category,
-                            error_message: error.message,
-                        });
+                        if let Some(counter) = sequence_counter {
+                            let _ = emitter.emit_sequenced(TronEvent::ApiRetry {
+                                base: BaseEvent::now(session_id),
+                                attempt,
+                                max_retries,
+                                delay_ms,
+                                error_category: error.category,
+                                error_message: error.message,
+                            }, counter);
+                        } else {
+                            let _ = emitter.emit(TronEvent::ApiRetry {
+                                base: BaseEvent::now(session_id),
+                                attempt,
+                                max_retries,
+                                delay_ms,
+                                error_category: error.category,
+                                error_message: error.message,
+                            });
+                        }
                     }
 
                     StreamEvent::SafetyBlock {
@@ -554,7 +626,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -572,7 +644,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -601,7 +673,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -634,7 +706,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -658,7 +730,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools()).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), RuntimeError::Provider(_)));
@@ -682,7 +754,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -720,7 +792,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
         assert!(!result.interrupted);
@@ -746,7 +818,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools()).await;
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -765,7 +837,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -779,7 +851,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
 
-        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -794,7 +866,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools())
+        let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -814,7 +886,7 @@ mod tests {
         let mut rx = emitter.subscribe();
         let cancel = CancellationToken::new();
 
-        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools())
+        let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -909,7 +981,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1013,7 +1085,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1089,7 +1161,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1145,7 +1217,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1213,7 +1285,7 @@ mod tests {
 
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1266,7 +1338,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
         // AskUserQuestion is in the set, but Bash is not — no drain
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1308,7 +1380,7 @@ mod tests {
         };
 
         let emitter = make_emitter();
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None)
             .await
             .unwrap();
 
@@ -1356,7 +1428,7 @@ mod tests {
         let emitter = make_emitter();
         let cancel = CancellationToken::new();
         // Empty set — no drain should happen
-        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools())
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None)
             .await
             .unwrap();
 

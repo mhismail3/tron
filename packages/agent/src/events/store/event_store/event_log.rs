@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -54,7 +55,19 @@ impl EventStore {
             None => session.head_event_id.clone(),
         };
 
-        let sequence = EventRepo::get_next_sequence(&tx, opts.session_id)?;
+        let sequence = match opts.sequence {
+            Some(seq) => seq,
+            None => {
+                // Fallback: assign sequence from DB MAX+1. This path will be removed
+                // once all callers provide pre-assigned sequences.
+                tracing::trace!(
+                    session_id = opts.session_id,
+                    event_type = %opts.event_type,
+                    "sequence not pre-assigned, falling back to DB MAX+1"
+                );
+                EventRepo::get_next_sequence(&tx, opts.session_id)?
+            }
+        };
         let event_id = format!("evt_{}", Uuid::now_v7());
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -165,6 +178,7 @@ impl EventStore {
                     "reason": reason.unwrap_or("user_request"),
                 }),
                 parent_id: None,
+                sequence: None,
             })
         })
     }
@@ -201,6 +215,20 @@ impl EventStore {
     pub fn get_descendants(&self, event_id: &str) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_descendants(&conn, event_id)
+    }
+
+    /// Get the current maximum sequence number for a session (0 if no events).
+    pub fn get_max_sequence(&self, session_id: &str) -> Result<i64> {
+        let conn = self.conn()?;
+        let max: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(sequence) FROM events WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(max.unwrap_or(0))
     }
 
     /// Get events inserted after a specific sequence number.

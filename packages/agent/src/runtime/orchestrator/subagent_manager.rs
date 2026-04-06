@@ -394,6 +394,7 @@ impl SubagentSpawner for SubagentManager {
                     "workingDirectory": config.working_directory,
                 }),
                 parent_id: None,
+                sequence: None,
             });
         }
 

@@ -219,6 +219,7 @@ impl WorktreeCoordinator {
                 "forkedFrom": null
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Track
@@ -266,6 +267,7 @@ impl WorktreeCoordinator {
                 "branchPreserved": release_info.branch_preserved,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Broadcast to WebSocket clients
@@ -312,6 +314,7 @@ impl WorktreeCoordinator {
                 "newBranch": new_branch,
             }),
             parent_id: None,
+            sequence: None,
         });
 
         self.broadcast(TronEvent::WorktreeRenamed {
@@ -392,6 +395,7 @@ impl WorktreeCoordinator {
                 "deletions": deletions
             }),
             parent_id: None,
+            sequence: None,
         });
 
         // Broadcast to WebSocket clients
@@ -453,6 +457,7 @@ impl WorktreeCoordinator {
                     "strategy": result.strategy
                 }),
                 parent_id: None,
+                sequence: None,
             });
 
             // Broadcast to WebSocket clients

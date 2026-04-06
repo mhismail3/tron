@@ -2,14 +2,16 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
+use dashmap::DashMap;
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
 use crate::core::events::TronEvent;
 
 use metrics::gauge;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
@@ -89,6 +91,9 @@ pub struct Orchestrator {
     tool_tracker: Mutex<ToolCallTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
     turn_accumulators: Arc<TurnAccumulatorMap>,
+    /// Per-session monotonic sequence counters.
+    /// Key: session_id, Value: shared atomic counter (current value = last assigned).
+    sequence_counters: Arc<DashMap<String, Arc<AtomicI64>>>,
 }
 
 impl Orchestrator {
@@ -101,6 +106,7 @@ impl Orchestrator {
             run_registry: Arc::new(RunRegistry::new(max_concurrent)),
             tool_tracker: Mutex::new(ToolCallTracker::new()),
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
+            sequence_counters: Arc::new(DashMap::new()),
         }
     }
 
@@ -122,6 +128,58 @@ impl Orchestrator {
     /// Get the turn accumulator map (for session resume catch-up).
     pub fn turn_accumulators(&self) -> &Arc<TurnAccumulatorMap> {
         &self.turn_accumulators
+    }
+
+    // ── Per-session sequence counters ──
+
+    /// Initialize a sequence counter for a session.
+    ///
+    /// Called on session create (start=0) or session resume (start=MAX from DB).
+    pub fn init_sequence_counter(&self, session_id: &str, start: i64) {
+        let _ = self.sequence_counters
+            .insert(session_id.to_string(), Arc::new(AtomicI64::new(start)));
+        trace!(session_id, start, "sequence counter initialized");
+    }
+
+    /// Atomically increment and return the next sequence number for a session.
+    ///
+    /// Returns 1-based sequences (first call after init(0) returns 1).
+    /// Panics if the counter was not initialized — callers must ensure
+    /// `init_sequence_counter` was called first.
+    pub fn next_sequence(&self, session_id: &str) -> i64 {
+        let entry = self.sequence_counters.get(session_id).unwrap_or_else(|| {
+            panic!("sequence counter not initialized for session {session_id}");
+        });
+        let seq = entry.value().fetch_add(1, Ordering::SeqCst) + 1;
+        trace!(session_id, seq, "sequence assigned");
+        seq
+    }
+
+    /// Read the current sequence value without incrementing.
+    ///
+    /// Returns `None` if the counter was never initialized for this session.
+    pub fn current_sequence(&self, session_id: &str) -> Option<i64> {
+        self.sequence_counters
+            .get(session_id)
+            .map(|entry| entry.value().load(Ordering::SeqCst))
+    }
+
+    /// Remove the sequence counter for a session (cleanup on session end).
+    pub fn remove_sequence_counter(&self, session_id: &str) {
+        if self.sequence_counters.remove(session_id).is_some() {
+            trace!(session_id, "sequence counter removed");
+        }
+    }
+
+    /// Get a cloned reference to a session's sequence counter.
+    ///
+    /// Returns `None` if the counter was never initialized for this session.
+    /// The returned `Arc<AtomicI64>` can be passed to agents and held across
+    /// async boundaries without holding a DashMap lock.
+    pub fn get_sequence_counter(&self, session_id: &str) -> Option<Arc<AtomicI64>> {
+        self.sequence_counters
+            .get(session_id)
+            .map(|entry| Arc::clone(entry.value()))
     }
 
     /// Start tracking a run for a session.
@@ -264,6 +322,8 @@ impl Orchestrator {
         // Cancel all pending tool calls
         self.tool_tracker.lock().cancel_all();
 
+        // Clear all sequence counters
+        self.sequence_counters.clear();
 
         // List all active sessions and end them
         let sessions = self
@@ -560,6 +620,76 @@ mod tests {
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
         assert!(orch.is_session_busy(&sid));
+    }
+
+    // --- Sequence counter tests ---
+
+    #[test]
+    fn next_sequence_monotonic() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 0);
+        let seqs: Vec<i64> = (0..10).map(|_| orch.next_sequence("s1")).collect();
+        assert_eq!(seqs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn next_sequence_initializes_from_db() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 5);
+        assert_eq!(orch.next_sequence("s1"), 6);
+        assert_eq!(orch.next_sequence("s1"), 7);
+    }
+
+    #[test]
+    fn next_sequence_concurrent() {
+        use std::sync::Arc;
+        let orch = Arc::new(make_orchestrator());
+        orch.init_sequence_counter("s1", 0);
+
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let orch = Arc::clone(&orch);
+            handles.push(std::thread::spawn(move || orch.next_sequence("s1")));
+        }
+        let mut results: Vec<i64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        results.sort_unstable();
+        assert_eq!(results, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn next_sequence_cross_session_independent() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 0);
+        orch.init_sequence_counter("s2", 0);
+        assert_eq!(orch.next_sequence("s1"), 1);
+        assert_eq!(orch.next_sequence("s2"), 1);
+        assert_eq!(orch.next_sequence("s1"), 2);
+        assert_eq!(orch.next_sequence("s2"), 2);
+    }
+
+    #[test]
+    fn sequence_counter_cleaned_on_session_end() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 0);
+        assert!(orch.current_sequence("s1").is_some());
+        orch.remove_sequence_counter("s1");
+        assert!(orch.current_sequence("s1").is_none());
+    }
+
+    #[test]
+    fn current_sequence_returns_none_for_unknown() {
+        let orch = make_orchestrator();
+        assert!(orch.current_sequence("unknown").is_none());
+    }
+
+    #[test]
+    fn current_sequence_reads_without_increment() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 0);
+        let _ = orch.next_sequence("s1");
+        let _ = orch.next_sequence("s1");
+        assert_eq!(orch.current_sequence("s1"), Some(2));
+        assert_eq!(orch.current_sequence("s1"), Some(2));
     }
 
     // --- Orphaned run cleanup ---

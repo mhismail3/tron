@@ -1,7 +1,7 @@
 //! `TronAgent` — multi-turn agent with turn loop, abort, and state tracking.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 
 use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::guardrails::GuardrailEngine;
@@ -83,6 +83,8 @@ pub struct TronAgent {
     external_abort_token: bool,
     /// Optional inline event persister (injected by orchestrator).
     persister: Option<Arc<EventPersister>>,
+    /// Optional per-session sequence counter for monotonic event ordering.
+    sequence_counter: Option<Arc<AtomicI64>>,
     /// Optional process manager for background process execution.
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     /// Optional unified job manager for process + subagent lifecycle.
@@ -119,6 +121,7 @@ impl TronAgent {
             abort_token: CancellationToken::new(),
             external_abort_token: false,
             persister: None,
+            sequence_counter: None,
         }
     }
 
@@ -158,9 +161,15 @@ impl TronAgent {
         });
 
         // Emit AgentStart
-        let _ = self.emitter.emit(TronEvent::AgentStart {
-            base: BaseEvent::now(&self.session_id),
-        });
+        if let Some(ref counter) = self.sequence_counter {
+            let _ = self.emitter.emit_sequenced(TronEvent::AgentStart {
+                base: BaseEvent::now(&self.session_id),
+            }, counter);
+        } else {
+            let _ = self.emitter.emit(TronEvent::AgentStart {
+                base: BaseEvent::now(&self.session_id),
+            });
+        }
         debug!(session_id = %self.session_id, "agent run started");
 
         let max_turns = self.config.max_turns;
@@ -195,6 +204,7 @@ impl TronAgent {
                 process_manager: self.process_manager.as_ref(),
                 job_manager: self.job_manager.as_ref(),
                 output_buffer_registry: self.output_buffer_registry.as_ref(),
+                sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
             })
             .await;
 
@@ -292,10 +302,17 @@ impl TronAgent {
         }
 
         // Emit AgentEnd
-        let _ = self.emitter.emit(TronEvent::AgentEnd {
-            base: BaseEvent::now(&self.session_id),
-            error: error.clone(),
-        });
+        if let Some(ref counter) = self.sequence_counter {
+            let _ = self.emitter.emit_sequenced(TronEvent::AgentEnd {
+                base: BaseEvent::now(&self.session_id),
+                error: error.clone(),
+            }, counter);
+        } else {
+            let _ = self.emitter.emit(TronEvent::AgentEnd {
+                base: BaseEvent::now(&self.session_id),
+                error: error.clone(),
+            });
+        }
 
         // _guard drops here, resetting is_running (even on panic)
 
@@ -326,6 +343,11 @@ impl TronAgent {
             self.compaction.set_persister(p.clone());
         }
         self.persister = persister;
+    }
+
+    /// Set the per-session sequence counter for monotonic event ordering.
+    pub fn set_sequence_counter(&mut self, counter: Arc<AtomicI64>) {
+        self.sequence_counter = Some(counter);
     }
 
     /// Abort the current run.

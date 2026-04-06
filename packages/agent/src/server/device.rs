@@ -87,6 +87,7 @@ impl DeviceRequestBroker {
                 "params": params,
             })),
             run_id: None,
+            sequence: None,
         };
         self.broadcast
             .broadcast_to_session(session_id, &event)

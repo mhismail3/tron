@@ -180,6 +180,7 @@ mod tests {
             timestamp: "2026-01-01T00:00:00.000Z".into(),
             data: None,
             run_id: None,
+            sequence: None,
         }
     }
 
@@ -314,6 +315,7 @@ mod tests {
             timestamp: "2026-02-13T15:30:00.000Z".into(),
             data: Some(serde_json::json!({"text": "hello"})),
             run_id: Some("run_1".into()),
+            sequence: Some(1),
         };
         bm.broadcast_to_session("sess_a", &event).await;
 

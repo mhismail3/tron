@@ -239,6 +239,7 @@ mod tests {
                 event_type: crate::events::EventType::MessageUser,
                 payload: serde_json::json!({"text": "hello"}),
                 parent_id: None,
+                sequence: None,
             })
             .unwrap();
         assert_eq!(event.session_id, sid);
