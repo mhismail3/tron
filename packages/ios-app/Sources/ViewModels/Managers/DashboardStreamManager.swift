@@ -20,7 +20,6 @@ struct DashboardStreamLine: Identifiable {
         case userPrompt
         case toolStart
         case toolEnd
-        case toolBatch
         case subagentSpawn
         case subagentDone
         case subagentFailed

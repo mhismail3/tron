@@ -351,20 +351,20 @@ enum ToolRegistry {
         ),
         // Special tools — not command chips, but need metadata for dashboard cards
         "notifyapp": ToolDescriptor(
-            icon: "bell.badge",
-            iconColor: .tronAmber,
-            iconColorName: "tronAmber",
-            displayName: "Notify",
-            completedDisplayName: "Notified",
+            icon: "bell.badge.fill",
+            iconColor: .tronSuccess,
+            iconColorName: "tronSuccess",
+            displayName: "Notification sent",
+            completedDisplayName: "Notification sent",
             summaryExtractor: { _ in "" },
             viewerFactory: nil
         ),
         "spawnsubagent": ToolDescriptor(
-            icon: "person.2",
-            iconColor: .tronPurple,
-            iconColorName: "tronPurple",
-            displayName: "Agent",
-            completedDisplayName: "Agent",
+            icon: "checkmark.circle.fill",
+            iconColor: .tronSuccess,
+            iconColorName: "tronSuccess",
+            displayName: "Subagent",
+            completedDisplayName: "Subagent",
             summaryExtractor: { args in ToolArgumentParser.string("task", from: args) ?? "" },
             viewerFactory: nil
         ),

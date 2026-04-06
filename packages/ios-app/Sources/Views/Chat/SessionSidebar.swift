@@ -320,39 +320,32 @@ struct MiniChatActivityView: View {
                 status: line.status ?? "success"
             )
 
-        case "toolBatch":
-            HStack(spacing: 4) {
-                Text("⚡")
-                    .foregroundStyle(.tronEmerald)
-                Text(line.text)
-                    .foregroundStyle(.tronEmerald)
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
-
         case "subagentSpawn":
-            HStack(spacing: 4) {
-                Text("◆").foregroundStyle(.tronPurple)
-                Text(line.text).foregroundStyle(.tronPurple)
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1).truncationMode(.tail)
+            MiniToolChip(
+                name: "Subagent",
+                icon: "person.2",
+                color: .tronAmber,
+                summary: line.text.hasPrefix("Agent: ") ? String(line.text.dropFirst(7)) : line.text,
+                status: "running"
+            )
 
         case "subagentDone":
-            HStack(spacing: 4) {
-                Text("◆").foregroundStyle(.tronPurple.opacity(0.7))
-                Text(line.text).foregroundStyle(.tronPurple.opacity(0.7))
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1)
+            MiniToolChip(
+                name: "Subagent",
+                icon: "checkmark.circle.fill",
+                color: .tronSuccess,
+                summary: line.text,
+                status: "success"
+            )
 
         case "subagentFailed":
-            HStack(spacing: 4) {
-                Text("◆").foregroundStyle(.red.opacity(0.7))
-                Text(line.text).foregroundStyle(.red.opacity(0.7))
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-            .lineLimit(1).truncationMode(.tail)
+            MiniToolChip(
+                name: "Subagent",
+                icon: "xmark.circle.fill",
+                color: .tronError,
+                summary: line.text,
+                status: "error"
+            )
 
         case "thinking":
             MiniThinkingRow()
@@ -521,6 +514,8 @@ extension String {
         case "tronPurple": return .tronPurple
         case "tronIndigo": return .tronIndigo
         case "tronTeal": return .tronTeal
+        case "tronSuccess": return .tronSuccess
+        case "tronError": return .tronError
         case "tronTextMuted": return .tronTextMuted
         default: return .tronTextMuted
         }
