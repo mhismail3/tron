@@ -131,19 +131,6 @@ impl EventRepo {
         Ok(rows)
     }
 
-    /// Get next sequence number for a session.
-    pub fn get_next_sequence(conn: &Connection, session_id: &str) -> Result<i64> {
-        let max: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(sequence) FROM events WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten();
-        Ok(max.unwrap_or(0) + 1)
-    }
-
     /// Get ancestor chain from root to the given event (inclusive), using recursive CTE.
     pub fn get_ancestors(conn: &Connection, event_id: &str) -> Result<Vec<EventRow>> {
         let sql = format!(
@@ -1028,28 +1015,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(events.len(), 3);
-    }
-
-    #[test]
-    fn get_next_sequence_empty() {
-        let conn = setup();
-        assert_eq!(EventRepo::get_next_sequence(&conn, "sess_1").unwrap(), 1);
-    }
-
-    #[test]
-    fn get_next_sequence_after_events() {
-        let conn = setup();
-        for i in 1..=3 {
-            let event = make_event(
-                &format!("evt_{i}"),
-                i,
-                EventType::MessageUser,
-                None,
-                json!({}),
-            );
-            EventRepo::insert(&conn, &event).unwrap();
-        }
-        assert_eq!(EventRepo::get_next_sequence(&conn, "sess_1").unwrap(), 4);
     }
 
     #[test]

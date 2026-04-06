@@ -1,4 +1,4 @@
-//! Agent handlers: prompt, abort, getState.
+//! Agent handlers: prompt, abort.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -7,7 +7,6 @@ use tracing::instrument;
 use crate::events::EventType;
 
 use crate::server::rpc::agent_commands::AgentCommandService;
-use crate::server::rpc::agent_queries::AgentQueryService;
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{opt_array, opt_string, require_string_param};
@@ -112,18 +111,6 @@ impl MethodHandler for AbortHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         AgentCommandService::abort(ctx, &session_id)
-    }
-}
-
-/// Get the current agent state for a session.
-pub struct GetAgentStateHandler;
-
-#[async_trait]
-impl MethodHandler for GetAgentStateHandler {
-    #[instrument(skip(self, ctx), fields(method = "agent.getState", session_id))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        AgentQueryService::get_state(ctx, session_id).await
     }
 }
 

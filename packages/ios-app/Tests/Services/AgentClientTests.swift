@@ -60,32 +60,6 @@ struct AgentClientTests {
             if abortShouldThrow { throw TestError.mockError }
         }
 
-        func getState() async throws -> AgentStateResult {
-            getStateCallCount += 1
-            getStateSessionId = nil
-            if getStateShouldThrow { throw TestError.mockError }
-            return makeAgentStateResult()
-        }
-
-        func getState(sessionId: String) async throws -> AgentStateResult {
-            getStateCallCount += 1
-            getStateSessionId = sessionId
-            if getStateShouldThrow { throw TestError.mockError }
-            return makeAgentStateResult()
-        }
-
-        private func makeAgentStateResult() -> AgentStateResult {
-            let json = """
-            {
-                "isRunning": \(getStateIsRunning),
-                "currentTurn": \(getStateCurrentTurn),
-                "messageCount": \(getStateMessageCount),
-                "model": "\(getStateModel)"
-            }
-            """
-            return try! JSONDecoder().decode(AgentStateResult.self, from: json.data(using: .utf8)!)
-        }
-
         func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
             sendToolResultCallCount += 1
             sendToolResultSessionId = sessionId
@@ -251,40 +225,6 @@ struct AgentClientTests {
 
         await #expect(throws: MockAgentClient.TestError.self) {
             try await mock.abort()
-        }
-    }
-
-    // MARK: - Get State Tests
-
-    @Test("Get state for current session")
-    func testGetState_currentSession() async throws {
-        let mock = MockAgentClient()
-        mock.getStateIsRunning = true
-        mock.getStateCurrentTurn = 3
-
-        let result = try await mock.getState()
-
-        #expect(mock.getStateCallCount == 1)
-        #expect(result.isRunning == true)
-        #expect(result.currentTurn == 3)
-    }
-
-    @Test("Get state for specific session")
-    func testGetState_specificSession() async throws {
-        let mock = MockAgentClient()
-
-        _ = try await mock.getState(sessionId: "session-123")
-
-        #expect(mock.getStateSessionId == "session-123")
-    }
-
-    @Test("Get state throws on error")
-    func testGetState_throwsOnError() async throws {
-        let mock = MockAgentClient()
-        mock.getStateShouldThrow = true
-
-        await #expect(throws: MockAgentClient.TestError.self) {
-            _ = try await mock.getState()
         }
     }
 

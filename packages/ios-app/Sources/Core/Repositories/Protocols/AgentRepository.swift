@@ -22,15 +22,6 @@ protocol AgentRepository: AnyObject {
     /// Abort the current agent operation.
     func abort() async throws
 
-    /// Get the current agent state.
-    /// - Returns: The current agent state
-    func getState() async throws -> AgentStateResult
-
-    /// Get agent state for a specific session.
-    /// - Parameter sessionId: The session ID to get state for
-    /// - Returns: The agent state for the session
-    func getState(sessionId: String) async throws -> AgentStateResult
-
     /// Send a tool result for interactive tools.
     /// - Parameters:
     ///   - sessionId: The session ID

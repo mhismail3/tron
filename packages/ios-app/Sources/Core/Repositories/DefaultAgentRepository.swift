@@ -34,14 +34,6 @@ final class DefaultAgentRepository: AgentRepository {
         try await agentClient.abort()
     }
 
-    func getState() async throws -> AgentStateResult {
-        try await agentClient.getState()
-    }
-
-    func getState(sessionId: String) async throws -> AgentStateResult {
-        try await agentClient.getState(sessionId: sessionId)
-    }
-
     func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
         try await agentClient.sendToolResult(sessionId: sessionId, toolCallId: toolCallId, result: result)
     }

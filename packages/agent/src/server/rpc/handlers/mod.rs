@@ -90,7 +90,6 @@ fn register_core(registry: &mut MethodRegistry) {
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
     registry.register("agent.abort", agent::AbortHandler);
-    registry.register("agent.getState", agent::GetAgentStateHandler);
 
     // Model
     registry.register("model.list", model::ListModelsHandler);
@@ -525,8 +524,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            128,
-            "expected 128 methods, got {}",
+            127,
+            "expected 127 methods, got {}",
             reg.methods().len()
         );
     }

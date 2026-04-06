@@ -4,7 +4,7 @@
 //!
 //! Implements the full RPC surface that clients connect to:
 //! - Session: create, resume, list, delete, fork, getHead, getState, reconstruct
-//! - Agent: prompt, abort, getState
+//! - Agent: prompt, abort
 //! - Model: list, switch
 //! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
 //! - Events: getHistory, getSince, subscribe, append
@@ -13,7 +13,6 @@
 //! - Plus: browser, device, task, transcription, worktree, tree
 
 pub(crate) mod agent_commands;
-pub(crate) mod agent_queries;
 pub(crate) mod client_logs;
 pub mod context;
 pub(crate) mod context_commands;

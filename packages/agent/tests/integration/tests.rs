@@ -459,7 +459,7 @@ async fn e2e_agent_get_state() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -479,13 +479,12 @@ async fn e2e_agent_get_state() {
     let resp = rpc_call(
         &mut ws,
         4,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["isRunning"], true);
-    assert!(resp["result"]["runId"].is_string());
 
     server.shutdown().shutdown();
 }
@@ -1588,7 +1587,7 @@ async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
         let resp = rpc_call(
             ws,
             id_start + i,
-            "agent.getState",
+            "session.reconstruct",
             Some(json!({"sessionId": sid})),
         )
         .await;
@@ -1677,7 +1676,7 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
     let state = rpc_call(
         &mut ws,
         3,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1807,7 +1806,7 @@ async fn e2e_prompt_cleans_up_on_complete() {
     let resp = rpc_call(
         &mut ws,
         10,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2031,15 +2030,15 @@ async fn e2e_prompt_run_id_matches() {
     let run_id = resp["result"]["runId"].as_str().unwrap().to_string();
     assert!(!run_id.is_empty());
 
-    // getState should show the same runId while busy
+    // session.reconstruct should show running while agent is busy
     let resp = rpc_call(
         &mut ws,
         3,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
-    assert_eq!(resp["result"]["runId"], run_id);
+    assert_eq!(resp["result"]["isRunning"], true);
 
     server.shutdown().shutdown();
 }
@@ -2137,7 +2136,7 @@ async fn e2e_prompt_state_transitions() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2159,7 +2158,7 @@ async fn e2e_prompt_state_transitions() {
     let resp = rpc_call(
         &mut ws,
         10,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2204,15 +2203,16 @@ async fn e2e_agent_get_state_ios_compat() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.getState",
+        "session.reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
     let result = &resp["result"];
     assert_eq!(result["isRunning"], false);
-    assert!(result["currentTurn"].is_number());
-    assert!(result["messageCount"].is_number());
-    assert!(result["model"].is_string());
+    assert!(result["metadata"]["turnCount"].is_number());
+    assert!(result["metadata"]["model"].is_string());
+    assert!(result["lastSequence"].is_number());
+    assert!(result["events"].is_array());
 
     server.shutdown().shutdown();
 }

@@ -129,11 +129,7 @@ struct AgentAbortParams: Encodable {
     let sessionId: String
 }
 
-struct AgentStateParams: Encodable {
-    let sessionId: String
-}
-
-/// Tool call info for in-progress turn (for resume support)
+/// Tool call info for in-progress turn (used by session.reconstruct inFlight state)
 struct CurrentTurnToolCall: Decodable {
     let toolCallId: String
     let toolName: String
@@ -173,32 +169,7 @@ enum ContentSequenceItem: Decodable {
     }
 }
 
-struct AgentStateResult: Decodable {
-    let isRunning: Bool
-    let currentTurn: Int
-    let messageCount: Int
-    let tokenUsage: AgentStateTokenUsage?
-    let model: String
-    let tools: [String]?  // Server returns this but we don't need it
-    /// Accumulated text from current in-progress turn (for resume)
-    let currentTurnText: String?
-    /// Tool calls from current in-progress turn (for resume)
-    let currentTurnToolCalls: [CurrentTurnToolCall]?
-    /// Structured content sequence for catch-up (interleaved text/thinking/tool_ref)
-    let contentSequence: [ContentSequenceItem]?
-    /// Whether the session was interrupted (last assistant message has interrupted flag)
-    let wasInterrupted: Bool?
-}
-
 // MARK: - Token Usage Types
-
-/// Token usage specifically for agent.getState response (uses different field names)
-struct AgentStateTokenUsage: Decodable {
-    let input: Int
-    let output: Int
-
-    var totalTokens: Int { input + output }
-}
 
 struct TokenUsage: Decodable, Equatable {
     let inputTokens: Int

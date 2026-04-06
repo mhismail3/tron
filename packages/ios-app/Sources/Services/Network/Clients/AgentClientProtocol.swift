@@ -13,10 +13,6 @@ protocol AgentClientProtocol {
 
     func abort() async throws
 
-    func getState() async throws -> AgentStateResult
-
-    func getState(sessionId: String) async throws -> AgentStateResult
-
     func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws
 
     // Session-scoped skill methods

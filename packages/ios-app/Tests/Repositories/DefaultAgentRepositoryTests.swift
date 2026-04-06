@@ -19,13 +19,6 @@ final class MockAgentClientForRepository {
     var abortCallCount = 0
     var abortError: Error?
 
-    // Get State
-    var getStateCallCount = 0
-    var getStateWithSessionCallCount = 0
-    var lastGetStateSessionId: String?
-    var getStateResultToReturn: AgentStateResult?
-    var getStateError: Error?
-
     // Send Tool Result
     var sendToolResultCallCount = 0
     var lastSendToolResultSessionId: String?
@@ -59,23 +52,6 @@ final class MockAgentClientForRepository {
         }
     }
 
-    func getState() async throws -> AgentStateResult {
-        getStateCallCount += 1
-        if let error = getStateError {
-            throw error
-        }
-        return getStateResultToReturn ?? createMockAgentState()
-    }
-
-    func getState(sessionId: String) async throws -> AgentStateResult {
-        getStateWithSessionCallCount += 1
-        lastGetStateSessionId = sessionId
-        if let error = getStateError {
-            throw error
-        }
-        return getStateResultToReturn ?? createMockAgentState()
-    }
-
     func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
         sendToolResultCallCount += 1
         lastSendToolResultSessionId = sessionId
@@ -85,17 +61,6 @@ final class MockAgentClientForRepository {
         }
     }
 
-    private func createMockAgentState() -> AgentStateResult {
-        let json = """
-        {
-            "isRunning": false,
-            "currentTurn": 0,
-            "messageCount": 0,
-            "model": "claude-sonnet-4-20250514"
-        }
-        """
-        return try! JSONDecoder().decode(AgentStateResult.self, from: json.data(using: .utf8)!)
-    }
 }
 
 // MARK: - DefaultAgentRepository Tests
@@ -191,39 +156,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
             XCTFail("Expected error to be thrown")
         } catch {
             XCTAssertEqual(mockClient.abortCallCount, 1)
-        }
-    }
-
-    // MARK: - Get State Tests
-
-    func test_getState_callsClient() async throws {
-        // When
-        let state = try await mockClient.getState()
-
-        // Then
-        XCTAssertEqual(mockClient.getStateCallCount, 1)
-        XCTAssertNotNil(state)
-    }
-
-    func test_getState_withSessionId_passesSessionId() async throws {
-        // When
-        _ = try await mockClient.getState(sessionId: "session-123")
-
-        // Then
-        XCTAssertEqual(mockClient.getStateWithSessionCallCount, 1)
-        XCTAssertEqual(mockClient.lastGetStateSessionId, "session-123")
-    }
-
-    func test_getState_throwsError() async throws {
-        // Given
-        mockClient.getStateError = NSError(domain: "Test", code: 1, userInfo: nil)
-
-        // When/Then
-        do {
-            _ = try await mockClient.getState()
-            XCTFail("Expected error to be thrown")
-        } catch {
-            XCTAssertEqual(mockClient.getStateCallCount, 1)
         }
     }
 

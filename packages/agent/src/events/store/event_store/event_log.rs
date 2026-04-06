@@ -58,14 +58,22 @@ impl EventStore {
         let sequence = match opts.sequence {
             Some(seq) => seq,
             None => {
-                // Fallback: assign sequence from DB MAX+1. This path will be removed
-                // once all callers provide pre-assigned sequences.
+                // Fallback: assign sequence from DB MAX+1. Used by non-agent callers
+                // (cron, session manager, recovery) that don't have a sequence counter.
                 tracing::trace!(
                     session_id = opts.session_id,
                     event_type = %opts.event_type,
                     "sequence not pre-assigned, falling back to DB MAX+1"
                 );
-                EventRepo::get_next_sequence(&tx, opts.session_id)?
+                let max: Option<i64> = tx
+                    .query_row(
+                        "SELECT MAX(sequence) FROM events WHERE session_id = ?1",
+                        rusqlite::params![opts.session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .flatten();
+                max.unwrap_or(0) + 1
             }
         };
         let event_id = format!("evt_{}", Uuid::now_v7());

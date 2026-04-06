@@ -78,21 +78,6 @@ final class AgentClient {
         logger.info("Aborted agent", category: .chat)
     }
 
-    func getState() async throws -> AgentStateResult {
-        let (ws, sessionId) = try requireTransport().requireSession()
-
-        let params = AgentStateParams(sessionId: sessionId)
-        return try await ws.send(method: "agent.getState", params: params)
-    }
-
-    /// Get agent state for a specific session (used for dashboard polling)
-    func getState(sessionId: String) async throws -> AgentStateResult {
-        let ws = try requireTransport().requireConnection()
-
-        let params = AgentStateParams(sessionId: sessionId)
-        return try await ws.send(method: "agent.getState", params: params)
-    }
-
     // MARK: - Tool Result Methods
 
     /// Send a tool result for interactive tools like AskUserQuestion.

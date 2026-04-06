@@ -217,17 +217,7 @@ final class TokenTypesTests: XCTestCase {
         XCTAssertEqual(usage.formattedTotal, "15.9k")
     }
 
-    func testAgentStateTokenUsage() throws {
-        let json = """
-        {"input": 1000, "output": 500}
-        """.data(using: .utf8)!
-
-        let usage = try JSONDecoder().decode(AgentStateTokenUsage.self, from: json)
-
-        XCTAssertEqual(usage.input, 1000)
-        XCTAssertEqual(usage.output, 500)
-        XCTAssertEqual(usage.totalTokens, 1500)
-    }
+    // testAgentStateTokenUsage removed — AgentStateTokenUsage deleted in Phase 5
 }
 
 // MARK: - Worktree Types Tests

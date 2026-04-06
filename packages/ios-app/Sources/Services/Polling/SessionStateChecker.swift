@@ -39,9 +39,9 @@ final class SessionStateChecker {
                 }
             }
 
-            let state = try await rpcClient.agent.getState(sessionId: sessionId)
+            let result = try await rpcClient.session.reconstruct(sessionId: sessionId, limit: 0)
             consecutiveFailures.removeValue(forKey: sessionId)
-            return state.isRunning
+            return result.isRunning
         } catch {
             logger.debug("Failed to check session \(sessionId) state: \(error.localizedDescription)")
             consecutiveFailures[sessionId, default: 0] += 1
