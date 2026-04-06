@@ -130,7 +130,7 @@ enum ContentExtractor {
         let durationMs: Int?
     }
 
-    static func extractActivityLines(from events: [SessionEvent]) -> [CachedActivityLine] {
+    static func extractActivityLines(from events: [SessionEvent]) -> [ActivityLine] {
         // Pass 1: collect tool result info by tool_use_id
         // Server stores camelCase keys (toolCallId, isError, duration)
         var toolResults: [String: ToolResultInfo] = [:]
@@ -148,7 +148,7 @@ enum ContentExtractor {
         }
 
         // Pass 2: walk events in order, building activity lines
-        var lines: [CachedActivityLine] = []
+        var lines: [ActivityLine] = []
 
         for event in events {
             switch event.type {
@@ -157,8 +157,9 @@ enum ContentExtractor {
                 if !text.isEmpty {
                     let firstLine = text.trimmingCharacters(in: .whitespacesAndNewlines)
                         .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
-                    let truncated = firstLine.count > 100 ? String(firstLine.prefix(100)) : firstLine
-                    lines.append(CachedActivityLine(kind: "userPrompt", text: truncated.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    let maxLen = DashboardConstants.maxUserPromptLength
+                    let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
+                    lines.append(ActivityLine(kind: .userPrompt, text: truncated.trimmingCharacters(in: .whitespacesAndNewlines)))
                 }
 
             case PersistedEventType.messageAssistant.rawValue:
@@ -186,27 +187,29 @@ enum ContentExtractor {
                         let isError = result?.isError ?? false
                         let duration = result?.durationMs.map { SessionStreamBuffer.formatDuration($0) }
 
-                        lines.append(CachedActivityLine(
-                            kind: "toolStart",
+                        lines.append(ActivityLine(
+                            kind: .toolStart,
                             text: name,
                             icon: descriptor.icon,
-                            iconColor: descriptor.iconColorName,
+                            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
+                            toolName: name,
                             displayName: descriptor.displayName,
                             summary: summary.isEmpty ? nil : summary,
                             duration: duration,
-                            status: isError ? "error" : "success"
+                            status: isError ? .error : .success
                         ))
 
                     } else if type == ContentBlockType.text.rawValue, let text = block["text"] as? String {
                         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
                             let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-                            let truncated = firstLine.count > 200 ? String(firstLine.prefix(200)) : firstLine
-                            lines.append(CachedActivityLine(kind: "text", text: truncated))
+                            let maxLen = DashboardConstants.maxAssistantTextLength
+                            let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
+                            lines.append(ActivityLine(kind: .text, text: truncated))
                         }
 
                     } else if type == ContentBlockType.thinking.rawValue {
-                        lines.append(CachedActivityLine(kind: "thinking", text: "Thinking"))
+                        lines.append(ActivityLine(kind: .thinking, text: "Thinking"))
                     }
                 }
 
@@ -215,7 +218,7 @@ enum ContentExtractor {
             }
         }
 
-        return Array(lines.suffix(5))
+        return Array(lines.suffix(DashboardConstants.maxActivityLines))
     }
 
     /// Serialize tool input dictionary to JSON string for ToolRegistry's summaryExtractor.

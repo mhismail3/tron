@@ -161,7 +161,7 @@ struct FloatingChatPill: View {
                     .foregroundStyle(.tronMint)
                     .symbolEffect(.pulse, options: .repeating)
 
-                if let lastLine = streamManager.visibleLines(for: session.id, count: 1).last {
+                if let lastLine = streamManager.activityLines(for: session.id, persisted: session.lastActivityLines, count: 1).last {
                     Text(lastLine.text)
                         .font(TronTypography.codeSM)
                         .foregroundStyle(.tronMint.opacity(0.7))
@@ -255,13 +255,8 @@ struct CachedSessionSidebarRow: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
-            // Mini-chat content — unified rendering for both live and persisted
-            let activityLines: [CachedActivityLine] = {
-                if streamManager.hasContent(for: session.id) {
-                    return streamManager.snapshotLines(for: session.id)
-                }
-                return session.lastActivityLines ?? []
-            }()
+            // Mini-chat content — single data source for both live and persisted
+            let activityLines = streamManager.activityLines(for: session.id, persisted: session.lastActivityLines)
             if !activityLines.isEmpty {
                 MiniChatActivityView(lines: activityLines)
             }
@@ -291,7 +286,7 @@ struct CachedSessionSidebarRow: View {
 
 @available(iOS 26.0, *)
 struct MiniChatActivityView: View {
-    let lines: [CachedActivityLine]
+    let lines: [ActivityLine]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -302,64 +297,61 @@ struct MiniChatActivityView: View {
     }
 
     @ViewBuilder
-    private func miniChatLine(_ line: CachedActivityLine) -> some View {
+    private func miniChatLine(_ line: ActivityLine) -> some View {
         switch line.kind {
-        case "userPrompt":
+        case .userPrompt:
             MiniMessageRow(text: line.text, isUser: true)
 
-        case "text":
+        case .text:
             MiniMessageRow(text: line.text, isUser: false)
 
-        case "toolStart", "toolEnd":
+        case .toolStart, .toolEnd:
             MiniToolChip(
                 name: line.displayName ?? line.text,
                 icon: line.icon ?? "gearshape",
-                color: (line.iconColor ?? "tronTextMuted").resolvedToolColor,
+                color: (line.iconColor ?? .tronTextMuted).color,
                 summary: line.summary,
                 duration: line.duration,
-                status: line.status ?? "success"
+                status: line.status ?? .success
             )
 
-        case "subagentSpawn":
+        case .subagentSpawn:
             MiniToolChip(
                 name: "Subagent",
                 icon: "person.2",
                 color: .tronAmber,
                 summary: line.text.hasPrefix("Agent: ") ? String(line.text.dropFirst(7)) : line.text,
-                status: "running"
+                status: .running
             )
 
-        case "subagentDone":
+        case .subagentDone:
             MiniToolChip(
                 name: "Subagent",
                 icon: "checkmark.circle.fill",
                 color: .tronSuccess,
                 summary: line.text,
-                status: "success"
+                status: .success
             )
 
-        case "subagentFailed":
+        case .subagentFailed:
             MiniToolChip(
                 name: "Subagent",
                 icon: "xmark.circle.fill",
                 color: .tronError,
                 summary: line.text,
-                status: "error"
+                status: .error
             )
 
-        case "thinking":
+        case .thinking:
             MiniThinkingRow()
 
-        case "error":
+        case .error:
             HStack(spacing: 4) {
                 Text("⚠").foregroundStyle(.red.opacity(0.8))
                 Text(line.text).foregroundStyle(.red.opacity(0.8))
             }
             .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1).truncationMode(.tail)
-
-        default:
-            MiniMessageRow(text: line.text, isUser: false)
         }
     }
 }
@@ -433,21 +425,21 @@ struct MiniToolChip: View {
     let color: Color
     var summary: String?
     var duration: String?
-    var status: String?  // "running", "success", "error"
+    var status: ActivityLineStatus?
 
     private var statusColor: Color {
-        status == "error" ? .tronError : color
+        status == .error ? .tronError : color
     }
 
     var body: some View {
         HStack(spacing: 4) {
             // Status icon
-            if status == "running" {
+            if status == .running {
                 ProgressView()
                     .scaleEffect(0.5)
                     .frame(width: 10, height: 10)
                     .tint(color)
-            } else if status == "error" {
+            } else if status == .error {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.tronError)
@@ -496,30 +488,6 @@ struct ProcessingBar: View {
             .opacity(isPulsing ? 0.3 : 0.8)
             .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isPulsing)
             .onAppear { isPulsing = true }
-    }
-}
-
-// MARK: - Tool Color Resolution
-
-extension String {
-    var resolvedToolColor: Color {
-        switch self {
-        case "tronSlate": return .tronSlate
-        case "tronPink": return .tronPink
-        case "orange": return .orange
-        case "tronEmerald": return .tronEmerald
-        case "purple": return .purple
-        case "cyan": return .cyan
-        case "tronInfo": return .tronInfo
-        case "tronAmber": return .tronAmber
-        case "tronPurple": return .tronPurple
-        case "tronIndigo": return .tronIndigo
-        case "tronTeal": return .tronTeal
-        case "tronSuccess": return .tronSuccess
-        case "tronError": return .tronError
-        case "tronTextMuted": return .tronTextMuted
-        default: return .tronTextMuted
-        }
     }
 }
 

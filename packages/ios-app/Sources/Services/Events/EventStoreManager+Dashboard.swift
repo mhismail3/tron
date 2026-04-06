@@ -135,7 +135,7 @@ extension EventStoreManager {
     }
 
     /// Update persisted activity lines for a session's card display.
-    func updateSessionActivityLines(sessionId: String, lines: [CachedActivityLine]) {
+    func updateSessionActivityLines(sessionId: String, lines: [ActivityLine]) {
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
             updateSession(at: index) { $0.lastActivityLines = lines }
         }

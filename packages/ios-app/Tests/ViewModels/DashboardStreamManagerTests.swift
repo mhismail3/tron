@@ -32,7 +32,7 @@ final class SessionStreamBufferTests: XCTestCase {
         buffer.appendTextDelta(longText)
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].text.count, SessionStreamBuffer.maxTextLineLength)
+        XCTAssertEqual(buffer.lines[0].text.count, DashboardConstants.maxAssistantTextLength)
         XCTAssertTrue(buffer.lines[0].text.hasPrefix("AAA"))
     }
 
@@ -100,7 +100,7 @@ final class SessionStreamBufferTests: XCTestCase {
         XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].kind, .toolEnd)
         XCTAssertEqual(buffer.lines[0].toolName, "Edit")
-        XCTAssertEqual(buffer.lines[0].status, "success")
+        XCTAssertEqual(buffer.lines[0].status, .success)
     }
 
     func testToolEndCreatesLineFailure() {
@@ -108,7 +108,7 @@ final class SessionStreamBufferTests: XCTestCase {
         buffer.addToolEnd(name: "Bash", success: false)
 
         XCTAssertEqual(buffer.lines[0].toolName, "Bash")
-        XCTAssertEqual(buffer.lines[0].status, "error")
+        XCTAssertEqual(buffer.lines[0].status, .error)
     }
 
     // MARK: - Subagent Events
@@ -218,7 +218,7 @@ final class SessionStreamBufferTests: XCTestCase {
             buffer.addError(message: "Error \(i)")
         }
 
-        XCTAssertEqual(buffer.lines.count, SessionStreamBuffer.maxLines)
+        XCTAssertEqual(buffer.lines.count, DashboardConstants.maxStreamBufferLines)
         XCTAssertEqual(buffer.lines.last?.text, "Error 11")
         XCTAssertEqual(buffer.lines.first?.text, "Error 4")
     }
@@ -279,7 +279,7 @@ final class SessionStreamBufferTests: XCTestCase {
         XCTAssertEqual(buffer.lines[0].kind, .text)
         XCTAssertEqual(buffer.lines[0].text, "first text")
         XCTAssertEqual(buffer.lines[1].kind, .toolStart)
-        XCTAssertEqual(buffer.lines[1].status, "success")
+        XCTAssertEqual(buffer.lines[1].status, .success)
         XCTAssertEqual(buffer.lines[2].kind, .text)
         XCTAssertEqual(buffer.lines[2].text, "second text")
     }
@@ -611,9 +611,9 @@ final class DashboardStreamManagerTests: XCTestCase {
 
         let snapshot = manager.snapshotLines(for: "s1", count: 3)
         XCTAssertEqual(snapshot.count, 2)
-        XCTAssertEqual(snapshot[0].kind, "text")
+        XCTAssertEqual(snapshot[0].kind, .text)
         XCTAssertEqual(snapshot[0].text, "hello")
-        XCTAssertEqual(snapshot[1].kind, "toolStart")
+        XCTAssertEqual(snapshot[1].kind, .toolStart)
         XCTAssertEqual(snapshot[1].text, "Edit")
     }
 
@@ -644,14 +644,14 @@ final class SessionStreamBufferToolTests: XCTestCase {
     func testToolEndUpdatesExistingToolStartInPlace() {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "Edit", arguments: ["file_path": AnyCodable("/a/b/c.rs")])
-        XCTAssertEqual(buffer.lines[0].status, "running")
+        XCTAssertEqual(buffer.lines[0].status, .running)
 
         buffer.addToolEnd(name: "Edit", success: true, durationMs: 50)
 
         // Same line count — updated in place
         XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].kind, .toolStart)
-        XCTAssertEqual(buffer.lines[0].status, "success")
+        XCTAssertEqual(buffer.lines[0].status, .success)
         XCTAssertEqual(buffer.lines[0].duration, "50ms")
         XCTAssertEqual(buffer.lines[0].summary, "c.rs") // preserved
     }
@@ -661,7 +661,7 @@ final class SessionStreamBufferToolTests: XCTestCase {
         buffer.addToolStart(name: "Read", arguments: ["file_path": AnyCodable("/missing.txt")])
         buffer.addToolEnd(name: "Read", success: false, durationMs: 2)
 
-        XCTAssertEqual(buffer.lines[0].status, "error")
+        XCTAssertEqual(buffer.lines[0].status, .error)
         XCTAssertEqual(buffer.lines[0].duration, "2ms")
     }
 
@@ -677,11 +677,11 @@ final class SessionStreamBufferToolTests: XCTestCase {
 
         XCTAssertEqual(buffer.lines.count, 3)
         XCTAssertEqual(buffer.lines[0].toolName, "Edit")
-        XCTAssertEqual(buffer.lines[0].status, "success")
+        XCTAssertEqual(buffer.lines[0].status, .success)
         XCTAssertEqual(buffer.lines[1].toolName, "Bash")
-        XCTAssertEqual(buffer.lines[1].status, "success")
+        XCTAssertEqual(buffer.lines[1].status, .success)
         XCTAssertEqual(buffer.lines[2].toolName, "Read")
-        XCTAssertEqual(buffer.lines[2].status, "error")
+        XCTAssertEqual(buffer.lines[2].status, .error)
     }
 
     func testToolEndWithDurationFormatting() {
@@ -712,7 +712,7 @@ final class SessionStreamBufferToolMetaTests: XCTestCase {
         buffer.addToolStart(name: "Bash", arguments: nil)
 
         XCTAssertEqual(buffer.lines[0].icon, "terminal")
-        XCTAssertEqual(buffer.lines[0].iconColor, "tronEmerald")
+        XCTAssertEqual(buffer.lines[0].iconColor, .tronEmerald)
     }
 
     func testToolStartUnknownToolHasDefaultIcon() {
@@ -721,7 +721,7 @@ final class SessionStreamBufferToolMetaTests: XCTestCase {
 
         // ToolRegistry default: gearshape icon, tronTextMuted color
         XCTAssertEqual(buffer.lines[0].icon, "gearshape")
-        XCTAssertEqual(buffer.lines[0].iconColor, "tronTextMuted")
+        XCTAssertEqual(buffer.lines[0].iconColor, .tronTextMuted)
     }
 
     func testToolEndHasIconAndColor() {
@@ -729,7 +729,7 @@ final class SessionStreamBufferToolMetaTests: XCTestCase {
         buffer.addToolEnd(name: "Edit", success: true)
 
         XCTAssertEqual(buffer.lines[0].icon, "pencil.line")
-        XCTAssertEqual(buffer.lines[0].iconColor, "orange")
+        XCTAssertEqual(buffer.lines[0].iconColor, .orange)
     }
 
     func testToolStartHasToolName() {
@@ -772,7 +772,7 @@ final class DashboardStreamManagerSnapshotTests: XCTestCase {
 
         let snapshot = manager.snapshotLines(for: "s1", count: 3)
         XCTAssertEqual(snapshot[0].icon, "terminal")
-        XCTAssertEqual(snapshot[0].iconColor, "tronEmerald")
+        XCTAssertEqual(snapshot[0].iconColor, .tronEmerald)
         XCTAssertEqual(snapshot[0].displayName, "Bash")
     }
 
@@ -822,7 +822,7 @@ final class DashboardStreamManagerSnapshotTests: XCTestCase {
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 1)[0].kind, .toolStart)
     }
 
-    func testToolStartFlushesProirTextDelta() {
+    func testToolStartFlushesPriorTextDelta() {
         let manager = DashboardStreamManager()
         manager.handleTextDelta(sessionId: "s1", delta: "thinking...")
         // Text delta is staged
@@ -833,6 +833,39 @@ final class DashboardStreamManagerSnapshotTests: XCTestCase {
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 5).count, 2)
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 5)[0].kind, .text)
         XCTAssertEqual(manager.visibleLines(for: "s1", count: 5)[1].kind, .toolStart)
+    }
+    // MARK: - activityLines(for:persisted:) Data Source
+
+    func testActivityLinesReturnsLiveBufferWhenAvailable() {
+        let manager = DashboardStreamManager()
+        manager.handleTextDelta(sessionId: "s1", delta: "live")
+        manager.flush()
+
+        let persisted = [ActivityLine(kind: .text, text: "old persisted")]
+        let result = manager.activityLines(for: "s1", persisted: persisted)
+        XCTAssertEqual(result[0].text, "live")
+    }
+
+    func testActivityLinesFallsBackToPersistedWhenNoBuffer() {
+        let manager = DashboardStreamManager()
+        let persisted = [ActivityLine(kind: .text, text: "persisted")]
+        let result = manager.activityLines(for: "s1", persisted: persisted)
+        XCTAssertEqual(result[0].text, "persisted")
+    }
+
+    func testActivityLinesReturnsEmptyWhenNeitherExists() {
+        let manager = DashboardStreamManager()
+        let result = manager.activityLines(for: "s1", persisted: nil)
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testActivityLinesRespectsCount() {
+        let manager = DashboardStreamManager()
+        for i in 0..<6 {
+            manager.handleToolStart(sessionId: "s1", toolName: "Tool\(i)", arguments: nil)
+        }
+        let result = manager.activityLines(for: "s1", persisted: nil, count: 3)
+        XCTAssertEqual(result.count, 3)
     }
 }
 
@@ -873,7 +906,7 @@ final class ContentExtractorActivityLineTests: XCTestCase {
         let lines = ContentExtractor.extractActivityLines(from: [assistantEvent])
 
         XCTAssertEqual(lines.count, 1)
-        XCTAssertEqual(lines[0].kind, "toolStart")
+        XCTAssertEqual(lines[0].kind, .toolStart)
         XCTAssertEqual(lines[0].displayName, "Bash")
         // Summary should be extracted from input arguments
         XCTAssertNotNil(lines[0].summary, "Summary should be extracted from tool input")
@@ -920,7 +953,7 @@ final class ContentExtractorActivityLineTests: XCTestCase {
         let lines = ContentExtractor.extractActivityLines(from: [assistantEvent, toolResult1, toolResult2])
 
         // Should have: Read tool, text, WebSearch tool
-        let toolLines = lines.filter { $0.kind == "toolStart" }
+        let toolLines = lines.filter { $0.kind == .toolStart }
         XCTAssertEqual(toolLines.count, 2)
 
         // Read tool should have file summary
@@ -928,7 +961,7 @@ final class ContentExtractorActivityLineTests: XCTestCase {
         XCTAssertNotNil(readLine)
         XCTAssertEqual(readLine?.summary, "example.swift")
         XCTAssertEqual(readLine?.duration, "25ms")
-        XCTAssertEqual(readLine?.status, "success")
+        XCTAssertEqual(readLine?.status, .success)
 
         // WebSearch tool should have query summary
         let searchLine = toolLines.first { $0.displayName == "Web Search" }
@@ -994,32 +1027,71 @@ final class ContentExtractorActivityLineTests: XCTestCase {
     }
 }
 
-// MARK: - CachedActivityLine Tests
+// MARK: - ActivityLine Tests
 
 @MainActor
-final class CachedActivityLineTests: XCTestCase {
+final class ActivityLineTests: XCTestCase {
 
-    func testCachedActivityLineCodable() throws {
-        let line = CachedActivityLine(kind: "toolStart", text: "Edit server.rs")
+    func testActivityLineCodable() throws {
+        let line = ActivityLine(kind: .toolStart, text: "Edit server.rs")
         let data = try JSONEncoder().encode(line)
-        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
-        XCTAssertEqual(decoded.kind, "toolStart")
+        let decoded = try JSONDecoder().decode(ActivityLine.self, from: data)
+        XCTAssertEqual(decoded.kind, .toolStart)
         XCTAssertEqual(decoded.text, "Edit server.rs")
     }
 
-    func testCachedActivityLineWithOptionalFields() throws {
-        let line = CachedActivityLine(kind: "toolStart", text: "Bash", icon: "terminal", iconColor: "tronEmerald")
+    func testActivityLineWithOptionalFields() throws {
+        let line = ActivityLine(kind: .toolStart, text: "Bash", icon: "terminal", iconColor: .tronEmerald)
         let data = try JSONEncoder().encode(line)
-        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
+        let decoded = try JSONDecoder().decode(ActivityLine.self, from: data)
         XCTAssertEqual(decoded.icon, "terminal")
-        XCTAssertEqual(decoded.iconColor, "tronEmerald")
+        XCTAssertEqual(decoded.iconColor, .tronEmerald)
     }
 
-    func testCachedActivityLineWithNilFields() throws {
-        let line = CachedActivityLine(kind: "text", text: "hello")
+    func testActivityLineWithNilFields() throws {
+        let line = ActivityLine(kind: .text, text: "hello")
         let data = try JSONEncoder().encode(line)
-        let decoded = try JSONDecoder().decode(CachedActivityLine.self, from: data)
+        let decoded = try JSONDecoder().decode(ActivityLine.self, from: data)
         XCTAssertNil(decoded.icon)
         XCTAssertNil(decoded.iconColor)
+    }
+
+    func testActivityLineCodableWithEnumFields() throws {
+        let line = ActivityLine(kind: .toolStart, text: "Edit", icon: "pencil.line",
+                                iconColor: .orange, status: .running)
+        let data = try JSONEncoder().encode(line)
+        let decoded = try JSONDecoder().decode(ActivityLine.self, from: data)
+        XCTAssertEqual(decoded.kind, .toolStart)
+        XCTAssertEqual(decoded.iconColor, .orange)
+        XCTAssertEqual(decoded.status, .running)
+        // id should be fresh (not persisted)
+        XCTAssertNotEqual(decoded.id, line.id)
+    }
+
+    func testActivityLineCodableOmitsTransientFields() throws {
+        let line = ActivityLine(kind: .text, text: "hello")
+        let data = try JSONEncoder().encode(line)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertNil(json["id"], "id should be excluded from encoding")
+        XCTAssertNil(json["toolCallId"], "toolCallId should be excluded from encoding")
+    }
+
+    func testActivityLineEqualityIgnoresId() {
+        let a = ActivityLine(kind: .text, text: "hello")
+        let b = ActivityLine(kind: .text, text: "hello")
+        XCTAssertEqual(a, b, "Same content should be equal")
+        XCTAssertNotEqual(a.id, b.id, "IDs should be unique")
+    }
+
+    func testToolColorResolvesAllCases() {
+        for toolColor in ToolColor.allCases {
+            _ = toolColor.color // Should not crash
+        }
+    }
+
+    func testToolColorFromDescriptorName() {
+        XCTAssertEqual(ToolColor(fromDescriptorName: "tronEmerald"), .tronEmerald)
+        XCTAssertEqual(ToolColor(fromDescriptorName: "orange"), .orange)
+        XCTAssertEqual(ToolColor(fromDescriptorName: "unknownColor"), .tronTextMuted)
     }
 }

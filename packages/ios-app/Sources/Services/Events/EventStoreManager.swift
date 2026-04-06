@@ -511,7 +511,7 @@ final class EventStoreManager {
     private func _loadSessionsImmediate() {
         do {
             // Preserve existing transient state before reloading
-            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, activityLines: [CachedActivityLine]?, isProcessing: Bool?)] = [:]
+            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, activityLines: [ActivityLine]?, isProcessing: Bool?)] = [:]
             for session in sessions {
                 preservedDashboardInfo[session.id] = (
                     session.lastUserPrompt,

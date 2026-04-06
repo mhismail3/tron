@@ -1,44 +1,13 @@
 import SwiftUI
 
-// MARK: - DashboardStreamLine
-
-/// A single line in a dashboard session card's mini-chat view.
-struct DashboardStreamLine: Identifiable {
-    let id = UUID()
-    let kind: Kind
-    var text: String
-    var icon: String?
-    var iconColor: String?
-    var toolName: String?
-    var displayName: String?
-    var summary: String?
-    var duration: String?
-    var status: String?  // "running", "success", "error"
-
-    enum Kind: String, Equatable {
-        case text
-        case userPrompt
-        case toolStart
-        case toolEnd
-        case subagentSpawn
-        case subagentDone
-        case subagentFailed
-        case thinking
-        case error
-    }
-}
-
 // MARK: - SessionStreamBuffer
 
 /// Per-session ring buffer of recent activity lines for dashboard display.
-/// Capped at `maxLines` to bound memory. Text deltas coalesce into a single
+/// Capped at `maxStreamBufferLines` to bound memory. Text deltas coalesce into a single
 /// `.text` line until a non-text event arrives. Each tool call gets its own
 /// `.toolStart` line with summary, duration, and status.
 struct SessionStreamBuffer {
-    static let maxLines = 8
-    static let maxTextLineLength = 200
-
-    private(set) var lines: [DashboardStreamLine] = []
+    private(set) var lines: [ActivityLine] = []
     private(set) var isActive: Bool = true
 
     /// Index into `lines` of the current text line being coalesced.
@@ -56,8 +25,9 @@ struct SessionStreamBuffer {
 
         let firstLine = text.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
-        let truncated = firstLine.count > 100 ? String(firstLine.prefix(100)) : firstLine
-        appendLine(DashboardStreamLine(kind: .userPrompt, text: truncated))
+        let maxLen = DashboardConstants.maxUserPromptLength
+        let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
+        appendLine(ActivityLine(kind: .userPrompt, text: truncated))
     }
 
     // MARK: - Text Deltas
@@ -73,19 +43,20 @@ struct SessionStreamBuffer {
             currentTextLineIndex = adjusted >= 0 ? adjusted : nil
         }
 
+        let maxLen = DashboardConstants.maxAssistantTextLength
         if let idx = currentTextLineIndex, idx < lines.count {
             // Accumulate raw text, then extract first non-empty line for display
             currentTextRaw.append(delta)
             let firstLine = currentTextRaw
                 .split(separator: "\n", omittingEmptySubsequences: true)
                 .first.map(String.init) ?? currentTextRaw
-            lines[idx].text = String(firstLine.prefix(Self.maxTextLineLength))
+            lines[idx].text = String(firstLine.prefix(maxLen))
         } else {
             currentTextRaw = delta
             let firstLine = delta
                 .split(separator: "\n", omittingEmptySubsequences: true)
                 .first.map(String.init) ?? delta
-            appendLine(DashboardStreamLine(kind: .text, text: String(firstLine.prefix(Self.maxTextLineLength))))
+            appendLine(ActivityLine(kind: .text, text: String(firstLine.prefix(maxLen))))
             currentTextLineIndex = lines.count - 1
         }
     }
@@ -100,13 +71,16 @@ struct SessionStreamBuffer {
         let argsJSON = Self.serializeArguments(arguments)
         let toolSummary = descriptor.summaryExtractor(argsJSON)
 
-        var line = DashboardStreamLine(kind: .toolStart, text: name)
-        line.icon = descriptor.icon
-        line.iconColor = descriptor.iconColorName
-        line.toolName = name
-        line.displayName = descriptor.displayName
-        line.summary = toolSummary.isEmpty ? nil : toolSummary
-        line.status = "running"
+        let line = ActivityLine(
+            kind: .toolStart,
+            text: name,
+            icon: descriptor.icon,
+            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
+            toolName: name,
+            displayName: descriptor.displayName,
+            summary: toolSummary.isEmpty ? nil : toolSummary,
+            status: .running
+        )
         appendLine(line)
     }
 
@@ -119,7 +93,7 @@ struct SessionStreamBuffer {
         // Update existing toolStart line in-place to show completed state
         if let name = name,
            let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolName == name }) {
-            lines[idx].status = success ? "success" : "error"
+            lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
@@ -127,13 +101,16 @@ struct SessionStreamBuffer {
         // Fallback: create a new toolEnd line if no matching toolStart found
         let toolName = name ?? "Tool"
         let descriptor = ToolRegistry.descriptor(for: toolName)
-        var line = DashboardStreamLine(kind: .toolEnd, text: toolName)
-        line.icon = descriptor.icon
-        line.iconColor = descriptor.iconColorName
-        line.toolName = toolName
-        line.displayName = descriptor.displayName
-        line.duration = formattedDuration
-        line.status = success ? "success" : "error"
+        let line = ActivityLine(
+            kind: .toolEnd,
+            text: toolName,
+            icon: descriptor.icon,
+            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
+            toolName: toolName,
+            displayName: descriptor.displayName,
+            duration: formattedDuration,
+            status: success ? .success : .error
+        )
         appendLine(line)
     }
 
@@ -149,21 +126,23 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let truncated = task.count > 50 ? String(task.prefix(47)) + "…" : task
-        appendLine(DashboardStreamLine(kind: .subagentSpawn, text: "Agent: \(truncated)"))
+        let maxLen = DashboardConstants.maxSubagentTextLength
+        let truncated = task.count > maxLen ? String(task.prefix(maxLen - 3)) + "…" : task
+        appendLine(ActivityLine(kind: .subagentSpawn, text: "Agent: \(truncated)"))
     }
 
     mutating func addSubagentComplete(turns: Int) {
         guard isActive else { return }
         currentTextLineIndex = nil
-        appendLine(DashboardStreamLine(kind: .subagentDone, text: "Agent complete (\(turns) turns)"))
+        appendLine(ActivityLine(kind: .subagentDone, text: "Agent complete (\(turns) turns)"))
     }
 
     mutating func addSubagentFailed(error: String) {
         guard isActive else { return }
         currentTextLineIndex = nil
-        let truncated = error.count > 50 ? String(error.prefix(47)) + "…" : error
-        appendLine(DashboardStreamLine(kind: .subagentFailed, text: "Agent failed: \(truncated)"))
+        let maxLen = DashboardConstants.maxSubagentTextLength
+        let truncated = error.count > maxLen ? String(error.prefix(maxLen - 3)) + "…" : error
+        appendLine(ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)"))
     }
 
     // MARK: - Thinking
@@ -173,7 +152,7 @@ struct SessionStreamBuffer {
         if lines.contains(where: { $0.kind == .thinking }) { return }
         currentTextLineIndex = nil
 
-        appendLine(DashboardStreamLine(kind: .thinking, text: "thinking"))
+        appendLine(ActivityLine(kind: .thinking, text: "thinking"))
     }
 
     // MARK: - Errors
@@ -182,8 +161,9 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let truncated = message.count > 80 ? String(message.prefix(77)) + "…" : message
-        appendLine(DashboardStreamLine(kind: .error, text: truncated))
+        let maxLen = DashboardConstants.maxErrorTextLength
+        let truncated = message.count > maxLen ? String(message.prefix(maxLen - 3)) + "…" : message
+        appendLine(ActivityLine(kind: .error, text: truncated))
     }
 
     mutating func addTurnFailed(error: String) {
@@ -206,10 +186,10 @@ struct SessionStreamBuffer {
 
     // MARK: - Private
 
-    private mutating func appendLine(_ line: DashboardStreamLine) {
+    private mutating func appendLine(_ line: ActivityLine) {
         lines.append(line)
-        if lines.count > Self.maxLines {
-            let overflow = lines.count - Self.maxLines
+        if lines.count > DashboardConstants.maxStreamBufferLines {
+            let overflow = lines.count - DashboardConstants.maxStreamBufferLines
             lines.removeFirst(overflow)
             if let idx = currentTextLineIndex {
                 let adjusted = idx - overflow
@@ -263,10 +243,7 @@ final class DashboardStreamManager {
     /// Render timer for batching text delta updates at ~60fps
     private var renderTimer: Task<Void, Never>?
 
-    /// Batch interval (~60fps)
-    private static let batchIntervalNanos: UInt64 = 16_000_000
-
-    func visibleLines(for sessionId: String, count: Int = 5) -> [DashboardStreamLine] {
+    func visibleLines(for sessionId: String, count: Int = 5) -> [ActivityLine] {
         guard let buffer = buffers[sessionId] else { return [] }
         return Array(buffer.lines.suffix(count))
     }
@@ -275,12 +252,19 @@ final class DashboardStreamManager {
         buffers[sessionId]?.lines.isEmpty == false
     }
 
-    /// Snapshot visible lines as persistable `CachedActivityLine` values.
-    func snapshotLines(for sessionId: String, count: Int = 5) -> [CachedActivityLine] {
-        let visible = visibleLines(for: sessionId, count: count)
-        return visible.map {
-            CachedActivityLine(kind: $0.kind.rawValue, text: $0.text, icon: $0.icon, iconColor: $0.iconColor, displayName: $0.displayName, summary: $0.summary, duration: $0.duration, status: $0.status)
+    /// Snapshot visible lines for persistence. With the unified ActivityLine type,
+    /// this is just a suffix slice — no conversion needed.
+    func snapshotLines(for sessionId: String, count: Int = DashboardConstants.maxActivityLines) -> [ActivityLine] {
+        return visibleLines(for: sessionId, count: count)
+    }
+
+    /// Single data source for views: returns live buffer lines if available,
+    /// otherwise falls back to persisted activity lines.
+    func activityLines(for sessionId: String, persisted: [ActivityLine]?, count: Int = DashboardConstants.maxActivityLines) -> [ActivityLine] {
+        if let buffer = buffers[sessionId], !buffer.lines.isEmpty {
+            return Array(buffer.lines.suffix(count))
         }
+        return Array((persisted ?? []).suffix(count))
     }
 
     // MARK: - Event Handlers
@@ -423,7 +407,7 @@ final class DashboardStreamManager {
     private func scheduleRenderFlush() {
         guard renderTimer == nil else { return }
         renderTimer = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.batchIntervalNanos)
+            try? await Task.sleep(nanoseconds: DashboardConstants.batchIntervalNanos)
             guard let self, !Task.isCancelled else { return }
             self.flushAllDirty()
             self.renderTimer = nil

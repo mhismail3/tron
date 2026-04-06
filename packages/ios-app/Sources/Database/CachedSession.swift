@@ -1,20 +1,5 @@
 import Foundation
 
-// MARK: - Cached Activity Line
-
-/// A persisted activity line for dashboard card display.
-/// Survives buffer clearing so completed session cards retain their mini-chat view.
-struct CachedActivityLine: Codable, Equatable {
-    let kind: String
-    let text: String
-    var icon: String?
-    var iconColor: String?
-    var displayName: String?
-    var summary: String?
-    var duration: String?
-    var status: String?
-}
-
 // MARK: - Cached Session
 
 /// Session metadata cached locally
@@ -52,7 +37,7 @@ struct CachedSession: Identifiable, Codable {
     var lastUserPrompt: String?
     var lastAssistantResponse: String?
     var lastToolCount: Int?
-    var lastActivityLines: [CachedActivityLine]?
+    var lastActivityLines: [ActivityLine]?
     var isProcessing: Bool?
 
     /// Whether this session is a fork of another session

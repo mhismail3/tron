@@ -67,7 +67,7 @@ extension EventStoreManager {
             guard let lines = session.lastActivityLines, !lines.isEmpty else { return true }
             // Re-extract if any tool chip is missing summary data (stale from old code)
             let hasStaleToolChips = lines.contains { line in
-                (line.kind == "toolStart" || line.kind == "toolEnd") && line.summary == nil && line.displayName == nil
+                (line.kind == .toolStart || line.kind == .toolEnd) && line.summary == nil && line.displayName == nil
             }
             return hasStaleToolChips
         }
