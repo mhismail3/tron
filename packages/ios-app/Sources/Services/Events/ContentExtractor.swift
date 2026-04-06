@@ -104,43 +104,46 @@ enum ContentExtractor {
                 guard let content = event.payload["content"]?.value else { continue }
                 let parsed = ContentBlockParser.parse(content)
 
-                for block in parsed.toolUseBlocks {
-                    guard let name = block["name"] as? String else { continue }
-                    let descriptor = ToolRegistry.descriptor(for: name)
-                    let toolId = block["id"] as? String
-                    let inputDict = (block["input"] ?? block["arguments"]) as? [String: Any]
-                    let argsJSON = serializeInput(inputDict)
-                    let summary = descriptor.summaryExtractor(argsJSON)
+                // Walk allBlocks in original order to preserve interleaving
+                // (text before tool calls, tool calls between text, etc.)
+                for block in parsed.allBlocks {
+                    guard let type = block["type"] as? String else { continue }
 
-                    let result = toolId.flatMap { toolResults[$0] }
-                    let isError = result?.isError ?? false
-                    let duration = result?.durationMs.map { SessionStreamBuffer.formatDuration($0) }
+                    if type == ContentBlockType.toolUse.rawValue, let name = block["name"] as? String {
+                        let descriptor = ToolRegistry.descriptor(for: name)
+                        let toolId = block["id"] as? String
+                        let inputDict = (block["input"] ?? block["arguments"]) as? [String: Any]
+                        let argsJSON = serializeInput(inputDict)
+                        let summary = descriptor.summaryExtractor(argsJSON)
 
-                    lines.append(ActivityLine(
-                        kind: .toolStart,
-                        text: name,
-                        icon: descriptor.icon,
-                        iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
-                        toolName: name,
-                        displayName: descriptor.displayName,
-                        summary: summary.isEmpty ? nil : summary,
-                        duration: duration,
-                        status: isError ? .error : .success
-                    ))
-                }
+                        let result = toolId.flatMap { toolResults[$0] }
+                        let isError = result?.isError ?? false
+                        let duration = result?.durationMs.map { SessionStreamBuffer.formatDuration($0) }
 
-                for textBlock in parsed.textBlocks {
-                    let trimmed = textBlock.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-                        let maxLen = DashboardConstants.maxAssistantTextLength
-                        let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
-                        lines.append(ActivityLine(kind: .text, text: truncated))
+                        lines.append(ActivityLine(
+                            kind: .toolStart,
+                            text: name,
+                            icon: descriptor.icon,
+                            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
+                            toolName: name,
+                            displayName: descriptor.displayName,
+                            summary: summary.isEmpty ? nil : summary,
+                            duration: duration,
+                            status: isError ? .error : .success
+                        ))
+
+                    } else if type == ContentBlockType.text.rawValue, let text = block["text"] as? String {
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
+                            let maxLen = DashboardConstants.maxAssistantTextLength
+                            let truncated = firstLine.count > maxLen ? String(firstLine.prefix(maxLen)) : firstLine
+                            lines.append(ActivityLine(kind: .text, text: truncated))
+                        }
+
+                    } else if type == ContentBlockType.thinking.rawValue {
+                        lines.append(ActivityLine(kind: .thinking, text: "Thinking"))
                     }
-                }
-
-                if !parsed.thinkingBlocks.isEmpty {
-                    lines.append(ActivityLine(kind: .thinking, text: "Thinking"))
                 }
 
             default:
