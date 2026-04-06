@@ -212,6 +212,7 @@ final class EventStoreManager {
                 dashboardStreamManager.handleToolStart(
                     sessionId: sessionId,
                     toolName: result.toolName,
+                    toolCallId: result.toolCallId,
                     arguments: result.arguments
                 )
             }
@@ -222,6 +223,7 @@ final class EventStoreManager {
                 dashboardStreamManager.handleToolEnd(
                     sessionId: sessionId,
                     toolName: result.toolName,
+                    toolCallId: result.toolCallId,
                     success: result.success,
                     durationMs: result.duration
                 )

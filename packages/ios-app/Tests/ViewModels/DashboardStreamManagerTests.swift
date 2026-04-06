@@ -700,6 +700,56 @@ final class SessionStreamBufferToolTests: XCTestCase {
         XCTAssertEqual(buffer.lines[0].kind, .toolEnd)
         XCTAssertEqual(buffer.lines[0].toolName, "Bash")
     }
+    // MARK: - Tool Call ID Matching
+
+    func testToolEndMatchesByToolCallIdFirst() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Read", toolCallId: "tc1", arguments: nil)
+        buffer.addToolStart(name: "Read", toolCallId: "tc2", arguments: nil)
+
+        buffer.addToolEnd(name: "Read", toolCallId: "tc1", success: true, durationMs: 50)
+
+        XCTAssertEqual(buffer.lines[0].status, .success)
+        XCTAssertEqual(buffer.lines[0].duration, "50ms")
+        XCTAssertEqual(buffer.lines[1].status, .running) // tc2 unchanged
+    }
+
+    func testToolEndFallsBackToNameWhenNoToolCallId() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Edit", toolCallId: nil, arguments: nil)
+        buffer.addToolEnd(name: "Edit", toolCallId: nil, success: true, durationMs: 100)
+
+        XCTAssertEqual(buffer.lines[0].status, .success)
+    }
+
+    func testToolEndWithMismatchedIdFallsBackToName() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Bash", toolCallId: "tc1", arguments: nil)
+        buffer.addToolEnd(name: "Bash", toolCallId: "tc999", success: true, durationMs: 10)
+
+        // No matching ID → falls back to name match (finds tc1 which is still running)
+        XCTAssertEqual(buffer.lines.count, 1)
+        XCTAssertEqual(buffer.lines[0].status, .success)
+    }
+
+    func testConcurrentSameNameToolsResolveCorrectly() {
+        var buffer = SessionStreamBuffer()
+        buffer.addToolStart(name: "Read", toolCallId: "tc1", arguments: ["file_path": AnyCodable("/a.txt")])
+        buffer.addToolStart(name: "Read", toolCallId: "tc2", arguments: ["file_path": AnyCodable("/b.txt")])
+        buffer.addToolStart(name: "Read", toolCallId: "tc3", arguments: ["file_path": AnyCodable("/c.txt")])
+
+        // Complete in reverse order
+        buffer.addToolEnd(name: "Read", toolCallId: "tc3", success: true, durationMs: 5)
+        buffer.addToolEnd(name: "Read", toolCallId: "tc1", success: false, durationMs: 100)
+        buffer.addToolEnd(name: "Read", toolCallId: "tc2", success: true, durationMs: 50)
+
+        XCTAssertEqual(buffer.lines[0].status, .error)    // tc1
+        XCTAssertEqual(buffer.lines[0].duration, "100ms")
+        XCTAssertEqual(buffer.lines[1].status, .success)   // tc2
+        XCTAssertEqual(buffer.lines[1].duration, "50ms")
+        XCTAssertEqual(buffer.lines[2].status, .success)   // tc3
+        XCTAssertEqual(buffer.lines[2].duration, "5ms")
+    }
 }
 
 // MARK: - Tool Metadata Tests

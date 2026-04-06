@@ -63,7 +63,7 @@ struct SessionStreamBuffer {
 
     // MARK: - Tool Events
 
-    mutating func addToolStart(name: String, arguments: [String: AnyCodable]?) {
+    mutating func addToolStart(name: String, toolCallId: String? = nil, arguments: [String: AnyCodable]?) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
@@ -79,26 +79,35 @@ struct SessionStreamBuffer {
             toolName: name,
             displayName: descriptor.displayName,
             summary: toolSummary.isEmpty ? nil : toolSummary,
-            status: .running
+            status: .running,
+            toolCallId: toolCallId
         )
         appendLine(line)
     }
 
-    mutating func addToolEnd(name: String?, success: Bool, durationMs: Int? = nil) {
+    mutating func addToolEnd(name: String?, toolCallId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
         let formattedDuration = durationMs.map { Self.formatDuration($0) }
 
-        // Update existing toolStart line in-place to show completed state
-        if let name = name,
-           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolName == name }) {
+        // 1. Match by toolCallId (exact — handles concurrent same-name tools)
+        if let toolCallId,
+           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolCallId == toolCallId }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
 
-        // Fallback: create a new toolEnd line if no matching toolStart found
+        // 2. Fall back to name matching (only matches still-running tools)
+        if let name,
+           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolName == name && $0.status == .running }) {
+            lines[idx].status = success ? .success : .error
+            lines[idx].duration = formattedDuration
+            return
+        }
+
+        // 3. Fallback: create a new toolEnd line if no matching toolStart found
         let toolName = name ?? "Tool"
         let descriptor = ToolRegistry.descriptor(for: toolName)
         let line = ActivityLine(
@@ -288,15 +297,15 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleToolStart(sessionId: String, toolName: String, arguments: [String: AnyCodable]?) {
+    func handleToolStart(sessionId: String, toolName: String, toolCallId: String? = nil, arguments: [String: AnyCodable]?) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addToolStart(name: toolName, arguments: arguments)
+        pendingBuffers[sessionId]?.addToolStart(name: toolName, toolCallId: toolCallId, arguments: arguments)
         flushSession(sessionId)
     }
 
-    func handleToolEnd(sessionId: String, toolName: String?, success: Bool, durationMs: Int? = nil) {
+    func handleToolEnd(sessionId: String, toolName: String?, toolCallId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addToolEnd(name: toolName, success: success, durationMs: durationMs)
+        pendingBuffers[sessionId]?.addToolEnd(name: toolName, toolCallId: toolCallId, success: success, durationMs: durationMs)
         flushSession(sessionId)
     }
 
