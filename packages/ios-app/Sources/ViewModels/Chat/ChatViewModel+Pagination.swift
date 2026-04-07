@@ -125,7 +125,7 @@ extension ChatViewModel {
 
     /// Set token and cost state from reconstructed server events.
     /// Server events are the single source of truth for token values.
-    private func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) {
+    func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) {
         let usage = state.totalTokenUsage
         contextState.setAccumulatedTokens(from: usage)
         contextState.lastTurnInputTokens = state.lastTurnInputTokens

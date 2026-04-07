@@ -43,6 +43,25 @@ extension ChatViewModel {
             await processInFlightState(inFlight)
         }
 
+        // 5. Restore token state for context progress pill
+        //    Without this, contextWindowTokens stays 0 and the pill shows empty.
+        if let manager = eventStoreManager {
+            updateTokenState(from: state, using: manager)
+        } else {
+            let usage = state.totalTokenUsage
+            contextState.setAccumulatedTokens(from: usage)
+            contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
+        }
+
+        // Use server-authoritative cost when available (avoids DB race on resume)
+        if let cost = result.metadata.totalCost {
+            contextState.accumulatedCost = cost
+        }
+
+        // 6. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
+        await refreshContextFromServer()
+
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)

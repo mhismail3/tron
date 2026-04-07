@@ -233,6 +233,109 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.currentContextWindow, initialWindow)
     }
 
+    // MARK: - setAccumulatedTokens Tests
+
+    func testSetAccumulatedTokens() {
+        let state = ContextTrackingState()
+        state.accumulatedInputTokens = 999
+        state.accumulatedOutputTokens = 999
+
+        let usage = TokenUsage(inputTokens: 5000, outputTokens: 2000, cacheReadTokens: 1500, cacheCreationTokens: 300)
+        state.setAccumulatedTokens(from: usage)
+
+        XCTAssertEqual(state.accumulatedInputTokens, 5000)
+        XCTAssertEqual(state.accumulatedOutputTokens, 2000)
+        XCTAssertEqual(state.accumulatedCacheReadTokens, 1500)
+        XCTAssertEqual(state.accumulatedCacheCreationTokens, 300)
+    }
+
+    func testSetAccumulatedTokensWithNilCacheValues() {
+        let state = ContextTrackingState()
+        let usage = TokenUsage(inputTokens: 5000, outputTokens: 2000, cacheReadTokens: nil, cacheCreationTokens: nil)
+        state.setAccumulatedTokens(from: usage)
+
+        XCTAssertEqual(state.accumulatedCacheReadTokens, 0)
+        XCTAssertEqual(state.accumulatedCacheCreationTokens, 0)
+    }
+
+    // MARK: - setTotalTokenUsage Tests
+
+    func testSetTotalTokenUsage() {
+        let state = ContextTrackingState()
+        let usage = TokenUsage(inputTokens: 5000, outputTokens: 2000, cacheReadTokens: 1500, cacheCreationTokens: 300)
+        state.setTotalTokenUsage(contextWindowSize: 85000, from: usage)
+
+        XCTAssertNotNil(state.totalTokenUsage)
+        XCTAssertEqual(state.totalTokenUsage?.inputTokens, 85000)
+        XCTAssertEqual(state.totalTokenUsage?.outputTokens, 2000)
+        XCTAssertEqual(state.totalTokenUsage?.cacheReadTokens, 1500)
+        XCTAssertEqual(state.totalTokenUsage?.cacheCreationTokens, 300)
+    }
+
+    // MARK: - lastTurnInputTokens Alias Tests
+
+    func testLastTurnInputTokensAliasesContextWindowTokens() {
+        let state = ContextTrackingState()
+        state.lastTurnInputTokens = 42000
+        XCTAssertEqual(state.contextWindowTokens, 42000)
+        XCTAssertEqual(state.lastTurnInputTokens, 42000)
+
+        state.contextWindowTokens = 99000
+        XCTAssertEqual(state.lastTurnInputTokens, 99000)
+    }
+
+    // MARK: - Reconstruction Restoration Integration Tests
+
+    func testReconstructionRestorationFlow() {
+        // Simulates the exact flow that processReconstructionResult should follow
+        let state = ContextTrackingState()
+        state.currentContextWindow = 200_000  // Set by prefetchModels or refreshContextFromServer
+
+        // Simulate what updateTokenState does with reconstruction data
+        let usage = TokenUsage(inputTokens: 15000, outputTokens: 3000, cacheReadTokens: 12000, cacheCreationTokens: 500)
+        state.setAccumulatedTokens(from: usage)
+        state.lastTurnInputTokens = 85000  // From ReconstructedState.lastTurnInputTokens
+        state.setTotalTokenUsage(contextWindowSize: 85000, from: usage)
+
+        // Verify the pill values are correct
+        XCTAssertEqual(state.contextWindowTokens, 85000)
+        XCTAssertEqual(state.contextPercentage, 43)  // 85000/200000 = 42.5, rounded to 43
+        XCTAssertEqual(state.tokensRemaining, 115_000)
+    }
+
+    func testReconstructionRestorationWithoutContextWindow() {
+        // If currentContextWindow hasn't been set yet (race condition), pill shows 0%
+        let state = ContextTrackingState()
+        // currentContextWindow defaults to 0
+
+        let usage = TokenUsage(inputTokens: 15000, outputTokens: 3000, cacheReadTokens: nil, cacheCreationTokens: nil)
+        state.setAccumulatedTokens(from: usage)
+        state.lastTurnInputTokens = 85000
+
+        // contextWindowTokens IS set, but percentage is 0 because denominator is 0
+        XCTAssertEqual(state.contextWindowTokens, 85000)
+        XCTAssertEqual(state.contextPercentage, 0)
+
+        // Once currentContextWindow is set (by refreshContextFromServer), pill updates
+        state.currentContextWindow = 200_000
+        XCTAssertEqual(state.contextPercentage, 43)
+    }
+
+    func testReconstructionRestorationPostCompaction() {
+        // After compaction, lastTurnInputTokens reflects the reduced context size
+        let state = ContextTrackingState()
+        state.currentContextWindow = 200_000
+
+        let usage = TokenUsage(inputTokens: 180000, outputTokens: 50000, cacheReadTokens: nil, cacheCreationTokens: nil)
+        state.setAccumulatedTokens(from: usage)
+        state.lastTurnInputTokens = 45000  // Post-compaction: was ~180k, now ~45k
+        state.setTotalTokenUsage(contextWindowSize: 45000, from: usage)
+
+        XCTAssertEqual(state.contextWindowTokens, 45000)
+        XCTAssertEqual(state.contextPercentage, 23)  // 45000/200000 = 22.5, rounded to 23
+        XCTAssertEqual(state.tokensRemaining, 155_000)
+    }
+
     // MARK: - Integration Test: Model Switch Scenario
 
     func testModelSwitchResetsCorrectly() {

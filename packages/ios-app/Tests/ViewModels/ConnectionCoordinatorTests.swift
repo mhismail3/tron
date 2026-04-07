@@ -243,7 +243,14 @@ final class MockConnectionContext: ConnectionContext {
             "metadata": {
                 "model": "test-model",
                 "turnCount": 0,
-                "workingDirectory": "/tmp"
+                "workingDirectory": "/tmp",
+                "tokenUsage": {
+                    "input": 5000,
+                    "output": 1200,
+                    "cacheRead": 3800,
+                    "cacheCreation": 200
+                },
+                "totalCost": 0.042
             }
         }
         """.data(using: .utf8)!
