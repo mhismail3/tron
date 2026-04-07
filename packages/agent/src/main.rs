@@ -360,27 +360,8 @@ async fn init_services(
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
-    // Provider factory — creates a fresh provider per request by detecting the provider
-    // type from the model ID and loading auth from disk. Model switches take effect
-    // immediately — no server restart needed.
-    let default_factory = provider_factory::DefaultProviderFactory::new(settings);
-    let shared_http_client = default_factory.http_client();
-    let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
-
-    // Check auth availability at startup (informational only)
-    let startup_auth_ok = provider_factory
-        .create_for_model(&settings.server.default_model)
-        .await
-        .is_ok();
-    if startup_auth_ok {
-        tracing::info!(
-            provider = settings.server.default_provider.as_str(),
-            model = settings.server.default_model.as_str(),
-            "auth available for default model"
-        );
-    } else {
-        tracing::warn!("no auth found at startup — sign in via Settings > Providers");
-    }
+    let (provider_factory, shared_http_client) =
+        init_provider_factory(settings).await;
 
     // Process manager for background tool execution
     let process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps> = Arc::new(
@@ -425,12 +406,81 @@ async fn init_services(
         ),
     );
 
-    // Build tool factory with subagent tools, job management, summarizer-backed WebFetch
+    let tool_factory = build_tool_factory(
+        &tool_config,
+        &subagent_manager,
+        &job_manager,
+    );
+
+    // Break circular dep: SubagentManager needs tool_factory to spawn children
+    subagent_manager.set_tool_factory(tool_factory.clone());
+
+    let agent_deps = Some(AgentDeps {
+        provider_factory: provider_factory.clone(),
+        tool_factory,
+        guardrails: None,
+    });
+    let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
+    let hook_abort_tracker =
+        Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
+
+    let transcription_engine = spawn_transcription_sidecar();
+
+    ServiceState {
+        event_store,
+        session_manager,
+        orchestrator,
+        skill_registry,
+        agent_deps,
+        shared_subagent_manager,
+        hook_abort_tracker,
+        tool_config,
+        process_manager,
+        job_manager,
+        output_buffer_registry,
+        transcription_engine,
+    }
+}
+
+/// Create provider factory and check startup auth availability.
+async fn init_provider_factory(
+    settings: &tron::settings::TronSettings,
+) -> (Arc<dyn ProviderFactory>, reqwest::Client) {
+    let default_factory = provider_factory::DefaultProviderFactory::new(settings);
+    let shared_http_client = default_factory.http_client();
+    let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
+
+    let startup_auth_ok = provider_factory
+        .create_for_model(&settings.server.default_model)
+        .await
+        .is_ok();
+    if startup_auth_ok {
+        tracing::info!(
+            provider = settings.server.default_provider.as_str(),
+            model = settings.server.default_model.as_str(),
+            "auth available for default model"
+        );
+    } else {
+        tracing::warn!("no auth found at startup — sign in via Settings > Providers");
+    }
+
+    (provider_factory, shared_http_client)
+}
+
+/// Build the tool factory closure that creates a fresh ToolRegistry per agent run.
+///
+/// Adds subagent spawning, job management, and LLM-summarizer-backed WebFetch
+/// on top of the base registry from `create_tool_registry()`.
+fn build_tool_factory(
+    tool_config: &Arc<ToolRegistryConfig>,
+    subagent_manager: &Arc<SubagentManager>,
+    job_manager: &Arc<dyn tron::tools::traits::JobManagerOps>,
+) -> Arc<dyn Fn() -> ToolRegistry + Send + Sync> {
     let config = tool_config.clone();
     let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
     let sm_for_summarizer = subagent_manager.clone();
     let jm_for_tools = job_manager.clone();
-    let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
+    Arc::new(move || {
         let mut registry = tool_factory::create_tool_registry(&config);
         registry.register(Arc::new(
             tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
@@ -458,52 +508,26 @@ async fn init_services(
         ));
 
         registry
-    });
+    })
+}
 
-    // Break circular dep: SubagentManager needs tool_factory to spawn children
-    subagent_manager.set_tool_factory(tool_factory.clone());
-
-    let agent_deps = Some(AgentDeps {
-        provider_factory: provider_factory.clone(),
-        tool_factory,
-        guardrails: None,
-    });
-    let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
-    let hook_abort_tracker =
-        Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
-
-    // Transcription sidecar (parakeet-mlx via Python worker)
+/// Spawn the transcription sidecar (parakeet-mlx via Python worker).
+fn spawn_transcription_sidecar() -> Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>> {
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
-    {
-        let cell = Arc::clone(&transcription_engine);
-        #[allow(clippy::let_underscore_future)]
-        let _ = tokio::spawn(async move {
-            match tron::transcription::MlxEngine::new().await {
-                Ok(engine) => {
-                    let _ = cell.set(engine);
-                    tracing::info!("transcription sidecar ready (parakeet-mlx)");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "transcription sidecar setup failed");
-                }
+    let cell = Arc::clone(&transcription_engine);
+    #[allow(clippy::let_underscore_future)]
+    let _ = tokio::spawn(async move {
+        match tron::transcription::MlxEngine::new().await {
+            Ok(engine) => {
+                let _ = cell.set(engine);
+                tracing::info!("transcription sidecar ready (parakeet-mlx)");
             }
-        });
-    }
-
-    ServiceState {
-        event_store,
-        session_manager,
-        orchestrator,
-        skill_registry,
-        agent_deps,
-        shared_subagent_manager,
-        hook_abort_tracker,
-        tool_config,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
-        transcription_engine,
-    }
+            Err(e) => {
+                tracing::warn!(error = %e, "transcription sidecar setup failed");
+            }
+        }
+    });
+    transcription_engine
 }
 
 /// Cron initialization result.
@@ -650,6 +674,36 @@ fn process_deploy_sentinel(
     #[cfg_attr(not(feature = "apns"), allow(unused_variables))]
     pool_for_deploy: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) {
+    /// Fetch all active device tokens from the database.
+    #[cfg(feature = "apns")]
+    fn active_device_tokens(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Vec<String> {
+        pool.get()
+            .ok()
+            .and_then(|conn| {
+                conn.prepare("SELECT device_token FROM device_tokens WHERE is_active = 1")
+                    .ok()
+                    .and_then(|mut stmt| {
+                        stmt.query_map([], |row| row.get::<_, String>(0))
+                            .ok()
+                            .map(|rows| rows.filter_map(Result::ok).collect())
+                    })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Send a push notification to all active devices.
+    #[cfg(feature = "apns")]
+    fn send_push(
+        apns: &Arc<tron::server::platform::apns::ApnsService>,
+        tokens: Vec<String>,
+        notification: tron::server::platform::apns::ApnsNotification,
+    ) {
+        let apns = apns.clone();
+        drop(tokio::spawn(async move {
+            let _ = apns.send_to_many(&tokens, &notification).await;
+        }));
+    }
+
     let deploy_dir = tron::settings::deploy_dir();
     match tron::server::deploy::complete_sentinel(&deploy_dir) {
         Ok(Some(sentinel)) => {
@@ -689,23 +743,9 @@ fn process_deploy_sentinel(
                     Some(subject) => format!("{short_commit}: {subject}"),
                     None => format!("Tron updated to {short_commit}"),
                 };
-                let tokens: Vec<String> = pool_for_deploy
-                    .get()
-                    .ok()
-                    .and_then(|conn| {
-                        conn.prepare(
-                            "SELECT device_token FROM device_tokens WHERE is_active = 1",
-                        )
-                        .ok()
-                        .and_then(|mut stmt| {
-                            stmt.query_map([], |row| row.get::<_, String>(0))
-                                .ok()
-                                .map(|rows| rows.filter_map(Result::ok).collect())
-                        })
-                    })
-                    .unwrap_or_default();
+                let tokens = active_device_tokens(pool_for_deploy);
                 if !tokens.is_empty() {
-                    let notification = tron::server::platform::apns::ApnsNotification {
+                    send_push(apns, tokens, tron::server::platform::apns::ApnsNotification {
                         title: "Deploy Complete".into(),
                         body,
                         data: std::collections::HashMap::from([
@@ -716,11 +756,7 @@ fn process_deploy_sentinel(
                         sound: None,
                         badge: None,
                         thread_id: None,
-                    };
-                    let apns = apns.clone();
-                    drop(tokio::spawn(async move {
-                        let _ = apns.send_to_many(&tokens, &notification).await;
-                    }));
+                    });
                 }
             }
         }
@@ -736,25 +772,11 @@ fn process_deploy_sentinel(
             && let Ok(content) = std::fs::read_to_string(&pending_path)
             && let Ok(data) = serde_json::from_str::<serde_json::Value>(&content)
         {
-            let tokens: Vec<String> = pool_for_deploy
-                .get()
-                .ok()
-                .and_then(|conn| {
-                    conn.prepare(
-                        "SELECT device_token FROM device_tokens WHERE is_active = 1",
-                    )
-                    .ok()
-                    .and_then(|mut stmt| {
-                        stmt.query_map([], |row| row.get::<_, String>(0))
-                            .ok()
-                            .map(|rows| rows.filter_map(Result::ok).collect())
-                    })
-                })
-                .unwrap_or_default();
+            let tokens = active_device_tokens(pool_for_deploy);
             if !tokens.is_empty() {
                 let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
                 let reason = data["reason"].as_str().unwrap_or("unknown");
-                let notification = tron::server::platform::apns::ApnsNotification {
+                send_push(apns, tokens, tron::server::platform::apns::ApnsNotification {
                     title: "Deploy Rolled Back".into(),
                     body: format!("Tron restored: {reason}"),
                     data: std::collections::HashMap::from([
@@ -769,11 +791,7 @@ fn process_deploy_sentinel(
                     sound: None,
                     badge: None,
                     thread_id: None,
-                };
-                let apns = apns.clone();
-                drop(tokio::spawn(async move {
-                    let _ = apns.send_to_many(&tokens, &notification).await;
-                }));
+                });
             }
         }
         let _ = std::fs::remove_file(&pending_path);
