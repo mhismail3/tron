@@ -96,6 +96,7 @@ impl Default for SubsessionConfig {
 }
 
 /// Output from a completed subsession.
+#[derive(Debug)]
 pub struct SubsessionOutput {
     /// Child session ID.
     pub session_id: String,
@@ -180,11 +181,16 @@ impl SubagentManager {
         let _ = self.tool_factory.set(factory);
     }
 
-    /// Spawn a system subsession with full configurability.
+    /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
     ///
     /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
     /// directly, tools are optional, and the subsession is tracked as
     /// `SpawnType::Subsession`.
+    ///
+    /// Returns `Err` if the subsession fails for any reason (provider error,
+    /// provider creation failure, session resume failure, agent cancellation).
+    /// Callers should handle `Err` gracefully by falling back to defaults or
+    /// skipping the operation.
     #[allow(clippy::too_many_lines)]
     pub async fn spawn_subsession(
         &self,
@@ -275,6 +281,11 @@ impl SubagentManager {
                 .wait_for_tracker_result(&tracker, timeout)
                 .await?
             {
+                if result.status == "failed" {
+                    return Err(ToolError::Internal {
+                        message: result.output,
+                    });
+                }
                 Ok(SubsessionOutput {
                     session_id: child_session_id,
                     output: result.output,
@@ -1009,9 +1020,20 @@ mod tests {
     async fn spawn_subsession_error_provider() {
         let (manager, _, _) = make_subagent_manager(Arc::new(ErrorProvider));
         let config = make_subsession_config("summarize", "parent-001");
-        let result = manager.spawn_subsession(config).await.unwrap();
-        // Should still complete (blocking) — output may contain error info
-        assert!(!result.session_id.is_empty());
+        let result = manager.spawn_subsession(config).await;
+        assert!(result.is_err(), "provider error should produce Err, not Ok with error as output");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("expired"), "error should contain provider message, got: {err_msg}");
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_success_returns_ok_with_output() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_subsession_config("summarize this", "parent-001");
+        let result = manager.spawn_subsession(config).await;
+        assert!(result.is_ok(), "successful subsession must return Ok");
+        let output = result.unwrap();
+        assert!(!output.session_id.is_empty());
     }
 
     #[tokio::test]
@@ -1062,12 +1084,17 @@ mod tests {
 
         let result = manager
             .spawn_subsession(make_subsession_config("task", "parent-001"))
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(result.output, "Provider creation failed: provider failed");
+        assert!(result.is_err(), "provider creation failure should produce Err");
+        let err_msg = result.unwrap_err().to_string();
         assert!(
-            !session_mgr.is_active(&result.session_id),
+            err_msg.contains("Provider creation failed"),
+            "error should contain failure reason, got: {err_msg}"
+        );
+        assert_eq!(
+            session_mgr.active_count(),
+            0,
             "provider creation failure should not leave subsession active"
         );
     }
