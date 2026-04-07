@@ -123,7 +123,7 @@ enum PersistedEventType: String, CaseIterable {
         case .streamThinkingDelta:     return .init(false,   false,   true,    true,   "Thinking delta")
         case .streamThinkingComplete:  return .init(false,   false,   true,    false,  "Thinking complete")
         case .streamTurnStart:         return .init(false,   false,   true,    true,   "Turn started")
-        case .streamTurnEnd:           return .init(false,   false,   true,    false,  "Turn ended")
+        case .streamTurnEnd:           return .init(false,   false,   true,    true,   "Turn ended")
         // Model/config
         case .configModelSwitch:       return .init(true,    true,    false,   false,  "Model switched")
         case .configPromptUpdate:      return .init(false,   true,    false,   true,   "Prompt updated")

@@ -120,6 +120,12 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertEqual(snapshot["compact.boundary"]?["rendersAsChatMessage"] as? Bool, true)
         XCTAssertEqual(snapshot["compact.boundary"]?["isMetadataOnly"] as? Bool, true)
 
+        // Streaming events should all be isMetadataOnly=true (except thinkingComplete and turnEnd-specific cases)
+        XCTAssertEqual(snapshot["stream.turn_end"]?["isStreamingEvent"] as? Bool, true)
+        XCTAssertEqual(snapshot["stream.turn_end"]?["isMetadataOnly"] as? Bool, true)
+        XCTAssertEqual(snapshot["stream.turn_start"]?["isMetadataOnly"] as? Bool, true)
+        XCTAssertEqual(snapshot["stream.thinking_complete"]?["isMetadataOnly"] as? Bool, false)
+
         // Verify total count matches allCases
         XCTAssertEqual(snapshot.count, PersistedEventType.allCases.count)
     }
