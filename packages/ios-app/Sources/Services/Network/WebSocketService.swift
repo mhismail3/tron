@@ -192,18 +192,7 @@ final class WebSocketService {
         urlSession?.invalidateAndCancel()
         urlSession = nil
 
-        let pendingCount = pendingRequests.count
-        for (id, continuation) in pendingRequests {
-            logger.warning("Cancelling pending request id=\(id)", category: .websocket)
-            continuation.resume(throwing: WebSocketError.notConnected)
-        }
-        pendingRequests.removeAll()
-
-        // Cancel all timeout tasks
-        let timeoutCount = timeoutTasks.count
-        timeoutTasks.values.forEach { $0.cancel() }
-        timeoutTasks.removeAll()
-        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks", category: .websocket)
+        failPendingRequests(error: WebSocketError.notConnected)
 
         connectionState = .disconnected
         logger.logWebSocketState("Disconnected")
@@ -473,6 +462,24 @@ final class WebSocketService {
         logger.verbose("Heartbeat loop exited after \(pingCount) pings", category: .websocket)
     }
 
+    // MARK: - Pending Request Cleanup
+
+    /// Fail all pending RPC requests and cancel their timeout tasks.
+    /// Shared between disconnect() (voluntary) and handleDisconnect() (involuntary).
+    private func failPendingRequests(error: Error) {
+        let pendingCount = pendingRequests.count
+        for (id, continuation) in pendingRequests {
+            logger.debug("Failing pending request id=\(id)", category: .websocket)
+            continuation.resume(throwing: error)
+        }
+        pendingRequests.removeAll()
+
+        let timeoutCount = timeoutTasks.count
+        timeoutTasks.values.forEach { $0.cancel() }
+        timeoutTasks.removeAll()
+        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks", category: .websocket)
+    }
+
     // MARK: - Reconnection
 
     private func handleDisconnect() async {
@@ -481,18 +488,7 @@ final class WebSocketService {
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
 
-        let pendingCount = pendingRequests.count
-        for (id, continuation) in pendingRequests {
-            logger.debug("Failing pending request id=\(id) due to disconnect", category: .websocket)
-            continuation.resume(throwing: WebSocketError.connectionFailed("Disconnected"))
-        }
-        pendingRequests.removeAll()
-
-        // Cancel all timeout tasks
-        let timeoutCount = timeoutTasks.count
-        timeoutTasks.values.forEach { $0.cancel() }
-        timeoutTasks.removeAll()
-        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks due to disconnect", category: .websocket)
+        failPendingRequests(error: WebSocketError.connectionFailed("Disconnected"))
 
         // Don't reconnect if in background
         if isInBackground {
