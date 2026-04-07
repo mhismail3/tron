@@ -97,39 +97,22 @@ Tools referenced in `allowedTools`, `deniedTools`, or in the skill content must 
 
 ### 5. Validate Path References
 
-Check all `~/.tron/` paths in the skill content against the current directory layout.
+Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** table in the system prompt (core.md). That table is the single source of truth for the current directory layout.
 
-**Current layout** (anything else is stale):
-
-| Correct path | Purpose |
-|-------------|---------|
-| `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary (inside app bundle) |
-| `~/.tron/system/auth.json` | OAuth tokens and API keys |
-| `~/.tron/system/settings.json` | Configuration |
-| `~/.tron/system/database/log.db` | Main SQLite database |
-| `~/.tron/system/deployment/` | Deploy scripts and state |
-| `~/.tron/system/mods/` | Optional modules (apns, google, transcribe, twitter) |
-| `~/.tron/skills/` | Installed skills |
-| `~/.tron/workspace/rules/` | System rules (SYSTEM.md) |
-| `~/.tron/workspace/knowledge/` | Knowledge base |
-| `~/.tron/workspace/sessions/` | Session notes |
-| `~/.tron/workspace/automations/` | Automation working files |
-| `~/.tron/workspace/scratch/` | Temporary files |
-| `~/.tron/user/voice/` | Voice I/O |
-
-**Stale path translations:**
+**Stale path translations** (common in older skills):
 
 | Old path | Current path |
 |----------|-------------|
-| `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` |
-| `~/.tron/settings.json` | `~/.tron/system/settings.json` |
-| `~/.tron/auth.json` | `~/.tron/system/auth.json` |
-| `~/.tron/tron` (binary) | `~/.tron/system/Tron.app/Contents/MacOS/tron` |
-| `~/.tron/mods/` | `~/.tron/system/mods/` |
-| `~/.tron/artifacts/` | `~/.tron/system/deployment/` |
-| `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` |
-| `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` |
-| `~/.tron/database/` | `~/.tron/system/database/` |
+| `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` (DATABASE) |
+| `~/.tron/settings.json` | `~/.tron/system/settings.json` (SETTINGS) |
+| `~/.tron/auth.json` | `~/.tron/system/auth.json` (AUTH) |
+| `~/.tron/tron` (binary) | `~/.tron/system/Tron.app/Contents/MacOS/tron` (BINARY) |
+| `~/.tron/mods/` | `~/.tron/system/mods/` (MODS) |
+| `~/.tron/artifacts/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
+| `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
+| `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` (KNOWLEDGE) |
+| `~/.tron/database/` | `~/.tron/system/database/` (DATABASE) |
+| `~/.tron/workspace/cron/` | `~/.tron/workspace/automations/` (AUTOMATIONS) |
 
 ### 6. Validate Database References
 
