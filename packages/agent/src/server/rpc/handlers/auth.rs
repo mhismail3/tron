@@ -52,6 +52,64 @@ fn mask_key(key: &str) -> String {
 
 // ─── Masked state builder ────────────────────────────────────────────────────
 
+/// Build the common provider info fields from a `ProviderAuth`.
+///
+/// Populates: `hasApiKey`, `apiKeyHint`, `hasOAuth`, `accounts`, `apiKeys`,
+/// and `activeCredential`. These fields are consumed by the iOS settings UI
+/// to render credential status for each provider.
+fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
+    let mut info = serde_json::Map::new();
+
+    let has_api_keys = pa.api_keys.as_ref().is_some_and(|k| !k.is_empty());
+    let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
+
+    // First key hint — used by iOS to show a masked preview of the active key
+    if let Some(first_key) = pa.api_keys.as_ref().and_then(|k| k.first()) {
+        let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
+    }
+
+    let has_accounts = pa.accounts.as_ref().is_some_and(|a| !a.is_empty());
+    let _ = info.insert("hasOAuth".into(), json!(has_accounts));
+
+    let accounts = build_accounts_list(pa);
+    let _ = info.insert("accounts".into(), json!(accounts));
+
+    let api_keys: Vec<Value> = pa
+        .api_keys
+        .as_ref()
+        .map(|keys| {
+            keys.iter()
+                .map(|k| json!({"label": k.label, "keyHint": mask_key(&k.key)}))
+                .collect()
+        })
+        .unwrap_or_default();
+    let _ = info.insert("apiKeys".into(), json!(api_keys));
+
+    // Effective active credential: explicit selection, or fallback to first available
+    let effective_active = crate::llm::auth::resolve_credential(pa, None).map(|resolved| {
+        match resolved {
+            crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
+                crate::llm::auth::ActiveCredential::OAuth {
+                    label: acct.label.clone(),
+                }
+            }
+            crate::llm::auth::ResolvedCredential::ApiKey(key) => {
+                crate::llm::auth::ActiveCredential::ApiKey {
+                    label: key.label.clone(),
+                }
+            }
+        }
+    });
+    if let Some(active) = effective_active {
+        let _ = info.insert(
+            "activeCredential".into(),
+            serde_json::to_value(&active).unwrap_or(json!(null)),
+        );
+    }
+
+    info
+}
+
 /// Build the masked auth state response from raw storage.
 fn build_masked_state(auth_path: &Path) -> Value {
     let storage = load_auth_storage(auth_path);
@@ -64,22 +122,10 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 .as_ref()
                 .and_then(crate::llm::auth::types::AuthStorage::get_google_auth);
 
-            let mut info = serde_json::Map::new();
-            if let Some(ref g) = google {
-                let base = &g.base;
+            let info = if let Some(ref g) = google {
+                let mut info = build_provider_info(&g.base);
 
-                // Derive hasApiKey from api_keys[]
-                let has_api_keys = base.api_keys.as_ref().is_some_and(|k| !k.is_empty());
-                let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
-                if let Some(first_key) = base.api_keys.as_ref().and_then(|k| k.first()) {
-                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
-                }
-
-                // Derive hasOAuth from accounts[]
-                let has_accounts = base.accounts.as_ref().is_some_and(|a| !a.is_empty());
-                let _ = info.insert("hasOAuth".into(), json!(has_accounts));
-
-                // Google-specific fields
+                // Google-specific OAuth configuration fields
                 if let Some(ref ep) = g.endpoint {
                     let ep_str = match ep {
                         GoogleOAuthEndpoint::CloudCodeAssist => "cloud-code-assist",
@@ -93,124 +139,42 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 let _ = info.insert("hasClientId".into(), json!(g.client_id.is_some()));
                 let _ = info.insert("hasClientSecret".into(), json!(g.client_secret.is_some()));
 
-                // Accounts
-                let accounts = build_accounts_list(base);
-                let _ = info.insert("accounts".into(), json!(accounts));
-
-                // Named API keys (masked)
-                let api_keys: Vec<Value> = base
-                    .api_keys
-                    .as_ref()
-                    .map(|keys| {
-                        keys.iter()
-                            .map(|k| json!({"label": k.label, "keyHint": mask_key(&k.key)}))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let _ = info.insert("apiKeys".into(), json!(api_keys));
-
-                // Effective active credential: explicit selection, or fallback to first available
-                let effective_active = crate::llm::auth::resolve_credential(base, None)
-                    .map(|resolved| match resolved {
-                        crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
-                            crate::llm::auth::ActiveCredential::OAuth {
-                                label: acct.label.clone(),
-                            }
-                        }
-                        crate::llm::auth::ResolvedCredential::ApiKey(key) => {
-                            crate::llm::auth::ActiveCredential::ApiKey {
-                                label: key.label.clone(),
-                            }
-                        }
-                    });
-                if let Some(active) = effective_active {
-                    let _ = info.insert(
-                        "activeCredential".into(),
-                        serde_json::to_value(&active).unwrap_or(json!(null)),
-                    );
-                }
+                info
             } else {
+                let mut info = serde_json::Map::new();
                 let _ = info.insert("hasApiKey".into(), json!(false));
                 let _ = info.insert("hasOAuth".into(), json!(false));
                 let _ = info.insert("hasClientId".into(), json!(false));
                 let _ = info.insert("hasClientSecret".into(), json!(false));
                 let _ = info.insert("accounts".into(), json!([]));
                 let _ = info.insert("apiKeys".into(), json!([]));
-            }
+                info
+            };
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
-            // Load provider auth from storage
             let pa = crate::llm::auth::storage::get_provider_auth(auth_path, provider);
 
-            let mut info = serde_json::Map::new();
-            if let Some(ref pa) = pa {
-                // Derive hasApiKey from api_keys[]
-                let has_api_keys = pa.api_keys.as_ref().is_some_and(|k| !k.is_empty());
-                let _ = info.insert("hasApiKey".into(), json!(has_api_keys));
-                // Backward compat: apiKeyHint from first named key
-                if let Some(first_key) = pa.api_keys.as_ref().and_then(|k| k.first()) {
-                    let _ = info.insert("apiKeyHint".into(), json!(mask_key(&first_key.key)));
-                }
+            let info = if let Some(ref pa) = pa {
+                let mut info = build_provider_info(pa);
 
-                // Derive hasOAuth from accounts[]
-                let has_accounts = pa.accounts.as_ref().is_some_and(|a| !a.is_empty());
-                let _ = info.insert("hasOAuth".into(), json!(has_accounts));
-
-                // Backward compat: oauthExpiresAt/isOAuthExpired from first account
+                // Top-level OAuth expiry from first account — used by iOS to show
+                // quick expiry status without expanding the accounts list
                 if let Some(first_acct) = pa.accounts.as_ref().and_then(|a| a.first()) {
                     let _ = info.insert("oauthExpiresAt".into(), json!(first_acct.oauth.expires_at));
                     let is_expired = crate::llm::auth::types::now_ms() >= first_acct.oauth.expires_at;
                     let _ = info.insert("isOAuthExpired".into(), json!(is_expired));
                 }
 
-                // Accounts list (OAuth)
-                let accounts = build_accounts_list(pa);
-                let _ = info.insert("accounts".into(), json!(accounts));
-
-                // Named API keys (masked)
-                let api_keys: Vec<Value> = pa
-                    .api_keys
-                    .as_ref()
-                    .map(|keys| {
-                        keys.iter()
-                            .map(|k| {
-                                json!({
-                                    "label": k.label,
-                                    "keyHint": mask_key(&k.key),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let _ = info.insert("apiKeys".into(), json!(api_keys));
-
-                // Effective active credential: explicit selection, or fallback to first available
-                let effective_active = crate::llm::auth::resolve_credential(pa, None)
-                    .map(|resolved| match resolved {
-                        crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
-                            crate::llm::auth::ActiveCredential::OAuth {
-                                label: acct.label.clone(),
-                            }
-                        }
-                        crate::llm::auth::ResolvedCredential::ApiKey(key) => {
-                            crate::llm::auth::ActiveCredential::ApiKey {
-                                label: key.label.clone(),
-                            }
-                        }
-                    });
-                if let Some(active) = effective_active {
-                    let _ = info.insert(
-                        "activeCredential".into(),
-                        serde_json::to_value(&active).unwrap_or(json!(null)),
-                    );
-                }
+                info
             } else {
+                let mut info = serde_json::Map::new();
                 let _ = info.insert("hasApiKey".into(), json!(false));
                 let _ = info.insert("hasOAuth".into(), json!(false));
                 let _ = info.insert("accounts".into(), json!([]));
                 let _ = info.insert("apiKeys".into(), json!([]));
-            }
+                info
+            };
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         }
