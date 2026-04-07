@@ -100,7 +100,7 @@ extension ChatViewModel {
     }
 
     /// Apply config state from reconstructed events (reasoning level, suggestions).
-    private func applyReconstructedConfig(_ state: ReconstructedState) {
+    func applyReconstructedConfig(_ state: ReconstructedState) {
         if let eventSourcedLevel = state.reasoningLevel {
             inputBarState.reasoningLevel = eventSourcedLevel
         }
@@ -145,7 +145,7 @@ extension ChatViewModel {
     /// Restore subagent state from reconstructed session data.
     /// Populates SubagentState from result events and converts SpawnSubagent tool messages
     /// to subagent chips using lifecycle events (spawned/completed/failed).
-    private func restoreSubagentState(from state: ReconstructedState) {
+    func restoreSubagentState(from state: ReconstructedState) {
         // Populate SubagentState from reconstructed subagent results
         for result in state.subagentResults {
             var data = SubagentToolData(

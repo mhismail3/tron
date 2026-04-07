@@ -11,11 +11,14 @@ extension ChatViewModel {
     func processReconstructionResult(_ result: SessionReconstructResult) async {
         logger.info("[RECONSTRUCT] Processing: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), hasMore=\(result.hasMoreEvents), inFlight=\(result.inFlight != nil)", category: .session)
 
-        // 1. Transform persisted events into messages using the unified transformer
-        let reconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(result.events)
+        // 1. Reconstruct full session state (messages + config + subagent state)
+        //    Uses reconstructSessionState() as single source of truth — same path as DB fallback.
+        let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
+        applyReconstructedConfig(state)
+        restoreSubagentState(from: state)
 
         // 2. Replace displayed messages with reconstructed history
-        allReconstructedMessages = reconstructedMessages
+        allReconstructedMessages = state.messages
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
         displayedMessageCount = batchSize
         hasMoreMessages = result.hasMoreEvents || allReconstructedMessages.count > batchSize
@@ -42,7 +45,7 @@ extension ChatViewModel {
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
-        logger.info("[RECONSTRUCT] Done: \(reconstructedMessages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
     }
 
     /// Process in-flight state from a running agent turn.

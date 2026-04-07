@@ -31,6 +31,15 @@ ReconstructedState (messages, activeTools, pendingQuestion, ...)
 ChatViewModel.messages
 ```
 
+## Two Entry Points
+
+| Method | Returns | Used By |
+|--------|---------|---------|
+| `reconstructSessionState()` | `ReconstructedState` (messages + config + subagent state + suggestions) | RPC reconstruction, DB fallback loading |
+| `transformPersistedEvents()` | `[ChatMessage]` (messages only) | Pagination load-more, subagent event loading |
+
+Both paths use `buildToolMaps` as the first pass. Use `reconstructSessionState()` when you need config, suggestions, or subagent state. Use `transformPersistedEvents()` only when you need bare messages (e.g., loading older pages).
+
 ## Rules
 
 - Use `EventTransformable` protocol for generic functions that work with both RawEvent and SessionEvent
@@ -39,6 +48,7 @@ ChatViewModel.messages
 - Sequence numbers determine ordering, not timestamps
 - Handle truncated tool arguments by looking up original from tool.call events
 - `buildToolMaps` is shared between `transformPersistedEvents` and `reconstructSessionState` — keep it in sync
+- Always use `reconstructSessionState()` when loading a full session — it includes suggestions and config that `transformPersistedEvents()` misses
 
 ---
 
