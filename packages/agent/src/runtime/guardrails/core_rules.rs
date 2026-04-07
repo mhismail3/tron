@@ -150,7 +150,7 @@ fn core_tron_no_delete() -> GuardrailRule {
     })
 }
 
-/// Core rule: Protect ~/.tron/system/ directory (db, auth, settings, deployment, mods, bin).
+/// Core rule: Protect ~/.tron/system/ directory (db, auth, settings, deployment, mods).
 fn core_tron_system_protection() -> GuardrailRule {
     let home = homedir();
     let system_path = format!("{home}/.tron/system");

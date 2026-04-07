@@ -728,10 +728,6 @@ cmd_deploy() {
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
     codesign_bundle "$INSTALLED_BUNDLE"
 
-    # Clean up old bare binary path (pre-bundle migration)
-    rm -f "$TRON_HOME/system/bin/tron"
-    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
-
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/system/mods/transcribe"
@@ -853,10 +849,6 @@ cmd_install() {
     codesign_bundle "$INSTALLED_BUNDLE"
     print_success "Installed app bundle"
 
-    # Clean up old bare binary path (pre-bundle migration)
-    rm -f "$TRON_HOME/system/bin/tron"
-    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
-
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/system/mods/transcribe"
@@ -944,9 +936,6 @@ cmd_uninstall() {
 
     print_status "Removing app bundle and binary..."
     rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$DEPLOY_DIR/tron.bak"
-    # Clean up old bare binary path if it exists
-    rm -f "$TRON_HOME/system/bin/tron"
-    rmdir "$TRON_HOME/system/bin" 2>/dev/null || true
 
     echo ""
     print_success "Service uninstalled"

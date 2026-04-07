@@ -740,7 +740,6 @@ The deploy process:
 |   +-- canvases/         Generated artifacts
 |   +-- scratch/          Downloads, temp files, experiments
 +-- system/
-|   +-- bin/              CLI binaries
 |   +-- db/
 |   |   +-- log.db        Single SQLite file (events, tasks, logs, vectors)
 |   +-- deployment/       Deploy state files

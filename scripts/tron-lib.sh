@@ -88,7 +88,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/system/{bin,database,deployment,mods/apns}
+    mkdir -p "$TRON_HOME"/system/{database,deployment,mods/apns}
     mkdir -p "$TRON_HOME"/workspace/{sessions,knowledge,cron,scratch,rules}
     mkdir -p "$TRON_HOME"/skills
     mkdir -p "$TRON_HOME"/user/voice
