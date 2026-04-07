@@ -1,4 +1,5 @@
 use super::*;
+use super::tool_factory::create_tool_registry;
 use clap::Parser;
 use tron::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
