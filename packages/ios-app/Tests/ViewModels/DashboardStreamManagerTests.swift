@@ -245,7 +245,7 @@ final class SessionStreamBufferTests: XCTestCase {
         buffer.addToolStart(name: "Edit", arguments: nil)
         buffer.addToolEnd(name: "Edit", success: true)
         buffer.addSubagentSpawn(task: "task")
-        buffer.addSubagentComplete(turns: 1)
+        buffer.addSubagentComplete(turns: 1, durationMs: nil)
         buffer.addSubagentFailed(error: "err")
         buffer.setThinking()
         buffer.addError(message: "err")
@@ -546,7 +546,7 @@ final class DashboardStreamManagerTests: XCTestCase {
     func testHookSubagentCompleteSuppressed() {
         let manager = DashboardStreamManager()
         manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1")
-        manager.handleSubagentCompleted(sessionId: "s1", turns: 3, subagentSessionId: "sub1")
+        manager.handleSubagentCompleted(sessionId: "s1", turns: 3, durationMs: nil, subagentSessionId: "sub1")
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
     }

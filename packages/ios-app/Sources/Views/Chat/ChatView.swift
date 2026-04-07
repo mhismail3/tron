@@ -763,11 +763,47 @@ struct ChatView: View {
 
     // MARK: - Load More Button
 
+    /// Load earlier messages and scroll to the top to show the new content.
+    /// Handles both in-memory pagination and async server pagination.
+    private func loadEarlierMessages() async {
+        let countBefore = viewModel.messages.count
+
+        // Suppress "New content" pill during the entire load
+        scrollCoordinator.willPrependHistory(firstVisibleId: viewModel.messages.first?.id)
+
+        // Try in-memory first, then async server fetch — called directly
+        // instead of via loadMoreMessages() to avoid fire-and-forget Task issues
+        viewModel.loadMoreMessagesSync()
+
+        if viewModel.messages.count == countBefore {
+            // In-memory had nothing — fetch from server (awaited, not fire-and-forget)
+            await viewModel.loadMoreMessagesFromServer()
+        }
+
+        // Scroll to the top of the new content.
+        // Yield a frame so LazyVStack materializes the newly prepended items —
+        // scrollTo silently no-ops if the target isn't rendered yet.
+        // NOTE: isPrependingHistory stays true until AFTER the scroll completes.
+        // The onChange(messages.count) handler fires during the yield and calls
+        // contentDidArrive() — if the flag were already cleared, it would set
+        // hasUnseenContent and flash the "New content" pill.
+        let countAfter = viewModel.messages.count
+        if countAfter > countBefore, let firstId = viewModel.messages.first?.id {
+            try? await Task.sleep(for: .milliseconds(50))
+            withAnimation(.easeOut(duration: 0.3)) {
+                scrollProxy?.scrollTo(firstId, anchor: .top)
+            }
+        }
+
+        // Clear prepend guard after scroll is dispatched
+        scrollCoordinator.isPrependingHistory = false
+    }
+
     private var loadMoreButton: some View {
         Button {
-            // Notify coordinator before prepending history
-            scrollCoordinator.willPrependHistory(firstVisibleId: viewModel.messages.first?.id)
-            viewModel.loadMoreMessages()
+            Task {
+                await loadEarlierMessages()
+            }
         } label: {
             HStack(spacing: 8) {
                 if viewModel.isLoadingMoreMessages {

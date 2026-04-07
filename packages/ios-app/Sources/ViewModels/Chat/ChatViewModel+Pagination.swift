@@ -242,7 +242,8 @@ extension ChatViewModel {
         await refreshContextFromServer()
     }
 
-    /// Load more older messages when user scrolls to top
+    /// Load more older messages when user scrolls to top.
+    /// Called by the Load Earlier Messages button via `loadEarlierMessages()`.
     func loadMoreMessages() {
         guard hasMoreMessages, !isLoadingMoreMessages else { return }
 
@@ -252,30 +253,41 @@ extension ChatViewModel {
             return
         }
 
+        // Try in-memory first
+        if loadMoreMessagesSync() { return }
+
+        // No more in-memory messages — fetch older events from server
+        Task {
+            await loadMoreMessagesFromServer()
+        }
+    }
+
+    /// Load older messages from the in-memory `allReconstructedMessages` buffer.
+    /// Returns true if messages were loaded, false if buffer is exhausted.
+    @discardableResult
+    func loadMoreMessagesSync() -> Bool {
+        guard hasMoreMessages else { return false }
+
         let historicalCount = allReconstructedMessages.count
         let shownFromHistory = displayedMessageCount
 
         let remainingInHistory = historicalCount - shownFromHistory
         let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
 
-        if batchToLoad > 0 {
-            isLoadingMoreMessages = true
-            let endIndex = historicalCount - shownFromHistory
-            let startIndex = max(0, endIndex - batchToLoad)
-            let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
+        guard batchToLoad > 0 else { return false }
 
-            insertAtFrontOfMessages(olderMessages)
-            displayedMessageCount += batchToLoad
+        isLoadingMoreMessages = true
+        let endIndex = historicalCount - shownFromHistory
+        let startIndex = max(0, endIndex - batchToLoad)
+        let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
 
-            logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
-            hasMoreMessages = displayedMessageCount < historicalCount
-            isLoadingMoreMessages = false
-        } else {
-            // No more in-memory messages — fetch older events from server
-            Task {
-                await loadMoreMessagesFromServer()
-            }
-        }
+        insertAtFrontOfMessages(olderMessages)
+        displayedMessageCount += batchToLoad
+
+        logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
+        hasMoreMessages = displayedMessageCount < historicalCount
+        isLoadingMoreMessages = false
+        return true
     }
 
     // MARK: - Live Session Pruning
