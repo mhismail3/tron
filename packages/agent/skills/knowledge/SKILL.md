@@ -1,121 +1,104 @@
 ---
 name: "Knowledge"
-description: "Maintain a persistent knowledge base — save research, extract from URLs, search notes, organize by topic"
-version: "1.0.0"
-tags: [knowledge, notes, research, vault]
+description: "LLM-maintained personal wiki — ingest URLs, capture session insights, deep research, search notes, lint for health, process Raindrop bookmarks"
+version: "2.0.0"
+tags: [knowledge, wiki, research, raindrop]
 ---
 
-# Knowledge
+# Knowledge Wiki
 
-Maintain a persistent knowledge base at `~/.tron/workspace/knowledge/`. Notes are plain Markdown files with optional YAML frontmatter. Use your standard tools — Read, Write, Edit, Find, Search — to manage everything directly.
+A persistent, compounding knowledge base. The wiki is maintained by LLM agents — you curate sources and ask questions, the agent does the summarizing, cross-referencing, and bookkeeping.
 
-## Knowledge folder
+## Paths
+
+All paths below are derived from the system prompt's PATH REFERENCE. This section is the single source of truth for this skill.
+
+| Alias | Path |
+|-------|------|
+| WIKI_ROOT | `~/.tron/workspace/knowledge/` |
+| WIKI_SCHEMA | `~/.tron/workspace/knowledge/SCHEMA.md` |
+| WIKI_INDEX | `~/.tron/workspace/knowledge/index.md` |
+| WIKI_LOG | `~/.tron/workspace/knowledge/log.md` |
+| WIKI_SOURCES | `~/.tron/workspace/knowledge/sources/` |
+| WIKI_PAGES | `~/.tron/workspace/knowledge/wiki/` |
+| AUTOMATIONS | `~/.tron/workspace/automations/` |
+
+**Before any operation**, read WIKI_SCHEMA. The schema is the ground truth for conventions. If this skill and the schema disagree, the schema wins.
+
+## Structure
 
 ```
-~/.tron/workspace/knowledge/
-  sources/       -- one note per URL (articles, papers, tweets)
-  topics/        -- one note per atomic concept (grows over time)
-  arguments/     -- synthesis notes connecting topics
-  references/    -- bookmarks, links, quick-reference material
-  voice-notes/   -- transcribed voice recordings (managed by iOS)
+WIKI_ROOT
+  SCHEMA.md      # Ground truth — conventions, frontmatter, naming
+  index.md       # Page catalog (rebuildable cache)
+  log.md         # Operation log (append-only, observability)
+  sources/       # What you read — one note per URL (dated snapshots)
+  wiki/          # What you think — concepts, synthesis, references (living docs)
 ```
 
-Create subdirectories as needed. The structure above is a starting point, not a constraint.
+## Routing
 
-## Routing table
-
-Match user intent to the correct reference file. **Read the file** before executing the workflow.
+Match user intent to the correct workflow file. **Read the file** before executing.
 
 | User wants... | Read file |
 |---|---|
-| Save a URL, extract knowledge from a link | `extract.md` |
-| Deep research on a topic (multi-round, autonomous) | `research.md` |
-| Find information, search across notes | `search.md` |
-| Reorganize, tag, rename, clean up notes | `organize.md` |
-| Save a quick fact, reference, or preference | `save.md` |
+| Ingest a URL, save a quick note, capture session insights, file an answer back | `ingest.md` |
+| Deep multi-round autonomous research on a topic | `research.md` |
+| Health-check, lint, reorganize, fix issues | `maintain.md` |
+| Process Raindrop.io bookmarks, set up Raindrop automation | `raindrop.md` |
 
-If a URL is provided, default to **extract**. For broad "research X for me" requests, use **research**. If the user is asking about existing notes, default to **search**.
+**Defaults:**
+- URL provided → `ingest.md` (extract mode)
+- "research X for me" → `research.md`
+- "save this" mid-conversation → `ingest.md` (capture mode)
+- "lint" / "health check" / "organize" → `maintain.md`
+- "raindrop" / "bookmarks" → `raindrop.md`
 
-## Quick operations
+## Search
 
-For simple operations that don't need a sub-file:
+When the user invokes `@knowledge search` or asks a question about wiki contents:
 
-### Save a quick note
+1. Read WIKI_INDEX for the full page catalog
+2. Identify relevant entries from the index
+3. Read those pages
+4. If the index doesn't surface what you need, full-text search:
+   ```
+   Search for "query" in WIKI_ROOT
+   ```
+5. Follow wikilinks to discover connected notes
+6. If WIKI_INDEX doesn't exist, skip to step 4 — the wiki still works without it
 
-```
-Write to: ~/.tron/workspace/knowledge/{category}/{slug}.md
-```
+Synthesize an answer from the wiki pages. If the answer is particularly good, offer to file it back: "Want me to save this synthesis to the wiki?"
 
-Include frontmatter:
+## Session Capture
 
-```yaml
----
-type: fact|reference|topic|source
-tags: [relevant, tags]
-created: "YYYY-MM-DD"
-updated: "YYYY-MM-DD"
----
-```
+Watch for high-value synthesis during conversations:
+- Novel connections between ideas
+- Conclusions that took significant reasoning
+- Frameworks or mental models that crystallized
 
-### Search notes
+When you notice these, ask: **"Want me to save this to the wiki?"** Proceed only if the user confirms. Follow `ingest.md` capture mode.
 
-```
-# Full-text search
-Search for "query" in ~/.tron/workspace/knowledge/
+Also triggered explicitly with `@knowledge capture` or "save this to the wiki".
 
-# Find all notes in a category
-Find *.md in ~/.tron/workspace/knowledge/topics/
+## Epilogue — After Every Operation
 
-# Find by tag
-Search for "tags:.*tagname" in ~/.tron/workspace/knowledge/
-```
+Every operation that creates or modifies a note must:
 
-### Read a note
+1. **Update WIKI_INDEX** — read it, add/update the entry, bump `updated` and `page_count`. If missing, skip (lint rebuilds it).
+2. **Append to WIKI_LOG** — one pipe-delimited line per note affected. If missing, create with `# Knowledge Log` header first.
+3. **Git commit** — at the end of a session or cron run, commit all changes:
+   ```bash
+   cd WIKI_ROOT && git add -A && git commit -m "wiki: {operation} — {brief description}"
+   ```
+   Do not push unless asked.
 
-```
-Read: ~/.tron/workspace/knowledge/{category}/{slug}.md
-```
-
-## When to save knowledge
-
-Save proactively when you encounter:
-- Research findings, patterns, or techniques discovered during work
-- Facts, preferences, or context the user shares
-- Synthesized understanding that emerged from a conversation
-- References, links, or resources worth keeping
-
-Don't save:
-- Session-specific actions (the memory ledger handles that)
-- Temporary scratch work
-- Information already in the memory ledger
-
-The memory ledger captures *what happened*. Knowledge captures *what's true*.
-
-## Frontmatter conventions
-
-All notes use YAML frontmatter between `---` fences. Required fields vary by type:
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `type` | Yes | `source`, `topic`, `argument`, `fact`, `reference`, `voice` |
-| `tags` | No | Array of tags for discovery |
-| `created` | No | ISO 8601 timestamp |
-| `url` | Sources only | Original URL |
-| `author` | Sources only | Author name |
-
-## Wikilinks
-
-Use `[[wikilinks]]` to connect notes:
-- Source citation: `[[Author - Short Title]]`
-- Topic link: `[[Topic Name]]`
-- Cross-reference: `[[Any Note Name]]`
-
-## Reference file paths
+## Reference Paths
 
 ```
-~/.tron/skills/knowledge/extract.md
-~/.tron/skills/knowledge/research.md
-~/.tron/skills/knowledge/search.md
-~/.tron/skills/knowledge/organize.md
-~/.tron/skills/knowledge/save.md
+WIKI_SCHEMA                                  # Ground truth
+~/.tron/skills/knowledge/ingest.md          # Ingest, capture, save, fileback
+~/.tron/skills/knowledge/research.md        # Deep autonomous research
+~/.tron/skills/knowledge/maintain.md        # Lint, organize, health check
+~/.tron/skills/knowledge/raindrop.md        # Raindrop.io integration
 ```

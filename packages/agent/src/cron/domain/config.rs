@@ -1,6 +1,6 @@
 //! JSON configuration file management.
 //!
-//! The canonical job definitions live in `~/.tron/workspace/cron/automations.json`.
+//! The canonical job definitions live in `~/.tron/workspace/automations/automations.json`.
 //! This module handles loading, saving (atomic writes), validation,
 //! and file change detection.
 

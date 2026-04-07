@@ -54,8 +54,8 @@ pub mod dirs {
     pub const KNOWLEDGE: &str = "knowledge";
     /// Analysis, research, and investigation reports.
     pub const REPORTS: &str = "reports";
-    /// Cron job working directories and output.
-    pub const CRON: &str = "cron";
+    /// Automation job working directories and output.
+    pub const CRON: &str = "automations";
     /// Throwaway output and intermediate results.
     pub const SCRATCH: &str = "scratch";
     /// Saved screenshots from computer-use tool.
@@ -171,7 +171,7 @@ pub fn reports_dir() -> PathBuf {
     workspace_dir().join(dirs::REPORTS)
 }
 
-/// `~/.tron/<workspace>/cron/`
+/// `~/.tron/<workspace>/automations/`
 pub fn cron_dir() -> PathBuf {
     workspace_dir().join(dirs::CRON)
 }
@@ -215,7 +215,7 @@ pub fn auth_path() -> PathBuf {
     system_dir().join(files::AUTH_JSON)
 }
 
-/// `~/.tron/<workspace>/cron/automations.json`
+/// `~/.tron/<workspace>/automations/automations.json`
 pub fn automations_path() -> PathBuf {
     cron_dir().join(files::AUTOMATIONS_JSON)
 }

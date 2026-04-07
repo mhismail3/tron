@@ -113,7 +113,7 @@ Check all `~/.tron/` paths in the skill content against the current directory la
 | `~/.tron/workspace/rules/` | System rules (SYSTEM.md) |
 | `~/.tron/workspace/knowledge/` | Knowledge base |
 | `~/.tron/workspace/sessions/` | Session notes |
-| `~/.tron/workspace/cron/` | Cron working files |
+| `~/.tron/workspace/automations/` | Automation working files |
 | `~/.tron/workspace/scratch/` | Temporary files |
 | `~/.tron/user/voice/` | Voice I/O |
 

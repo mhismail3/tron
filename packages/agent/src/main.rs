@@ -100,10 +100,7 @@ struct Cli {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum Command {
-    /// Reset the global system prompt to the built-in default.
-    ResetPrompt,
-}
+enum Command {}
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -178,9 +175,6 @@ fn init_directories() {
     let _ = std::fs::create_dir_all(tron_home.join(dirs::USER).join(dirs::VOICE));
     let _ = std::fs::create_dir_all(tron_home.join(dirs::SKILLS));
     let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::RULES));
-
-    // Seed global SYSTEM.md (system prompt override) if missing or not customized.
-    let _ = tron::runtime::context::system_prompts::seed_global_system_prompt(&tron_home);
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.
@@ -878,28 +872,6 @@ fn spawn_background_tasks(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
-
-    // Dispatch subcommands before server startup.
-    if let Some(cmd) = args.command {
-        match cmd {
-            Command::ResetPrompt => {
-                let path = tron::core::paths::global_system_prompt_path();
-                let content = tron::runtime::context::system_prompts::build_seeded_content(
-                    tron::runtime::context::system_prompts::TRON_CORE_PROMPT,
-                );
-                match std::fs::write(&path, &content) {
-                    Ok(()) => {
-                        println!("Reset {} to built-in default.", path.display());
-                        std::process::exit(0);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to write {}: {e}", path.display());
-                        std::process::exit(1);
-                    }
-                }
-            }
-        }
-    }
 
     // Phase 1: Pre-database filesystem operations
     init_crash_recovery();
