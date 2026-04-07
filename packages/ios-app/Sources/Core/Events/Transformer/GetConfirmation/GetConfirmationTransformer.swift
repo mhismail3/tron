@@ -25,14 +25,10 @@ enum GetConfirmationTransformer {
         allEvents: [E]?
     ) -> ChatMessage? {
         // Parse the params from arguments
-        let argumentsJson: String
-        if let toolCallArgs = toolCall?.arguments {
-            argumentsJson = toolCallArgs
-        } else if let inputDict = (contentBlock["arguments"] ?? contentBlock["input"]) as? [String: Any],
-                  let jsonData = try? JSONSerialization.data(withJSONObject: inputDict),
-                  let jsonString = String(data: jsonData, encoding: .utf8) {
-            argumentsJson = jsonString
-        } else {
+        guard let argumentsJson = ToolArgumentExtractor.extractArguments(
+            toolCall: toolCall,
+            contentBlock: contentBlock
+        ) else {
             TronLogger.shared.warning("GetConfirmation: Could not extract arguments", category: .events)
             return nil
         }

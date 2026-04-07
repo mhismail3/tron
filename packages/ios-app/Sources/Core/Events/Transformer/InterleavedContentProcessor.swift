@@ -219,16 +219,10 @@ enum InterleavedContentProcessor {
         }
 
         // Arguments: use tool.call string if available, else serialize content block input
-        let arguments: String
-        if let toolCallArgs = toolCall?.arguments {
-            arguments = toolCallArgs
-        } else if let inputDict = (block["arguments"] ?? block["input"]) as? [String: Any],
-                  let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.sortedKeys]),
-                  let jsonString = String(data: jsonData, encoding: .utf8) {
-            arguments = jsonString
-        } else {
-            arguments = "{}"
-        }
+        let arguments = ToolArgumentExtractor.extractArguments(
+            toolCall: toolCall,
+            contentBlock: block
+        ) ?? "{}"
 
         // Metadata is set after the loop on the last message (see transform())
         return ChatMessage(
