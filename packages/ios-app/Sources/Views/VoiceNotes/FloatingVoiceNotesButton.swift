@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Floating mic button for voice notes - smaller than plus button, teal tint.
+/// Floating mic button for voice notes, teal tint.
 /// Automatically disables when audio recording is unavailable (e.g., during phone calls).
 @available(iOS 26.0, *)
 struct FloatingVoiceNotesButton: View {
     let action: () -> Void
+    var size: CGFloat = 44
     private let audioMonitor = AudioAvailabilityMonitor.shared
 
     var body: some View {
@@ -12,7 +13,7 @@ struct FloatingVoiceNotesButton: View {
             Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
                 .font(TronTypography.button)
                 .foregroundStyle(audioMonitor.isRecordingAvailable ? .tronTeal : .tronTextDisabled)
-                .frame(width: 44, height: 44)
+                .frame(width: size, height: size)
                 .contentShape(Circle())
         }
         .disabled(!audioMonitor.isRecordingAvailable)

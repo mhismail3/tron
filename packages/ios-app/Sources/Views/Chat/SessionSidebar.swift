@@ -501,7 +501,7 @@ struct EmptySessionsView: View {
         VStack(spacing: 20) {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronEmerald)
 
             VStack(spacing: 6) {
                 Text("No Sessions")

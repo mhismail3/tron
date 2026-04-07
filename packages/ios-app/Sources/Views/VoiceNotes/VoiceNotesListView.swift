@@ -29,7 +29,7 @@ struct VoiceNotesListView: View {
             }
 
             // Floating mic button
-            FloatingVoiceNotesButton(action: onVoiceNote)
+            FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
         }
@@ -103,17 +103,11 @@ struct VoiceNotesListView: View {
         VStack(spacing: 20) {
             Image(systemName: "waveform")
                 .font(TronTypography.sans(size: 48, weight: .light))
+                .foregroundStyle(.tronTeal)
+
+            Text("Tap the mic button to record")
+                .font(TronTypography.subheadline)
                 .foregroundStyle(.tronTextMuted)
-
-            VStack(spacing: 6) {
-                Text("No Voice Notes")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("Tap the mic button to record")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronTextMuted)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -240,7 +240,7 @@ struct AutomationsDashboardView: View {
         VStack(spacing: 20) {
             Image(systemName: "clock.badge.checkmark")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronCoral)
 
             VStack(spacing: 6) {
                 Text("No Automations")

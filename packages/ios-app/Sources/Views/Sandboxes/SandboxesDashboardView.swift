@@ -248,7 +248,7 @@ struct SandboxesDashboardView: View {
         VStack(spacing: 20) {
             Image(systemName: "shippingbox")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronIndigo)
 
             VStack(spacing: 6) {
                 Text("No Containers")
