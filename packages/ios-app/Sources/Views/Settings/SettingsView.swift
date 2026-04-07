@@ -141,7 +141,7 @@ struct SettingsView: View {
             Button("Archive All", role: .destructive) { archiveAllSessions() }
         } message: {
             Text({
-                let count = eventStoreManager.sessions.filter { !$0.isChat }.count
+                let count = eventStoreManager.sessions.count(where: { !$0.isChat })
                 return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
             }())
         }

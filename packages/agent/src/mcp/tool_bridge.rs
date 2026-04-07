@@ -149,8 +149,8 @@ pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &st
 }
 
 /// Create bridge tools for all tools discovered from an MCP client.
-#[allow(dead_code)]
-pub fn create_bridge_tools(
+#[cfg(test)]
+pub(crate) fn create_bridge_tools(
     server_name: &str,
     tool_defs: &[McpToolDef],
     client: &Arc<McpClient>,

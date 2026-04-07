@@ -92,8 +92,9 @@ struct GlobToolDetailSheet: View {
     private var statusRow: some View {
         ToolStatusRow(status: data.status, durationMs: data.durationMs) {
             if !parsedFiles.isEmpty {
-                let fileCount = parsedFiles.filter { !$0.isDirectory }.count
-                let dirCount = parsedFiles.filter { $0.isDirectory }.count
+                let (fileCount, dirCount) = parsedFiles.reduce(into: (0, 0)) { counts, file in
+                    if file.isDirectory { counts.1 += 1 } else { counts.0 += 1 }
+                }
                 if fileCount > 0 {
                     ToolInfoPill(icon: "doc", label: "\(fileCount) files", color: .cyan)
                 }

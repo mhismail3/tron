@@ -33,7 +33,7 @@ final class ProcessState {
 
     /// Count of currently active processes.
     var activeCount: Int {
-        processes.values.filter { $0.status == .running || $0.status == .backgrounded }.count
+        processes.values.count(where: { $0.status == .running || $0.status == .backgrounded })
     }
 
     /// Find a process by its tool call ID.

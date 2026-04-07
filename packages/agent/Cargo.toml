@@ -10,7 +10,7 @@ repository = "https://github.com/moose/tron"
 [features]
 default = ["apns"]
 apns = ["dep:jsonwebtoken"]
-browser-integration = []
+
 
 [lib]
 doctest = false
