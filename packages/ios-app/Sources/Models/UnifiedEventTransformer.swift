@@ -174,8 +174,6 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformRulesActivated(payload, timestamp: ts)
         case .memoryRetained:
             return SystemEventHandlers.transformMemoryRetained(payload, timestamp: ts)
-        case .streamThinkingComplete:
-            return SystemEventHandlers.transformThinkingComplete(payload, timestamp: ts)
         default:
             return nil
         }
@@ -432,10 +430,6 @@ extension UnifiedEventTransformer {
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn
                 }
-
-            case .sessionEnd:
-                // Legacy event type — sessions no longer end, just ignore
-                break
 
             case .sessionFork:
                 if let source = event.payload["sourceEventId"]?.value as? String {

@@ -120,7 +120,7 @@ enum PersistedEventType: String, CaseIterable {
     /// Whether this event affects session state reconstruction
     var affectsSessionState: Bool {
         switch self {
-        case .sessionStart, .sessionEnd, .sessionFork,
+        case .sessionStart, .sessionFork,
              .messageUser, .messageAssistant, .messageSystem,
              .messageDeleted,
              .toolCall, .toolResult,
