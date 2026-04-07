@@ -33,7 +33,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             type: type,
             timestamp: timestamp ?? self.timestamp(),
             sequence: sequence,
-            payload: payload
+            payload: payload,
+            toolCallId: nil,
+            toolName: nil
         )
     }
 

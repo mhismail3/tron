@@ -27,6 +27,10 @@ struct RawEvent: Decodable, EventTransformable {
     let timestamp: String
     let sequence: Int
     let payload: [String: AnyCodable]
+    /// Wire-level toolCallId from DB column (tool.call / tool.result events).
+    /// Also present inside `payload`, but captured here for robustness.
+    let toolCallId: String?
+    let toolName: String?
 }
 
 struct EventsGetHistoryResult: Decodable {

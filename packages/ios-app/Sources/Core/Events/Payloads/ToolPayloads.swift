@@ -85,6 +85,20 @@ struct ToolResultPayload {
             self.details = nil
         }
     }
+
+    /// Minimal init for fallback when payload is missing toolCallId but wire-level has it.
+    init(toolCallId: String, content: String, isError: Bool, durationMs: Int) {
+        self.toolCallId = toolCallId
+        self.content = content
+        self.isError = isError
+        self.durationMs = durationMs
+        self.affectedFiles = nil
+        self.truncated = nil
+        self.blobId = nil
+        self.name = nil
+        self.arguments = nil
+        self.details = nil
+    }
 }
 
 // MARK: - Error Payloads

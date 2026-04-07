@@ -206,6 +206,7 @@ enum InterleavedContentProcessor {
         if let result = result {
             status = result.isError ? .error : .success
         } else {
+            TronLogger.shared.warning("[RECONSTRUCT] tool_use \(toolName) id=\(toolUseId) has no matching tool.result — will show as running", category: .session)
             status = .running
         }
 

@@ -85,6 +85,15 @@ enum ContentExtractor {
             }
         }
 
+        // Collect hook subagent IDs (spawned without toolCallId) to filter completions/failures
+        var hookSubagentIds: Set<String> = []
+        for event in events where event.type == PersistedEventType.subagentSpawned.rawValue {
+            if event.payload["toolCallId"]?.value == nil,
+               let subId = event.payload["subagentSessionId"]?.stringValue {
+                hookSubagentIds.insert(subId)
+            }
+        }
+
         // Pass 2: walk events in order, building activity lines
         var lines: [ActivityLine] = []
 
@@ -110,6 +119,9 @@ enum ContentExtractor {
                     guard let type = block["type"] as? String else { continue }
 
                     if type == ContentBlockType.toolUse.rawValue, let name = block["name"] as? String {
+                        // SpawnSubagent tools use subagent lifecycle events instead
+                        guard name != "SpawnSubagent" else { continue }
+
                         let descriptor = ToolRegistry.descriptor(for: name)
                         let toolId = block["id"] as? String
                         let inputDict = (block["input"] ?? block["arguments"]) as? [String: Any]
@@ -144,6 +156,46 @@ enum ContentExtractor {
                     } else if type == ContentBlockType.thinking.rawValue {
                         lines.append(ActivityLine(kind: .thinking, text: "Thinking"))
                     }
+                }
+
+            case PersistedEventType.subagentSpawned.rawValue:
+                // Only show user-visible subagents (those with a toolCallId from SpawnSubagent)
+                if event.payload["toolCallId"]?.value != nil {
+                    let task = event.payload["task"]?.stringValue ?? "Sub-agent task"
+                    let maxLen = DashboardConstants.maxSubagentTextLength
+                    let truncated = task.count > maxLen ? String(task.prefix(maxLen - 3)) + "…" : task
+                    lines.append(ActivityLine(kind: .subagentSpawn, text: "Subagent \(truncated)"))
+                }
+
+            case PersistedEventType.subagentCompleted.rawValue:
+                let subId = event.payload["subagentSessionId"]?.stringValue
+                if let subId, hookSubagentIds.contains(subId) { break }
+                let turns = event.payload["totalTurns"]?.intValue ?? 0
+                let duration = event.payload["duration"]?.intValue
+                let durationStr = duration.map { SessionStreamBuffer.formatDuration($0) }
+                let completeLine = ActivityLine(
+                    kind: .subagentDone,
+                    text: "Agent complete (\(turns) turns)",
+                    duration: durationStr
+                )
+                // Replace the most recent spawn line (like toolEnd replaces toolStart)
+                if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
+                    lines[idx] = completeLine
+                } else {
+                    lines.append(completeLine)
+                }
+
+            case PersistedEventType.subagentFailed.rawValue:
+                let subId = event.payload["subagentSessionId"]?.stringValue
+                if let subId, hookSubagentIds.contains(subId) { break }
+                let error = event.payload["error"]?.stringValue ?? "Unknown error"
+                let maxLen = DashboardConstants.maxSubagentTextLength
+                let truncated = error.count > maxLen ? String(error.prefix(maxLen - 3)) + "…" : error
+                let failLine = ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)")
+                if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
+                    lines[idx] = failLine
+                } else {
+                    lines.append(failLine)
                 }
 
             default:

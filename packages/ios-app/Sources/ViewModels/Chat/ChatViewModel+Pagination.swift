@@ -252,8 +252,6 @@ extension ChatViewModel {
             return
         }
 
-        isLoadingMoreMessages = true
-
         let historicalCount = allReconstructedMessages.count
         let shownFromHistory = displayedMessageCount
 
@@ -261,6 +259,7 @@ extension ChatViewModel {
         let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
 
         if batchToLoad > 0 {
+            isLoadingMoreMessages = true
             let endIndex = historicalCount - shownFromHistory
             let startIndex = max(0, endIndex - batchToLoad)
             let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
@@ -269,10 +268,14 @@ extension ChatViewModel {
             displayedMessageCount += batchToLoad
 
             logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
+            hasMoreMessages = displayedMessageCount < historicalCount
+            isLoadingMoreMessages = false
+        } else {
+            // No more in-memory messages — fetch older events from server
+            Task {
+                await loadMoreMessagesFromServer()
+            }
         }
-
-        hasMoreMessages = displayedMessageCount < historicalCount
-        isLoadingMoreMessages = false
     }
 
     // MARK: - Live Session Pruning

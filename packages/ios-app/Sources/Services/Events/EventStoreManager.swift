@@ -189,6 +189,9 @@ final class EventStoreManager {
         case ToolStartPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? ToolStartPlugin.Result {
+                // SpawnSubagent tools have dedicated subagent lifecycle events
+                // (subagentSpawned/subagentCompleted) — suppress tool chips to avoid duplicates
+                guard result.toolName != "SpawnSubagent" else { break }
                 dashboardStreamManager.handleEvent(
                     .toolStart(toolName: result.toolName, toolCallId: result.toolCallId, arguments: result.arguments),
                     sessionId: sessionId)
@@ -197,6 +200,7 @@ final class EventStoreManager {
         case ToolEndPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? ToolEndPlugin.Result {
+                guard result.toolName != "SpawnSubagent" else { break }
                 dashboardStreamManager.handleEvent(
                     .toolEnd(toolName: result.toolName, toolCallId: result.toolCallId, success: result.success, durationMs: result.duration),
                     sessionId: sessionId)
@@ -214,7 +218,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentCompletedPlugin.Result {
                 dashboardStreamManager.handleEvent(
-                    .subagentCompleted(turns: result.totalTurns, subagentSessionId: result.subagentSessionId),
+                    .subagentCompleted(turns: result.totalTurns, durationMs: result.duration, subagentSessionId: result.subagentSessionId),
                     sessionId: sessionId)
             }
 

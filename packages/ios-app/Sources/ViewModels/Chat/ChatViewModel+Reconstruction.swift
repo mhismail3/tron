@@ -27,7 +27,10 @@ extension ChatViewModel {
             clearAllMessages()
         }
 
-        // 3. Update session metadata from reconstruction
+        // 3. Track oldest sequence for load-more pagination
+        reconstructionOldestSequence = result.oldestSequence
+
+        // 4. Update session metadata from reconstruction
         if let turnCount = result.metadata.turnCount {
             currentTurn = turnCount
         }
@@ -177,43 +180,36 @@ extension ChatViewModel {
                 .success
         }
 
-        let toolUseData = ToolUseData(
-            toolName: toolCall.toolName,
-            toolCallId: toolCall.toolCallId,
-            arguments: argsString,
-            status: status,
-            result: toolCall.result,
-            durationMs: nil,
-            streamingOutput: (status == .running) ? toolCall.streamingOutput : nil
-        )
-
-        var toolMessage = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .toolUse(toolUseData),
-            timestamp: Date()
-        )
-
-        // If tool call is already completed, update with result
+        // Compute duration for completed tools
+        var durationMs: Int? = nil
         if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
-            var durationMs: Int? = nil
             if let completedAt = toolCall.completedAt,
                let startedAt = toolCall.startedAt,
                let startDate = DateParser.parse(startedAt),
                let endDate = DateParser.parse(completedAt) {
                 durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
             }
-
-            let resultData = ToolResultData(
-                toolCallId: toolCall.toolCallId,
-                content: toolCall.result ?? (toolCall.isError == true ? "Error" : "(no output)"),
-                isError: toolCall.isError ?? false,
-                toolName: toolCall.toolName,
-                arguments: argsString,
-                durationMs: durationMs
-            )
-            toolMessage.content = .toolResult(resultData)
         }
+
+        // Always use .toolUse content — this renders as compact chips.
+        // Previously completed tools were converted to .toolResult which
+        // renders as expanded container rows, breaking the chip display.
+        let toolUseData = ToolUseData(
+            toolName: toolCall.toolName,
+            toolCallId: toolCall.toolCallId,
+            arguments: argsString,
+            status: status,
+            result: toolCall.result,
+            durationMs: durationMs,
+            streamingOutput: (status == .running) ? toolCall.streamingOutput : nil
+        )
+
+        let toolMessage = ChatMessage(
+            id: messageId,
+            role: .assistant,
+            content: .toolUse(toolUseData),
+            timestamp: Date()
+        )
 
         // Track in currentToolMessages AFTER content is finalized
         currentToolMessages[messageId] = toolMessage
@@ -227,11 +223,11 @@ extension ChatViewModel {
         isLoadingMoreMessages = true
         defer { isLoadingMoreMessages = false }
 
-        // Get the oldest sequence from current messages
-        guard let oldestSeq = allReconstructedMessages.first.flatMap({ msg -> Int64? in
-            // RawEvent has sequence; ChatMessage doesn't directly. Use the stored oldest.
-            return nil // TODO: track oldestSequence from last reconstruction
-        }) ?? reconstructionOldestSequence else { return }
+        guard let oldestSeq = reconstructionOldestSequence else {
+            logger.warning("[RECONSTRUCT] loadMore: no oldestSequence tracked, cannot paginate", category: .session)
+            hasMoreMessages = false
+            return
+        }
 
         do {
             let result = try await rpcClient.session.reconstruct(

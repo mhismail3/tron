@@ -133,7 +133,7 @@ final class SessionStreamBufferTests: XCTestCase {
 
     func testSubagentCompleteCreatesLine() {
         var buffer = SessionStreamBuffer()
-        buffer.addSubagentComplete(turns: 3)
+        buffer.addSubagentComplete(turns: 3, durationMs: nil)
 
         XCTAssertEqual(buffer.lines.count, 1)
         XCTAssertEqual(buffer.lines[0].kind, .subagentDone)

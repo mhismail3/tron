@@ -71,9 +71,20 @@ struct UnifiedEventTransformer {
                let payload = ToolCallPayload(from: event.payload) {
                 toolCalls[payload.toolCallId] = payload
             }
-            if event.type == PersistedEventType.toolResult.rawValue,
-               let payload = ToolResultPayload(from: event.payload) {
-                toolResults[payload.toolCallId] = payload
+            if event.type == PersistedEventType.toolResult.rawValue {
+                if let payload = ToolResultPayload(from: event.payload) {
+                    toolResults[payload.toolCallId] = payload
+                } else if let rawEvent = event as? RawEvent, let tcId = rawEvent.toolCallId {
+                    // Fallback: toolCallId missing from payload but available at wire level
+                    TronLogger.shared.warning("[RECONSTRUCT] tool.result payload missing toolCallId, using wire-level \(tcId)", category: .session)
+                    let fallback = ToolResultPayload(
+                        toolCallId: tcId,
+                        content: event.payload.string("content") ?? "",
+                        isError: event.payload.bool("isError") ?? false,
+                        durationMs: event.payload.int("duration") ?? 0
+                    )
+                    toolResults[tcId] = fallback
+                }
             }
             if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
                let ids = event.payload["consumedEventIds"]?.value as? [Any] {
@@ -87,6 +98,8 @@ struct UnifiedEventTransformer {
                 lastTurnEndSequence = max(lastTurnEndSequence, event.sequence)
             }
         }
+
+        TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(toolCalls.count) tool.call, \(toolResults.count) tool.result from \(sorted.count) events", category: .session)
 
         // Transform events, processing message.assistant content blocks in order
         var messages: [ChatMessage] = []
@@ -276,9 +289,18 @@ extension UnifiedEventTransformer {
                let payload = ToolCallPayload(from: event.payload) {
                 toolCalls[payload.toolCallId] = payload
             }
-            if event.type == PersistedEventType.toolResult.rawValue,
-               let payload = ToolResultPayload(from: event.payload) {
-                toolResults[payload.toolCallId] = payload
+            if event.type == PersistedEventType.toolResult.rawValue {
+                if let payload = ToolResultPayload(from: event.payload) {
+                    toolResults[payload.toolCallId] = payload
+                } else if let rawEvent = event as? RawEvent, let tcId = rawEvent.toolCallId {
+                    let fallback = ToolResultPayload(
+                        toolCallId: tcId,
+                        content: event.payload.string("content") ?? "",
+                        isError: event.payload.bool("isError") ?? false,
+                        durationMs: event.payload.int("duration") ?? 0
+                    )
+                    toolResults[tcId] = fallback
+                }
             }
             if event.type == PersistedEventType.messageDeleted.rawValue,
                let payload = MessageDeletedPayload(from: event.payload) {

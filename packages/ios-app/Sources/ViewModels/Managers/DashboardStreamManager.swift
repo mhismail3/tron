@@ -126,17 +126,38 @@ struct SessionStreamBuffer {
         appendLine(ActivityLine(kind: .subagentSpawn, text: "Agent: \(truncated)"))
     }
 
-    mutating func addSubagentComplete(turns: Int) {
+    mutating func addSubagentComplete(turns: Int, durationMs: Int?) {
         guard isActive else { return }
         currentTextLineIndex = nil
-        appendLine(ActivityLine(kind: .subagentDone, text: "Agent complete (\(turns) turns)"))
+
+        // Replace the most recent pending spawn line (like toolEnd replaces toolStart)
+        if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
+            lines[idx] = ActivityLine(
+                kind: .subagentDone,
+                text: "Agent complete (\(turns) turns)",
+                duration: durationMs.map { Self.formatDuration($0) }
+            )
+            return
+        }
+        appendLine(ActivityLine(
+            kind: .subagentDone,
+            text: "Agent complete (\(turns) turns)",
+            duration: durationMs.map { Self.formatDuration($0) }
+        ))
     }
 
     mutating func addSubagentFailed(error: String) {
         guard isActive else { return }
         currentTextLineIndex = nil
+
         let maxLen = DashboardConstants.maxSubagentTextLength
         let truncated = error.count > maxLen ? String(error.prefix(maxLen - 3)) + "…" : error
+
+        // Replace the most recent pending spawn line
+        if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
+            lines[idx] = ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)")
+            return
+        }
         appendLine(ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)"))
     }
 
@@ -281,8 +302,8 @@ final class DashboardStreamManager {
             handleToolEnd(sessionId: sessionId, toolName: name, toolCallId: id, success: success, durationMs: ms)
         case .subagentSpawned(let task, let toolCallId, let subId):
             handleSubagentSpawned(sessionId: sessionId, task: task, toolCallId: toolCallId, subagentSessionId: subId)
-        case .subagentCompleted(let turns, let subId):
-            handleSubagentCompleted(sessionId: sessionId, turns: turns, subagentSessionId: subId)
+        case .subagentCompleted(let turns, let durationMs, let subId):
+            handleSubagentCompleted(sessionId: sessionId, turns: turns, durationMs: durationMs, subagentSessionId: subId)
         case .subagentFailed(let error, let subId):
             handleSubagentFailed(sessionId: sessionId, error: error, subagentSessionId: subId)
         case .turnFailed(let error):
@@ -331,10 +352,10 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleSubagentCompleted(sessionId: String, turns: Int, subagentSessionId: String) {
+    func handleSubagentCompleted(sessionId: String, turns: Int, durationMs: Int?, subagentSessionId: String) {
         if hookSubagentIds.remove(subagentSessionId) != nil { return }
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addSubagentComplete(turns: turns)
+        pendingBuffers[sessionId]?.addSubagentComplete(turns: turns, durationMs: durationMs)
         flushSession(sessionId)
     }
 
