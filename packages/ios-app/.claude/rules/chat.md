@@ -15,6 +15,7 @@ Split across extension files. Extensions conform to context protocols, which del
 | +TurnLifecycleContext | TurnLifecycleContext | TurnLifecycleCoordinator |
 | +EventDispatchContext | EventDispatchTarget | EventDispatchCoordinator |
 | +Pagination | — | — (logic lives directly in extension) |
+| +SubagentEvents | — | — (delegates to SubagentState) |
 
 ## Adding Features
 
