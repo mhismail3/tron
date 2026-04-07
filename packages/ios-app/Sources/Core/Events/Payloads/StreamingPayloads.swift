@@ -16,35 +16,7 @@ struct StreamTurnEndPayload {
     init(from payload: [String: AnyCodable]) {
         self.turn = payload.int("turn") ?? 1
 
-        // Extract tokenRecord for accurate context tracking
-        if let record = payload.dict("tokenRecord"),
-           let sourceDict = record["source"] as? [String: Any],
-           let computedDict = record["computed"] as? [String: Any],
-           let metaDict = record["meta"] as? [String: Any] {
-            let source = TokenSource(
-                provider: sourceDict["provider"] as? String ?? "",
-                timestamp: sourceDict["timestamp"] as? String ?? "",
-                rawInputTokens: sourceDict["rawInputTokens"] as? Int ?? 0,
-                rawOutputTokens: sourceDict["rawOutputTokens"] as? Int ?? 0,
-                rawCacheReadTokens: sourceDict["rawCacheReadTokens"] as? Int ?? 0,
-                rawCacheCreationTokens: sourceDict["rawCacheCreationTokens"] as? Int ?? 0
-            )
-            let computed = ComputedTokens(
-                contextWindowTokens: computedDict["contextWindowTokens"] as? Int ?? 0,
-                newInputTokens: computedDict["newInputTokens"] as? Int ?? 0,
-                previousContextBaseline: computedDict["previousContextBaseline"] as? Int ?? 0,
-                calculationMethod: computedDict["calculationMethod"] as? String ?? ""
-            )
-            let meta = TokenMeta(
-                turn: metaDict["turn"] as? Int ?? 1,
-                sessionId: metaDict["sessionId"] as? String ?? "",
-                extractedAt: metaDict["extractedAt"] as? String ?? "",
-                normalizedAt: metaDict["normalizedAt"] as? String ?? ""
-            )
-            self.tokenRecord = TokenRecord(source: source, computed: computed, meta: meta)
-        } else {
-            self.tokenRecord = nil
-        }
+        self.tokenRecord = TokenRecord.from(dict: payload.dict("tokenRecord"))
     }
 
     /// Get the context window token count from tokenRecord

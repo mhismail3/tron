@@ -81,6 +81,43 @@ struct TokenMeta: Codable, Equatable {
     let normalizedAt: String
 }
 
+// MARK: - Dictionary Parsing
+
+extension TokenRecord {
+    /// Parse a TokenRecord from a raw dictionary (event payload format).
+    /// Returns nil if the dict is nil or missing required source/computed/meta sections.
+    static func from(dict: [String: Any]?) -> TokenRecord? {
+        guard let dict,
+              let sourceDict = dict["source"] as? [String: Any],
+              let computedDict = dict["computed"] as? [String: Any],
+              let metaDict = dict["meta"] as? [String: Any] else {
+            return nil
+        }
+
+        let source = TokenSource(
+            provider: sourceDict["provider"] as? String ?? "",
+            timestamp: sourceDict["timestamp"] as? String ?? "",
+            rawInputTokens: sourceDict["rawInputTokens"] as? Int ?? 0,
+            rawOutputTokens: sourceDict["rawOutputTokens"] as? Int ?? 0,
+            rawCacheReadTokens: sourceDict["rawCacheReadTokens"] as? Int ?? 0,
+            rawCacheCreationTokens: sourceDict["rawCacheCreationTokens"] as? Int ?? 0
+        )
+        let computed = ComputedTokens(
+            contextWindowTokens: computedDict["contextWindowTokens"] as? Int ?? 0,
+            newInputTokens: computedDict["newInputTokens"] as? Int ?? 0,
+            previousContextBaseline: computedDict["previousContextBaseline"] as? Int ?? 0,
+            calculationMethod: computedDict["calculationMethod"] as? String ?? ""
+        )
+        let meta = TokenMeta(
+            turn: metaDict["turn"] as? Int ?? 1,
+            sessionId: metaDict["sessionId"] as? String ?? "",
+            extractedAt: metaDict["extractedAt"] as? String ?? "",
+            normalizedAt: metaDict["normalizedAt"] as? String ?? ""
+        )
+        return TokenRecord(source: source, computed: computed, meta: meta)
+    }
+}
+
 // MARK: - Extensions
 
 extension TokenSource {
