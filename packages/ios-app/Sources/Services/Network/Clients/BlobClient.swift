@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for fetching blob content from the server.
 /// Used by the Display tool to load images stored in blob storage.
-@MainActor
-final class BlobClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class BlobClient: RPCDomainClient {
 
     /// Fetch blob content by ID. Returns base64-encoded data and MIME type.
     func getBlob(blobId: String) async throws -> BlobGetResult {

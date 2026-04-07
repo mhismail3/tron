@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for filesystem and git-related RPC methods.
 /// Handles directory listing, file reading, and repository cloning.
-@MainActor
-final class FilesystemClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class FilesystemClient: RPCDomainClient {
 
     // MARK: - Filesystem Methods
 

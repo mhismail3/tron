@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for job.* RPC methods.
 /// Unified interface for managing background processes and subagents.
-@MainActor
-final class JobClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class JobClient: RPCDomainClient {
 
     /// Promote a blocking job to background.
     func background(jobId: String, sessionId: String) async throws {

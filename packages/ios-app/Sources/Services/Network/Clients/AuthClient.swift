@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for auth.* RPC methods.
 /// Reads and writes provider API keys and OAuth tokens stored in auth.json.
-@MainActor
-final class AuthClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class AuthClient: RPCDomainClient {
 
     // MARK: - Auth Methods
 

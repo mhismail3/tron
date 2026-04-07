@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for mcp.* RPC methods.
 /// Manages MCP server lifecycle: status, add, remove, enable, disable, restart, reload.
-@MainActor
-final class MCPClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class MCPClient: RPCDomainClient {
 
     // MARK: - Status
 

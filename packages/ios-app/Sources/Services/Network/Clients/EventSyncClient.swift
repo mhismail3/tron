@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for event synchronization and tree traversal RPC methods.
 /// Handles event history retrieval, incremental sync, and ancestor traversal.
-@MainActor
-final class EventSyncClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class EventSyncClient: RPCDomainClient {
 
     // MARK: - Event Sync Methods
 

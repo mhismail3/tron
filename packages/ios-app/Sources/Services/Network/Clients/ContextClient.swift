@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for context management RPC methods.
 /// Handles context snapshots, clearing, and compaction.
-@MainActor
-final class ContextClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class ContextClient: RPCDomainClient {
 
     // MARK: - Context Methods
 

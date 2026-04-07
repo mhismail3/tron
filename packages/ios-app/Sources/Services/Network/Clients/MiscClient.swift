@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for miscellaneous RPC methods.
 /// Handles system, device token, memory, message, and log operations.
-@MainActor
-final class MiscClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class MiscClient: RPCDomainClient {
 
     // MARK: - System Methods
 
@@ -81,7 +69,7 @@ final class MiscClient {
     func registerDeviceToken(_ deviceToken: String, sessionId: String? = nil, workspaceId: String? = nil) async throws {
         let ws = try requireTransport().requireConnection()
 
-        let effectiveSessionId = sessionId ?? transport?.currentSessionId
+        let effectiveSessionId = sessionId ?? currentTransport?.currentSessionId
 
         let params = DeviceTokenRegisterParams(
             deviceToken: deviceToken,

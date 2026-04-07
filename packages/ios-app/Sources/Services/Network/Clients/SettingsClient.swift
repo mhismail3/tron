@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for settings.* RPC methods.
 /// Reads and writes server-authoritative settings (compaction, model, workspace).
-@MainActor
-final class SettingsClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class SettingsClient: RPCDomainClient {
 
     // MARK: - Settings Methods
 

@@ -1,19 +1,7 @@
 import Foundation
 
 /// Client for cron scheduling RPC methods.
-@MainActor
-final class CronClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class CronClient: RPCDomainClient {
 
     // MARK: - Job Management
 

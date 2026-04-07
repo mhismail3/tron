@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for session-related RPC methods.
 /// Handles session creation, listing, resumption, deletion, and forking.
-@MainActor
-final class SessionClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class SessionClient: RPCDomainClient {
 
     // MARK: - Session Methods
 
@@ -35,8 +23,8 @@ final class SessionClient {
             params: params
         )
 
-        transport?.setCurrentSessionId(result.sessionId)
-        transport?.setCurrentModel(result.model)
+        currentTransport?.setCurrentSessionId(result.sessionId)
+        currentTransport?.setCurrentModel(result.model)
         logger.info("Created session: \(result.sessionId)", category: .session)
 
         return result
@@ -74,8 +62,8 @@ final class SessionClient {
             params: params
         )
 
-        transport?.setCurrentSessionId(result.sessionId)
-        transport?.setCurrentModel(result.model)
+        currentTransport?.setCurrentSessionId(result.sessionId)
+        currentTransport?.setCurrentModel(result.model)
         logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
@@ -85,8 +73,8 @@ final class SessionClient {
         let params = SessionArchiveParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "session.archive", params: params)
 
-        if transport?.currentSessionId == sessionId {
-            transport?.setCurrentSessionId(nil)
+        if currentTransport?.currentSessionId == sessionId {
+            currentTransport?.setCurrentSessionId(nil)
         }
         logger.info("Archived session: \(sessionId)", category: .session)
     }

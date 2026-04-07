@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for media-related RPC methods.
 /// Handles transcription, voice notes, and browser streaming.
-@MainActor
-final class MediaClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class MediaClient: RPCDomainClient {
 
     // MARK: - Transcription Methods
 
@@ -30,7 +18,7 @@ final class MediaClient {
         }.value
 
         let params = TranscribeAudioParams(
-            sessionId: transport?.currentSessionId,
+            sessionId: currentTransport?.currentSessionId,
             audioBase64: audioBase64,
             mimeType: mimeType,
             fileName: fileName

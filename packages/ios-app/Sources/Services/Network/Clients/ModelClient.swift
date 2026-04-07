@@ -10,24 +10,12 @@ protocol ModelClientProtocol {
 
 /// Client for model-related RPC methods.
 /// Handles model switching and listing with caching.
-@MainActor
-final class ModelClient: ModelClientProtocol {
-    private weak var transport: (any RPCTransport)?
+final class ModelClient: RPCDomainClient, ModelClientProtocol {
 
     // Model list cache (5-minute TTL to reduce redundant server calls)
     private var modelCache: [ModelInfo]?
     private var modelCacheTime: Date?
     private let modelCacheTTL: TimeInterval = 300 // 5 minutes
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
 
     // MARK: - Model Methods
 
@@ -40,8 +28,8 @@ final class ModelClient: ModelClientProtocol {
             params: params
         )
 
-        if transport?.currentSessionId == sessionId {
-            transport?.setCurrentModel(result.newModel)
+        if currentTransport?.currentSessionId == sessionId {
+            currentTransport?.setCurrentModel(result.newModel)
         }
 
         logger.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)

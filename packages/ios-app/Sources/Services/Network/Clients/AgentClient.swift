@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for agent-related RPC methods.
 /// Handles prompts, abort, state queries, and tool results.
-@MainActor
-final class AgentClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class AgentClient: RPCDomainClient {
 
     // MARK: - Agent Methods
 

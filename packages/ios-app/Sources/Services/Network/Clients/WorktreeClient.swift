@@ -2,19 +2,7 @@ import Foundation
 
 /// Client for worktree-related RPC methods.
 /// Handles worktree status, commits, merges, diffs, and branch management.
-@MainActor
-final class WorktreeClient {
-    private weak var transport: (any RPCTransport)?
-
-    init(transport: RPCTransport) {
-        self.transport = transport
-    }
-
-    /// Access transport safely, throwing if deallocated during server change.
-    private func requireTransport() throws -> any RPCTransport {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        return transport
-    }
+final class WorktreeClient: RPCDomainClient {
 
     // MARK: - Status
 
