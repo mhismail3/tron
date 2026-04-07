@@ -9,15 +9,26 @@ Reconstructs chat history from stored events. Converts `SessionEvent` or `RawEve
 
 ## Key Components
 
-- `EventTransformable` - Protocol unifying RawEvent and SessionEvent
+- `EventTransformable` - Protocol unifying RawEvent and SessionEvent (all fields non-optional: sessionId, timestamp, sequence)
+- `buildToolMaps(from:)` - Shared first-pass helper building tool call/result lookups and consumed subagent IDs
 - `Handlers/` - Type-specific transformation logic (MessageHandlers, ToolHandlers, etc.)
-- `Reconstruction/` - State tracking during transformation
+- `Reconstruction/` - State tracking during transformation (produces `ReconstructedState`)
 - `AskUserQuestion/` - Special handling for question detection
 
 ## Reconstruction Flow
 
+The server provides events via the `session.reconstruct` RPC (with pagination via `beforeSequence`/`hasMoreEvents`). The transformer then processes them:
+
 ```
-[SessionEvent] -> EventSorter -> Handlers -> InterleavedContentProcessor -> [ChatMessage]
+server events (from session.reconstruct RPC)
+    ↓
+buildToolMaps (first pass — tool call/result lookups)
+    ↓
+reconstructSessionState (second pass — handlers per event type)
+    ↓
+ReconstructedState (messages, activeTools, pendingQuestion, ...)
+    ↓
+ChatViewModel.messages
 ```
 
 ## Rules
@@ -27,6 +38,7 @@ Reconstructs chat history from stored events. Converts `SessionEvent` or `RawEve
 - Tool events reconstruct from both `tool.call` and `tool.result` events
 - Sequence numbers determine ordering, not timestamps
 - Handle truncated tool arguments by looking up original from tool.call events
+- `buildToolMaps` is shared between `transformPersistedEvents` and `reconstructSessionState` — keep it in sync
 
 ---
 

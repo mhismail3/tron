@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-01-27
+> Last verified: 2026-04-06
 
 ## Overview
 
@@ -58,6 +58,7 @@ ViewModels/Chat/
 ├── ChatViewModel+Events.swift       # Event subscription
 ├── ChatViewModel+Messaging.swift    # Message sending
 ├── ChatViewModel+Pagination.swift   # History loading
+├── ChatViewModel+Reconstruction.swift # Session reconstruction + pagination
 └── ChatViewModel+EventDispatchContext.swift  # Event handlers
 ```
 
@@ -139,19 +140,25 @@ ChatViewModel handler method
 UI updates via @Observable
 ```
 
-### History Loading
+### History Loading (Session Reconstruction)
 
 ```
-EventStoreManager.fetchEvents()
+SessionClient.reconstruct(sessionId, limit, beforeSequence)
+    ↓  (calls session.reconstruct RPC)
+SessionReconstructResult (events, isRunning, hasMoreEvents, oldestSequence)
     ↓
-UnifiedEventTransformer.transform()
+UnifiedEventTransformer.reconstructSessionState(from: events)
     ↓
-[ChatMessage] array
+ReconstructedState (messages, activeTools, pendingQuestion, ...)
     ↓
-ChatViewModel.messages
+ChatViewModel.messages (batched for pagination)
     ↓
 ChatView renders
 ```
+
+Pagination: older history is loaded on demand via `beforeSequence`, passing the
+`oldestSequence` from the previous page. `hasMoreEvents` controls whether the
+"load more" UI is shown.
 
 ## Dependency Injection
 

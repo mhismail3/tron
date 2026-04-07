@@ -150,13 +150,41 @@ Unifies different event types:
 ```swift
 protocol EventTransformable {
     var id: String { get }
+    var parentId: String? { get }
+    var sessionId: String { get }
+    var workspaceId: String { get }
     var type: String { get }
-    var sessionId: String? { get }
-    var timestamp: String? { get }
-    var sequence: Int? { get }
-    func payload<T: Decodable>(as type: T.Type) -> T?
+    var timestamp: String { get }
+    var sequence: Int { get }
+    var payload: [String: AnyCodable] { get }
 }
 ```
+
+Note: `sessionId`, `timestamp`, and `sequence` are non-optional. Both `RawEvent`
+and `SessionEvent` conform trivially since they already have all required fields.
+
+### Shared First-Pass Helper: buildToolMaps
+
+Both `transformPersistedEvents` and `reconstructSessionState` run a shared first
+pass over the event array via `buildToolMaps(from:)`. This builds lookup
+dictionaries for tool calls, tool results, and consumed subagent event IDs so
+that downstream handlers can resolve `tool_use` content blocks and filter
+already-consumed notifications in a single pass.
+
+### Reconstruction Pagination
+
+The `session.reconstruct` RPC supports cursor-based pagination:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `limit` | `Int?` | Max events to return per page |
+| `beforeSequence` | `Int64?` | Fetch events older than this sequence number |
+| `hasMoreEvents` | `Bool` | Whether older pages exist |
+| `oldestSequence` | `Int64?` | Sequence of the earliest event in the response (use as next `beforeSequence`) |
+
+`ChatViewModel+Reconstruction.swift` drives the pagination loop: on initial
+load it requests the most recent page, then on scroll-up it passes
+`oldestSequence` as `beforeSequence` to fetch the next older page.
 
 ## Adding a New Event
 
