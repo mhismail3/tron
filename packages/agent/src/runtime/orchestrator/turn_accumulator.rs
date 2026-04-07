@@ -1,8 +1,8 @@
 //! Turn accumulator — tracks in-progress turn content for session resume.
 //!
-//! When a client reconnects to a running session, `agent.getState` returns the
-//! accumulated text, thinking, and tool calls so the UI can render catch-up
-//! content without waiting for the next delta.
+//! When a client reconnects to a running session, `session.reconstruct` returns
+//! the accumulated text, thinking, and tool calls as `inFlight` state so the UI
+//! can render in-progress content without waiting for the next delta.
 //!
 //! ## Lifecycle
 //!
