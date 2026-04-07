@@ -82,77 +82,62 @@ extension ChatViewModel {
 
         do {
             let state = try manager.getReconstructedState(sessionId: sessionId)
-            let loadedMessages = state.messages
 
-            // Store all messages for pagination (mutable copy for subagent conversion)
-            allReconstructedMessages = loadedMessages
-
-            // Update turn counter from unified state
+            allReconstructedMessages = state.messages
             currentTurn = state.currentTurn
 
-            // Apply event-sourced reasoning level (authoritative over UserDefaults)
-            if let eventSourcedLevel = state.reasoningLevel {
-                inputBarState.reasoningLevel = eventSourcedLevel
-            }
-
-            // Restore suggestion prompts from the latest hook result
-            if !state.suggestions.isEmpty {
-                pullUpPanelState.suggestions = state.suggestions
-            }
-
-            // Populate subagent state and convert SpawnSubagent tool messages to subagent chips
+            applyReconstructedConfig(state)
             restoreSubagentState(from: state)
+            sliceMessagesForDisplay()
+            updateTokenState(from: state, using: manager)
 
-            // Slice the latest batch for display (after subagent conversion)
-            let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
-            displayedMessageCount = batchSize
-            hasMoreMessages = allReconstructedMessages.count > batchSize
-
-            if batchSize > 0 {
-                let startIndex = allReconstructedMessages.count - batchSize
-                replaceAllMessages(with: Array(allReconstructedMessages[startIndex...]))
-            } else {
-                clearAllMessages()
-            }
-
-            // =============================================================================
-            // TOKEN STATE FROM RECONSTRUCTED STATE (SERVER EVENTS = SINGLE SOURCE OF TRUTH)
-            // =============================================================================
-            //
-            // The reconstructed state comes from parsing events synced from the server.
-            // This is the ONLY source of truth for token values:
-            // - state.lastTurnInputTokens = from stream.turn_end events' tokenRecord.computed.contextWindowTokens
-            // - state.totalTokenUsage = accumulated from all turn_end events
-            //
-            // The iOS DB session table is ONLY for dashboard display (which sessions exist).
-            // It should NOT be used for token state - that leads to stale/wrong values.
-            //
-            let usage = state.totalTokenUsage
-
-            // Set token state from reconstructed state (derived from server events)
-            contextState.setAccumulatedTokens(from: usage)
-            contextState.lastTurnInputTokens = state.lastTurnInputTokens
-            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
-            logger.info("[TOKEN-FIX] RESUME from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
-
-            // Get cost from iOS DB session cache (just for display)
-            do {
-                if let session = try manager.eventDB.sessions.get(sessionId) {
-                    contextState.accumulatedCost = session.cost
-                }
-            } catch {
-                logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
-            }
-
-            logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
+            logger.info("Loaded \(state.messages.count) messages, displaying latest \(displayedMessageCount) for session \(sessionId)", category: .session)
         } catch {
             logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
         }
 
-        // Validate against server (authoritative source of context state)
-        // This ensures context window and token counts are accurate after session resume,
-        // especially if model was switched or skills were added/removed while away
         await refreshContextFromServer()
+    }
+
+    /// Apply config state from reconstructed events (reasoning level, suggestions).
+    private func applyReconstructedConfig(_ state: ReconstructedState) {
+        if let eventSourcedLevel = state.reasoningLevel {
+            inputBarState.reasoningLevel = eventSourcedLevel
+        }
+        if !state.suggestions.isEmpty {
+            pullUpPanelState.suggestions = state.suggestions
+        }
+    }
+
+    /// Slice the latest batch of messages for display after subagent conversion.
+    private func sliceMessagesForDisplay() {
+        let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
+        displayedMessageCount = batchSize
+        hasMoreMessages = allReconstructedMessages.count > batchSize
+
+        if batchSize > 0 {
+            let startIndex = allReconstructedMessages.count - batchSize
+            replaceAllMessages(with: Array(allReconstructedMessages[startIndex...]))
+        } else {
+            clearAllMessages()
+        }
+    }
+
+    /// Set token and cost state from reconstructed server events.
+    /// Server events are the single source of truth for token values.
+    private func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) {
+        let usage = state.totalTokenUsage
+        contextState.setAccumulatedTokens(from: usage)
+        contextState.lastTurnInputTokens = state.lastTurnInputTokens
+        contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
+
+        do {
+            if let session = try manager.eventDB.sessions.get(sessionId) {
+                contextState.accumulatedCost = session.cost
+            }
+        } catch {
+            logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
+        }
     }
 
     // MARK: - Subagent State Restoration
