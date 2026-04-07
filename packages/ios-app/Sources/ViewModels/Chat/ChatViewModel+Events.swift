@@ -283,10 +283,9 @@ extension ChatViewModel {
         }
     }
 
-    /// Handle enriched provider errors from the agent.error event.
-    /// Only terminal errors reach here (retries are silent).
-    /// Resets all processing state and shows error notification pill.
-    func handleProviderError(_ result: ErrorPlugin.Result) {
+    /// Reset all processing state to idle after an error.
+    /// Shared by handleProviderError and handleAgentError.
+    private func resetToIdleState(errorPreview: String) {
         uiUpdateQueue.flush()
         uiUpdateQueue.reset()
         animationCoordinator.resetToolState()
@@ -302,9 +301,16 @@ extension ChatViewModel {
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
-            lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
+            lastAssistantResponse: "Error: \(String(errorPreview.prefix(100)))"
         )
         finalizeStreamingMessage()
+    }
+
+    /// Handle enriched provider errors from the agent.error event.
+    /// Only terminal errors reach here (retries are silent).
+    /// Resets all processing state and shows error notification pill.
+    func handleProviderError(_ result: ErrorPlugin.Result) {
+        resetToIdleState(errorPreview: result.message)
 
         if let category = result.category, category != "unknown" {
             let data = ProviderErrorDetailData(
@@ -320,12 +326,10 @@ extension ChatViewModel {
             appendToMessages(.providerError(data))
             logger.error("Provider error [\(category)]: \(result.message)", category: .events)
         } else {
-            // Legacy (un-enriched server): fall back to plain error text
             appendToMessages(.error(result.message))
             logger.error("Agent error: \(result.message)", category: .events)
         }
 
-        // Drain queued messages if any — agent is idle now
         drainMessageQueue()
     }
 
@@ -333,32 +337,13 @@ extension ChatViewModel {
     func handleAgentError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
 
-        // Flush and reset all manager states on error
-        uiUpdateQueue.flush()
-        uiUpdateQueue.reset()
-        animationCoordinator.resetToolState()
-        streamingManager.reset()
-
-        agentPhase = .idle
-        isCompacting = false
-        compactionInProgressMessageId = nil
-        isRetaining = false
-        memoryRetainInProgressMessageId = nil
-        askUserQuestionState.clearAll()
-        getConfirmationState.clearAll()
+        resetToIdleState(errorPreview: message)
         pullUpPanelState.awaitingSuggestions = false
-        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
-        eventStoreManager?.updateSessionDashboardInfo(
-            sessionId: sessionId,
-            lastAssistantResponse: "Error: \(String(message.prefix(100)))"
-        )
-        finalizeStreamingMessage()
         appendToMessages(.error(message))
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)
 
-        // Drain queued messages if any — agent is idle now
         drainMessageQueue()
     }
 
