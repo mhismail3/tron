@@ -41,10 +41,7 @@ struct ToolUseData: Equatable {
     }
 
     var truncatedArguments: String {
-        if arguments.count > 200 {
-            return String(arguments.prefix(200)) + "..."
-        }
-        return arguments
+        arguments.truncated(to: 203)
     }
 
     var formattedDuration: String? {
@@ -93,9 +90,6 @@ struct ToolResultData: Equatable {
     }
 
     var truncatedContent: String {
-        if content.count > 500 {
-            return String(content.prefix(500)) + "..."
-        }
-        return content
+        content.truncated(to: 503)
     }
 }

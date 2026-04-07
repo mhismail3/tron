@@ -225,18 +225,6 @@ struct UnifiedEventTransformer {
     // MARK: - Helpers
     // =========================================================================
 
-    /// Extract preview (first 3 lines) from thinking content for display
-    private static func extractThinkingPreview(from content: String, maxLines: Int = 3) -> String {
-        let lines = content.components(separatedBy: .newlines)
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .prefix(maxLines)
-        let preview = lines.joined(separator: " ")
-        if preview.count > 120 {
-            return String(preview.prefix(117)) + "..."
-        }
-        return preview
-    }
-
     /// Parse ISO 8601 timestamp string to Date.
     /// Delegates to EventSorter for the implementation.
     private static func parseTimestamp(_ isoString: String) -> Date {

@@ -92,9 +92,6 @@ struct SubagentToolData: Equatable {
 
     /// Short task preview for chip display
     var taskPreview: String {
-        if task.count > 40 {
-            return String(task.prefix(40)) + "..."
-        }
-        return task
+        task.truncated(to: 43)
     }
 }

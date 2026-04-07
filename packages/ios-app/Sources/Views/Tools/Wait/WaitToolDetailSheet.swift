@@ -288,7 +288,7 @@ struct WaitToolDetailSheet: View {
         } else {
             if let agent = viewModel.subagentState.subagents[jobId] {
                 let task = agent.task
-                return task.count > 50 ? String(task.prefix(50)) + "..." : task
+                return task.truncated(to: 53)
             }
             return "Sub-Agent"
         }

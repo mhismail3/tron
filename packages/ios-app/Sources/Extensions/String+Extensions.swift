@@ -41,6 +41,15 @@ extension String {
         URL(string: self)
     }
 
+    /// Extract a preview from thinking content: first N non-empty lines, joined, max length.
+    func thinkingPreview(maxLines: Int = 3, maxLength: Int = 120) -> String {
+        let lines = components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .prefix(maxLines)
+        let preview = lines.joined(separator: " ")
+        return preview.truncated(to: maxLength)
+    }
+
 }
 
 // MARK: - String Formatting

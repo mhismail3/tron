@@ -65,7 +65,7 @@ final class ThinkingRepository {
                     let turnNumber = event.payload["turn"]?.value as? Int ?? 1
 
                     // Create preview (first 3 lines, max 120 chars)
-                    let preview = extractThinkingPreview(from: thinkingText)
+                    let preview = thinkingText.thinkingPreview()
 
                     // Create block with composite ID (eventId:blockIndex) for lazy loading
                     let thinkingBlock = ThinkingBlock(
@@ -144,18 +144,6 @@ final class ThinkingRepository {
     }
 
     // MARK: - Private Helpers
-
-    /// Extract preview (first 3 lines, max 120 chars) from thinking content
-    private func extractThinkingPreview(from content: String, maxLines: Int = 3) -> String {
-        let lines = content.components(separatedBy: .newlines)
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .prefix(maxLines)
-        let preview = lines.joined(separator: " ")
-        if preview.count > 120 {
-            return String(preview.prefix(117)) + "..."
-        }
-        return preview
-    }
 
     /// Parse an event row from SQL result
     private func parseEventRow(_ stmt: OpaquePointer?, transport: DatabaseTransport) throws -> SessionEvent {

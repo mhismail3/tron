@@ -79,10 +79,7 @@ struct ThinkingCompletePayload: Codable {
             .prefix(maxLines)
 
         let preview = lines.joined(separator: " ")
-        if preview.count > 200 {
-            return String(preview.prefix(197)) + "..."
-        }
-        return preview
+        return preview.truncated(to: 200)
     }
 
     /// Convert to dictionary for DB persistence

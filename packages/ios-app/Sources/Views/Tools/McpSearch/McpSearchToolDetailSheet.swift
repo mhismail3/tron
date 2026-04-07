@@ -66,8 +66,8 @@ struct McpSearchToolDetailSheet: View {
                     color: .tronInfo
                 )
             }
-            if server != nil {
-                ToolInfoPill(icon: "server.rack", label: server!, color: .tronSlate)
+            if let server {
+                ToolInfoPill(icon: "server.rack", label: server, color: .tronSlate)
             }
         }
     }

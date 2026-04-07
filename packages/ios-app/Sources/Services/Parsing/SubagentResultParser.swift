@@ -108,7 +108,7 @@ enum SubagentResultParser {
             let output = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
             let cleaned = output.components(separatedBy: "\n---\n").first ?? output
             let lines = cleaned.components(separatedBy: "\n").filter { !$0.isEmpty }
-            let summary = lines.first.map { $0.count > 100 ? String($0.prefix(100)) + "..." : $0 }
+            let summary = lines.first.map { $0.truncated(to: 103) }
             return (summary, cleaned)
         }
 
@@ -176,7 +176,7 @@ enum SubagentResultParser {
         if let match = result.firstMatch(of: /\*\*Output\*\*:\s*\n(.+)/) {
             let output = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
             let firstLine = output.components(separatedBy: "\n").first ?? output
-            return firstLine.count > 200 ? String(firstLine.prefix(200)) + "..." : firstLine
+            return firstLine.truncated(to: 203)
         }
         if result.lowercased().contains("spawned") {
             return "Sub-agent spawned successfully"

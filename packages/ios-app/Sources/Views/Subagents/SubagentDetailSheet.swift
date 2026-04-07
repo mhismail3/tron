@@ -468,6 +468,6 @@ struct SubagentDetailSheet: View {
         if model.contains("opus") { return "Opus" }
         if model.contains("sonnet") { return "Sonnet" }
         if model.contains("haiku") { return "Haiku" }
-        return model.count > 10 ? String(model.prefix(10)) + "..." : model
+        return model.truncated(to: 13)
     }
 }

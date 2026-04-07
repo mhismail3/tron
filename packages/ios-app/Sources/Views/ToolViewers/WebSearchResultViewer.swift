@@ -349,7 +349,7 @@ struct SearchResult {
     var displayUrl: String {
         guard let urlObj = URL(string: url), let host = urlObj.host else { return url }
         let path = urlObj.path
-        let shortPath = path.count > 30 ? String(path.prefix(27)) + "..." : path
+        let shortPath = path.truncated(to: 30)
         return host + shortPath
     }
 }

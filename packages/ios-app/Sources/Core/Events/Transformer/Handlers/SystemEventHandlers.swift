@@ -167,7 +167,7 @@ enum SystemEventHandlers {
         let success = payload["success"]?.value as? Bool ?? true
 
         // Create a short preview of the task for display
-        let taskPreview = task.count > 50 ? String(task.prefix(50)) + "..." : task
+        let taskPreview = task.truncated(to: 53)
 
         return ChatMessage(
             role: .system,

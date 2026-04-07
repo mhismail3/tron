@@ -174,7 +174,7 @@ struct ComputerUseToolDetailSheet: View {
 
         case "type":
             if let text = typedText {
-                let preview = text.count > 60 ? String(text.prefix(57)) + "..." : text
+                let preview = text.truncated(to: 60)
                 detailRow(icon: "character.cursor.ibeam", label: "Text", value: "\"\(preview)\"")
             }
             if let len = typedLength {

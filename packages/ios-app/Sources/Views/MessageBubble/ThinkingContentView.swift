@@ -27,10 +27,7 @@ struct ThinkingContentView: View {
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .prefix(2)
         let preview = lines.joined(separator: " ")
-        if preview.count > 140 {
-            return String(preview.prefix(137)) + "..."
-        }
-        return preview
+        return preview.truncated(to: 140)
     }
 
     /// Whether content exceeds the preview

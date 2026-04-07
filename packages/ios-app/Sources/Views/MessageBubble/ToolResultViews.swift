@@ -15,7 +15,7 @@ struct StandaloneToolResultView: View {
             // For Bash: show command
             if let command = json["command"] as? String {
                 // Truncate long commands
-                let truncated = command.count > 30 ? String(command.prefix(30)) + "..." : command
+                let truncated = command.truncated(to: 33)
                 return truncated
             }
             // For Read/Write/Edit: show file path
@@ -25,7 +25,7 @@ struct StandaloneToolResultView: View {
             }
             // For Grep: show pattern
             if let pattern = json["pattern"] as? String {
-                return pattern.count > 20 ? String(pattern.prefix(20)) + "..." : pattern
+                return pattern.truncated(to: 23)
             }
         }
         return ""
