@@ -4,6 +4,15 @@
 //! All mutating actions (click, type, keypress, scroll, `moveMouse`) are gated behind a
 //! configurable confirmation flag. Read-only actions (screenshot, `getWindows`)
 //! are always allowed.
+//!
+//! ## Submodules
+//!
+//! | Module        | Content |
+//! |---------------|---------|
+//! | `actions`     | Input actions: type, keypress, scroll, click, list, focus, get_windows |
+//! | `screenshot`  | Screen/window/region capture with resize and compression |
+//! | `permissions` | macOS TCC permission probing (accessibility, automation, screen recording, FDA) |
+//! | `codegen`     | AppleScript/Swift code generation for UI automation |
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
