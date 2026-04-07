@@ -5,11 +5,11 @@
 //! - **Antigravity**: Free tier/sandbox with default project fallback.
 
 use super::errors::AuthError;
-#[allow(unused_imports)] // now_ms used in tests
 use super::types::{
     GoogleAuth, GoogleOAuthEndpoint, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at,
-    now_ms,
 };
+#[cfg(test)]
+use super::types::now_ms;
 
 /// Default project for Antigravity free tier.
 pub const ANTIGRAVITY_DEFAULT_PROJECT: &str = "rising-fact-p41fc";
