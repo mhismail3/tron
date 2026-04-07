@@ -218,116 +218,118 @@ final class SubagentState {
         let date = DateParser.parse(timestamp) ?? Date()
         let dataDict = eventData.value as? [String: Any] ?? [:]
 
-        // Initialize event list if needed
         if subagentEvents[subagentSessionId] == nil {
             subagentEvents[subagentSessionId] = []
         }
 
         switch Self.normalizeEventType(eventType) {
         case "tool.start":
-            let toolName = dataDict["toolName"] as? String ?? "unknown"
-            let toolCallId = dataDict["toolCallId"] as? String
+            handleForwardedToolStart(sessionId: subagentSessionId, data: dataDict, date: date)
+        case "tool.end":
+            handleForwardedToolEnd(sessionId: subagentSessionId, data: dataDict, date: date)
+        case "text.delta":
+            handleForwardedTextDelta(sessionId: subagentSessionId, data: dataDict, date: date)
+        case "thinking.delta":
+            handleForwardedThinkingDelta(sessionId: subagentSessionId, date: date)
+        default:
+            break
+        }
 
-            // Mark any running output events as complete (finalize the text block)
-            if let events = subagentEvents[subagentSessionId] {
-                for i in events.indices {
-                    if subagentEvents[subagentSessionId]?[i].type == .output &&
-                       subagentEvents[subagentSessionId]?[i].isRunning == true {
-                        subagentEvents[subagentSessionId]?[i].isRunning = false
-                    }
+        enforceEventLimit(for: subagentSessionId)
+    }
+
+    // MARK: - Forwarded Event Handlers
+
+    private func handleForwardedToolStart(sessionId: String, data: [String: Any], date: Date) {
+        let toolName = data["toolName"] as? String ?? "unknown"
+        let toolCallId = data["toolCallId"] as? String
+
+        // Finalize any running output events
+        if let events = subagentEvents[sessionId] {
+            for i in events.indices {
+                if subagentEvents[sessionId]?[i].type == .output &&
+                   subagentEvents[sessionId]?[i].isRunning == true {
+                    subagentEvents[sessionId]?[i].isRunning = false
                 }
             }
+        }
 
-            // Create a new tool event (will be updated when tool ends)
+        let item = SubagentEventItem(
+            timestamp: date,
+            type: .tool,
+            title: SubagentEventFormatter.formatToolTitle(toolName),
+            detail: nil,
+            toolCallId: toolCallId,
+            isRunning: true
+        )
+        subagentEvents[sessionId]?.append(item)
+    }
+
+    private func handleForwardedToolEnd(sessionId: String, data: [String: Any], date: Date) {
+        let success = data["success"] as? Bool ?? true
+        let toolCallId = data["toolCallId"] as? String
+        let toolName = data["toolName"] as? String
+        let result = data["result"] as? String ?? data["output"] as? String ?? ""
+
+        if let toolCallId,
+           let index = subagentEvents[sessionId]?.lastIndex(where: { $0.toolCallId == toolCallId }) {
+            subagentEvents[sessionId]?[index].isRunning = false
+            subagentEvents[sessionId]?[index].detail = SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success)
+            if !success {
+                subagentEvents[sessionId]?[index].title += " ✗"
+            }
+        } else {
             let item = SubagentEventItem(
                 timestamp: date,
                 type: .tool,
-                title: SubagentEventFormatter.formatToolTitle(toolName),
-                detail: nil,
+                title: SubagentEventFormatter.formatToolTitle(toolName) + (success ? "" : " ✗"),
+                detail: SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success),
                 toolCallId: toolCallId,
+                isRunning: false
+            )
+            subagentEvents[sessionId]?.append(item)
+        }
+    }
+
+    private func handleForwardedTextDelta(sessionId: String, data: [String: Any], date: Date) {
+        let delta = data["delta"] as? String ?? ""
+        guard !delta.isEmpty else { return }
+
+        let events = subagentEvents[sessionId] ?? []
+        let lastEvent = events.last
+
+        if let lastEvent, lastEvent.type == .output, lastEvent.isRunning {
+            let currentText = accumulatedOutput[sessionId] ?? ""
+            accumulatedOutput[sessionId] = currentText + delta
+
+            if let index = subagentEvents[sessionId]?.lastIndex(where: { $0.type == .output && $0.isRunning }) {
+                let accumulated = accumulatedOutput[sessionId] ?? ""
+                subagentEvents[sessionId]?[index].detail = SubagentEventFormatter.formatAccumulatedOutput(accumulated)
+            }
+        } else {
+            accumulatedOutput[sessionId] = delta
+
+            let item = SubagentEventItem(
+                timestamp: date,
+                type: .output,
+                title: "Output",
+                detail: SubagentEventFormatter.formatAccumulatedOutput(delta),
                 isRunning: true
             )
-            subagentEvents[subagentSessionId]?.append(item)
-
-        case "tool.end":
-            let success = dataDict["success"] as? Bool ?? true
-            let toolCallId = dataDict["toolCallId"] as? String
-            let toolName = dataDict["toolName"] as? String
-            let result = dataDict["result"] as? String ?? dataDict["output"] as? String ?? ""
-
-            // Find and update the matching tool_start event
-            if let toolCallId = toolCallId,
-               let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.toolCallId == toolCallId }) {
-                subagentEvents[subagentSessionId]?[index].isRunning = false
-                subagentEvents[subagentSessionId]?[index].detail = SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success)
-                if !success {
-                    subagentEvents[subagentSessionId]?[index].title += " ✗"
-                }
-            } else {
-                // No matching start found, create standalone end event
-                let item = SubagentEventItem(
-                    timestamp: date,
-                    type: .tool,
-                    title: SubagentEventFormatter.formatToolTitle(toolName) + (success ? "" : " ✗"),
-                    detail: SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success),
-                    toolCallId: toolCallId,
-                    isRunning: false
-                )
-                subagentEvents[subagentSessionId]?.append(item)
-            }
-
-        case "text.delta":
-            let delta = dataDict["delta"] as? String ?? ""
-            guard !delta.isEmpty else { return }
-
-            // Check if the last event is an output event (not a tool)
-            // If so, append to it. Otherwise, create a new output event.
-            // This ensures text is linearized with tools properly.
-            let events = subagentEvents[subagentSessionId] ?? []
-            let lastEvent = events.last
-
-            if let lastEvent = lastEvent, lastEvent.type == .output, lastEvent.isRunning {
-                // Append to existing output event
-                let currentText = accumulatedOutput[subagentSessionId] ?? ""
-                accumulatedOutput[subagentSessionId] = currentText + delta
-
-                if let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.type == .output && $0.isRunning }) {
-                    let accumulated = accumulatedOutput[subagentSessionId] ?? ""
-                    subagentEvents[subagentSessionId]?[index].detail = SubagentEventFormatter.formatAccumulatedOutput(accumulated)
-                }
-            } else {
-                // Create new output event (after a tool or at start)
-                // Reset accumulator for this new output block
-                accumulatedOutput[subagentSessionId] = delta
-
-                let item = SubagentEventItem(
-                    timestamp: date,
-                    type: .output,
-                    title: "Output",
-                    detail: SubagentEventFormatter.formatAccumulatedOutput(delta),
-                    isRunning: true
-                )
-                subagentEvents[subagentSessionId]?.append(item)
-            }
-
-        case "thinking.delta":
-            // Only add thinking indicator if not already present
-            if subagentEvents[subagentSessionId]?.contains(where: { $0.type == .thinking }) != true {
-                let item = SubagentEventItem(
-                    timestamp: date,
-                    type: .thinking,
-                    title: "Thinking...",
-                    isRunning: true
-                )
-                subagentEvents[subagentSessionId]?.append(item)
-            }
-
-        default:
-            break // Ignore unknown events
+            subagentEvents[sessionId]?.append(item)
         }
+    }
 
-        // Enforce memory limit to prevent unbounded growth
-        enforceEventLimit(for: subagentSessionId)
+    private func handleForwardedThinkingDelta(sessionId: String, date: Date) {
+        if subagentEvents[sessionId]?.contains(where: { $0.type == .thinking }) != true {
+            let item = SubagentEventItem(
+                timestamp: date,
+                type: .thinking,
+                title: "Thinking...",
+                isRunning: true
+            )
+            subagentEvents[sessionId]?.append(item)
+        }
     }
 
     /// Get events for a subagent (in reverse chronological order - newest first)
