@@ -2118,4 +2118,128 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTAssertEqual(text, "Response")
         }
     }
+
+    // MARK: - buildToolMaps Tests
+
+    func testBuildToolMapsCollectsToolCallsAndResults() {
+        let events = [
+            rawEvent(
+                id: "e1",
+                type: "tool.call",
+                payload: [
+                    "toolCallId": AnyCodable("tc1"),
+                    "name": AnyCodable("Read"),
+                    "arguments": AnyCodable("{\"path\":\"/test\"}")
+                ],
+                sequence: 1
+            ),
+            rawEvent(
+                id: "e2",
+                type: "tool.result",
+                payload: [
+                    "toolCallId": AnyCodable("tc1"),
+                    "content": AnyCodable("file content"),
+                    "isError": AnyCodable(false),
+                    "duration": AnyCodable(42)
+                ],
+                sequence: 2
+            )
+        ]
+
+        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+
+        XCTAssertEqual(maps.toolCalls.count, 1)
+        XCTAssertEqual(maps.toolResults.count, 1)
+        XCTAssertEqual(maps.toolCalls["tc1"]?.name, "Read")
+        XCTAssertEqual(maps.toolResults["tc1"]?.toolCallId, "tc1")
+        XCTAssertEqual(maps.toolResults["tc1"]?.durationMs, 42)
+    }
+
+    func testBuildToolMapsCollectsConsumedSubagentIds() {
+        let events = [
+            rawEvent(
+                id: "e1",
+                type: "subagent.results_consumed",
+                payload: [
+                    "consumedEventIds": AnyCodable(["notif-1", "notif-2"])
+                ],
+                sequence: 1
+            )
+        ]
+
+        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+
+        XCTAssertEqual(maps.consumedSubagentEventIds, Set(["notif-1", "notif-2"]))
+    }
+
+    func testBuildToolMapsTracksLastTurnEndSequence() {
+        let events = [
+            rawEvent(id: "e1", type: "stream.turn_end", payload: ["turn": AnyCodable(1)], sequence: 5),
+            rawEvent(id: "e2", type: "stream.turn_end", payload: ["turn": AnyCodable(2)], sequence: 10),
+            rawEvent(id: "e3", type: "stream.turn_end", payload: ["turn": AnyCodable(3)], sequence: 8)
+        ]
+
+        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+
+        XCTAssertEqual(maps.lastTurnEndSequence, 10)
+    }
+
+    func testBuildToolMapsEmptyEvents() {
+        let maps = UnifiedEventTransformer.buildToolMaps(from: [RawEvent]())
+
+        XCTAssertTrue(maps.toolCalls.isEmpty)
+        XCTAssertTrue(maps.toolResults.isEmpty)
+        XCTAssertTrue(maps.consumedSubagentEventIds.isEmpty)
+        XCTAssertEqual(maps.lastTurnEndSequence, -1)
+    }
+
+    func testBuildToolMapsDuplicateToolCallIdLastWins() {
+        let events = [
+            rawEvent(
+                id: "e1",
+                type: "tool.call",
+                payload: [
+                    "toolCallId": AnyCodable("tc1"),
+                    "name": AnyCodable("Read"),
+                    "arguments": AnyCodable("{}")
+                ],
+                sequence: 1
+            ),
+            rawEvent(
+                id: "e2",
+                type: "tool.call",
+                payload: [
+                    "toolCallId": AnyCodable("tc1"),
+                    "name": AnyCodable("Write"),
+                    "arguments": AnyCodable("{}")
+                ],
+                sequence: 2
+            )
+        ]
+
+        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+
+        XCTAssertEqual(maps.toolCalls.count, 1)
+        XCTAssertEqual(maps.toolCalls["tc1"]?.name, "Write")
+    }
+
+    func testBuildToolMapsToolResultWithoutToolCallIdSkipped() {
+        // tool.result without toolCallId in payload should be gracefully skipped
+        let events = [
+            rawEvent(
+                id: "e1",
+                type: "tool.result",
+                payload: [
+                    "content": AnyCodable("some result"),
+                    "isError": AnyCodable(false)
+                    // No toolCallId!
+                ],
+                sequence: 1
+            )
+        ]
+
+        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+
+        XCTAssertTrue(maps.toolResults.isEmpty)
+    }
 }

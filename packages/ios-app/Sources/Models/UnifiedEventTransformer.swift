@@ -60,44 +60,11 @@ struct UnifiedEventTransformer {
         let sorted = EventSorter.sortBySequence(events)
 
         // Build maps for tool calls, results, and subagent notification filtering
-        var toolCalls: [String: ToolCallPayload] = [:]
-        var toolResults: [String: ToolResultPayload] = [:]
-        // Collect consumed notification IDs from subagent.results_consumed events
-        var consumedSubagentEventIds: Set<String> = []
-        // Track the last turn_end sequence to filter stale notifications
-        var lastTurnEndSequence: Int = -1
-        for event in sorted {
-            if event.type == PersistedEventType.toolCall.rawValue,
-               let payload = ToolCallPayload(from: event.payload) {
-                toolCalls[payload.toolCallId] = payload
-            }
-            if event.type == PersistedEventType.toolResult.rawValue {
-                if let payload = ToolResultPayload(from: event.payload) {
-                    toolResults[payload.toolCallId] = payload
-                } else if let rawEvent = event as? RawEvent, let tcId = rawEvent.toolCallId {
-                    // Fallback: toolCallId missing from payload but available at wire level
-                    TronLogger.shared.warning("[RECONSTRUCT] tool.result payload missing toolCallId, using wire-level \(tcId)", category: .session)
-                    let fallback = ToolResultPayload(
-                        toolCallId: tcId,
-                        content: event.payload.string("content") ?? "",
-                        isError: event.payload.bool("isError") ?? false,
-                        durationMs: event.payload.int("duration") ?? 0
-                    )
-                    toolResults[tcId] = fallback
-                }
-            }
-            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
-               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
-                for id in ids {
-                    if let s = id as? String {
-                        consumedSubagentEventIds.insert(s)
-                    }
-                }
-            }
-            if event.type == PersistedEventType.streamTurnEnd.rawValue {
-                lastTurnEndSequence = max(lastTurnEndSequence, event.sequence)
-            }
-        }
+        let maps = buildToolMaps(from: sorted)
+        let toolCalls = maps.toolCalls
+        let toolResults = maps.toolResults
+        let consumedSubagentEventIds = maps.consumedSubagentEventIds
+        let lastTurnEndSequence = maps.lastTurnEndSequence
 
         TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(toolCalls.count) tool.call, \(toolResults.count) tool.result from \(sorted.count) events", category: .session)
 
@@ -215,6 +182,48 @@ struct UnifiedEventTransformer {
     }
 
     // =========================================================================
+    // MARK: - Tool Map Collection (shared between transform and reconstruct)
+    // =========================================================================
+
+    /// Result of the first-pass collection over events.
+    /// Both `transformPersistedEvents` and `reconstructSessionState` need these maps
+    /// to resolve tool_use content blocks and filter consumed notifications.
+    struct ToolMapResult {
+        var toolCalls: [String: ToolCallPayload] = [:]
+        var toolResults: [String: ToolResultPayload] = [:]
+        var consumedSubagentEventIds: Set<String> = []
+        var lastTurnEndSequence: Int = -1
+    }
+
+    /// Single-pass collection of tool calls, tool results, consumed subagent notification IDs,
+    /// and the last turn_end sequence number from a sorted event array.
+    static func buildToolMaps<E: EventTransformable>(from events: [E]) -> ToolMapResult {
+        var result = ToolMapResult()
+        for event in events {
+            if event.type == PersistedEventType.toolCall.rawValue,
+               let payload = ToolCallPayload(from: event.payload) {
+                result.toolCalls[payload.toolCallId] = payload
+            }
+            if event.type == PersistedEventType.toolResult.rawValue,
+               let payload = ToolResultPayload(from: event.payload) {
+                result.toolResults[payload.toolCallId] = payload
+            }
+            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
+               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
+                for id in ids {
+                    if let s = id as? String {
+                        result.consumedSubagentEventIds.insert(s)
+                    }
+                }
+            }
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                result.lastTurnEndSequence = max(result.lastTurnEndSequence, event.sequence)
+            }
+        }
+        return result
+    }
+
+    // =========================================================================
     // MARK: - Helpers
     // =========================================================================
 
@@ -277,31 +286,15 @@ extension UnifiedEventTransformer {
         // would incorrectly interleave parent and forked events
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // PASS 1: Collect deleted event IDs, config state, tool maps, and subagent consumption info
-        var deletedEventIds = Set<String>()
-        var toolCalls: [String: ToolCallPayload] = [:]
-        var toolResults: [String: ToolResultPayload] = [:]
-        var consumedSubagentEventIds: Set<String> = []
-        var lastTurnEndSequence: Int = -1
+        // PASS 1: Collect tool maps (shared), plus deleted event IDs and config state (reconstruct-only)
+        let maps = buildToolMaps(from: sorted)
+        let toolCalls = maps.toolCalls
+        let toolResults = maps.toolResults
+        let consumedSubagentEventIds = maps.consumedSubagentEventIds
+        let lastTurnEndSequence = maps.lastTurnEndSequence
 
+        var deletedEventIds = Set<String>()
         for event in sorted {
-            if event.type == PersistedEventType.toolCall.rawValue,
-               let payload = ToolCallPayload(from: event.payload) {
-                toolCalls[payload.toolCallId] = payload
-            }
-            if event.type == PersistedEventType.toolResult.rawValue {
-                if let payload = ToolResultPayload(from: event.payload) {
-                    toolResults[payload.toolCallId] = payload
-                } else if let rawEvent = event as? RawEvent, let tcId = rawEvent.toolCallId {
-                    let fallback = ToolResultPayload(
-                        toolCallId: tcId,
-                        content: event.payload.string("content") ?? "",
-                        isError: event.payload.bool("isError") ?? false,
-                        durationMs: event.payload.int("duration") ?? 0
-                    )
-                    toolResults[tcId] = fallback
-                }
-            }
             if event.type == PersistedEventType.messageDeleted.rawValue,
                let payload = MessageDeletedPayload(from: event.payload) {
                 deletedEventIds.insert(payload.targetEventId)
@@ -309,15 +302,6 @@ extension UnifiedEventTransformer {
             if event.type == PersistedEventType.configReasoningLevel.rawValue {
                 let payload = ReasoningLevelPayload(from: event.payload)
                 state.reasoningLevel = payload.newLevel
-            }
-            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
-               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
-                for id in ids {
-                    if let s = id as? String { consumedSubagentEventIds.insert(s) }
-                }
-            }
-            if event.type == PersistedEventType.streamTurnEnd.rawValue {
-                lastTurnEndSequence = max(lastTurnEndSequence, event.sequence)
             }
         }
 
