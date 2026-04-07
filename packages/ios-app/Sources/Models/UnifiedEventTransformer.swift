@@ -385,45 +385,8 @@ extension UnifiedEventTransformer {
                     state.subagentResults.append(info)
                 }
 
-            case .subagentSpawned:
-                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
-                    state.subagentSpawns.append(ReconstructedState.SubagentSpawnInfo(
-                        subagentSessionId: sessionId,
-                        task: event.payload["task"]?.value as? String ?? "",
-                        model: event.payload["model"]?.value as? String ?? "unknown",
-                        toolCallId: event.payload["toolCallId"]?.value as? String,
-                        blocking: event.payload["blocking"]?.value as? Bool ?? false
-                    ))
-                }
-
-            case .subagentCompleted:
-                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
-                    let tokenDict = event.payload["totalTokenUsage"]?.value as? [String: Any]
-                    let tokenUsage: TokenUsage? = tokenDict.flatMap {
-                        guard let input = $0["inputTokens"] as? Int,
-                              let output = $0["outputTokens"] as? Int else { return nil }
-                        return TokenUsage(inputTokens: input, outputTokens: output,
-                                          cacheReadTokens: nil, cacheCreationTokens: nil)
-                    }
-                    state.subagentCompletions[sessionId] = ReconstructedState.SubagentCompletionInfo(
-                        subagentSessionId: sessionId,
-                        resultSummary: event.payload["resultSummary"]?.value as? String ?? "",
-                        totalTurns: event.payload["totalTurns"]?.value as? Int ?? 0,
-                        duration: event.payload["duration"]?.value as? Int ?? 0,
-                        tokenUsage: tokenUsage,
-                        fullOutput: event.payload["fullOutput"]?.value as? String,
-                        model: event.payload["model"]?.value as? String
-                    )
-                }
-
-            case .subagentFailed:
-                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
-                    state.subagentFailures[sessionId] = ReconstructedState.SubagentFailureInfo(
-                        subagentSessionId: sessionId,
-                        error: event.payload["error"]?.value as? String ?? "Unknown error",
-                        duration: event.payload["duration"]?.value as? Int
-                    )
-                }
+            case .subagentSpawned, .subagentCompleted, .subagentFailed:
+                handleSubagentEvent(eventType, payload: event.payload, state: &state)
 
             case .streamTurnEnd:
                 let payload = StreamTurnEndPayload(from: event.payload)
@@ -432,72 +395,20 @@ extension UnifiedEventTransformer {
                 }
 
             case .sessionFork:
-                if let source = event.payload["sourceEventId"]?.value as? String {
-                    state.sessionInfo.forkSource = source
-                }
+                state.sessionInfo.forkSource = event.payload["sourceEventId"]?.value as? String
 
             case .sessionBranch:
                 if let parsed = SessionBranchPayload(from: event.payload) {
                     state.sessionInfo.branchName = parsed.name
                 }
 
-            case .fileRead:
-                if let parsed = FileReadPayload(from: event.payload) {
-                    state.fileActivity.reads.append(ReconstructedState.FileActivityState.FileRead(
-                        path: parsed.path,
-                        timestamp: parseTimestamp(event.timestamp),
-                        linesStart: parsed.linesStart,
-                        linesEnd: parsed.linesEnd
-                    ))
-                }
+            case .fileRead, .fileWrite, .fileEdit:
+                handleFileActivityEvent(eventType, payload: event.payload,
+                                        timestamp: event.timestamp, state: &state)
 
-            case .fileWrite:
-                if let parsed = FileWritePayload(from: event.payload) {
-                    state.fileActivity.writes.append(ReconstructedState.FileActivityState.FileWrite(
-                        path: parsed.path,
-                        timestamp: parseTimestamp(event.timestamp),
-                        size: parsed.size,
-                        contentHash: parsed.contentHash
-                    ))
-                }
-
-            case .fileEdit:
-                if let parsed = FileEditPayload(from: event.payload) {
-                    state.fileActivity.edits.append(ReconstructedState.FileActivityState.FileEdit(
-                        path: parsed.path,
-                        timestamp: parseTimestamp(event.timestamp),
-                        oldString: parsed.oldString,
-                        newString: parsed.newString,
-                        diff: parsed.diff
-                    ))
-                }
-
-            case .worktreeAcquired:
-                state.worktree.isAcquired = true
-                if let path = event.payload["path"]?.value as? String {
-                    state.worktree.currentWorktree = path
-                }
-
-            case .worktreeReleased:
-                state.worktree.isAcquired = false
-
-            case .worktreeCommit:
-                state.worktree.commits.append(ReconstructedState.WorktreeState.Commit(
-                    hash: event.payload["commitHash"]?.value as? String ?? "",
-                    message: event.payload["message"]?.value as? String ?? "",
-                    timestamp: parseTimestamp(event.timestamp)
-                ))
-
-            case .worktreeMerged:
-                state.worktree.merges.append(ReconstructedState.WorktreeState.Merge(
-                    branch: event.payload["sourceBranch"]?.value as? String ?? "",
-                    timestamp: parseTimestamp(event.timestamp)
-                ))
-
-            case .worktreeRenamed:
-                if let newBranch = event.payload["newBranch"]?.value as? String {
-                    state.worktree.currentBranch = newBranch
-                }
+            case .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed:
+                handleWorktreeEvent(eventType, payload: event.payload,
+                                    timestamp: event.timestamp, state: &state)
 
             case .compactBoundary:
                 if let message = transformPersistedEvent(event) {
@@ -527,34 +438,9 @@ extension UnifiedEventTransformer {
                     ))
                 }
 
-            case .metadataUpdate:
-                if let parsed = MetadataUpdatePayload(from: event.payload) {
-                    state.metadata.customData[parsed.key] = parsed.newValue
-                    state.metadata.lastUpdated = parseTimestamp(event.timestamp)
-                }
-
-            case .metadataTag:
-                if let parsed = MetadataTagPayload(from: event.payload) {
-                    if parsed.action == "add" && !state.tags.contains(parsed.tag) {
-                        state.tags.append(parsed.tag)
-                    } else if parsed.action == "remove" {
-                        state.tags.removeAll { $0 == parsed.tag }
-                    }
-                }
-
-            case .llmHookResult:
-                // Extract the latest suggest-prompts output (overwrites previous)
-                if let hookId = event.payload["hookId"]?.value as? String,
-                   hookId.contains("suggest-prompts"),
-                   let success = event.payload["success"]?.value as? Bool,
-                   success,
-                   let output = event.payload["output"]?.value as? String {
-                    let suggestions = output
-                        .components(separatedBy: .newlines)
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { !$0.isEmpty && $0.count < 80 }
-                    state.suggestions = Array(suggestions.prefix(5))
-                }
+            case .metadataUpdate, .metadataTag, .llmHookResult:
+                handleMetadataEvent(eventType, payload: event.payload,
+                                    timestamp: event.timestamp, state: &state)
 
             default:
                 break
@@ -562,5 +448,158 @@ extension UnifiedEventTransformer {
         }
 
         return state
+    }
+
+    // =========================================================================
+    // MARK: - Reconstruction Event Handlers
+    // =========================================================================
+
+    private static func handleSubagentEvent(
+        _ eventType: PersistedEventType,
+        payload: [String: AnyCodable],
+        state: inout ReconstructedState
+    ) {
+        guard let sessionId = payload["subagentSessionId"]?.value as? String else { return }
+
+        switch eventType {
+        case .subagentSpawned:
+            state.subagentSpawns.append(ReconstructedState.SubagentSpawnInfo(
+                subagentSessionId: sessionId,
+                task: payload["task"]?.value as? String ?? "",
+                model: payload["model"]?.value as? String ?? "unknown",
+                toolCallId: payload["toolCallId"]?.value as? String,
+                blocking: payload["blocking"]?.value as? Bool ?? false
+            ))
+
+        case .subagentCompleted:
+            let tokenDict = payload["totalTokenUsage"]?.value as? [String: Any]
+            let tokenUsage: TokenUsage? = tokenDict.flatMap {
+                guard let input = $0["inputTokens"] as? Int,
+                      let output = $0["outputTokens"] as? Int else { return nil }
+                return TokenUsage(inputTokens: input, outputTokens: output,
+                                  cacheReadTokens: nil, cacheCreationTokens: nil)
+            }
+            state.subagentCompletions[sessionId] = ReconstructedState.SubagentCompletionInfo(
+                subagentSessionId: sessionId,
+                resultSummary: payload["resultSummary"]?.value as? String ?? "",
+                totalTurns: payload["totalTurns"]?.value as? Int ?? 0,
+                duration: payload["duration"]?.value as? Int ?? 0,
+                tokenUsage: tokenUsage,
+                fullOutput: payload["fullOutput"]?.value as? String,
+                model: payload["model"]?.value as? String
+            )
+
+        case .subagentFailed:
+            state.subagentFailures[sessionId] = ReconstructedState.SubagentFailureInfo(
+                subagentSessionId: sessionId,
+                error: payload["error"]?.value as? String ?? "Unknown error",
+                duration: payload["duration"]?.value as? Int
+            )
+
+        default:
+            break
+        }
+    }
+
+    private static func handleFileActivityEvent(
+        _ eventType: PersistedEventType,
+        payload: [String: AnyCodable],
+        timestamp: String,
+        state: inout ReconstructedState
+    ) {
+        let ts = parseTimestamp(timestamp)
+
+        switch eventType {
+        case .fileRead:
+            if let parsed = FileReadPayload(from: payload) {
+                state.fileActivity.reads.append(ReconstructedState.FileActivityState.FileRead(
+                    path: parsed.path, timestamp: ts,
+                    linesStart: parsed.linesStart, linesEnd: parsed.linesEnd
+                ))
+            }
+        case .fileWrite:
+            if let parsed = FileWritePayload(from: payload) {
+                state.fileActivity.writes.append(ReconstructedState.FileActivityState.FileWrite(
+                    path: parsed.path, timestamp: ts,
+                    size: parsed.size, contentHash: parsed.contentHash
+                ))
+            }
+        case .fileEdit:
+            if let parsed = FileEditPayload(from: payload) {
+                state.fileActivity.edits.append(ReconstructedState.FileActivityState.FileEdit(
+                    path: parsed.path, timestamp: ts,
+                    oldString: parsed.oldString, newString: parsed.newString, diff: parsed.diff
+                ))
+            }
+        default:
+            break
+        }
+    }
+
+    private static func handleWorktreeEvent(
+        _ eventType: PersistedEventType,
+        payload: [String: AnyCodable],
+        timestamp: String,
+        state: inout ReconstructedState
+    ) {
+        switch eventType {
+        case .worktreeAcquired:
+            state.worktree.isAcquired = true
+            state.worktree.currentWorktree = payload["path"]?.value as? String
+        case .worktreeReleased:
+            state.worktree.isAcquired = false
+        case .worktreeCommit:
+            state.worktree.commits.append(ReconstructedState.WorktreeState.Commit(
+                hash: payload["commitHash"]?.value as? String ?? "",
+                message: payload["message"]?.value as? String ?? "",
+                timestamp: parseTimestamp(timestamp)
+            ))
+        case .worktreeMerged:
+            state.worktree.merges.append(ReconstructedState.WorktreeState.Merge(
+                branch: payload["sourceBranch"]?.value as? String ?? "",
+                timestamp: parseTimestamp(timestamp)
+            ))
+        case .worktreeRenamed:
+            state.worktree.currentBranch = payload["newBranch"]?.value as? String
+        default:
+            break
+        }
+    }
+
+    private static func handleMetadataEvent(
+        _ eventType: PersistedEventType,
+        payload: [String: AnyCodable],
+        timestamp: String,
+        state: inout ReconstructedState
+    ) {
+        switch eventType {
+        case .metadataUpdate:
+            if let parsed = MetadataUpdatePayload(from: payload) {
+                state.metadata.customData[parsed.key] = parsed.newValue
+                state.metadata.lastUpdated = parseTimestamp(timestamp)
+            }
+        case .metadataTag:
+            if let parsed = MetadataTagPayload(from: payload) {
+                if parsed.action == "add" && !state.tags.contains(parsed.tag) {
+                    state.tags.append(parsed.tag)
+                } else if parsed.action == "remove" {
+                    state.tags.removeAll { $0 == parsed.tag }
+                }
+            }
+        case .llmHookResult:
+            if let hookId = payload["hookId"]?.value as? String,
+               hookId.contains("suggest-prompts"),
+               let success = payload["success"]?.value as? Bool,
+               success,
+               let output = payload["output"]?.value as? String {
+                let suggestions = output
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty && $0.count < 80 }
+                state.suggestions = Array(suggestions.prefix(5))
+            }
+        default:
+            break
+        }
     }
 }
