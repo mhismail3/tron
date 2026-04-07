@@ -242,7 +242,7 @@ final class SubagentState {
             let item = SubagentEventItem(
                 timestamp: date,
                 type: .tool,
-                title: formatToolTitle(toolName),
+                title: SubagentEventFormatter.formatToolTitle(toolName),
                 detail: nil,
                 toolCallId: toolCallId,
                 isRunning: true
@@ -259,7 +259,7 @@ final class SubagentState {
             if let toolCallId = toolCallId,
                let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.toolCallId == toolCallId }) {
                 subagentEvents[subagentSessionId]?[index].isRunning = false
-                subagentEvents[subagentSessionId]?[index].detail = formatToolResult(toolName: toolName, result: result, success: success)
+                subagentEvents[subagentSessionId]?[index].detail = SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success)
                 if !success {
                     subagentEvents[subagentSessionId]?[index].title += " ✗"
                 }
@@ -268,8 +268,8 @@ final class SubagentState {
                 let item = SubagentEventItem(
                     timestamp: date,
                     type: .tool,
-                    title: formatToolTitle(toolName) + (success ? "" : " ✗"),
-                    detail: formatToolResult(toolName: toolName, result: result, success: success),
+                    title: SubagentEventFormatter.formatToolTitle(toolName) + (success ? "" : " ✗"),
+                    detail: SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success),
                     toolCallId: toolCallId,
                     isRunning: false
                 )
@@ -293,7 +293,7 @@ final class SubagentState {
 
                 if let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.type == .output && $0.isRunning }) {
                     let accumulated = accumulatedOutput[subagentSessionId] ?? ""
-                    subagentEvents[subagentSessionId]?[index].detail = formatAccumulatedOutput(accumulated)
+                    subagentEvents[subagentSessionId]?[index].detail = SubagentEventFormatter.formatAccumulatedOutput(accumulated)
                 }
             } else {
                 // Create new output event (after a tool or at start)
@@ -304,7 +304,7 @@ final class SubagentState {
                     timestamp: date,
                     type: .output,
                     title: "Output",
-                    detail: formatAccumulatedOutput(delta),
+                    detail: SubagentEventFormatter.formatAccumulatedOutput(delta),
                     isRunning: true
                 )
                 subagentEvents[subagentSessionId]?.append(item)
@@ -328,115 +328,6 @@ final class SubagentState {
 
         // Enforce memory limit to prevent unbounded growth
         enforceEventLimit(for: subagentSessionId)
-    }
-
-    // MARK: - Formatting Helpers
-
-    private func formatToolTitle(_ toolName: String?) -> String {
-        guard let name = toolName else { return "Tool" }
-        switch ToolKind(toolName: name) {
-        case .bash: return "🖥 Bash"
-        case .read: return "📄 Read"
-        case .write: return "✏️ Write"
-        case .edit: return "📝 Edit"
-        case .search: return "🔍 Search"
-        case .glob: return "📂 Find"
-        default: return name
-        }
-    }
-
-    private func formatToolResult(toolName: String?, result: String, success: Bool) -> String {
-        let cleaned = cleanResult(result)
-
-        if !success {
-            return String(cleaned.prefix(150))
-        }
-
-        // Tool-specific formatting
-        let kind = toolName.map { ToolKind(toolName: $0) }
-        switch kind {
-        case .bash:
-            return formatBashResult(cleaned)
-        case .read:
-            return formatReadResult(cleaned)
-        case .search:
-            return formatSearchResult(cleaned)
-        case .write, .edit:
-            return formatWriteResult(cleaned)
-        default:
-            return String(cleaned.prefix(150))
-        }
-    }
-
-    private func cleanResult(_ result: String) -> String {
-        var cleaned = result
-
-        // Remove common JSON wrapper patterns
-        if cleaned.hasPrefix("{\"") && cleaned.contains("\"content\":") {
-            // Try to extract content from JSON
-            if let data = cleaned.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let content = json["content"] as? String {
-                cleaned = content
-            }
-        }
-
-        // Unescape common escape sequences
-        cleaned = cleaned
-            .replacingOccurrences(of: "\\n", with: "\n")
-            .replacingOccurrences(of: "\\t", with: "\t")
-            .replacingOccurrences(of: "\\\"", with: "\"")
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func formatBashResult(_ result: String) -> String {
-        let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
-        if lines.count <= 3 {
-            return lines.joined(separator: "\n")
-        }
-        // Show first 2 lines + count
-        let preview = lines.prefix(2).joined(separator: "\n")
-        return "\(preview)\n... +\(lines.count - 2) more lines"
-    }
-
-    private func formatReadResult(_ result: String) -> String {
-        let lines = result.components(separatedBy: "\n")
-        if lines.count <= 5 {
-            return String(result.prefix(200))
-        }
-        return "\(lines.count) lines read"
-    }
-
-    private func formatSearchResult(_ result: String) -> String {
-        let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
-        if lines.isEmpty {
-            return "No matches"
-        }
-        if lines.count == 1 {
-            return String(lines[0].prefix(100))
-        }
-        return "\(lines.count) matches found"
-    }
-
-    private func formatWriteResult(_ result: String) -> String {
-        if result.lowercased().contains("success") || result.lowercased().contains("written") {
-            return "✓ File saved"
-        }
-        return String(result.prefix(100))
-    }
-
-    private func formatAccumulatedOutput(_ text: String) -> String {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lines = cleaned.components(separatedBy: "\n")
-
-        if lines.count <= 4 {
-            return String(cleaned.prefix(300))
-        }
-
-        // Show last few lines for streaming feel
-        let lastLines = lines.suffix(3).joined(separator: "\n")
-        return "...\n\(lastLines)"
     }
 
     /// Get events for a subagent (in reverse chronological order - newest first)
@@ -497,8 +388,8 @@ final class SubagentState {
                 let item = SubagentEventItem(
                     timestamp: message.timestamp,
                     type: .tool,
-                    title: formatToolTitle(tool.toolName),
-                    detail: formatToolResult(toolName: tool.toolName, result: tool.result ?? "", success: tool.status != .error),
+                    title: SubagentEventFormatter.formatToolTitle(tool.toolName),
+                    detail: SubagentEventFormatter.formatToolResult(toolName: tool.toolName, result: tool.result ?? "", success: tool.status != .error),
                     toolCallId: tool.toolCallId,
                     isRunning: false
                 )
@@ -512,7 +403,7 @@ final class SubagentState {
                         timestamp: message.timestamp,
                         type: .output,
                         title: "Output",
-                        detail: formatAccumulatedOutput(text),
+                        detail: SubagentEventFormatter.formatAccumulatedOutput(text),
                         isRunning: false
                     )
                     items.append(item)
