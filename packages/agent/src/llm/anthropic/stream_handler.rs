@@ -5,39 +5,30 @@
 //!
 //! The handler maintains a [`StreamState`] that accumulates text, thinking, signature,
 //! and tool arguments across delta events, then emits complete blocks on `content_block_stop`.
+//!
+//! Delegates mechanical delta accumulation to [`StreamAccumulator`] from the shared
+//! `stream_common` module, keeping only Anthropic-specific protocol mapping here.
 
-use serde_json::Map;
 use tracing::{debug, warn};
 
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
-use crate::core::messages::{TokenUsage, ToolCall};
+use crate::core::messages::TokenUsage;
+use crate::llm::stream_common::StreamAccumulator;
 
 use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 
 /// Stream state accumulated across SSE events.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct StreamState {
     /// Provider type for token attribution in Done events.
     pub provider_type: crate::core::messages::Provider,
+    /// Shared delta accumulator for text, thinking, signature, and tool args.
+    pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
     /// Tool call ID for the current `tool_use` block.
     pub current_tool_call_id: Option<String>,
-    /// Tool name for the current `tool_use` block.
-    pub current_tool_name: Option<String>,
-    /// Accumulated text content.
-    pub accumulated_text: String,
-    /// Accumulated thinking content.
-    pub accumulated_thinking: String,
-    /// Accumulated signature.
-    pub accumulated_signature: String,
-    /// Accumulated tool call JSON arguments.
-    pub accumulated_args: String,
-    /// Input tokens from `message_start`.
-    pub input_tokens: u64,
-    /// Output tokens from `message_delta`.
-    pub output_tokens: u64,
     /// Cache creation tokens.
     pub cache_creation_tokens: u64,
     /// Cache read tokens.
@@ -50,6 +41,23 @@ pub struct StreamState {
     pub content_blocks: Vec<AssistantContent>,
     /// Stop reason from `message_delta`.
     pub stop_reason: Option<String>,
+}
+
+impl Default for StreamState {
+    fn default() -> Self {
+        Self {
+            provider_type: crate::core::messages::Provider::default(),
+            acc: StreamAccumulator::new(),
+            current_block_type: None,
+            current_tool_call_id: None,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_5m_tokens: 0,
+            cache_creation_1h_tokens: 0,
+            content_blocks: Vec::new(),
+            stop_reason: None,
+        }
+    }
 }
 
 /// Type of content block being accumulated.
@@ -78,6 +86,8 @@ pub fn create_stream_state() -> StreamState {
     create_stream_state_for(crate::core::messages::Provider::Anthropic)
 }
 
+
+
 /// Process a single Anthropic SSE event and return zero or more [`StreamEvent`]s.
 ///
 /// Call this for each SSE event received. The state is mutated to track
@@ -85,7 +95,7 @@ pub fn create_stream_state() -> StreamState {
 pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> Vec<StreamEvent> {
     match event {
         AnthropicSseEvent::MessageStart { message } => {
-            state.input_tokens = message.usage.input_tokens;
+            state.acc.input_tokens = message.usage.input_tokens;
             state.cache_creation_tokens = message.usage.cache_creation_input_tokens;
             state.cache_read_tokens = message.usage.cache_read_input_tokens;
             if let Some(ref cc) = message.usage.cache_creation {
@@ -96,7 +106,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             let cache_hit = state.cache_read_tokens > 0;
             let cache_write = state.cache_creation_tokens > 0;
             debug!(
-                input_tokens = state.input_tokens,
+                input_tokens = state.acc.input_tokens,
                 cache_read = state.cache_read_tokens,
                 cache_write = state.cache_creation_tokens,
                 cache_hit,
@@ -110,49 +120,43 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
         AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
             SseContentBlock::Text { .. } => {
                 state.current_block_type = Some(BlockType::Text);
+                // Anthropic has explicit block starts; use mark_ rather than process_.
+                state.acc.text_started = true;
                 vec![StreamEvent::TextStart]
             }
             SseContentBlock::Thinking { .. } => {
                 state.current_block_type = Some(BlockType::Thinking);
+                state.acc.thinking_started = true;
                 vec![StreamEvent::ThinkingStart]
             }
             SseContentBlock::ToolUse { id, name } => {
                 state.current_block_type = Some(BlockType::ToolUse);
                 state.current_tool_call_id = Some(id.clone());
-                state.current_tool_name = Some(name.clone());
-                vec![StreamEvent::ToolCallStart {
-                    tool_call_id: id.clone(),
-                    name: name.clone(),
-                }]
+                state.acc.start_tool_call(id.clone(), name.clone())
             }
         },
 
         AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
             match delta {
                 SseDelta::TextDelta { text } => {
-                    state.accumulated_text.push_str(text);
+                    state.acc.accumulate_text(text);
                     vec![StreamEvent::TextDelta {
                         delta: text.clone(),
                     }]
                 }
                 SseDelta::ThinkingDelta { thinking } => {
-                    state.accumulated_thinking.push_str(thinking);
+                    state.acc.accumulate_thinking(thinking);
                     vec![StreamEvent::ThinkingDelta {
                         delta: thinking.clone(),
                     }]
                 }
                 SseDelta::SignatureDelta { signature } => {
-                    state.accumulated_signature.push_str(signature);
-                    // Signature is not yielded until content_block_stop
+                    state.acc.accumulate_signature(signature);
                     vec![]
                 }
                 SseDelta::InputJsonDelta { partial_json } => {
-                    state.accumulated_args.push_str(partial_json);
                     if let Some(ref id) = state.current_tool_call_id {
-                        vec![StreamEvent::ToolCallDelta {
-                            tool_call_id: id.clone(),
-                            arguments_delta: partial_json.clone(),
-                        }]
+                        state.acc.append_tool_args(id, partial_json)
                     } else {
                         vec![]
                     }
@@ -165,7 +169,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
         AnthropicSseEvent::MessageDelta { delta, usage } => {
             state.stop_reason.clone_from(&delta.stop_reason);
             if let Some(u) = usage {
-                state.output_tokens = u.output_tokens;
+                state.acc.output_tokens = u.output_tokens;
             }
             vec![]
         }
@@ -194,7 +198,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
 fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
     match state.current_block_type.take() {
         Some(BlockType::Text) => {
-            let text = std::mem::take(&mut state.accumulated_text);
+            let text = state.acc.take_text();
             state
                 .content_blocks
                 .push(AssistantContent::Text { text: text.clone() });
@@ -204,12 +208,8 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
             }]
         }
         Some(BlockType::Thinking) => {
-            let thinking = std::mem::take(&mut state.accumulated_thinking);
-            let signature = if state.accumulated_signature.is_empty() {
-                None
-            } else {
-                Some(std::mem::take(&mut state.accumulated_signature))
-            };
+            let thinking = state.acc.take_thinking();
+            let signature = state.acc.take_signature();
             state.content_blocks.push(AssistantContent::Thinking {
                 thinking: thinking.clone(),
                 signature: signature.clone(),
@@ -220,22 +220,18 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
             }]
         }
         Some(BlockType::ToolUse) => {
-            let args_str = std::mem::take(&mut state.accumulated_args);
-            let arguments: Map<String, serde_json::Value> =
-                serde_json::from_str(&args_str).unwrap_or_default();
             let id = state.current_tool_call_id.take().unwrap_or_default();
-            let name = state.current_tool_name.take().unwrap_or_default();
-
-            let tool_call = ToolCall::new(id.clone(), name.clone(), arguments.clone());
-
-            state.content_blocks.push(AssistantContent::ToolUse {
-                id,
-                name,
-                arguments,
-                thought_signature: None,
-            });
-
-            vec![StreamEvent::ToolCallEnd { tool_call }]
+            let events = state.acc.finish_tool_call(&id);
+            // Extract the ToolCall from the event to build the content block.
+            if let Some(StreamEvent::ToolCallEnd { tool_call }) = events.first() {
+                state.content_blocks.push(AssistantContent::ToolUse {
+                    id: tool_call.id.clone(),
+                    name: tool_call.name.clone(),
+                    arguments: tool_call.arguments.clone(),
+                    thought_signature: None,
+                });
+            }
+            events
         }
         None => vec![],
     }
@@ -249,10 +245,10 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
         .take()
         .unwrap_or_else(|| "end_turn".into());
 
-    let token_usage = if state.input_tokens > 0 || state.output_tokens > 0 {
+    let token_usage = if state.acc.input_tokens > 0 || state.acc.output_tokens > 0 {
         Some(TokenUsage {
-            input_tokens: state.input_tokens,
-            output_tokens: state.output_tokens,
+            input_tokens: state.acc.input_tokens,
+            output_tokens: state.acc.output_tokens,
             cache_read_tokens: if state.cache_read_tokens > 0 {
                 Some(state.cache_read_tokens)
             } else {
@@ -331,8 +327,8 @@ mod tests {
     #[test]
     fn done_event_uses_state_provider_type() {
         let mut state = create_stream_state_for(crate::core::messages::Provider::MiniMax);
-        state.input_tokens = 100;
-        state.output_tokens = 50;
+        state.acc.input_tokens = 100;
+        state.acc.output_tokens = 50;
         let event = build_done_event(&mut state);
         match event {
             StreamEvent::Done { message, .. } => {
@@ -361,7 +357,7 @@ mod tests {
         };
         let events = process_sse_event(&event, &mut state);
         assert!(events.is_empty());
-        assert_eq!(state.input_tokens, 100);
+        assert_eq!(state.acc.input_tokens, 100);
         assert_eq!(state.cache_creation_tokens, 50);
         assert_eq!(state.cache_read_tokens, 20);
     }
@@ -444,7 +440,7 @@ mod tests {
             _ => panic!("expected ToolCallStart"),
         }
         assert_eq!(state.current_tool_call_id, Some("toolu_01abc".into()));
-        assert_eq!(state.current_tool_name, Some("bash".into()));
+        assert_eq!(state.acc.tool_calls()[0].name, "bash");
     }
 
     // ── content_block_delta ─────────────────────────────────────────────
@@ -465,7 +461,7 @@ mod tests {
             StreamEvent::TextDelta { delta } => assert_eq!(delta, "Hello "),
             _ => panic!("expected TextDelta"),
         }
-        assert_eq!(state.accumulated_text, "Hello ");
+        assert_eq!(state.acc.accumulated_text, "Hello ");
 
         // Second delta
         let second_event = AnthropicSseEvent::ContentBlockDelta {
@@ -475,7 +471,7 @@ mod tests {
             },
         };
         let _ = process_sse_event(&second_event, &mut state);
-        assert_eq!(state.accumulated_text, "Hello world");
+        assert_eq!(state.acc.accumulated_text, "Hello world");
     }
 
     #[test]
@@ -494,7 +490,7 @@ mod tests {
             StreamEvent::ThinkingDelta { delta } => assert_eq!(delta, "Let me think"),
             _ => panic!("expected ThinkingDelta"),
         }
-        assert_eq!(state.accumulated_thinking, "Let me think");
+        assert_eq!(state.acc.accumulated_thinking, "Let me think");
     }
 
     #[test]
@@ -508,7 +504,7 @@ mod tests {
         };
         let events = process_sse_event(&event, &mut state);
         assert!(events.is_empty()); // Signature not yielded
-        assert_eq!(state.accumulated_signature, "sig_part1");
+        assert_eq!(state.acc.accumulated_signature, "sig_part1");
 
         // Second signature delta
         let second_event = AnthropicSseEvent::ContentBlockDelta {
@@ -518,7 +514,7 @@ mod tests {
             },
         };
         let _ = process_sse_event(&second_event, &mut state);
-        assert_eq!(state.accumulated_signature, "sig_part1_part2");
+        assert_eq!(state.acc.accumulated_signature, "sig_part1_part2");
     }
 
     #[test]
@@ -526,6 +522,7 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
+        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
         let event = AnthropicSseEvent::ContentBlockDelta {
             index: 1,
             delta: SseDelta::InputJsonDelta {
@@ -552,7 +549,7 @@ mod tests {
     fn content_block_stop_text() {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::Text);
-        state.accumulated_text = "Hello world".into();
+        state.acc.accumulated_text = "Hello world".into();
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -563,7 +560,7 @@ mod tests {
             }
             _ => panic!("expected TextEnd"),
         }
-        assert!(state.accumulated_text.is_empty());
+        assert!(state.acc.accumulated_text.is_empty());
         assert_eq!(state.content_blocks.len(), 1);
     }
 
@@ -571,8 +568,8 @@ mod tests {
     fn content_block_stop_thinking_with_signature() {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::Thinking);
-        state.accumulated_thinking = "deep thought".into();
-        state.accumulated_signature = "sig123".into();
+        state.acc.accumulated_thinking = "deep thought".into();
+        state.acc.accumulated_signature = "sig123".into();
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -586,15 +583,15 @@ mod tests {
             }
             _ => panic!("expected ThinkingEnd"),
         }
-        assert!(state.accumulated_thinking.is_empty());
-        assert!(state.accumulated_signature.is_empty());
+        assert!(state.acc.accumulated_thinking.is_empty());
+        assert!(state.acc.accumulated_signature.is_empty());
     }
 
     #[test]
     fn content_block_stop_thinking_without_signature() {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::Thinking);
-        state.accumulated_thinking = "display only".into();
+        state.acc.accumulated_thinking = "display only".into();
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
         match &events[0] {
@@ -610,8 +607,8 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
-        state.current_tool_name = Some("bash".into());
-        state.accumulated_args = r#"{"cmd":"ls"}"#.into();
+        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
+        let _ = state.acc.append_tool_args("toolu_01abc", r#"{"cmd":"ls"}"#);
         let event = AnthropicSseEvent::ContentBlockStop { index: 1 };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -624,8 +621,7 @@ mod tests {
             _ => panic!("expected ToolCallEnd"),
         }
         assert!(state.current_tool_call_id.is_none());
-        assert!(state.current_tool_name.is_none());
-        assert!(state.accumulated_args.is_empty());
+        assert!(state.acc.tool_calls().is_empty());
     }
 
     #[test]
@@ -633,7 +629,7 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
-        state.current_tool_name = Some("bash".into());
+        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
         // Empty args
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
@@ -659,7 +655,7 @@ mod tests {
         let events = process_sse_event(&event, &mut state);
         assert!(events.is_empty());
         assert_eq!(state.stop_reason, Some("end_turn".into()));
-        assert_eq!(state.output_tokens, 42);
+        assert_eq!(state.acc.output_tokens, 42);
     }
 
     #[test]
@@ -681,8 +677,8 @@ mod tests {
     #[test]
     fn message_stop_yields_done() {
         let mut state = create_stream_state();
-        state.input_tokens = 100;
-        state.output_tokens = 50;
+        state.acc.input_tokens = 100;
+        state.acc.output_tokens = 50;
         state.stop_reason = Some("end_turn".into());
         state.content_blocks.push(AssistantContent::Text {
             text: "Hello".into(),
@@ -737,8 +733,8 @@ mod tests {
     #[test]
     fn message_stop_with_cache_tokens() {
         let mut state = create_stream_state();
-        state.input_tokens = 100;
-        state.output_tokens = 50;
+        state.acc.input_tokens = 100;
+        state.acc.output_tokens = 50;
         state.cache_read_tokens = 80;
         state.cache_creation_tokens = 20;
         state.cache_creation_5m_tokens = 10;

@@ -3,6 +3,10 @@
 //! Processes streaming chunks from the Gemini API and converts them to unified
 //! [`StreamEvent`] values. Handles thinking/text
 //! transitions, function call extraction, safety blocks, and token usage.
+//!
+//! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
+//! shared `stream_common` module. Tool call handling remains provider-specific
+//! because Gemini delivers complete function calls (not streamed argument deltas).
 
 use std::collections::HashSet;
 
@@ -10,25 +14,16 @@ use serde_json::Map;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::{Provider, TokenUsage, ToolCall};
+use crate::llm::stream_common::StreamAccumulator;
 
 use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating};
 
 /// Mutable state accumulated across SSE events within a single stream.
 pub struct StreamState {
-    /// Accumulated text content.
-    pub accumulated_text: String,
-    /// Accumulated thinking/reasoning content.
-    pub accumulated_thinking: String,
-    /// Accumulated tool calls.
+    /// Shared delta accumulator for text, thinking, and token tracking.
+    pub acc: StreamAccumulator,
+    /// Accumulated tool calls (Google-specific: complete, not streamed).
     pub tool_calls: Vec<ToolCallState>,
-    /// Input tokens reported by the API.
-    pub input_tokens: u64,
-    /// Output tokens reported by the API.
-    pub output_tokens: u64,
-    /// Whether we've emitted a `text_start` event.
-    pub text_started: bool,
-    /// Whether we've emitted a `thinking_start` event.
-    pub thinking_started: bool,
     /// Counter for generating unique tool call IDs.
     pub tool_call_index: u32,
     /// Unique prefix for tool call ID generation (Gemini doesn't provide IDs).
@@ -54,13 +49,8 @@ pub struct ToolCallState {
 pub fn create_stream_state() -> StreamState {
     let prefix = format!("{:08x}", rand_u32());
     StreamState {
-        accumulated_text: String::new(),
-        accumulated_thinking: String::new(),
+        acc: StreamAccumulator::new(),
         tool_calls: Vec::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-        text_started: false,
-        thinking_started: false,
         tool_call_index: 0,
         unique_prefix: prefix,
         completed_tool_ids: HashSet::new(),
@@ -97,8 +87,8 @@ pub fn process_stream_chunk(
 
     // Update token usage
     if let Some(ref usage) = chunk.usage_metadata {
-        state.input_tokens = u64::from(usage.prompt_token_count);
-        state.output_tokens = u64::from(usage.candidates_token_count);
+        state.acc.input_tokens = u64::from(usage.prompt_token_count);
+        state.acc.output_tokens = u64::from(usage.candidates_token_count);
     }
 
     // Process candidates
@@ -152,19 +142,7 @@ fn process_part(part: &GeminiPart, state: &mut StreamState) -> Vec<StreamEvent> 
 
 /// Process a thinking/reasoning text part.
 fn process_thinking_text(text: &str, state: &mut StreamState) -> Vec<StreamEvent> {
-    let mut events = Vec::new();
-
-    if !state.thinking_started {
-        events.push(StreamEvent::ThinkingStart);
-        state.thinking_started = true;
-    }
-
-    state.accumulated_thinking.push_str(text);
-    events.push(StreamEvent::ThinkingDelta {
-        delta: text.to_string(),
-    });
-
-    events
+    state.acc.process_thinking_delta(text)
 }
 
 /// Process a regular (non-thinking) text part.
@@ -172,23 +150,9 @@ fn process_regular_text(text: &str, state: &mut StreamState) -> Vec<StreamEvent>
     let mut events = Vec::new();
 
     // Transition from thinking to text
-    if state.thinking_started {
-        events.push(StreamEvent::ThinkingEnd {
-            thinking: state.accumulated_thinking.clone(),
-            signature: None,
-        });
-        state.thinking_started = false;
-    }
+    events.extend(state.acc.close_thinking(None));
 
-    if !state.text_started {
-        events.push(StreamEvent::TextStart);
-        state.text_started = true;
-    }
-
-    state.accumulated_text.push_str(text);
-    events.push(StreamEvent::TextDelta {
-        delta: text.to_string(),
-    });
+    events.extend(state.acc.process_text_delta(text));
 
     events
 }
@@ -250,13 +214,7 @@ fn handle_finish(
     let mut events = Vec::new();
 
     // End thinking if still active
-    if state.thinking_started {
-        events.push(StreamEvent::ThinkingEnd {
-            thinking: state.accumulated_thinking.clone(),
-            signature: None,
-        });
-        state.thinking_started = false;
-    }
+    events.extend(state.acc.close_thinking(None));
 
     // Handle safety block
     if finish_reason == "SAFETY"
@@ -279,24 +237,18 @@ fn handle_finish(
     }
 
     // End text if active
-    if state.text_started {
-        events.push(StreamEvent::TextEnd {
-            text: state.accumulated_text.clone(),
-            signature: None,
-        });
-        state.text_started = false;
-    }
+    events.extend(state.acc.close_text(None));
 
     // Build assistant content blocks
     let mut content = Vec::new();
-    if !state.accumulated_thinking.is_empty() {
+    if !state.acc.accumulated_thinking.is_empty() {
         content.push(AssistantContent::Thinking {
-            thinking: state.accumulated_thinking.clone(),
+            thinking: state.acc.accumulated_thinking.clone(),
             signature: None,
         });
     }
-    if !state.accumulated_text.is_empty() {
-        content.push(AssistantContent::text(&state.accumulated_text));
+    if !state.acc.accumulated_text.is_empty() {
+        content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
     // Add tool calls as ToolUse content blocks
@@ -319,8 +271,8 @@ fn handle_finish(
         message: AssistantMessage {
             content,
             token_usage: Some(TokenUsage {
-                input_tokens: state.input_tokens,
-                output_tokens: state.output_tokens,
+                input_tokens: state.acc.input_tokens,
+                output_tokens: state.acc.output_tokens,
                 cache_read_tokens: None,
                 cache_creation_tokens: None,
                 cache_creation_5m_tokens: None,
@@ -375,13 +327,13 @@ mod tests {
     #[test]
     fn initial_state_is_empty() {
         let state = create_stream_state();
-        assert!(state.accumulated_text.is_empty());
-        assert!(state.accumulated_thinking.is_empty());
+        assert!(state.acc.accumulated_text.is_empty());
+        assert!(state.acc.accumulated_thinking.is_empty());
         assert!(state.tool_calls.is_empty());
-        assert_eq!(state.input_tokens, 0);
-        assert_eq!(state.output_tokens, 0);
-        assert!(!state.text_started);
-        assert!(!state.thinking_started);
+        assert_eq!(state.acc.input_tokens, 0);
+        assert_eq!(state.acc.output_tokens, 0);
+        assert!(!state.acc.text_started);
+        assert!(!state.acc.thinking_started);
         assert_eq!(state.tool_call_index, 0);
         assert!(!state.unique_prefix.is_empty());
     }
@@ -423,8 +375,8 @@ mod tests {
         };
         let mut state = create_stream_state();
         let _ = process_stream_chunk(&chunk, &mut state);
-        assert_eq!(state.input_tokens, 100);
-        assert_eq!(state.output_tokens, 50);
+        assert_eq!(state.acc.input_tokens, 100);
+        assert_eq!(state.acc.output_tokens, 50);
     }
 
     // ── Text streaming ───────────────────────────────────────────────
@@ -450,7 +402,7 @@ mod tests {
         let events = process_stream_chunk(&chunk, &mut state);
         assert!(matches!(events[0], StreamEvent::TextStart));
         assert!(matches!(&events[1], StreamEvent::TextDelta { delta } if delta == "hello"));
-        assert!(state.text_started);
+        assert!(state.acc.text_started);
     }
 
     #[test]
@@ -471,7 +423,7 @@ mod tests {
             ..empty_chunk()
         };
         let mut state = create_stream_state();
-        state.text_started = true;
+        state.acc.text_started = true;
         let events = process_stream_chunk(&chunk, &mut state);
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], StreamEvent::TextDelta { .. }));
@@ -522,8 +474,8 @@ mod tests {
             ..empty_chunk()
         };
         let mut state = create_stream_state();
-        state.thinking_started = true;
-        state.accumulated_thinking = "prior thinking".into();
+        state.acc.thinking_started = true;
+        state.acc.accumulated_thinking = "prior thinking".into();
         let events = process_stream_chunk(&chunk, &mut state);
         assert!(
             matches!(&events[0], StreamEvent::ThinkingEnd { thinking, .. } if thinking == "prior thinking")
@@ -592,8 +544,8 @@ mod tests {
             ..empty_chunk()
         };
         let mut state = create_stream_state();
-        state.text_started = true;
-        state.accumulated_text = "hello".into();
+        state.acc.text_started = true;
+        state.acc.accumulated_text = "hello".into();
         let events = process_stream_chunk(&chunk, &mut state);
         let done = events
             .iter()
@@ -636,9 +588,9 @@ mod tests {
     #[test]
     fn done_includes_thinking_and_text_content() {
         let mut state = create_stream_state();
-        state.accumulated_thinking = "thought".into();
-        state.accumulated_text = "answer".into();
-        state.text_started = true;
+        state.acc.accumulated_thinking = "thought".into();
+        state.acc.accumulated_text = "answer".into();
+        state.acc.text_started = true;
         let events = handle_finish("STOP", None, &mut state);
         let done = events
             .iter()

@@ -9,10 +9,15 @@
 //! - `response.reasoning_text.delta` → `ThinkingStart` + `ThinkingDelta` (full reasoning)
 //! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary fallback)
 //! - `response.completed` → `ThinkingEnd`, `TextEnd`, `ToolCallEnd`, `Done`
+//!
+//! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
+//! shared `stream_common` module. OpenAI-specific reasoning dedup and tool call
+//! handling (HashMap-based, with `parse_tool_call_arguments`) stays here.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::llm::{ToolCallContext, parse_tool_call_arguments};
+use crate::llm::stream_common::StreamAccumulator;
 use tracing::debug;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
@@ -23,20 +28,10 @@ use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 /// State for tracking accumulated stream content.
 #[derive(Clone, Debug)]
 pub struct StreamState {
-    /// Accumulated text content.
-    pub accumulated_text: String,
-    /// Accumulated thinking/reasoning content.
-    pub accumulated_thinking: String,
+    /// Shared delta accumulator for text, thinking, and token tracking.
+    pub acc: StreamAccumulator,
     /// Tool calls by `call_id` → (id, name, `accumulated_args`).
     pub tool_calls: HashMap<String, ToolCallState>,
-    /// Input tokens from usage.
-    pub input_tokens: u64,
-    /// Output tokens from usage.
-    pub output_tokens: u64,
-    /// Whether we've emitted `TextStart`.
-    pub text_started: bool,
-    /// Whether we've emitted `ThinkingStart`.
-    pub thinking_started: bool,
     /// Deduplication set for reasoning text.
     pub seen_thinking_texts: HashSet<String>,
     /// Whether we received full reasoning text (vs only summary).
@@ -58,13 +53,8 @@ pub struct ToolCallState {
 #[must_use]
 pub fn create_stream_state() -> StreamState {
     StreamState {
-        accumulated_text: String::new(),
-        accumulated_thinking: String::new(),
+        acc: StreamAccumulator::new(),
         tool_calls: HashMap::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-        text_started: false,
-        thinking_started: false,
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
     }
@@ -108,18 +98,11 @@ fn handle_content_part_delta(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
-    let mut events = Vec::new();
     if let Some(delta) = &event.delta {
-        if !state.text_started {
-            state.text_started = true;
-            events.push(StreamEvent::TextStart);
-        }
-        state.accumulated_text.push_str(delta);
-        events.push(StreamEvent::TextDelta {
-            delta: delta.clone(),
-        });
+        state.acc.process_text_delta(delta)
+    } else {
+        Vec::new()
     }
-    events
 }
 
 /// Handle `response.output_item.added` — start tool calls or reasoning items.
@@ -149,8 +132,8 @@ fn handle_output_item_added(
                     });
                 }
             }
-        } else if item.item_type == OutputItemType::Reasoning && !state.thinking_started {
-            state.thinking_started = true;
+        } else if item.item_type == OutputItemType::Reasoning && !state.acc.thinking_started {
+            state.acc.thinking_started = true;
             events.push(StreamEvent::ThinkingStart);
         }
     }
@@ -159,12 +142,7 @@ fn handle_output_item_added(
 
 /// Handle `response.reasoning_summary_part.added` — emit `ThinkingStart` if not yet started.
 fn handle_reasoning_summary_part_added(state: &mut StreamState) -> Vec<StreamEvent> {
-    let mut events = Vec::new();
-    if !state.thinking_started {
-        state.thinking_started = true;
-        events.push(StreamEvent::ThinkingStart);
-    }
-    events
+    state.acc.mark_thinking_started().into_iter().collect()
 }
 
 /// Handle `response.reasoning_text.delta` — full reasoning content, preferred over summary.
@@ -176,18 +154,11 @@ fn handle_reasoning_text_delta(
     if let Some(delta) = &event.delta {
         if !state.has_reasoning_text {
             state.has_reasoning_text = true;
-            if !state.accumulated_thinking.is_empty() {
-                state.accumulated_thinking.clear();
+            if !state.acc.accumulated_thinking.is_empty() {
+                state.acc.accumulated_thinking.clear();
             }
         }
-        if !state.thinking_started {
-            state.thinking_started = true;
-            events.push(StreamEvent::ThinkingStart);
-        }
-        state.accumulated_thinking.push_str(delta);
-        events.push(StreamEvent::ThinkingDelta {
-            delta: delta.clone(),
-        });
+        events.extend(state.acc.process_thinking_delta(delta));
     }
     events
 }
@@ -197,24 +168,17 @@ fn handle_reasoning_summary_text_delta(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
-    let mut events = Vec::new();
     if state.has_reasoning_text {
-        return events;
+        return Vec::new();
     }
     if let Some(delta) = &event.delta
         && !state.seen_thinking_texts.contains(delta.as_str())
     {
         let _ = state.seen_thinking_texts.insert(delta.clone());
-        if !state.thinking_started {
-            state.thinking_started = true;
-            events.push(StreamEvent::ThinkingStart);
-        }
-        state.accumulated_thinking.push_str(delta);
-        events.push(StreamEvent::ThinkingDelta {
-            delta: delta.clone(),
-        });
+        state.acc.process_thinking_delta(delta)
+    } else {
+        Vec::new()
     }
-    events
 }
 
 /// Handle `response.function_call_arguments.delta` — accumulate tool call arguments.
@@ -252,22 +216,19 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     // Only process reasoning items with summary content not already streamed.
     if item.item_type != OutputItemType::Reasoning
         || item.summary.is_none()
-        || !state.accumulated_thinking.is_empty()
+        || !state.acc.accumulated_thinking.is_empty()
         || state.has_reasoning_text
     {
         return events;
     }
-    if !state.thinking_started {
-        state.thinking_started = true;
-        events.push(StreamEvent::ThinkingStart);
-    }
+    events.extend(state.acc.mark_thinking_started());
     if let Some(summary) = &item.summary {
         for part in summary {
             if part.content_type == "summary_text"
                 && let Some(text) = &part.text
             {
                 let _ = state.seen_thinking_texts.insert(text.clone());
-                state.accumulated_thinking.push_str(text);
+                state.acc.accumulate_thinking(text);
                 events.push(StreamEvent::ThinkingDelta {
                     delta: text.clone(),
                 });
@@ -289,28 +250,18 @@ fn process_completed_response(
 
     // Extract usage
     if let Some(usage) = &response.usage {
-        state.input_tokens = usage.input_tokens;
-        state.output_tokens = usage.output_tokens;
+        state.acc.input_tokens = usage.input_tokens;
+        state.acc.output_tokens = usage.output_tokens;
     }
 
     // Process output items from completed response
     merge_completed_output_items(response, state, &mut events);
 
     // Emit thinking_end if we had thinking
-    if state.thinking_started {
-        events.push(StreamEvent::ThinkingEnd {
-            thinking: state.accumulated_thinking.clone(),
-            signature: None,
-        });
-    }
+    events.extend(state.acc.close_thinking(None));
 
     // Emit text_end if we had text
-    if state.text_started {
-        events.push(StreamEvent::TextEnd {
-            text: state.accumulated_text.clone(),
-            signature: None,
-        });
-    }
+    events.extend(state.acc.close_text(None));
 
     // Emit toolcall_end for each tool call
     for tc in state.tool_calls.values() {
@@ -365,10 +316,10 @@ fn merge_message_item(item: &super::types::ResponsesOutputItem, state: &mut Stre
         for c in content {
             if c.content_type == "output_text"
                 && let Some(text) = &c.text
-                && !state.text_started
+                && !state.acc.text_started
             {
-                state.text_started = true;
-                state.accumulated_text.clone_from(text);
+                state.acc.text_started = true;
+                state.acc.accumulated_text.clone_from(text);
             }
         }
     }
@@ -380,7 +331,7 @@ fn merge_reasoning_item(
     state: &mut StreamState,
     events: &mut Vec<StreamEvent>,
 ) {
-    if !state.accumulated_thinking.is_empty() || state.has_reasoning_text {
+    if !state.acc.accumulated_thinking.is_empty() || state.has_reasoning_text {
         return;
     }
     if let Some(summary) = &item.summary {
@@ -388,11 +339,8 @@ fn merge_reasoning_item(
             if s.content_type == "summary_text"
                 && let Some(text) = &s.text
             {
-                if !state.thinking_started {
-                    state.thinking_started = true;
-                    events.push(StreamEvent::ThinkingStart);
-                }
-                state.accumulated_thinking.clone_from(text);
+                events.extend(state.acc.mark_thinking_started());
+                state.acc.accumulated_thinking.clone_from(text);
             }
         }
     }
@@ -430,15 +378,15 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
 fn build_done_event(state: &StreamState) -> StreamEvent {
     let mut content: Vec<AssistantContent> = Vec::new();
 
-    if !state.accumulated_thinking.is_empty() {
+    if !state.acc.accumulated_thinking.is_empty() {
         content.push(AssistantContent::Thinking {
-            thinking: state.accumulated_thinking.clone(),
+            thinking: state.acc.accumulated_thinking.clone(),
             signature: None,
         });
     }
 
-    if !state.accumulated_text.is_empty() {
-        content.push(AssistantContent::text(&state.accumulated_text));
+    if !state.acc.accumulated_text.is_empty() {
+        content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
     for tc in state.tool_calls.values() {
@@ -468,8 +416,8 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
         message: AssistantMessage {
             content,
             token_usage: Some(TokenUsage {
-                input_tokens: state.input_tokens,
-                output_tokens: state.output_tokens,
+                input_tokens: state.acc.input_tokens,
+                output_tokens: state.acc.output_tokens,
                 provider_type: Some(crate::core::messages::Provider::OpenAi),
                 ..TokenUsage::default()
             }),
@@ -560,13 +508,13 @@ mod tests {
     #[test]
     fn initial_state_is_empty() {
         let state = create_stream_state();
-        assert!(state.accumulated_text.is_empty());
-        assert!(state.accumulated_thinking.is_empty());
+        assert!(state.acc.accumulated_text.is_empty());
+        assert!(state.acc.accumulated_thinking.is_empty());
         assert!(state.tool_calls.is_empty());
-        assert_eq!(state.input_tokens, 0);
-        assert_eq!(state.output_tokens, 0);
-        assert!(!state.text_started);
-        assert!(!state.thinking_started);
+        assert_eq!(state.acc.input_tokens, 0);
+        assert_eq!(state.acc.output_tokens, 0);
+        assert!(!state.acc.text_started);
+        assert!(!state.acc.thinking_started);
     }
 
     // ── Text streaming ─────────────────────────────────────────────
@@ -584,15 +532,15 @@ mod tests {
                 delta: "Hello".into()
             }
         );
-        assert!(state.text_started);
-        assert_eq!(state.accumulated_text, "Hello");
+        assert!(state.acc.text_started);
+        assert_eq!(state.acc.accumulated_text, "Hello");
     }
 
     #[test]
     fn emits_only_delta_on_subsequent() {
         let mut state = create_stream_state();
-        state.text_started = true;
-        state.accumulated_text = "Hello".into();
+        state.acc.text_started = true;
+        state.acc.accumulated_text = "Hello".into();
 
         let events = process_stream_event(&text_delta_event(" world"), &mut state);
 
@@ -603,7 +551,7 @@ mod tests {
                 delta: " world".into()
             }
         );
-        assert_eq!(state.accumulated_text, "Hello world");
+        assert_eq!(state.acc.accumulated_text, "Hello world");
     }
 
     #[test]
@@ -685,13 +633,13 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], StreamEvent::ThinkingStart);
-        assert!(state.thinking_started);
+        assert!(state.acc.thinking_started);
     }
 
     #[test]
     fn emits_thinking_delta_for_reasoning_summary() {
         let mut state = create_stream_state();
-        state.thinking_started = true;
+        state.acc.thinking_started = true;
 
         let events =
             process_stream_event(&reasoning_summary_delta_event("Analyzing..."), &mut state);
@@ -703,13 +651,13 @@ mod tests {
                 delta: "Analyzing...".into()
             }
         );
-        assert_eq!(state.accumulated_thinking, "Analyzing...");
+        assert_eq!(state.acc.accumulated_thinking, "Analyzing...");
     }
 
     #[test]
     fn deduplicates_reasoning_text() {
         let mut state = create_stream_state();
-        state.thinking_started = true;
+        state.acc.thinking_started = true;
         state.seen_thinking_texts.insert("Already seen".into());
 
         let events =
@@ -743,13 +691,13 @@ mod tests {
             })
             .collect();
         assert_eq!(types, vec!["thinking_start", "thinking_delta"]);
-        assert_eq!(state.accumulated_thinking, "The approach is correct.");
+        assert_eq!(state.acc.accumulated_thinking, "The approach is correct.");
     }
 
     #[test]
     fn skips_output_item_done_if_already_accumulated() {
         let mut state = create_stream_state();
-        state.accumulated_thinking = "Already accumulated".into();
+        state.acc.accumulated_thinking = "Already accumulated".into();
 
         let event = ResponsesSseEvent {
             event_type: SseEventType::OutputItemDone,
@@ -766,7 +714,7 @@ mod tests {
 
         let events = process_stream_event(&event, &mut state);
         assert!(events.is_empty());
-        assert_eq!(state.accumulated_thinking, "Already accumulated");
+        assert_eq!(state.acc.accumulated_thinking, "Already accumulated");
     }
 
     // ── response.completed ─────────────────────────────────────────
@@ -774,8 +722,8 @@ mod tests {
     #[test]
     fn completed_emits_text_end_and_done() {
         let mut state = create_stream_state();
-        state.text_started = true;
-        state.accumulated_text = "Hello world".into();
+        state.acc.text_started = true;
+        state.acc.accumulated_text = "Hello world".into();
 
         let event = completed_event(
             vec![ResponsesOutputItem {
@@ -862,10 +810,10 @@ mod tests {
     #[test]
     fn completed_with_thinking_emits_thinking_end_before_done() {
         let mut state = create_stream_state();
-        state.thinking_started = true;
-        state.accumulated_thinking = "Some reasoning".into();
-        state.text_started = true;
-        state.accumulated_text = "The answer".into();
+        state.acc.thinking_started = true;
+        state.acc.accumulated_thinking = "Some reasoning".into();
+        state.acc.text_started = true;
+        state.acc.accumulated_text = "The answer".into();
 
         let event = completed_event(
             vec![ResponsesOutputItem {
@@ -1038,7 +986,7 @@ mod tests {
     #[test]
     fn reasoning_summary_part_added_noop_when_already_started() {
         let mut state = create_stream_state();
-        state.thinking_started = true;
+        state.acc.thinking_started = true;
         let event = ResponsesSseEvent {
             event_type: SseEventType::ReasoningSummaryPartAdded,
             ..Default::default()
@@ -1052,8 +1000,8 @@ mod tests {
     #[test]
     fn done_event_has_openai_provider_type() {
         let mut state = create_stream_state();
-        state.text_started = true;
-        state.accumulated_text = "test".into();
+        state.acc.text_started = true;
+        state.acc.accumulated_text = "test".into();
 
         let event = completed_event(
             vec![],
@@ -1102,8 +1050,8 @@ mod tests {
             }
         );
         assert!(state.has_reasoning_text);
-        assert!(state.thinking_started);
-        assert_eq!(state.accumulated_thinking, "Let me think about this...");
+        assert!(state.acc.thinking_started);
+        assert_eq!(state.acc.accumulated_thinking, "Let me think about this...");
     }
 
     #[test]
@@ -1114,7 +1062,7 @@ mod tests {
             &reasoning_summary_delta_event("**Short summary**"),
             &mut state,
         );
-        assert_eq!(state.accumulated_thinking, "**Short summary**");
+        assert_eq!(state.acc.accumulated_thinking, "**Short summary**");
 
         // Then receive full reasoning text — should replace summary
         let events = process_stream_event(
@@ -1123,7 +1071,7 @@ mod tests {
         );
 
         assert!(state.has_reasoning_text);
-        assert_eq!(state.accumulated_thinking, "Full reasoning content here...");
+        assert_eq!(state.acc.accumulated_thinking, "Full reasoning content here...");
         // Should emit ThinkingDelta (ThinkingStart already emitted by summary)
         assert_eq!(events.len(), 1);
         assert_eq!(
@@ -1144,7 +1092,7 @@ mod tests {
         let events =
             process_stream_event(&reasoning_summary_delta_event("**Summary**"), &mut state);
         assert!(events.is_empty());
-        assert_eq!(state.accumulated_thinking, "Full reasoning...");
+        assert_eq!(state.acc.accumulated_thinking, "Full reasoning...");
     }
 
     #[test]
@@ -1152,6 +1100,6 @@ mod tests {
         let mut state = create_stream_state();
         let _ = process_stream_event(&reasoning_text_delta_event("First part. "), &mut state);
         let _ = process_stream_event(&reasoning_text_delta_event("Second part."), &mut state);
-        assert_eq!(state.accumulated_thinking, "First part. Second part.");
+        assert_eq!(state.acc.accumulated_thinking, "First part. Second part.");
     }
 }

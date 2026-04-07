@@ -12,6 +12,7 @@
 //! - [`tool_parsing`] — Robust JSON parsing for tool call arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
 //! - [`id_remapping`] — Tool call ID format conversion between providers
+//! - [`stream_common`] — Shared [`stream_common::StreamAccumulator`] for delta processing
 //!
 //! # Architecture
 //!
@@ -48,6 +49,8 @@ pub mod provider;
 pub mod retry;
 #[path = "shared/sse.rs"]
 pub mod sse;
+#[path = "shared/stream_common.rs"]
+pub mod stream_common;
 #[path = "shared/stream_pipeline.rs"]
 pub mod stream_pipeline;
 pub mod tokens;
@@ -70,4 +73,5 @@ pub use provider::{
 };
 pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
 pub use sse::{SseParserOptions, parse_sse_lines};
+pub use stream_common::StreamAccumulator;
 pub use tool_parsing::{ToolCallContext, is_valid_tool_call_arguments, parse_tool_call_arguments};
