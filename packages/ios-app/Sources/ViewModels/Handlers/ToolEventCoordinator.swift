@@ -37,8 +37,10 @@ final class ToolEventCoordinator {
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
 
-        // AskUserQuestion gets its own chip type with a .generating spinner
-        if kind == .askUserQuestion {
+        // Build the chip content based on tool kind
+        let content: MessageContent
+        switch kind {
+        case .askUserQuestion:
             let toolData = AskUserQuestionToolData(
                 toolCallId: pluginResult.toolCallId,
                 params: AskUserQuestionParams(questions: [], context: nil),
@@ -46,76 +48,42 @@ final class ToolEventCoordinator {
                 status: .generating,
                 result: nil
             )
-            let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
-            context.appendToMessages(message)
-            context.currentToolMessages[message.id] = message
-            context.runningToolCount += 1
-            context.makeToolVisible(pluginResult.toolCallId)
-            context.appendToMessageWindow(message)
-
-            let record = ToolCallRecord(
-                toolCallId: pluginResult.toolCallId,
-                toolName: pluginResult.toolName,
-                arguments: ""
-            )
-            context.currentTurnToolCalls.append(record)
-            return
-        }
-
-        // GetConfirmation gets its own chip type with a .generating spinner
-        if kind == .getConfirmation {
+            content = .askUserQuestion(toolData)
+        case .getConfirmation:
             let toolData = GetConfirmationToolData(
                 toolCallId: pluginResult.toolCallId,
                 params: GetConfirmationParams(action: "", reason: "", riskLevel: .low),
                 status: .generating
             )
-            let message = ChatMessage(role: .assistant, content: .getConfirmation(toolData))
-            context.appendToMessages(message)
-            context.currentToolMessages[message.id] = message
-            context.runningToolCount += 1
-            context.makeToolVisible(pluginResult.toolCallId)
-            context.appendToMessageWindow(message)
-
-            let record = ToolCallRecord(
-                toolCallId: pluginResult.toolCallId,
+            content = .getConfirmation(toolData)
+        default:
+            let tool = ToolUseData(
                 toolName: pluginResult.toolName,
-                arguments: ""
+                toolCallId: pluginResult.toolCallId,
+                arguments: "",
+                status: .running
             )
-            context.currentTurnToolCalls.append(record)
-            return
+            content = .toolUse(tool)
         }
 
-        // Create chip with .running status, empty arguments
-        let tool = ToolUseData(
-            toolName: pluginResult.toolName,
-            toolCallId: pluginResult.toolCallId,
-            arguments: "",
-            status: .running
-        )
-        let message = ChatMessage(role: .assistant, content: .toolUse(tool))
-
-        context.appendToMessages(message)
-        context.currentToolMessages[message.id] = message
-        context.runningToolCount += 1
-        context.makeToolVisible(pluginResult.toolCallId)
-        context.appendToMessageWindow(message)
-
-        // Track tool call for persistence
-        let record = ToolCallRecord(
+        // Append, track, and record — shared across all tool kinds
+        trackGeneratingChip(
+            content: content,
             toolCallId: pluginResult.toolCallId,
             toolName: pluginResult.toolName,
-            arguments: ""
+            context: context
         )
-        context.currentTurnToolCalls.append(record)
 
-        // Enqueue for UIUpdateQueue ordering
-        let toolStartData = UIUpdateQueue.ToolStartData(
-            toolCallId: pluginResult.toolCallId,
-            toolName: pluginResult.toolName,
-            arguments: "",
-            timestamp: Date()
-        )
-        context.enqueueToolStart(toolStartData)
+        // Only regular tools enqueue for staggered animation
+        if kind != .askUserQuestion && kind != .getConfirmation {
+            let toolStartData = UIUpdateQueue.ToolStartData(
+                toolCallId: pluginResult.toolCallId,
+                toolName: pluginResult.toolName,
+                arguments: "",
+                timestamp: Date()
+            )
+            context.enqueueToolStart(toolStartData)
+        }
     }
 
     // MARK: - Tool Start Handling
@@ -311,6 +279,29 @@ final class ToolEventCoordinator {
     }
 
     // MARK: - Private Helpers
+
+    /// Append a generating chip to chat, track in currentToolMessages, and record for persistence.
+    /// Shared by AskUserQuestion, GetConfirmation, and regular tool chips.
+    private func trackGeneratingChip(
+        content: MessageContent,
+        toolCallId: String,
+        toolName: String,
+        context: ToolEventContext
+    ) {
+        let message = ChatMessage(role: .assistant, content: content)
+        context.appendToMessages(message)
+        context.currentToolMessages[message.id] = message
+        context.runningToolCount += 1
+        context.makeToolVisible(toolCallId)
+        context.appendToMessageWindow(message)
+
+        let record = ToolCallRecord(
+            toolCallId: toolCallId,
+            toolName: toolName,
+            arguments: ""
+        )
+        context.currentTurnToolCalls.append(record)
+    }
 
     /// Handle GetConfirmation tool start - creates or updates special message
     private func handleGetConfirmationToolStart(
