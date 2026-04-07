@@ -296,6 +296,59 @@ mod tests {
 
     // ── validate ───────────────────────────────────────────────────
 
+    // ── QueueDrainMode ──────────────────────────────────────────
+
+    #[test]
+    fn queue_drain_mode_defaults_to_sequential() {
+        let s = TronSettings::default();
+        assert_eq!(s.session.queue_drain_mode, QueueDrainMode::Sequential);
+    }
+
+    #[test]
+    fn queue_drain_mode_serde_roundtrip() {
+        let json = serde_json::json!({
+            "session": {
+                "queueDrainMode": "batched"
+            }
+        });
+        let settings: TronSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.session.queue_drain_mode, QueueDrainMode::Batched);
+
+        let serialized = serde_json::to_value(&settings).unwrap();
+        assert_eq!(serialized["session"]["queueDrainMode"], "batched");
+    }
+
+    #[test]
+    fn queue_drain_mode_sequential_from_json() {
+        let json = serde_json::json!({
+            "session": {
+                "queueDrainMode": "sequential"
+            }
+        });
+        let settings: TronSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.session.queue_drain_mode, QueueDrainMode::Sequential);
+    }
+
+    #[test]
+    fn queue_drain_mode_missing_uses_default() {
+        let json = serde_json::json!({
+            "session": {}
+        });
+        let settings: TronSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.session.queue_drain_mode, QueueDrainMode::Sequential);
+    }
+
+    #[test]
+    fn queue_drain_mode_camel_case_field_name() {
+        let settings = TronSettings::default();
+        let json = serde_json::to_value(&settings).unwrap();
+        assert!(json["session"].get("queueDrainMode").is_some());
+        // Verify it's NOT snake_case
+        assert!(json["session"].get("queue_drain_mode").is_none());
+    }
+
+    // ── validate ───────────────────────────────────────────────
+
     #[test]
     fn validate_clamps_compaction_threshold() {
         let mut s = TronSettings::default();

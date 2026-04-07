@@ -129,6 +129,40 @@ struct AgentAbortParams: Encodable {
     let sessionId: String
 }
 
+// MARK: - Prompt Queue RPCs
+
+struct QueuePromptParams: Encodable {
+    let sessionId: String
+    let prompt: String
+}
+
+struct DequeuePromptParams: Encodable {
+    let sessionId: String
+    let queueId: String
+}
+
+struct ClearQueueParams: Encodable {
+    let sessionId: String
+}
+
+/// Server-side pending queue item (from agent.queuePrompt or reconstruction).
+struct PendingQueueItem: Decodable, Identifiable, Equatable {
+    let queueId: String
+    let text: String
+    let position: UInt32
+    let timestamp: String
+
+    var id: String { queueId }
+}
+
+struct ClearQueueResult: Decodable {
+    let cleared: UInt32
+}
+
+struct DequeueResult: Decodable {
+    let ok: Bool
+}
+
 /// Tool call info for in-progress turn (used by session.reconstruct inFlight state)
 struct CurrentTurnToolCall: Decodable {
     let toolCallId: String

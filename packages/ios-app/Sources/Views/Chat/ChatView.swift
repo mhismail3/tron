@@ -253,7 +253,6 @@ struct ChatView: View {
                     if initialLoadComplete {
                         // Reconnection after initial setup — reconstruct state
                         await viewModel.reconnectAndReconstruct()
-                        viewModel.drainMessageQueue()
                     } else {
                         // First connection — use initial connect flow
                         await viewModel.connectAndReconstruct()
@@ -423,7 +422,9 @@ struct ChatView: View {
                         onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
                         onSpellRemove: { _ in },
                         onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },
-                        onQueueRemove: { [viewModel] id in viewModel.messageQueueState.remove(id: id) }
+                        onQueueRemove: { [viewModel] queueId in
+                            Task { try? await viewModel.rpcClient.agent.dequeuePrompt(queueId) }
+                        }
                     )
                 )
                 .id(sessionId)

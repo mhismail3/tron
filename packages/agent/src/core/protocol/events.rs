@@ -760,6 +760,29 @@ tron_events! {
         reason: Option<String>,
     } => "message_deleted",
 
+    /// Message queued for later delivery (user sent while agent busy).
+    MessageQueued {
+        #[serde(rename = "queueId")]
+        queue_id: String,
+        text: String,
+        position: u32,
+    } => "message_queued",
+
+    /// Queued message consumed or cancelled.
+    MessageDequeued {
+        #[serde(rename = "queueId")]
+        queue_id: String,
+        reason: String,
+    } => "message_dequeued",
+
+    /// Queued message sent as a user prompt (auto-drain).
+    /// Broadcast so iOS can render the user message bubble in real-time.
+    QueuedMessageSent {
+        text: String,
+        #[serde(rename = "queueId")]
+        queue_id: String,
+    } => "queued_message_sent",
+
     /// Rules loaded (workspace rules loaded into context).
     RulesLoaded {
         #[serde(rename = "totalFiles")]
@@ -1732,6 +1755,22 @@ mod tests {
                 target_type: "t".into(),
                 target_turn: None,
                 reason: None,
+            },
+            TronEvent::MessageQueued {
+                base: base.clone(),
+                queue_id: "q1".into(),
+                text: "hello".into(),
+                position: 0,
+            },
+            TronEvent::MessageDequeued {
+                base: base.clone(),
+                queue_id: "q1".into(),
+                reason: "processed".into(),
+            },
+            TronEvent::QueuedMessageSent {
+                base: base.clone(),
+                text: "hello".into(),
+                queue_id: "q1".into(),
             },
             TronEvent::RulesLoaded {
                 base: base.clone(),

@@ -75,6 +75,12 @@ import Foundation
     func handleLlmHookResult(_ result: LlmHookResultPlugin.Result)
 }
 
+@MainActor protocol QueueEventHandler: AnyObject {
+    func handleMessageQueued(_ result: MessageQueuedPlugin.Result)
+    func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result)
+    func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -88,5 +94,5 @@ import Foundation
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, DisplayStreamEventHandler,
-    ProcessEventHandler, HookEventHandler, EventDispatchLogger {}
+    ProcessEventHandler, HookEventHandler, QueueEventHandler, EventDispatchLogger {}
 

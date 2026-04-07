@@ -29,6 +29,7 @@ pub struct PromptRequest {
 
 struct PromptRunPlan {
     started_run: StartedRun,
+    orchestrator: Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
     session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     broadcast: Arc<crate::runtime::EventEmitter>,
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
@@ -128,6 +129,7 @@ pub fn spawn_prompt_run(
 ) {
     let plan = PromptRunPlan {
         started_run,
+        orchestrator: ctx.orchestrator.clone(),
         session_manager: ctx.session_manager.clone(),
         broadcast: ctx.orchestrator.broadcast().clone(),
         provider_factory: agent_deps.provider_factory.clone(),
@@ -175,6 +177,7 @@ pub fn spawn_prompt_run(
 async fn execute_prompt_run(plan: PromptRunPlan) {
     let PromptRunPlan {
         started_run,
+        orchestrator,
         session_manager,
         broadcast,
         provider_factory,
@@ -207,6 +210,22 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         images,
         attachments,
     } = request;
+
+    // Pre-clone deps needed for auto-drain after the run completes
+    let drain_provider_factory = provider_factory.clone();
+    let drain_tool_factory = tool_factory.clone();
+    let drain_guardrails = guardrails.clone();
+    let drain_health_tracker = health_tracker.clone();
+    let drain_context_artifacts = context_artifacts.clone();
+    let drain_skill_registry = skill_registry.clone();
+    let drain_subagent_manager = subagent_manager.clone();
+    let drain_shutdown_token = shutdown_token.clone();
+    let drain_worktree_coordinator = worktree_coordinator.clone();
+    let drain_process_manager = process_manager.clone();
+    let drain_job_manager = job_manager.clone();
+    let drain_output_buffer_registry = output_buffer_registry.clone();
+    let drain_hook_abort_tracker = hook_abort_tracker.clone();
+    let drain_server_origin = server_origin.clone();
 
     // Create per-session hook engine: builtins + discovered user/project hooks.
     // Fresh each session so new/modified hook files are picked up without restart.
@@ -752,4 +771,170 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         turns = result.turns_executed,
         "prompt run completed"
     );
+
+    // Auto-drain: check the prompt queue and start the next queued message if present.
+    // This runs after the run is fully complete (agent.ready emitted, cleanup done),
+    // so the session is free for a new run.
+    drain_prompt_queue(
+        &event_store,
+        &orchestrator,
+        &session_manager,
+        &session_id,
+        &model,
+        &working_dir,
+        is_chat,
+        orchestrator.broadcast().clone(),
+        drain_provider_factory,
+        drain_tool_factory,
+        drain_guardrails,
+        drain_health_tracker,
+        drain_context_artifacts,
+        drain_skill_registry,
+        drain_subagent_manager,
+        drain_shutdown_token,
+        drain_worktree_coordinator,
+        drain_process_manager,
+        drain_job_manager,
+        drain_output_buffer_registry,
+        drain_hook_abort_tracker,
+        drain_server_origin,
+    );
+}
+
+/// Check the prompt queue for the session and, if there is a pending message,
+/// dequeue it and spawn a new prompt run for it.
+#[allow(clippy::too_many_arguments)]
+fn drain_prompt_queue(
+    event_store: &Arc<crate::events::EventStore>,
+    orchestrator: &Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
+    session_manager: &Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
+    session_id: &str,
+    model: &str,
+    working_dir: &str,
+    is_chat: bool,
+    broadcast: Arc<crate::runtime::EventEmitter>,
+    provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
+    tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
+    guardrails: Option<Arc<parking_lot::Mutex<crate::runtime::guardrails::GuardrailEngine>>>,
+    health_tracker: Arc<crate::llm::ProviderHealthTracker>,
+    context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
+    skill_registry: Arc<RwLock<SkillRegistry>>,
+    subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    shutdown_token: Option<tokio_util::sync::CancellationToken>,
+    worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
+    server_origin: String,
+) {
+    use crate::server::rpc::prompt_queue::PromptQueueService;
+    use crate::settings::types::QueueDrainMode;
+
+    let settings = crate::settings::get_settings();
+    let drain_mode = &settings.session.queue_drain_mode;
+
+    // Peek at the queue — do NOT dequeue until run is confirmed.
+    let pending = match PromptQueueService::get_pending_queue(event_store, session_id) {
+        Ok(items) => items,
+        Err(e) => {
+            warn!(session_id, error = %e, "failed to query prompt queue");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+
+    // Determine prompt text based on drain mode
+    let (prompt_text, items_to_dequeue) = match drain_mode {
+        QueueDrainMode::Sequential => {
+            // One message per turn
+            let item = &pending[0];
+            (item.text.clone(), vec![item.clone()])
+        }
+        QueueDrainMode::Batched => {
+            // Combine all pending into a single prompt
+            let combined = pending.iter().map(|i| i.text.as_str()).collect::<Vec<_>>().join("\n\n");
+            (combined, pending)
+        }
+    };
+
+    debug!(
+        session_id,
+        mode = ?drain_mode,
+        count = items_to_dequeue.len(),
+        text_preview = %prompt_text.chars().take(80).collect::<String>(),
+        "auto-draining queued prompt(s)"
+    );
+
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let started_run = match orchestrator.begin_run(session_id, &run_id) {
+        Ok(run) => run,
+        Err(e) => {
+            warn!(session_id, error = %e, "failed to begin run for queued prompt, messages preserved in queue");
+            return;
+        }
+    };
+
+    // Run is registered — NOW it's safe to mark messages as processed.
+    for item in &items_to_dequeue {
+        if let Err(e) = PromptQueueService::dequeue(event_store, session_id, &item.queue_id, "processed") {
+            warn!(session_id, queue_id = %item.queue_id, error = %e, "failed to dequeue message");
+        }
+        let _ = orchestrator.broadcast().emit(crate::core::events::TronEvent::MessageDequeued {
+            base: crate::core::events::BaseEvent::now(session_id),
+            queue_id: item.queue_id.clone(),
+            reason: "processed".into(),
+        });
+    }
+
+    // Broadcast the user message so iOS can render the bubble in real-time.
+    // In the normal flow, iOS adds the user bubble locally before the RPC.
+    // During auto-drain, the server owns the prompt — this event is how iOS learns about it.
+    let _ = orchestrator.broadcast().emit(crate::core::events::TronEvent::QueuedMessageSent {
+        base: crate::core::events::BaseEvent::now(session_id),
+        text: prompt_text.clone(),
+        queue_id: items_to_dequeue.first().map(|i| i.queue_id.clone()).unwrap_or_default(),
+    });
+
+    let sequence_counter = orchestrator.get_sequence_counter(session_id);
+
+    let plan = PromptRunPlan {
+        started_run,
+        orchestrator: orchestrator.clone(),
+        session_manager: session_manager.clone(),
+        broadcast,
+        provider_factory,
+        tool_factory,
+        guardrails,
+        health_tracker,
+        event_store: event_store.clone(),
+        context_artifacts,
+        skill_registry,
+        subagent_manager,
+        shutdown_token: shutdown_token.clone(),
+        worktree_coordinator,
+        process_manager,
+        job_manager,
+        output_buffer_registry,
+        hook_abort_tracker,
+        sequence_counter,
+        server_origin,
+        run_id,
+        model: model.to_string(),
+        working_dir: working_dir.to_string(),
+        is_chat,
+        request: PromptRequest {
+            session_id: session_id.to_string(),
+            prompt: prompt_text,
+            reasoning_level: None,
+            images: None,
+            attachments: None,
+        },
+    };
+
+    tokio::spawn(async move {
+        execute_prompt_run(plan).await;
+    });
 }

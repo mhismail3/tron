@@ -19,6 +19,7 @@ final class SettingsState {
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
     var cacheTtlSecs: Int = 3600
+    var queueDrainMode: String = "sequential"
 
     // MARK: - Hooks
 
@@ -76,6 +77,7 @@ final class SettingsState {
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             isolationMode = settings.isolationMode
             cacheTtlSecs = settings.cacheTtlSecs
+            queueDrainMode = settings.queueDrainMode
             connectionPresets = settings.connectionPresets
             hooksLlmModel = settings.hooksLlmModel
             builtinHooks = settings.builtinHooks
@@ -118,6 +120,7 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = true
         isolationMode = "always"
         cacheTtlSecs = 3600
+        queueDrainMode = "sequential"
         quickSessionWorkspace = AppConstants.defaultWorkspace
         chatWorkspace = ""
         hooksLlmModel = "claude-haiku-4-5-20251001"
@@ -139,7 +142,7 @@ final class SettingsState {
                 ),
                 rules: .init(discoverStandaloneFiles: true)
             ),
-            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600),
+            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600, queueDrainMode: "sequential"),
             hooks: .init(llmModel: "claude-haiku-4-5-20251001", builtinHooks: []),
             skills: .init(compactionPolicy: "clearAll", showIndex: "always")
         )

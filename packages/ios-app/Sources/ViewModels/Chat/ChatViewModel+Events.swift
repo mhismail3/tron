@@ -163,7 +163,6 @@ extension ChatViewModel {
             if self.agentPhase == .postProcessing {
                 self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
                 self.agentPhase = .idle
-                self.drainMessageQueue()
             }
         }
     }
@@ -173,7 +172,7 @@ extension ChatViewModel {
         postProcessingTimeoutTask = nil
         agentPhase = .idle
         logInfo("Agent ready - post-processing complete")
-        drainMessageQueue()
+        // Queue drain is now server-side — no client-side drain needed.
     }
 
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
@@ -329,8 +328,6 @@ extension ChatViewModel {
             appendToMessages(.error(result.message))
             logger.error("Agent error: \(result.message)", category: .events)
         }
-
-        drainMessageQueue()
     }
 
     /// Handle errors from the agent streaming (shows error in chat)
@@ -343,8 +340,6 @@ extension ChatViewModel {
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)
-
-        drainMessageQueue()
     }
 
     /// Sync session events from server after turn completes
@@ -366,6 +361,34 @@ extension ChatViewModel {
     // These handlers accept plugin Result types directly, bridging the plugin system
     // to the existing event handler infrastructure.
 
+
+    // MARK: - Queue Event Handlers
+
+    func handleMessageQueued(_ result: MessageQueuedPlugin.Result) {
+        let item = PendingQueueItem(
+            queueId: result.queueId,
+            text: result.text,
+            position: result.position,
+            timestamp: result.timestamp
+        )
+        messageQueueState.handleQueued(item)
+        logger.info("Message queued: \"\(result.text.prefix(50))...\" position=\(result.position)", category: .events)
+    }
+
+    func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result) {
+        messageQueueState.handleDequeued(queueId: result.queueId)
+        logger.info("Message dequeued: queueId=\(result.queueId) reason=\(result.reason)", category: .events)
+    }
+
+    func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result) {
+        // Server auto-drained a queued message and is about to run the agent with it.
+        // Append a user message bubble so the chat shows the queued text in real-time
+        // (same as what happens locally when the user taps Send directly).
+        let userMessage = ChatMessage.user(result.text)
+        appendToMessages(userMessage)
+        currentTurn += 1
+        logger.info("Queued message sent as user prompt: \"\(result.text.prefix(50))...\"", category: .events)
+    }
 
     func handleAgentTurn(_ result: AgentTurnPlugin.Result) {
         logger.info("Agent turn received: \(result.messages.count) messages, \(result.toolUses.count) tool uses, \(result.toolResults.count) tool results", category: .events)

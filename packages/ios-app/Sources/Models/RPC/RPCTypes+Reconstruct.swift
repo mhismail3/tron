@@ -29,6 +29,8 @@ struct SessionReconstructResult: Decodable {
     let isRunning: Bool
     /// Session metadata.
     let metadata: ReconstructMetadata
+    /// Pending queued messages (server-sourced, drives pill UI).
+    let pendingQueue: [PendingQueueItem]?
 }
 
 /// In-flight state for an active turn.

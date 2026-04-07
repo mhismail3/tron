@@ -135,6 +135,11 @@ final class EventRegistry: @unchecked Sendable {
         // Hook events
         register(LlmHookResultPlugin.self)
 
+        // Queue events
+        register(MessageQueuedPlugin.self)
+        register(MessageDequeuedPlugin.self)
+        register(QueuedMessageSentPlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

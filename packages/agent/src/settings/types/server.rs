@@ -262,6 +262,8 @@ pub struct SessionSettings {
     pub chat: ChatSettings,
     /// TTL in seconds for idle session cache eviction. 0 = evict all idle immediately.
     pub cache_ttl_secs: u64,
+    /// How queued messages are drained when the agent finishes.
+    pub queue_drain_mode: QueueDrainMode,
 }
 
 impl Default for SessionSettings {
@@ -271,8 +273,20 @@ impl Default for SessionSettings {
             isolation: IsolationSettings::default(),
             chat: ChatSettings::default(),
             cache_ttl_secs: 3600,
+            queue_drain_mode: QueueDrainMode::default(),
         }
     }
+}
+
+/// How queued messages are drained after the agent finishes a turn.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueDrainMode {
+    /// Each queued message is sent as its own turn (agent responds to each individually).
+    #[default]
+    Sequential,
+    /// All pending queued messages are combined into a single prompt for one turn.
+    Batched,
 }
 
 /// Default chat session settings.

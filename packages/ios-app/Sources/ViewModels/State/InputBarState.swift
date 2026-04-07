@@ -137,9 +137,9 @@ struct InputBarConfig {
     /// Show the chevron-up drag hint above the input row (hold gesture active).
     let showDragHint: Bool
 
-    // MARK: - Message Queue
-    /// Queued messages waiting to be sent when the agent becomes ready.
-    let queuedMessages: [QueuedMessage]
+    // MARK: - Message Queue (Server-Driven)
+    /// Pending queued messages from the server. Drives the pill chips UI.
+    let queuedMessages: [PendingQueueItem]
     /// Whether the queue is at capacity.
     var isQueueFull: Bool { queuedMessages.count >= MessageQueueState.maxCapacity }
 
@@ -161,7 +161,7 @@ struct InputBarConfig {
         animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false,
         showDragHint: Bool = false,
-        queuedMessages: [QueuedMessage] = []
+        queuedMessages: [PendingQueueItem] = []
     ) {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
@@ -217,8 +217,8 @@ struct InputBarActions {
     let onSpellRemove: ((Skill) -> Void)?
     let onSpellDetailTap: ((Skill) -> Void)?
 
-    // MARK: - Message Queue
-    let onQueueRemove: ((UUID) -> Void)?
+    // MARK: - Message Queue (Server-Driven)
+    let onQueueRemove: ((String) -> Void)?
 
     init(
         onSend: @escaping () -> Void = {},
@@ -236,7 +236,7 @@ struct InputBarActions {
         onSkillDetailTap: ((Skill) -> Void)? = nil,
         onSpellRemove: ((Skill) -> Void)? = nil,
         onSpellDetailTap: ((Skill) -> Void)? = nil,
-        onQueueRemove: ((UUID) -> Void)? = nil
+        onQueueRemove: ((String) -> Void)? = nil
     ) {
         self.onSend = onSend
         self.onAbort = onAbort

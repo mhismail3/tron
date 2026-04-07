@@ -58,6 +58,30 @@ final class AgentClient: RPCDomainClient {
         return try await ws.send(method: "skill.active", params: params)
     }
 
+    // MARK: - Prompt Queue Methods
+
+    /// Queue a prompt for later delivery when the agent becomes ready.
+    /// Server persists a `message.queued` event and broadcasts it via WebSocket.
+    func queuePrompt(_ text: String) async throws -> PendingQueueItem {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = QueuePromptParams(sessionId: sessionId, prompt: text)
+        return try await ws.send(method: "agent.queuePrompt", params: params)
+    }
+
+    /// Cancel a specific queued prompt by its queue ID.
+    func dequeuePrompt(_ queueId: String) async throws {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = DequeuePromptParams(sessionId: sessionId, queueId: queueId)
+        let _: DequeueResult = try await ws.send(method: "agent.dequeuePrompt", params: params)
+    }
+
+    /// Clear all queued prompts for the current session.
+    func clearQueue() async throws {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = ClearQueueParams(sessionId: sessionId)
+        let _: ClearQueueResult = try await ws.send(method: "agent.clearQueue", params: params)
+    }
+
     func abort() async throws {
         guard let (ws, sessionId) = try? requireTransport().requireSession() else { return }
 

@@ -8,7 +8,6 @@ protocol CompactionContext: LoggingContext, StreamingManaging, MessageMutating {
     var compactionInProgressMessageId: UUID? { get set }
     var contextState: ContextTrackingState { get }
     func refreshContextInBackground()
-    func drainMessageQueue()
 }
 
 /// Coordinates context compaction event handling for ChatViewModel.
@@ -84,6 +83,5 @@ final class CompactionCoordinator {
         }
 
         context.refreshContextInBackground()
-        context.drainMessageQueue()
     }
 }

@@ -133,40 +133,44 @@ extension ChatViewModel {
         }
     }
 
-    /// Abort and discard all queued messages.
+    /// Abort and discard all queued messages (server-side clear).
     func abortAndClearQueue() {
-        messageQueueState.clear()
-        Task { await messagingCoordinator.abortAgent(context: self) }
-    }
-
-    /// Abort but keep queued messages — drain starts after abort completes.
-    func abortKeepQueue() {
         Task {
             await messagingCoordinator.abortAgent(context: self)
-            drainMessageQueue()
+            do {
+                try await rpcClient.agent.clearQueue()
+            } catch {
+                logError("Failed to clear queue: \(error.localizedDescription)")
+            }
         }
     }
 
-    // MARK: - Message Queue
+    /// Abort but keep queued messages — server auto-drains on next agent.ready.
+    func abortKeepQueue() {
+        Task {
+            await messagingCoordinator.abortAgent(context: self)
+        }
+    }
 
-    /// Enqueue the current input text for sending when the agent becomes ready.
-    /// Only enqueues text — attachments and skills are not included in queued messages.
+    // MARK: - Message Queue (Server-Driven)
+
+    /// Queue the current input text on the server for delivery when the agent becomes ready.
+    /// The server persists a `message.queued` event and broadcasts it — the pill appears
+    /// when the `MessageQueuedPlugin` event arrives via WebSocket.
     func enqueueCurrentInput() {
         let text = inputBarState.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        guard messageQueueState.enqueue(text) else { return }
+        guard !messageQueueState.isFull else { return }
         inputBarState.text = ""
-    }
-
-    /// Drain the next queued message and send it.
-    /// Called after agent.ready, error recovery, and compaction completion.
-    func drainMessageQueue() {
-        guard agentPhase.isIdle else { return }
-        guard !isCompacting else { return }
-        guard let queued = messageQueueState.dequeue() else { return }
-        logInfo("Draining queued message: \"\(queued.text.prefix(50))...\"")
         Task {
-            await messagingCoordinator.sendQueuedMessage(text: queued.text, context: self)
+            do {
+                _ = try await rpcClient.agent.queuePrompt(text)
+                logInfo("Queued message on server: \"\(text.prefix(50))...\"")
+            } catch {
+                logError("Failed to queue message: \(error.localizedDescription)")
+                // Restore text so user doesn't lose their input
+                inputBarState.text = text
+            }
         }
     }
 

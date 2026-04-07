@@ -25,6 +25,10 @@ define_events! {
         MessageSystem => "message.system" => payloads::message::SystemMessagePayload,
         /// Message deleted (soft delete).
         MessageDeleted => "message.deleted" => payloads::message_ops::MessageDeletedPayload,
+        /// Message queued for later delivery (user sent while agent busy).
+        MessageQueued => "message.queued" => payloads::message_ops::MessageQueuedPayload,
+        /// Queued message consumed or cancelled.
+        MessageDequeued => "message.dequeued" => payloads::message_ops::MessageDequeuedPayload,
         /// Tool call from the model.
         ToolCall => "tool.call" => payloads::tool::ToolCallPayload,
         /// Tool execution result.
@@ -153,6 +157,8 @@ define_events! {
         is_skill_type => [SkillActivated, SkillDeactivated, SpellCast, SpellConsumed, SkillsCleared],
         /// Whether this is a rules event (`rules.*`).
         is_rules_type => [RulesLoaded, RulesIndexed, RulesActivated],
+        /// Whether this is a queue event (`message.queued|dequeued`).
+        is_queue_type => [MessageQueued, MessageDequeued],
         /// Whether this is a file event (`file.*`).
         is_file_type => [FileRead, FileWrite, FileEdit],
     }
@@ -162,7 +168,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 59] = [
+    const EXPECTED: [(EventType, &str); 61] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -170,6 +176,8 @@ mod tests {
         (EventType::MessageAssistant, "message.assistant"),
         (EventType::MessageSystem, "message.system"),
         (EventType::MessageDeleted, "message.deleted"),
+        (EventType::MessageQueued, "message.queued"),
+        (EventType::MessageDequeued, "message.dequeued"),
         (EventType::ToolCall, "tool.call"),
         (EventType::ToolResult, "tool.result"),
         (EventType::StreamTextDelta, "stream.text_delta"),
@@ -250,7 +258,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 59);
+        assert_eq!(ALL_EVENT_TYPES.len(), 61);
     }
 
     #[test]
@@ -385,6 +393,14 @@ mod tests {
         assert!(EventType::FileWrite.is_file_type());
         assert!(EventType::FileEdit.is_file_type());
         assert!(!EventType::WorktreeCommit.is_file_type());
+    }
+
+    #[test]
+    fn is_queue_type() {
+        assert!(EventType::MessageQueued.is_queue_type());
+        assert!(EventType::MessageDequeued.is_queue_type());
+        assert!(!EventType::MessageUser.is_queue_type());
+        assert!(!EventType::MessageDeleted.is_queue_type());
     }
 
     #[test]

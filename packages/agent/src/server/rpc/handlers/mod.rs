@@ -22,6 +22,7 @@
 //! `communication`, `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
+pub mod agent_queue;
 pub mod auth;
 pub mod blob;
 pub mod browser;
@@ -90,6 +91,9 @@ fn register_core(registry: &mut MethodRegistry) {
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
     registry.register("agent.abort", agent::AbortHandler);
+    registry.register("agent.queuePrompt", agent_queue::QueuePromptHandler);
+    registry.register("agent.dequeuePrompt", agent_queue::DequeuePromptHandler);
+    registry.register("agent.clearQueue", agent_queue::ClearQueueHandler);
 
     // Model
     registry.register("model.list", model::ListModelsHandler);
@@ -524,8 +528,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            127,
-            "expected 127 methods, got {}",
+            130,
+            "expected 130 methods, got {}",
             reg.methods().len()
         );
     }

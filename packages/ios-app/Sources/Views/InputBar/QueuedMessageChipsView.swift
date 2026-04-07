@@ -1,14 +1,15 @@
 import SwiftUI
 
 /// Displays queued messages as removable chips above the input bar.
+/// Items come from the server via `MessageQueueState` (server-driven).
 @available(iOS 26.0, *)
 struct QueuedMessageChipsView: View {
-    let queue: [QueuedMessage]
-    let onRemove: (UUID) -> Void
+    let queue: [PendingQueueItem]
+    let onRemove: (String) -> Void
 
     var body: some View {
         VStack(spacing: 6) {
-            ForEach(Array(queue.enumerated()), id: \.element.id) { index, message in
+            ForEach(Array(queue.enumerated()), id: \.element.queueId) { index, message in
                 HStack(spacing: 8) {
                     // Position badge
                     Text("\(index + 1)")
@@ -28,7 +29,7 @@ struct QueuedMessageChipsView: View {
                     // Remove button
                     Button {
                         withAnimation(.tronStandard) {
-                            onRemove(message.id)
+                            onRemove(message.queueId)
                         }
                     } label: {
                         Image(systemName: "xmark")
@@ -47,6 +48,6 @@ struct QueuedMessageChipsView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.tronStandard, value: queue.map(\.id))
+        .animation(.tronStandard, value: queue.map(\.queueId))
     }
 }

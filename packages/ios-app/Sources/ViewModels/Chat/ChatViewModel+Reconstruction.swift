@@ -59,12 +59,19 @@ extension ChatViewModel {
             contextState.accumulatedCost = cost
         }
 
-        // 6. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
+        // 6. Restore pending queue from server state
+        if let pendingQueue = result.pendingQueue {
+            messageQueueState.restoreFromReconstruction(pendingQueue)
+        } else {
+            messageQueueState.clear()
+        }
+
+        // 7. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
         await refreshContextFromServer()
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
-        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0)", category: .session)
     }
 
     /// Process in-flight state from a running agent turn.

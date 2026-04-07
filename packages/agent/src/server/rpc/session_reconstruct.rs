@@ -16,6 +16,7 @@
 //!   lastSequence: i64,       // highest sequence (includes non-persisted events)
 //!   isRunning: bool,
 //!   metadata: {...},
+//!   pendingQueue: [...],     // queued messages not yet sent (pills on iOS)
 //! }
 //! ```
 
@@ -25,6 +26,7 @@ use tracing::{debug, instrument};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::events::event_row_to_wire;
+use crate::server::rpc::prompt_queue::PromptQueueService;
 
 pub(crate) struct SessionReconstructService;
 
@@ -42,8 +44,8 @@ impl SessionReconstructService {
         let orchestrator = ctx.orchestrator.clone();
         let sid = session_id.clone();
 
-        // 1. Load events from DB (blocking — SQLite)
-        let (events, has_more, session_metadata) =
+        // 1. Load events and pending queue from DB (blocking — SQLite)
+        let (events, has_more, session_metadata, pending_queue) =
             ctx.run_blocking("session.reconstruct.load", move || {
                 // Verify session exists
                 let session = session_manager
@@ -90,7 +92,12 @@ impl SessionReconstructService {
                     "totalCost": session.total_cost,
                 });
 
-                Ok((events, has_more, metadata))
+                // Load pending queue state (derived from message.queued/dequeued events)
+                let pending_queue =
+                    PromptQueueService::get_pending_queue(&event_store, &sid)
+                        .unwrap_or_default();
+
+                Ok((events, has_more, metadata, pending_queue))
             })
             .await?;
 
@@ -140,6 +147,7 @@ impl SessionReconstructService {
             "lastSequence": last_sequence,
             "isRunning": is_running,
             "metadata": session_metadata,
+            "pendingQueue": pending_queue,
         }))
     }
 
@@ -230,6 +238,7 @@ mod tests {
                 "workingDirectory": "/tmp",
                 "tokenUsage": null,
             },
+            "pendingQueue": [],
         });
 
         assert!(response.get("events").is_some());
@@ -239,5 +248,6 @@ mod tests {
         assert!(response.get("lastSequence").is_some());
         assert!(response.get("isRunning").is_some());
         assert!(response.get("metadata").is_some());
+        assert!(response.get("pendingQueue").is_some());
     }
 }

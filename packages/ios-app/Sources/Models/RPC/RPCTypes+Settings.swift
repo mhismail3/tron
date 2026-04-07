@@ -22,6 +22,7 @@ struct ServerSettings: Decodable {
     let builtinHooks: [BuiltinHookSetting]
     let skillsCompactionPolicy: String
     let skillsShowIndex: String
+    let queueDrainMode: String
 
     private enum CodingKeys: String, CodingKey {
         case models, server, context, session, hooks, skills
@@ -36,7 +37,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum SessionKeys: String, CodingKey {
-        case isolation, chat, cacheTtlSecs
+        case isolation, chat, cacheTtlSecs, queueDrainMode
     }
 
     private enum ChatKeys: String, CodingKey {
@@ -102,10 +103,12 @@ struct ServerSettings: Decodable {
                 chatWorkingDirectory = nil
             }
             cacheTtlSecs = (try? sessionContainer.decodeIfPresent(Int.self, forKey: .cacheTtlSecs)) ?? 3600
+            queueDrainMode = (try? sessionContainer.decodeIfPresent(String.self, forKey: .queueDrainMode)) ?? "sequential"
         } else {
             isolationMode = "always"
             chatWorkingDirectory = nil
             cacheTtlSecs = 3600
+            queueDrainMode = "sequential"
         }
 
         // hooks.*
@@ -209,6 +212,7 @@ struct ServerSettingsUpdate: Encodable {
         var isolation: IsolationUpdate?
         var chat: ChatUpdate?
         var cacheTtlSecs: Int?
+        var queueDrainMode: String?
 
         struct IsolationUpdate: Encodable {
             var mode: String?

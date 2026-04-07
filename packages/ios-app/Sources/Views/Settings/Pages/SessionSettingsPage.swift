@@ -58,6 +58,9 @@ struct SessionSettingsPage: View {
             // Git Isolation
             gitIsolationCard
 
+            // Message Queue
+            messageQueueCard
+
             // Session Management
             sessionManagementCard
         }
@@ -201,6 +204,70 @@ struct SessionSettingsPage: View {
             }
             updateServerSetting {
                 ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(labels[currentIndex])
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.tronEmerald.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Message Queue Card
+
+    private var queueDrainDescription: String {
+        switch settingsState.queueDrainMode {
+        case "batched":
+            return "All queued messages are combined into a single prompt when the agent finishes."
+        default:
+            return "Each queued message is sent as its own turn — the agent responds to each individually."
+        }
+    }
+
+    private var messageQueueCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Message Queue")
+
+            SettingsCard {
+                HStack {
+                    Image(systemName: "tray.and.arrow.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Drain Mode")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    queueDrainModeToggle
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
+            }
+
+            SettingsCaption(text: queueDrainDescription)
+        }
+    }
+
+    private var queueDrainModeToggle: some View {
+        let modes = ["sequential", "batched"]
+        let labels = ["Sequential", "Batched"]
+        let currentIndex = modes.firstIndex(of: settingsState.queueDrainMode) ?? 0
+
+        return Button {
+            let nextIndex = (currentIndex + 1) % modes.count
+            let newValue = modes[nextIndex]
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                settingsState.queueDrainMode = newValue
+            }
+            updateServerSetting {
+                ServerSettingsUpdate(session: .init(queueDrainMode: newValue))
             }
         } label: {
             HStack(spacing: 4) {
