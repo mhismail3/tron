@@ -136,19 +136,7 @@ extension ChatViewModel {
                     guard case .toolUse(let tool) = allReconstructedMessages[i].content,
                           tool.toolName == "SpawnSubagent" else { continue }
 
-                    // Match spawn: primary by toolCallId, fallback by task content
-                    let spawn: ReconstructedState.SubagentSpawnInfo?
-                    if let match = spawnByToolCallId[tool.toolCallId] {
-                        spawn = match
-                    } else {
-                        // Fallback for old events without toolCallId
-                        let taskFromArgs = ToolArgumentParser.string("task", from: tool.arguments) ?? ""
-                        spawn = state.subagentSpawns.first { s in
-                            s.toolCallId == nil && !taskFromArgs.isEmpty && s.task == taskFromArgs
-                        }
-                    }
-
-                    guard let spawn = spawn else { continue }
+                    guard let spawn = spawnByToolCallId[tool.toolCallId] else { continue }
                     let sessionId = spawn.subagentSessionId
 
                     let completion = state.subagentCompletions[sessionId]
