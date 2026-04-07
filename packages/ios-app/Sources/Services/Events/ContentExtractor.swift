@@ -73,14 +73,9 @@ enum ContentExtractor {
         // Pass 1: collect tool result info by tool_use_id
         var toolResults: [String: ToolResultInfo] = [:]
         for event in events where event.type == PersistedEventType.toolResult.rawValue {
-            let toolUseId = event.payload["toolCallId"]?.value as? String
-                ?? event.payload["tool_use_id"]?.value as? String
-            if let toolUseId {
-                let isError = (event.payload["isError"]?.value as? Bool)
-                    ?? (event.payload["is_error"]?.value as? Bool)
-                    ?? false
-                let durationMs = (event.payload["duration"]?.value as? Int)
-                    ?? (event.payload["duration_ms"]?.value as? Int)
+            if let toolUseId = event.payload["toolCallId"]?.value as? String {
+                let isError = event.payload["isError"]?.value as? Bool ?? false
+                let durationMs = event.payload["duration"]?.value as? Int
                 toolResults[toolUseId] = ToolResultInfo(isError: isError, durationMs: durationMs)
             }
         }

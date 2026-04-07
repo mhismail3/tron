@@ -985,15 +985,15 @@ final class ContentExtractorActivityLineTests: XCTestCase {
         ]
 
         let toolResult1 = makeEvent(type: "tool.result", payload: [
-            "tool_use_id": AnyCodable("toolu_1"),
-            "is_error": AnyCodable(false),
-            "duration_ms": AnyCodable(25)
+            "toolCallId": AnyCodable("toolu_1"),
+            "isError": AnyCodable(false),
+            "duration": AnyCodable(25)
         ])
 
         let toolResult2 = makeEvent(type: "tool.result", payload: [
-            "tool_use_id": AnyCodable("toolu_2"),
-            "is_error": AnyCodable(false),
-            "duration_ms": AnyCodable(703)
+            "toolCallId": AnyCodable("toolu_2"),
+            "isError": AnyCodable(false),
+            "duration": AnyCodable(703)
         ])
 
         let assistantEvent = makeEvent(type: "message.assistant", payload: [
