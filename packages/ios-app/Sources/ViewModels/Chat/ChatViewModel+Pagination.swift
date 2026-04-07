@@ -100,83 +100,8 @@ extension ChatViewModel {
                 pullUpPanelState.suggestions = state.suggestions
             }
 
-            // Populate SubagentState from reconstructed subagent results
-            // This enables tap handlers on reconstructed subagent result chips to work
-            for result in state.subagentResults {
-                var data = SubagentToolData(
-                    toolCallId: result.subagentSessionId,
-                    subagentSessionId: result.subagentSessionId,
-                    task: result.task,
-                    model: nil,
-                    status: result.success ? .completed : .failed,
-                    currentTurn: result.totalTurns,
-                    resultSummary: result.resultSummary,
-                    fullOutput: nil,
-                    duration: result.duration,
-                    error: result.success ? nil : "Failed",
-                    tokenUsage: result.tokenUsage
-                )
-                // These survived reconstruction filtering — they're genuinely pending
-                data.resultDeliveryStatus = .pending
-                subagentState.populateFromReconstruction(data)
-            }
-
-            // Convert SpawnSubagent tool messages to subagent chips using lifecycle events.
-            // Applied to allReconstructedMessages so loadMoreMessages() also gets converted chips.
-            if !state.subagentSpawns.isEmpty {
-                // Primary lookup: toolCallId → spawn
-                var spawnByToolCallId: [String: ReconstructedState.SubagentSpawnInfo] = [:]
-                for spawn in state.subagentSpawns {
-                    if let toolCallId = spawn.toolCallId {
-                        spawnByToolCallId[toolCallId] = spawn
-                    }
-                }
-
-                for i in allReconstructedMessages.indices {
-                    guard case .toolUse(let tool) = allReconstructedMessages[i].content,
-                          tool.toolName == "SpawnSubagent" else { continue }
-
-                    guard let spawn = spawnByToolCallId[tool.toolCallId] else { continue }
-                    let sessionId = spawn.subagentSessionId
-
-                    let completion = state.subagentCompletions[sessionId]
-                    let failure = state.subagentFailures[sessionId]
-                    let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
-
-                    var subagentData = SubagentToolData(
-                        toolCallId: tool.toolCallId,
-                        subagentSessionId: sessionId,
-                        task: spawn.task,
-                        model: completion?.model ?? spawn.model,
-                        status: status,
-                        currentTurn: completion?.totalTurns ?? 0,
-                        resultSummary: completion?.resultSummary,
-                        fullOutput: completion?.fullOutput,
-                        duration: completion?.duration ?? failure?.duration,
-                        error: failure?.error,
-                        tokenUsage: completion?.tokenUsage
-                    )
-                    subagentData.blocking = spawn.blocking
-
-                    // Preserve resultDeliveryStatus if already set from subagentResults
-                    if let existing = subagentState.getSubagent(sessionId: sessionId) {
-                        subagentData.resultDeliveryStatus = existing.resultDeliveryStatus
-                    }
-                    allReconstructedMessages[i].content = .subagent(subagentData)
-                    subagentState.populateFromReconstruction(subagentData)
-                }
-
-                // Remove notification messages for blocking subagents (persisted before server fix)
-                let blockingSessionIds = Set(state.subagentSpawns.filter { $0.blocking }.map { $0.subagentSessionId })
-                if !blockingSessionIds.isEmpty {
-                    allReconstructedMessages.removeAll { msg in
-                        if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
-                            return blockingSessionIds.contains(sid)
-                        }
-                        return false
-                    }
-                }
-            }
+            // Populate subagent state and convert SpawnSubagent tool messages to subagent chips
+            restoreSubagentState(from: state)
 
             // Slice the latest batch for display (after subagent conversion)
             let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
@@ -228,6 +153,86 @@ extension ChatViewModel {
         // This ensures context window and token counts are accurate after session resume,
         // especially if model was switched or skills were added/removed while away
         await refreshContextFromServer()
+    }
+
+    // MARK: - Subagent State Restoration
+
+    /// Restore subagent state from reconstructed session data.
+    /// Populates SubagentState from result events and converts SpawnSubagent tool messages
+    /// to subagent chips using lifecycle events (spawned/completed/failed).
+    private func restoreSubagentState(from state: ReconstructedState) {
+        // Populate SubagentState from reconstructed subagent results
+        for result in state.subagentResults {
+            var data = SubagentToolData(
+                toolCallId: result.subagentSessionId,
+                subagentSessionId: result.subagentSessionId,
+                task: result.task,
+                model: nil,
+                status: result.success ? .completed : .failed,
+                currentTurn: result.totalTurns,
+                resultSummary: result.resultSummary,
+                fullOutput: nil,
+                duration: result.duration,
+                error: result.success ? nil : "Failed",
+                tokenUsage: result.tokenUsage
+            )
+            data.resultDeliveryStatus = .pending
+            subagentState.populateFromReconstruction(data)
+        }
+
+        // Convert SpawnSubagent tool messages to subagent chips using lifecycle events
+        guard !state.subagentSpawns.isEmpty else { return }
+
+        var spawnByToolCallId: [String: ReconstructedState.SubagentSpawnInfo] = [:]
+        for spawn in state.subagentSpawns {
+            if let toolCallId = spawn.toolCallId {
+                spawnByToolCallId[toolCallId] = spawn
+            }
+        }
+
+        for i in allReconstructedMessages.indices {
+            guard case .toolUse(let tool) = allReconstructedMessages[i].content,
+                  tool.toolName == "SpawnSubagent" else { continue }
+
+            guard let spawn = spawnByToolCallId[tool.toolCallId] else { continue }
+            let sessionId = spawn.subagentSessionId
+
+            let completion = state.subagentCompletions[sessionId]
+            let failure = state.subagentFailures[sessionId]
+            let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
+
+            var subagentData = SubagentToolData(
+                toolCallId: tool.toolCallId,
+                subagentSessionId: sessionId,
+                task: spawn.task,
+                model: completion?.model ?? spawn.model,
+                status: status,
+                currentTurn: completion?.totalTurns ?? 0,
+                resultSummary: completion?.resultSummary,
+                fullOutput: completion?.fullOutput,
+                duration: completion?.duration ?? failure?.duration,
+                error: failure?.error,
+                tokenUsage: completion?.tokenUsage
+            )
+            subagentData.blocking = spawn.blocking
+
+            if let existing = subagentState.getSubagent(sessionId: sessionId) {
+                subagentData.resultDeliveryStatus = existing.resultDeliveryStatus
+            }
+            allReconstructedMessages[i].content = .subagent(subagentData)
+            subagentState.populateFromReconstruction(subagentData)
+        }
+
+        // Remove notification messages for blocking subagents
+        let blockingSessionIds = Set(state.subagentSpawns.filter { $0.blocking }.map { $0.subagentSessionId })
+        if !blockingSessionIds.isEmpty {
+            allReconstructedMessages.removeAll { msg in
+                if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
+                    return blockingSessionIds.contains(sid)
+                }
+                return false
+            }
+        }
     }
 
     /// Load more older messages when user scrolls to top.
