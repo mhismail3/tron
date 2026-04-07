@@ -55,7 +55,6 @@ struct UserMessagePayload {
                 let blockType = block["type"] as? String
 
                 if blockType == ContentBlockType.image.rawValue {
-                    // Image: Server format { type: 'image', data: <base64>, mimeType: <mime> }
                     if let base64Data = block["data"] as? String,
                        let mimeType = block["mimeType"] as? String,
                        let data = Data(base64Encoded: base64Data) {
@@ -63,20 +62,6 @@ struct UserMessagePayload {
                             type: .image,
                             data: data,
                             mimeType: mimeType,
-                            fileName: nil
-                        ))
-                        continue
-                    }
-
-                    // Fallback: Anthropic format { source: { data, media_type } }
-                    if let source = block["source"] as? [String: Any],
-                       let base64Data = source["data"] as? String,
-                       let mediaType = source["media_type"] as? String,
-                       let data = Data(base64Encoded: base64Data) {
-                        extractedAttachments.append(Attachment(
-                            type: .image,
-                            data: data,
-                            mimeType: mediaType,
                             fileName: nil
                         ))
                     }
@@ -192,15 +177,8 @@ struct AssistantMessagePayload {
     }
 
     init(from payload: [String: AnyCodable]) {
-        // Content can be array of blocks or direct string (legacy)
         if let blocks = payload["content"]?.value as? [[String: Any]] {
             self.contentBlocks = blocks
-        } else if let text = payload.string("content") {
-            // Legacy: convert string to text block
-            self.contentBlocks = [["type": "text", "text": text]]
-        } else if let text = payload.string("text") {
-            // Alternative field name
-            self.contentBlocks = [["type": "text", "text": text]]
         } else {
             self.contentBlocks = nil
         }

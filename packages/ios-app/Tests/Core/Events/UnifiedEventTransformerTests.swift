@@ -105,7 +105,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let event = rawEvent(
             type: "message.assistant",
             payload: [
-                "content": AnyCodable("Hello! How can I help?"),
+                "content": AnyCodable([["type": "text", "text": "Hello! How can I help?"] as [String: Any]]),
                 "model": AnyCodable("claude-sonnet-4-20250514"),
                 "turn": AnyCodable(1),
                 "latency": AnyCodable(1500)
@@ -385,7 +385,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("Hi")], timestamp: timestamp(1)),
-            rawEvent(type: "message.assistant", payload: ["content": AnyCodable("Hello!")], timestamp: timestamp(2)),
+            rawEvent(type: "message.assistant", payload: ["content": AnyCodable([["type": "text", "text": "Hello!"] as [String: Any]])], timestamp: timestamp(2)),
             rawEvent(type: "session.end", payload: [:], timestamp: timestamp(3))
         ]
 
@@ -571,7 +571,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0)),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(1)),
             rawEvent(type: "message.assistant", payload: [
-                "content": AnyCodable("Hi there!"),
+                "content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]]),
                 "turn": AnyCodable(1),
                 "tokenRecord": AnyCodable([
                     "source": [
@@ -616,7 +616,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "previousModel": AnyCodable("claude-sonnet-4"),
                 "newModel": AnyCodable("claude-opus-4")
             ], timestamp: timestamp(2)),
-            rawEvent(type: "message.assistant", payload: ["content": AnyCodable("Now using Opus")], timestamp: timestamp(3))
+            rawEvent(type: "message.assistant", payload: ["content": AnyCodable([["type": "text", "text": "Now using Opus"] as [String: Any]])], timestamp: timestamp(3))
         ]
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
@@ -743,7 +743,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
             rawEvent(type: "message.assistant", payload: [
-                "content": AnyCodable("Response 1"),
+                "content": AnyCodable([["type": "text", "text": "Response 1"] as [String: Any]]),
                 "turn": AnyCodable(1),
                 "tokenRecord": AnyCodable([
                     "source": [
@@ -769,7 +769,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 ])
             ], timestamp: timestamp(1)),
             rawEvent(type: "message.assistant", payload: [
-                "content": AnyCodable("Response 2"),
+                "content": AnyCodable([["type": "text", "text": "Response 2"] as [String: Any]]),
                 "turn": AnyCodable(2),
                 "tokenRecord": AnyCodable([
                     "source": [
@@ -836,7 +836,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hi")], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
-                "content": AnyCodable("Hello!"),
+                "content": AnyCodable([["type": "text", "text": "Hello!"] as [String: Any]]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3)
         ]
@@ -887,7 +887,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testEventsAreSortedBySequence() {
         // Events in wrong order (sequence: 3, 1, 2) - should be sorted to (1, 2, 3)
         let events = [
-            rawEvent(type: "message.assistant", payload: ["content": AnyCodable("Third")], timestamp: timestamp(3), sequence: 3),
+            rawEvent(type: "message.assistant", payload: ["content": AnyCodable([["type": "text", "text": "Third"] as [String: Any]])], timestamp: timestamp(3), sequence: 3),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("First")], timestamp: timestamp(1), sequence: 1),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("Second")], timestamp: timestamp(2), sequence: 2)
         ]

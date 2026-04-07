@@ -186,7 +186,7 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "p-assistant", parentId: "p-user", sessionId: "parent-session",
                          workspaceId: "/test", type: "message.assistant",
                          timestamp: "2024-01-01T00:02:00Z", sequence: 3,
-                         payload: ["content": AnyCodable("Hi there!")])
+                         payload: ["content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]])])
         ]
         try database.events.insertBatch(parentEvents)
 
@@ -356,7 +356,7 @@ final class EventDatabaseTests: XCTestCase {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: ["content": AnyCodable("Hello")]),
-            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable("Hi there!")])
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]])])
         ]
 
         try database.events.insertBatch(events)
@@ -378,7 +378,7 @@ final class EventDatabaseTests: XCTestCase {
                 "content": AnyCodable("Hello")
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
-                "content": AnyCodable("Hi there!"),
+                "content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]]),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10, outputTokens: 50, turn: 1)),
                 "turn": AnyCodable(1)
             ])
@@ -408,7 +408,7 @@ final class EventDatabaseTests: XCTestCase {
         let events = [
             SessionEvent(id: "root", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "msg1", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: ["content": AnyCodable("Hello")]),
-            SessionEvent(id: "msg2", parentId: "msg1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable("Hi")])
+            SessionEvent(id: "msg2", parentId: "msg1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable([["type": "text", "text": "Hi"] as [String: Any]])])
         ]
 
         try database.events.insertBatch(events)
@@ -493,7 +493,7 @@ final class EventDatabaseTests: XCTestCase {
                 "content": AnyCodable("Hello")
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
-                "content": AnyCodable("Hi there!"),
+                "content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]]),
                 "model": AnyCodable("claude-sonnet-4-20250514"),
                 "latency": AnyCodable(1234),
                 "turn": AnyCodable(1),

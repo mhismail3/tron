@@ -56,6 +56,11 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
         )
     }
 
+    /// Helper to create content payload in the modern block array format for assistant messages.
+    private func assistantContent(_ text: String) -> [String: AnyCodable] {
+        ["content": AnyCodable([["type": "text", "text": text] as [String: Any]])]
+    }
+
     private func makeEvent(
         id: String,
         parentId: String?,
@@ -227,12 +232,12 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
             makeEvent(id: "e2", parentId: "e1", sessionId: "s1", type: "message.user", sequence: 2,
                       payload: ["content": AnyCodable("Hello before interruption")]),
             makeEvent(id: "e3", parentId: "e2", sessionId: "s1", type: "message.assistant", sequence: 3,
-                      payload: ["content": AnyCodable("Response before interruption")]),
+                      payload: assistantContent("Response before interruption")),
             makeEvent(id: "e4", parentId: "e3", sessionId: "s1", type: "notification.interrupted", sequence: 4, payload: [:]),
             makeEvent(id: "e5", parentId: "e4", sessionId: "s1", type: "message.user", sequence: 5,
                       payload: ["content": AnyCodable("Hello after interruption")]),
             makeEvent(id: "e6", parentId: "e5", sessionId: "s1", type: "message.assistant", sequence: 6,
-                      payload: ["content": AnyCodable("Response after interruption")]),
+                      payload: assistantContent("Response after interruption")),
         ]
         try database.events.insertBatch(events)
         try database.sessions.insert(makeSession(id: "s1", headEventId: "e6", rootEventId: "e1"))
@@ -255,7 +260,7 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
             makeEvent(id: "p2", parentId: "p1", sessionId: "parent", type: "message.user", sequence: 2,
                       payload: ["content": AnyCodable("Parent user message")]),
             makeEvent(id: "p3", parentId: "p2", sessionId: "parent", type: "message.assistant", sequence: 3,
-                      payload: ["content": AnyCodable("Parent assistant response")]),
+                      payload: assistantContent("Parent assistant response")),
         ]
         try database.events.insertBatch(parentEvents)
         try database.sessions.insert(makeSession(id: "parent", headEventId: "p3", rootEventId: "p1"))
@@ -266,7 +271,7 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
             makeEvent(id: "f2", parentId: "f1", sessionId: "forked", type: "message.user", sequence: 2,
                       payload: ["content": AnyCodable("Fork user message")]),
             makeEvent(id: "f3", parentId: "f2", sessionId: "forked", type: "message.assistant", sequence: 3,
-                      payload: ["content": AnyCodable("Fork assistant response")]),
+                      payload: assistantContent("Fork assistant response")),
         ]
         try database.events.insertBatch(forkEvents)
         try database.sessions.insert(makeSession(id: "forked", headEventId: "f3", rootEventId: "f1", isFork: true))
@@ -291,12 +296,12 @@ final class EventStoreManagerReconstructionTests: XCTestCase {
             makeEvent(id: "e2", parentId: "e1", sessionId: "s1", type: "message.user", sequence: 2,
                       payload: ["content": AnyCodable("First question")]),
             makeEvent(id: "e3", parentId: "e2", sessionId: "s1", type: "message.assistant", sequence: 3,
-                      payload: ["content": AnyCodable("First answer")]),
+                      payload: assistantContent("First answer")),
             // Event e4 has a broken parent chain (simulates sync gap)
             makeEvent(id: "e4", parentId: nil, sessionId: "s1", type: "message.user", sequence: 4,
                       payload: ["content": AnyCodable("Second question")]),
             makeEvent(id: "e5", parentId: "e4", sessionId: "s1", type: "message.assistant", sequence: 5,
-                      payload: ["content": AnyCodable("Second answer")]),
+                      payload: assistantContent("Second answer")),
         ]
         try database.events.insertBatch(events)
         try database.sessions.insert(makeSession(id: "s1", headEventId: "e5", rootEventId: "e1"))
