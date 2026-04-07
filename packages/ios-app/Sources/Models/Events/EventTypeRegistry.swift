@@ -99,124 +99,111 @@ enum PersistedEventType: String, CaseIterable {
     // Hooks
     case llmHookResult = "hook.llm_result"
 
-    // MARK: - Display Classification
+    // MARK: - Classification (single source of truth)
 
-    /// Whether this event type should render as a ChatMessage in the chat UI
-    var rendersAsChatMessage: Bool {
+    /// All classification flags for this event type, consolidated into one switch.
+    /// Individual properties below forward to this for backward compatibility.
+    private var classification: EventClassification {
+        //                                                    renders  affects  stream  meta
         switch self {
-        case .messageUser, .messageAssistant, .messageSystem,
-             .toolCall, .toolResult,
-             .notificationInterrupted, .notificationSubagentResult,
-             .configModelSwitch, .configReasoningLevel,
-             .contextCleared, .compactBoundary, .skillDeactivated, .rulesLoaded, .rulesActivated,
-             .errorAgent, .errorTool, .errorProvider,
-             .turnFailed, .memoryRetained:
-            return true
-        default:
-            return false
+        // Session lifecycle
+        case .sessionStart:            return .init(false,   true,    false,   true,   "Session started")
+        case .sessionEnd:              return .init(false,   false,   false,   true,   "Session ended (legacy)")
+        case .sessionFork:             return .init(false,   true,    false,   true,   "Session forked")
+        case .sessionBranch:           return .init(false,   false,   false,   true,   "Branch created")
+        // Conversation
+        case .messageUser:             return .init(true,    true,    false,   false,  "User message")
+        case .messageAssistant:        return .init(true,    true,    false,   false,  "Assistant message")
+        case .messageSystem:           return .init(true,    true,    false,   false,  "System message")
+        // Tool execution
+        case .toolCall:                return .init(true,    true,    false,   false,  "Tool call")
+        case .toolResult:              return .init(true,    true,    false,   false,  "Tool result")
+        // Streaming
+        case .streamTextDelta:         return .init(false,   false,   true,    true,   "Text delta")
+        case .streamThinkingDelta:     return .init(false,   false,   true,    true,   "Thinking delta")
+        case .streamThinkingComplete:  return .init(false,   false,   true,    false,  "Thinking complete")
+        case .streamTurnStart:         return .init(false,   false,   true,    true,   "Turn started")
+        case .streamTurnEnd:           return .init(false,   false,   true,    false,  "Turn ended")
+        // Model/config
+        case .configModelSwitch:       return .init(true,    true,    false,   false,  "Model switched")
+        case .configPromptUpdate:      return .init(false,   true,    false,   true,   "Prompt updated")
+        case .configReasoningLevel:    return .init(true,    true,    false,   false,  "Reasoning level changed")
+        // Message operations
+        case .messageDeleted:          return .init(false,   true,    false,   true,   "Message deleted")
+        // Notifications
+        case .notificationInterrupted: return .init(true,    false,   false,   false,  "Session interrupted")
+        case .notificationSubagentResult: return .init(true, false,   false,   false,  "Subagent result available")
+        // Skills
+        case .skillActivated:          return .init(false,   false,   false,   false,  "Skill activated")
+        case .skillDeactivated:        return .init(true,    false,   false,   false,  "Skill deactivated")
+        // Rules
+        case .rulesLoaded:             return .init(true,    false,   false,   false,  "Rules loaded")
+        case .rulesActivated:          return .init(true,    false,   false,   false,  "Rules activated")
+        // Compaction
+        case .compactBoundary:         return .init(true,    true,    false,   true,   "Compact boundary")
+        case .compactSummary:          return .init(false,   true,    false,   true,   "Compact summary")
+        // Context
+        case .contextCleared:          return .init(true,    false,   false,   false,  "Context cleared")
+        // Metadata
+        case .metadataUpdate:          return .init(false,   false,   false,   true,   "Metadata updated")
+        case .metadataTag:             return .init(false,   false,   false,   true,   "Tag updated")
+        // File operations
+        case .fileRead:                return .init(false,   false,   false,   true,   "File read")
+        case .fileWrite:               return .init(false,   false,   false,   true,   "File write")
+        case .fileEdit:                return .init(false,   false,   false,   true,   "File edit")
+        // Worktree
+        case .worktreeAcquired:        return .init(false,   true,    false,   true,   "Worktree acquired")
+        case .worktreeCommit:          return .init(false,   true,    false,   true,   "Git commit")
+        case .worktreeReleased:        return .init(false,   true,    false,   true,   "Worktree released")
+        case .worktreeMerged:          return .init(false,   true,    false,   true,   "Worktree merged")
+        case .worktreeRenamed:         return .init(false,   true,    false,   true,   "Branch renamed")
+        // Errors
+        case .errorAgent:              return .init(true,    true,    false,   false,  "Agent error")
+        case .errorTool:               return .init(true,    false,   false,   false,  "Tool error")
+        case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
+        // Subagents
+        case .subagentSpawned:         return .init(false,   true,    false,   false,  "Subagent spawned")
+        case .subagentCompleted:       return .init(false,   true,    false,   false,  "Subagent completed")
+        case .subagentFailed:          return .init(false,   true,    false,   false,  "Subagent failed")
+        case .subagentResultsConsumed: return .init(false,   false,   false,   false,  "Subagent results consumed")
+        // Turn events
+        case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
+        // Memory
+        case .memoryRetained:          return .init(true,    false,   false,   false,  "Memory retained")
+        // Process
+        case .notificationProcessResult: return .init(false, false,   false,   false,  "Process result")
+        case .processResultsConsumed:  return .init(false,   false,   false,   false,  "Results consumed")
+        // Hooks
+        case .llmHookResult:           return .init(false,   true,    false,   true,   "LLM hook result")
         }
     }
 
-    /// Whether this event affects session state reconstruction
-    var affectsSessionState: Bool {
-        switch self {
-        case .sessionStart, .sessionFork,
-             .messageUser, .messageAssistant, .messageSystem,
-             .messageDeleted,
-             .toolCall, .toolResult,
-             .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
-             .compactBoundary, .compactSummary,
-             .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged, .worktreeRenamed,
-             .subagentSpawned, .subagentCompleted, .subagentFailed,
-             .errorAgent,
-             .llmHookResult:
-            return true
-        default:
-            return false
-        }
-    }
+    var rendersAsChatMessage: Bool { classification.rendersAsChatMessage }
+    var affectsSessionState: Bool { classification.affectsSessionState }
+    var isStreamingEvent: Bool { classification.isStreamingEvent }
+    var isMetadataOnly: Bool { classification.isMetadataOnly }
+    var displayDescription: String { classification.displayDescription }
+}
 
-    /// Whether this is a streaming-related event (real-time reconstruction)
-    var isStreamingEvent: Bool {
-        switch self {
-        case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete, .streamTurnStart, .streamTurnEnd:
-            return true
-        default:
-            return false
-        }
-    }
+// =============================================================================
+// MARK: - Event Classification
+// =============================================================================
 
-    /// Whether this event is metadata-only (not displayed in main chat)
-    var isMetadataOnly: Bool {
-        switch self {
-        case .sessionStart, .sessionEnd, .sessionFork, .sessionBranch,
-             .compactBoundary, .compactSummary,
-             .metadataUpdate, .metadataTag,
-             .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
-             .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
-             .configPromptUpdate,
-             .messageDeleted,
-             .fileRead, .fileWrite, .fileEdit,
-             .llmHookResult:
-            return true
-        default:
-            return false
-        }
-    }
+/// Consolidated classification flags for an event type.
+/// Single source of truth — each event case maps to exactly one of these.
+private struct EventClassification {
+    let rendersAsChatMessage: Bool
+    let affectsSessionState: Bool
+    let isStreamingEvent: Bool
+    let isMetadataOnly: Bool
+    let displayDescription: String
 
-    /// Human-readable description for debugging
-    var displayDescription: String {
-        switch self {
-        case .sessionStart: return "Session started"
-        case .sessionEnd: return "Session ended (legacy)"
-        case .sessionFork: return "Session forked"
-        case .sessionBranch: return "Branch created"
-        case .messageUser: return "User message"
-        case .messageAssistant: return "Assistant message"
-        case .messageSystem: return "System message"
-        case .toolCall: return "Tool call"
-        case .toolResult: return "Tool result"
-        case .streamTextDelta: return "Text delta"
-        case .streamThinkingDelta: return "Thinking delta"
-        case .streamThinkingComplete: return "Thinking complete"
-        case .streamTurnStart: return "Turn started"
-        case .streamTurnEnd: return "Turn ended"
-        case .configModelSwitch: return "Model switched"
-        case .configPromptUpdate: return "Prompt updated"
-        case .configReasoningLevel: return "Reasoning level changed"
-        case .messageDeleted: return "Message deleted"
-        case .notificationInterrupted: return "Session interrupted"
-        case .notificationSubagentResult: return "Subagent result available"
-        case .skillActivated: return "Skill activated"
-        case .skillDeactivated: return "Skill deactivated"
-        case .rulesLoaded: return "Rules loaded"
-        case .rulesActivated: return "Rules activated"
-        case .compactBoundary: return "Compact boundary"
-        case .compactSummary: return "Compact summary"
-        case .contextCleared: return "Context cleared"
-        case .metadataUpdate: return "Metadata updated"
-        case .metadataTag: return "Tag updated"
-        case .fileRead: return "File read"
-        case .fileWrite: return "File write"
-        case .fileEdit: return "File edit"
-        case .worktreeAcquired: return "Worktree acquired"
-        case .worktreeCommit: return "Git commit"
-        case .worktreeReleased: return "Worktree released"
-        case .worktreeMerged: return "Worktree merged"
-        case .worktreeRenamed: return "Branch renamed"
-        case .errorAgent: return "Agent error"
-        case .errorTool: return "Tool error"
-        case .errorProvider: return "Provider error"
-        case .subagentSpawned: return "Subagent spawned"
-        case .subagentCompleted: return "Subagent completed"
-        case .subagentFailed: return "Subagent failed"
-        case .subagentResultsConsumed: return "Subagent results consumed"
-        case .turnFailed: return "Turn failed"
-        case .memoryRetained: return "Memory retained"
-        case .notificationProcessResult: return "Process result"
-        case .processResultsConsumed: return "Results consumed"
-        case .llmHookResult: return "LLM hook result"
-        }
+    init(_ renders: Bool, _ affects: Bool, _ streaming: Bool, _ metadata: Bool, _ description: String) {
+        self.rendersAsChatMessage = renders
+        self.affectsSessionState = affects
+        self.isStreamingEvent = streaming
+        self.isMetadataOnly = metadata
+        self.displayDescription = description
     }
 }
 
