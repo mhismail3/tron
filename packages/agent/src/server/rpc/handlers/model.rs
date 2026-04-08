@@ -915,4 +915,23 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, RpcError::NotFound { .. }));
     }
+
+    #[tokio::test]
+    async fn list_models_has_provider_display_fields() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        for model in models {
+            assert!(
+                model["providerDisplayName"].is_string(),
+                "Model {} missing providerDisplayName",
+                model["id"]
+            );
+            assert!(
+                model["providerSortOrder"].is_number(),
+                "Model {} missing providerSortOrder",
+                model["id"]
+            );
+        }
+    }
 }

@@ -5,14 +5,6 @@ import PhotosUI
 
 extension ChatViewModel: MessagingContext {
 
-    var lastAnsweredQuestionCount: Int {
-        askUserQuestionState.lastAnsweredQuestionCount
-    }
-
-    var lastConfirmationWasApproval: Bool {
-        getConfirmationState.lastDecisionWasApproval
-    }
-
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
@@ -160,7 +152,6 @@ extension ChatViewModel {
     func enqueueCurrentInput() {
         let text = inputBarState.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        guard !messageQueueState.isFull else { return }
         inputBarState.text = ""
         Task {
             do {
@@ -170,6 +161,7 @@ extension ChatViewModel {
                 logError("Failed to queue message: \(error.localizedDescription)")
                 // Restore text so user doesn't lose their input
                 inputBarState.text = text
+                showError("Could not queue message: \(error.localizedDescription)")
             }
         }
     }

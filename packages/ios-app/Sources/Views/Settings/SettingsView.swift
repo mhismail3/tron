@@ -328,9 +328,14 @@ struct SettingsView: View {
         serverHost = AppConstants.defaultHost
         serverPort = ""
         confirmArchive = true
-        settingsState.resetToDefaults()
-        updateServerSetting { settingsState.buildResetUpdate() }
         dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
+        Task {
+            do {
+                try await settingsState.resetToDefaults(using: rpcClient)
+            } catch {
+                settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func resetChatSession() {

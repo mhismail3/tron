@@ -1,12 +1,6 @@
 import Foundation
 
 /// Protocol defining the context required by AskUserQuestionCoordinator.
-///
-/// This protocol allows AskUserQuestionCoordinator to be tested independently from ChatViewModel
-/// by defining the minimum interface it needs to interact with state and dependencies.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display (showError)
 @MainActor
 protocol AskUserQuestionContext: LoggingContext {
     /// AskUserQuestion state container
@@ -15,8 +9,14 @@ protocol AskUserQuestionContext: LoggingContext {
     /// Messages array for updating tool status
     var messages: [ChatMessage] { get set }
 
-    /// Send the formatted answer as a new prompt
-    func sendAnswerPrompt(_ text: String)
+    /// RPC client for server communication
+    var rpcClient: RPCClient { get }
+
+    /// Append a message to the chat
+    func appendMessage(_ message: ChatMessage)
+
+    /// Increment turn counter
+    var currentTurn: Int { get set }
 }
 
 /// Coordinates AskUserQuestion event handling and user interaction for ChatViewModel.
@@ -24,34 +24,22 @@ protocol AskUserQuestionContext: LoggingContext {
 /// Responsibilities:
 /// - Sheet management (open/dismiss for pending and answered questions)
 /// - Answer submission and validation
-/// - Formatting answers as prompts for the agent
+/// - Submitting answers to the server via RPC (server constructs the agent prompt)
 /// - Marking pending questions as superseded when user bypasses
-///
-/// This coordinator extracts AskUserQuestion handling logic from ChatViewModel+AskUserQuestion.swift,
-/// making it independently testable while maintaining the same behavior.
 @MainActor
 final class AskUserQuestionCoordinator {
-
-    // MARK: - Initialization
 
     init() {}
 
     // MARK: - Sheet Management
 
-    /// Open the AskUserQuestion sheet for a tool call.
-    ///
-    /// - Parameters:
-    ///   - data: The AskUserQuestion tool data
-    ///   - context: The context providing access to state and dependencies
     func openSheet(for data: AskUserQuestionToolData, context: AskUserQuestionContext) {
-        // Allow opening for pending (to answer) or answered (to view)
         guard data.status == .pending || data.status == .answered else {
             context.logInfo("Not opening AskUserQuestion sheet - status is \(data.status)")
             return
         }
 
         context.askUserQuestionState.currentData = data
-        // Initialize answers from data (in case of re-opening or viewing answered)
         context.askUserQuestionState.answers = data.answers
         context.askUserQuestionState.showSheet = true
 
@@ -59,9 +47,6 @@ final class AskUserQuestionCoordinator {
         context.logInfo("Opened AskUserQuestion sheet (\(mode)) for \(data.params.questions.count) questions")
     }
 
-    /// Dismiss AskUserQuestion sheet without submitting.
-    ///
-    /// - Parameter context: The context providing access to state
     func dismissSheet(context: AskUserQuestionContext) {
         context.askUserQuestionState.showSheet = false
         context.logInfo("AskUserQuestion sheet dismissed without submitting")
@@ -69,29 +54,20 @@ final class AskUserQuestionCoordinator {
 
     // MARK: - Two-Phase Answer Submission
     //
-    // Submission is split into prepare + execute to avoid a SwiftUI rendering bug:
-    // Calling sendAnswerPrompt() while the sheet dismiss animation is in flight causes
-    // concurrent state mutations (isProcessing, inputText, keyboard resign) that glitch
-    // the safeAreaInset layout, making the InputBar disappear permanently.
+    // Split into prepare + execute to avoid a SwiftUI rendering bug where concurrent
+    // sheet dismiss animation + state mutations glitch the safeAreaInset layout.
     //
-    // Phase 1 (prepareSubmission): Updates chip, formats prompt, stores pending. Called
-    //   BEFORE dismiss() so the chip updates while the sheet is still visible.
-    // Phase 2 (executePendingSubmission): Sends the stored prompt. Called from the
-    //   sheet's onDismiss callback AFTER the dismiss animation completes.
+    // Phase 1 (prepareSubmission): Updates chip, stores structured submission data.
+    // Phase 2 (executePendingSubmission): Sends via server RPC after sheet dismiss completes.
 
-    /// Phase 1: Prepare submission — updates chip, formats prompt, stores as pending.
-    /// Called BEFORE sheet dismiss. Does NOT send the prompt.
-    ///
-    /// - Parameters:
-    ///   - answers: The answers to submit
-    ///   - context: The context providing access to state and dependencies
+    /// Phase 1: Prepare submission — updates chip, stores structured data as pending.
+    /// Called BEFORE sheet dismiss. Does NOT send to server.
     func prepareSubmission(_ answers: [AskUserQuestionAnswer], context: AskUserQuestionContext) {
         guard let data = context.askUserQuestionState.currentData else {
             context.logError("Cannot submit answers - no current question data")
             return
         }
 
-        // Verify the question is still pending (not superseded)
         guard data.status == .pending else {
             context.logWarning("Cannot submit answers - question status is \(data.status)")
             context.showError("This question is no longer active")
@@ -101,7 +77,6 @@ final class AskUserQuestionCoordinator {
             return
         }
 
-        // Build the result
         let result = AskUserQuestionResult(
             answers: answers,
             complete: true,
@@ -110,7 +85,7 @@ final class AskUserQuestionCoordinator {
 
         context.logInfo("Preparing AskUserQuestion submission for toolCallId=\(data.toolCallId)")
 
-        // Update the chip status to .answered immediately (visible while sheet animates away)
+        // Update the chip status to .answered immediately
         updateMessageToAnswered(
             toolCallId: data.toolCallId,
             result: result,
@@ -118,41 +93,58 @@ final class AskUserQuestionCoordinator {
             context: context
         )
 
-        // Format answers as a user prompt and store for deferred send
-        let answerPrompt = formatAnswersAsPrompt(data: data, answers: answers)
-        context.askUserQuestionState.pendingAnswerPrompt = answerPrompt
+        // Build structured submission for server RPC
+        var submissions: [AnswerSubmission] = []
+        for question in data.params.questions {
+            guard let answer = answers.first(where: { $0.questionId == question.id }) else { continue }
+            submissions.append(AnswerSubmission(
+                id: question.id,
+                question: question.question,
+                selectedValues: answer.selectedValues,
+                otherValue: answer.otherValue
+            ))
+        }
+        context.askUserQuestionState.pendingSubmission = submissions
 
-        // Store question count so MessagingCoordinator doesn't need to re-parse
+        // Store question count for chip display
         context.askUserQuestionState.lastAnsweredQuestionCount = data.params.questions.count
 
-        // Clear answers but keep currentData alive — the sheet reads it during
-        // its dismiss animation. Setting currentData = nil here would switch the
-        // sheet content to EmptyView(), causing a white flash. currentData is
-        // cleared in executePendingSubmission after the animation completes.
         context.askUserQuestionState.showSheet = false
         context.askUserQuestionState.answers = [:]
 
         context.logInfo("AskUserQuestion submission prepared, awaiting sheet dismiss")
     }
 
-    /// Phase 2: Execute pending submission — sends the stored prompt.
+    /// Phase 2: Execute pending submission — sends via server RPC.
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
-    ///
-    /// - Parameter context: The context providing access to state and dependencies
     func executePendingSubmission(context: AskUserQuestionContext) {
-        guard let answerPrompt = context.askUserQuestionState.pendingAnswerPrompt else { return }
-        context.askUserQuestionState.pendingAnswerPrompt = nil
+        guard let submissions = context.askUserQuestionState.pendingSubmission else { return }
+        context.askUserQuestionState.pendingSubmission = nil
         context.askUserQuestionState.currentData = nil
-        context.sendAnswerPrompt(answerPrompt)
-        context.logInfo("AskUserQuestion answers submitted as prompt")
+
+        // Add answered questions chip to chat
+        let questionCount = max(1, context.askUserQuestionState.lastAnsweredQuestionCount)
+        let answerChip = ChatMessage(
+            role: .user,
+            content: .answeredQuestions(questionCount: questionCount)
+        )
+        context.appendMessage(answerChip)
+        context.currentTurn += 1
+
+        // Submit via server RPC (server constructs the agent prompt)
+        Task {
+            do {
+                _ = try await context.rpcClient.agent.submitAnswers(questions: submissions)
+                context.logInfo("AskUserQuestion answers submitted via RPC")
+            } catch {
+                context.logError("Failed to submit answers: \(error.localizedDescription)")
+                context.showError("Failed to submit answers: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - State Management
 
-    /// Mark all pending AskUserQuestion chips as superseded.
-    /// Called before sending a new user message (when user bypasses answering).
-    ///
-    /// - Parameter context: The context providing access to state
     func markPendingQuestionsAsSuperseded(context: AskUserQuestionContext) {
         for i in context.messages.indices {
             if case .askUserQuestion(var data) = context.messages[i].content,
@@ -164,39 +156,8 @@ final class AskUserQuestionCoordinator {
         }
     }
 
-    // MARK: - Formatting
-
-    /// Format answers into a user prompt for the agent.
-    ///
-    /// - Parameters:
-    ///   - data: The original question data
-    ///   - answers: The user's answers
-    /// - Returns: Formatted prompt string
-    func formatAnswersAsPrompt(data: AskUserQuestionToolData, answers: [AskUserQuestionAnswer]) -> String {
-        var lines: [String] = [AgentProtocol.askUserAnswerPrefix, ""]
-
-        for question in data.params.questions {
-            guard let answer = answers.first(where: { $0.questionId == question.id }) else { continue }
-
-            lines.append("**\(question.question)**")
-
-            if let otherValue = answer.otherValue, !otherValue.isEmpty {
-                lines.append("Answer: [Other] \(otherValue)")
-            } else if !answer.selectedValues.isEmpty {
-                let selected = answer.selectedValues.joined(separator: ", ")
-                lines.append("Answer: \(selected)")
-            } else {
-                lines.append("Answer: (no selection)")
-            }
-            lines.append("")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
     // MARK: - Private Helpers
 
-    /// Update the message content to answered status.
     private func updateMessageToAnswered(
         toolCallId: String,
         result: AskUserQuestionResult,
@@ -207,7 +168,6 @@ final class AskUserQuestionCoordinator {
             if case .askUserQuestion(var toolData) = context.messages[index].content {
                 toolData.status = .answered
                 toolData.result = result
-                // Convert array to dictionary
                 var answersDict: [String: AskUserQuestionAnswer] = [:]
                 for answer in answers {
                     answersDict[answer.questionId] = answer

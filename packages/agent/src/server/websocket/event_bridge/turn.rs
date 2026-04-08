@@ -8,7 +8,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
         TronEvent::TurnStart { turn, .. } => Some(global(
             event,
             "agent.turn_start",
-            Some(json!({ "turn": turn })),
+            Some(json!({ "turn": turn, "agentPhase": "processing" })),
         )),
         TronEvent::TurnEnd {
             turn,

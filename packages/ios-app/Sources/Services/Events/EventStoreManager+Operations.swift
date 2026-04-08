@@ -339,8 +339,8 @@ extension EventStoreManager {
         // Load sessions from local DB
         loadSessions()
 
-        // Restore which sessions were processing when app was closed
-        restoreProcessingSessionIds()
+        // Processing state is seeded from server on session list refresh (isRunning field)
+        // No local persistence needed — server is authoritative
 
         logger.info("EventStoreManager initialized with \(self.sessions.count) sessions", category: .session)
     }

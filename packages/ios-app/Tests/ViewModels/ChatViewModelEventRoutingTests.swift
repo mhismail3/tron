@@ -658,7 +658,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             blocking: false
         )
         viewModel.handleSubagentSpawnedResult(result)
-        // Mark as completed so sendSubagentResults() will accept it
+        // Mark as completed so deliverSubagentResults() will accept it
         viewModel.subagentState.complete(
             subagentSessionId: sessionId,
             resultSummary: "Done",

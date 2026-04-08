@@ -140,8 +140,6 @@ struct ChatView: View {
             guard let level = notification.object as? String else { return }
             let previousLevel = viewModel.inputBarState.reasoningLevel
             viewModel.inputBarState.reasoningLevel = level
-            // Persist reasoning level for this session
-            UserDefaults.standard.set(level, forKey: reasoningLevelKey)
             // Add in-chat notification for reasoning level change
             if previousLevel != level {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
@@ -180,10 +178,7 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            // Load persisted reasoning level for this session
-            if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {
-                viewModel.inputBarState.reasoningLevel = savedLevel
-            }
+            // Reasoning level is restored from server via reconstruction (config.reasoning_level events)
             // Note: Message entry animations are handled in .task after messages load
         }
         .onDisappear {

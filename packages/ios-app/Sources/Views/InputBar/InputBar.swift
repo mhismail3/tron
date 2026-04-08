@@ -45,8 +45,8 @@ struct InputBar: View {
 
     private var canSend: Bool {
         if config.agentPhase.isActive {
-            // During processing/postProcessing: allow send if has text and queue not full
-            return state.hasTextContent && !config.isQueueFull
+            // During processing/postProcessing: allow send if has text (server rejects if queue full)
+            return state.hasTextContent
         }
         return state.hasContent && !config.isCompacting
     }

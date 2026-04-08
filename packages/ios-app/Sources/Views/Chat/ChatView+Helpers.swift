@@ -24,9 +24,6 @@ extension ChatView {
         viewModel.modelPickerState.isLoadingModels
     }
 
-    /// UserDefaults key for storing reasoning level per session
-    var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
-
     // MARK: - Model Operations
 
     /// Pre-fetch models for model picker menu

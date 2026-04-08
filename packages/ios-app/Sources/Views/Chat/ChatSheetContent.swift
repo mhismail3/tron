@@ -217,8 +217,8 @@ struct ChatSheetContent: View {
                 subagentState: viewModel.subagentState,
                 eventStoreManager: eventStoreManager,
                 rpcClient: rpcClient,
-                onSendResults: { subagent in
-                    viewModel.sendSubagentResults(subagent)
+                onSendResults: { _ in
+                    viewModel.deliverSubagentResults()
                 }
             )
             .adaptivePresentationDetents([.medium, .large])
@@ -236,10 +236,10 @@ struct ChatSheetContent: View {
             eventStoreManager: eventStoreManager,
             rpcClient: rpcClient,
             onSendAll: {
-                viewModel.sendAllSubagentResults()
+                viewModel.deliverSubagentResults()
             },
-            onSendIndividual: { subagent in
-                viewModel.sendSubagentResults(subagent)
+            onSendIndividual: { _ in
+                viewModel.deliverSubagentResults()
             }
         )
         .adaptivePresentationDetents([.medium, .large])

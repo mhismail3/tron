@@ -31,13 +31,4 @@ final class ProtocolConstantsTests: XCTestCase {
         XCTAssertEqual(CompactionReason.manual.detailDisplayText, "Manual")
     }
 
-    // MARK: - AgentProtocol Tests
-
-    func testAskUserAnswerPrefix() {
-        XCTAssertEqual(AgentProtocol.askUserAnswerPrefix, "[Answers to your questions]")
-    }
-
-    func testSubagentResultPrefix() {
-        XCTAssertEqual(AgentProtocol.subagentResultPrefix, "[SUBAGENT RESULTS")
-    }
 }

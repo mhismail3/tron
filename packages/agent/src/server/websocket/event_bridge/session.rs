@@ -7,10 +7,13 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
     match event {
         TronEvent::AgentStart { .. } => Some(session_scoped(event, "agent.start", Some(json!({})))),
         TronEvent::AgentEnd { error, .. } => {
-            let data = error.as_ref().map(|message| json!({ "error": message }));
-            Some(global(event, "agent.complete", data))
+            let mut data = json!({ "agentPhase": "postProcessing" });
+            if let Some(message) = error {
+                data["error"] = json!(message);
+            }
+            Some(global(event, "agent.complete", Some(data)))
         }
-        TronEvent::AgentReady { .. } => Some(global(event, "agent.ready", Some(json!({})))),
+        TronEvent::AgentReady { .. } => Some(global(event, "agent.ready", Some(json!({ "agentPhase": "idle" })))),
         TronEvent::Error {
             error,
             context,

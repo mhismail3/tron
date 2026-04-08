@@ -699,58 +699,20 @@ final class ChatViewModel {
             return
         }
 
-        // Retry up to 3 times with exponential backoff (100ms, 200ms, 400ms)
-        let maxRetries = 3
-        var lastError: Error?
-
-        for attempt in 1...maxRetries {
-            do {
-                let snapshot = try await rpcClient.context.getSnapshot(sessionId: sessionId)
-                await MainActor.run {
-                    // =============================================================================
-                    // CONTEXT SNAPSHOT PURPOSE
-                    // =============================================================================
-                    // The context.getSnapshot RPC returns:
-                    // - contextLimit: Maximum tokens for the model (e.g., 200k)
-                    // - currentTokens: Current ESTIMATED context (system prompt + tools + messages)
-                    //
-                    // CRITICAL: currentTokens is NOT the same as tokenRecord.computed.contextWindowTokens!
-                    // - contextWindowTokens (stored in turn_end events) = actual tokens sent to LLM
-                    // - currentTokens (from getSnapshot) = current context estimate
-                    //
-                    // We ONLY use the snapshot for:
-                    // 1. Getting the context limit (model's max tokens)
-                    // 2. Updating token count DURING LIVE streaming (handled by handleTurnEnd)
-                    //
-                    // We do NOT use it to update lastTurnInputTokens during resume because:
-                    // - The reconstructed state already has the correct value from turn_end events
-                    // - The snapshot's currentTokens measures something different
-                    // =============================================================================
-
-                    // Update context limit (model's max tokens)
-                    self.contextState.currentContextWindow = snapshot.contextLimit
-
-                    // Do NOT update lastTurnInputTokens here!
-                    // The reconstructed state (from parsing stream.turn_end events) is the
-                    // single source of truth for context window tokens.
-                    logger.debug("[TOKEN-FIX] refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens) (NOT updating lastTurnInputTokens, using reconstructed value: \(self.contextState.lastTurnInputTokens))", category: .session)
-                }
-                logger.debug("Context refreshed from server: \(snapshot.currentTokens)/\(snapshot.contextLimit)", category: .session)
-                return  // Success, exit retry loop
-            } catch {
-                lastError = error
-                if attempt < maxRetries {
-                    // Exponential backoff: 100ms, 200ms, 400ms
-                    let delayMs = UInt64(100 * (1 << (attempt - 1)))
-                    try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
-                    logger.debug("Context refresh attempt \(attempt) failed, retrying in \(delayMs)ms", category: .session)
-                }
+        // Capture the RPC client call outside the retry closure to avoid Sendable issues
+        let contextClient = rpcClient.context
+        let sid = sessionId
+        do {
+            let snapshot = try await withRetry {
+                try await contextClient.getSnapshot(sessionId: sid)
             }
-        }
-
-        // All retries failed - preserve reconstructed state value
-        if let error = lastError {
-            logger.warning("Failed to refresh context from server after \(maxRetries) attempts: \(error.localizedDescription). Preserving reconstructed state value: \(contextState.lastTurnInputTokens)", category: .session)
+            // Update context limit (model's max tokens).
+            // Do NOT update lastTurnInputTokens — reconstructed state from turn_end events
+            // is the single source of truth for context window tokens.
+            self.contextState.currentContextWindow = snapshot.contextLimit
+            logger.debug("refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens) (preserving reconstructed lastTurnInputTokens: \(self.contextState.lastTurnInputTokens))", category: .session)
+        } catch {
+            logger.warning("Failed to refresh context from server: \(error.localizedDescription). Preserving reconstructed state value: \(contextState.lastTurnInputTokens)", category: .session)
         }
     }
 

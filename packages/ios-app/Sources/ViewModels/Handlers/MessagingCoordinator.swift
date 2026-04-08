@@ -27,12 +27,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Current turn number
     var currentTurn: Int { get set }
 
-    /// Number of questions from the last AskUserQuestion answer submission
-    var lastAnsweredQuestionCount: Int { get }
-
-    /// Whether the last GetConfirmation submission was an approval
-    var lastConfirmationWasApproval: Bool { get }
-
     /// Send prompt to the server
     func sendPromptToServer(
         text: String,
@@ -92,7 +86,7 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 /// - Creating appropriate user message UI (regular text or answered questions chip)
 /// - Managing agent abort with proper state cleanup
 /// - Attachment add/remove operations
-/// - Coordinating state updates (isProcessing, dashboard, streaming)
+/// - Coordinating state updates (agentPhase, dashboard, streaming)
 ///
 /// This coordinator extracts messaging logic from ChatViewModel+Messaging.swift,
 /// making it independently testable while maintaining the same behavior.
@@ -129,27 +123,12 @@ final class MessagingCoordinator {
 
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
 
-        // Check if this is a special prompt that should not trigger certain dismissals
-        let isAnswerPrompt = text.hasPrefix(AgentProtocol.askUserAnswerPrefix)
-        let isConfirmationPrompt = text.hasPrefix(AgentProtocol.confirmationAnswerPrefix)
-        let isSubagentResultPrompt = text.hasPrefix(AgentProtocol.subagentResultPrefix)
-
-        if !isAnswerPrompt {
-            // Mark any pending AskUserQuestion chips as superseded
-            // (user chose to send a different message instead of answering)
-            context.markPendingQuestionsAsSuperseded()
-        }
-
-        if !isConfirmationPrompt {
-            // Mark any pending GetConfirmation chips as superseded
-            context.markPendingConfirmationsAsSuperseded()
-        }
-
-        if !isSubagentResultPrompt {
-            // Dismiss any pending subagent results
-            // (user chose to send a different message - the "Send" button is a one-time shortcut)
-            context.dismissPendingSubagentResults()
-        }
+        // Confirmation/answer submissions and subagent results are delivered via
+        // dedicated RPCs, not through sendMessage. Any regular user message sent here
+        // supersedes pending interactive tools and dismisses subagent notifications.
+        context.markPendingQuestionsAsSuperseded()
+        context.markPendingConfirmationsAsSuperseded()
+        context.dismissPendingSubagentResults()
 
         // Reset browser dismissal for new prompt - browser can auto-open again
 
@@ -159,29 +138,9 @@ final class MessagingCoordinator {
         let spellsToShow = spells?.isEmpty == false ? spells : nil
 
         if !text.isEmpty {
-            if isAnswerPrompt {
-                // Use tracked count from AskUserQuestionState (set during answer submission)
-                let questionCount = max(1, context.lastAnsweredQuestionCount)
-                let answerChip = ChatMessage(
-                    role: .user,
-                    content: .answeredQuestions(questionCount: questionCount)
-                )
-                context.appendMessage(answerChip)
-                context.logDebug("Added answered questions chip")
-            } else if isConfirmationPrompt {
-                // Show an approved/denied chip instead of the raw prompt text
-                let approved = context.lastConfirmationWasApproval
-                let confirmChip = ChatMessage(
-                    role: .user,
-                    content: .confirmedAction(approved: approved)
-                )
-                context.appendMessage(confirmChip)
-                context.logDebug("Added confirmed action chip (approved=\(approved))")
-            } else {
-                let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
-                context.appendMessage(userMessage)
-                context.logDebug("Added user text message with \(context.attachments.count) attachments")
-            }
+            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
+            context.appendMessage(userMessage)
+            context.logDebug("Added user text message with \(context.attachments.count) attachments")
             context.currentTurn += 1
         } else if !context.attachments.isEmpty {
             // If only attachments (no text), still show them in chat

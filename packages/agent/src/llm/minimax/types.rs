@@ -240,6 +240,8 @@ impl MiniMaxModelInfo {
             "id": id,
             "name": self.name,
             "provider": "minimax",
+            "providerDisplayName": "MiniMax",
+            "providerSortOrder": 3,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,

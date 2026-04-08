@@ -2,12 +2,7 @@ import Foundation
 
 // MARK: - GetConfirmationContext Conformance
 
-extension ChatViewModel: GetConfirmationContext {
-    func sendConfirmationPrompt(_ text: String) {
-        inputText = text
-        sendMessage()
-    }
-}
+extension ChatViewModel: GetConfirmationContext {}
 
 // MARK: - GetConfirmation Methods
 
@@ -27,13 +22,13 @@ extension ChatViewModel {
 
     // MARK: - Decision Submission (Two-Phase)
 
-    /// Phase 1: Prepare submission — updates chip and stores pending prompt.
+    /// Phase 1: Prepare submission — updates chip and stores pending submission data.
     /// Called synchronously from sheet's onSubmit BEFORE dismiss.
     func prepareGetConfirmationSubmission(_ decision: ConfirmationDecision, note: String?) {
         getConfirmationCoordinator.prepareSubmission(decision, note: note, context: self)
     }
 
-    /// Phase 2: Execute pending submission — sends stored prompt.
+    /// Phase 2: Execute pending submission — sends via server RPC.
     /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
     func executePendingGetConfirmationSubmission() {
         getConfirmationCoordinator.executePendingSubmission(context: self)

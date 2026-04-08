@@ -27,6 +27,8 @@ struct SessionReconstructResult: Decodable {
     let lastSequence: Int64
     /// Whether the agent is currently running.
     let isRunning: Bool
+    /// Server-authoritative agent phase ("processing", "postProcessing", "idle").
+    let agentPhase: String?
     /// Session metadata.
     let metadata: ReconstructMetadata
     /// Pending queued messages (server-sourced, drives pill UI).

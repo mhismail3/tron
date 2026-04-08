@@ -201,6 +201,8 @@ impl ClaudeModelInfo {
             "id": id,
             "name": self.short_name,
             "provider": "anthropic",
+            "providerDisplayName": "Anthropic",
+            "providerSortOrder": 0,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,

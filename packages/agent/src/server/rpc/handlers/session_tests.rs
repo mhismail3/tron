@@ -1203,6 +1203,7 @@ async fn reconstruct_empty_session() {
     let events = result["events"].as_array().unwrap();
     assert!(events.len() <= 1); // session.start or empty
     assert_eq!(result["isRunning"], false);
+    assert_eq!(result["agentPhase"], "idle");
     assert!(result["inFlight"].is_null());
     assert_eq!(result["hasMoreEvents"], false);
 }
@@ -1709,4 +1710,18 @@ async fn reconstruct_before_sequence_zero_returns_empty() {
     let events = result["events"].as_array().unwrap();
     assert_eq!(events.len(), 0);
     assert_eq!(result["hasMoreEvents"], false);
+}
+
+#[tokio::test]
+async fn list_sessions_has_is_running_field() {
+    let ctx = make_test_context();
+    let _ = ctx
+        .session_manager
+        .create_session("m", "/a", Some("s1"))
+        .unwrap();
+
+    let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
+    let session = &result["sessions"][0];
+    // No active run → isRunning should be false
+    assert_eq!(session["isRunning"], false);
 }

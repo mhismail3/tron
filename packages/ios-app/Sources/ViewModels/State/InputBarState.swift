@@ -140,8 +140,6 @@ struct InputBarConfig {
     // MARK: - Message Queue (Server-Driven)
     /// Pending queued messages from the server. Drives the pill chips UI.
     let queuedMessages: [PendingQueueItem]
-    /// Whether the queue is at capacity.
-    var isQueueFull: Bool { queuedMessages.count >= MessageQueueState.maxCapacity }
 
     init(
         agentPhase: AgentPhase = .idle,

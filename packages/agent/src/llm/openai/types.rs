@@ -448,6 +448,8 @@ impl OpenAIModelInfo {
             "id": id,
             "name": self.name,
             "provider": "openai-codex",
+            "providerDisplayName": "OpenAI",
+            "providerSortOrder": 1,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": false,

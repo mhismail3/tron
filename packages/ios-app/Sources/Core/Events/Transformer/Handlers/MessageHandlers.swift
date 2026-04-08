@@ -25,7 +25,7 @@ enum MessageHandlers {
         }
 
         // AskUserQuestion answer prompts - render as a chip instead of full text
-        if parsed.content.contains(AgentProtocol.askUserAnswerPrefix) {
+        if parsed.content.contains("[Answers to your questions]") {
             // Count the questions by parsing the message (count ** markers)
             let questionCount = parsed.content.components(separatedBy: "\n**").count - 1
             return ChatMessage(
@@ -36,7 +36,7 @@ enum MessageHandlers {
         }
 
         // GetConfirmation response prompts - render as a chip instead of full text
-        if parsed.content.contains(AgentProtocol.confirmationAnswerPrefix) {
+        if parsed.content.contains("[Confirmation response]") {
             let parsedResponse = GetConfirmationDetector.parseConfirmationResponse(from: parsed.content)
             return ChatMessage(
                 role: .user,

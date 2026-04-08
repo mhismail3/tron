@@ -29,6 +29,15 @@ final class SettingsClient: RPCDomainClient {
             params: UpdateParams(settings: settings)
         )
     }
+
+    /// Reset all settings to server defaults and return the new values.
+    func resetToDefaults() async throws -> ServerSettings {
+        let ws = try requireTransport().requireConnection()
+        return try await ws.send(
+            method: "settings.resetToDefaults",
+            params: EmptyParams()
+        )
+    }
 }
 
 /// Simple success result for settings.update

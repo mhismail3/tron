@@ -235,3 +235,49 @@ struct TokenUsage: Decodable, Equatable {
     }
 }
 
+// MARK: - Subagent Result Delivery
+
+struct DeliverSubagentResultsParams: Encodable {
+    let sessionId: String
+}
+
+// MARK: - Confirmation/Answer Submission
+
+struct SubmitConfirmationParams: Encodable {
+    let sessionId: String
+    let action: String
+    let decision: String
+    let note: String?
+}
+
+struct AnswerSubmission: Encodable {
+    let id: String
+    let question: String
+    let selectedValues: [String]
+    let otherValue: String?
+}
+
+struct SubmitAnswersParams: Encodable {
+    let sessionId: String
+    let questions: [AnswerSubmission]
+}
+
+struct SubmitConfirmationResponse: Decodable {
+    let acknowledged: Bool
+    let queued: Bool
+    let runId: String?
+}
+
+struct SubmitAnswersResponse: Decodable {
+    let acknowledged: Bool
+    let queued: Bool
+    let runId: String?
+}
+
+struct DeliverSubagentResultsResponse: Decodable {
+    let acknowledged: Bool
+    let queued: Bool
+    let subagentCount: Int
+    let runId: String?
+}
+

@@ -688,6 +688,8 @@ impl GeminiModelInfo {
             "id": id,
             "name": self.short_name,
             "provider": "google",
+            "providerDisplayName": "Google",
+            "providerSortOrder": 2,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,

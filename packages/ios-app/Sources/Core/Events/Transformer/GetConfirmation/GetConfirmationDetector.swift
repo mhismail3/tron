@@ -39,7 +39,7 @@ enum GetConfirmationDetector {
             let event = events[i]
             if event.type == PersistedEventType.messageUser.rawValue {
                 guard let content = event.payload["content"]?.value as? String else { continue }
-                if content.contains(AgentProtocol.confirmationAnswerPrefix) {
+                if content.contains("[Confirmation response]") {
                     let parsed = parseConfirmationResponse(from: content)
                     return GetConfirmationDetectionResult(
                         status: parsed.decision == .approved ? .approved : .denied,

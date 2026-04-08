@@ -57,6 +57,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let releaseDate: String?
     /// Sort order within provider (server-authoritative)
     let sortOrder: Int?
+    /// Human-readable provider name (server-authoritative, e.g. "Anthropic", "OpenAI")
+    let providerDisplayName: String?
+    /// Provider display order (server-authoritative, e.g. 0=Anthropic, 1=OpenAI)
+    let providerSortOrder: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name, provider, contextWindow, maxOutputTokens
@@ -65,6 +69,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
+        case providerDisplayName, providerSortOrder
         case inputCostPerMillion, outputCostPerMillion
         case modelDescription = "description"
     }
@@ -95,7 +100,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         outputCostPerMillion: Double? = nil,
         recommended: Bool? = nil,
         releaseDate: String? = nil,
-        sortOrder: Int? = nil
+        sortOrder: Int? = nil,
+        providerDisplayName: String? = nil,
+        providerSortOrder: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -122,6 +129,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.recommended = recommended
         self.releaseDate = releaseDate
         self.sortOrder = sortOrder
+        self.providerDisplayName = providerDisplayName
+        self.providerSortOrder = providerSortOrder
     }
 
     // MARK: - Formatted Display Helpers

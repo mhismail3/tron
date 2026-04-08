@@ -48,6 +48,7 @@ extension EventStoreManager {
             }
 
             loadSessions()
+            seedProcessingStateFromSessions()
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
 
             // Background: sync events for sessions missing activity lines
@@ -119,6 +120,7 @@ extension EventStoreManager {
             }
 
             loadSessions()
+            seedProcessingStateFromSessions()
             logger.info("Full sync completed: synced \(syncedCount), skipped \(skippedCount) cross-origin, showing \(self.sessions.count) sessions", category: .session)
 
         } catch {
@@ -182,17 +184,13 @@ extension EventStoreManager {
 
     /// Convert server SessionInfo to CachedSession.
     func serverSessionToCached(_ info: SessionInfo, serverOrigin: String? = nil) -> CachedSession {
-        return CachedSession(
+        var session = CachedSession(
             id: info.sessionId,
             workspaceId: info.workingDirectory ?? "",
-            rootEventId: nil,
-            headEventId: nil,
-            title: info.title,
             latestModel: info.model,
             workingDirectory: info.workingDirectory ?? "",
             createdAt: info.createdAt,
             lastActivityAt: info.lastActivity ?? info.createdAt,
-            archivedAt: nil,
             eventCount: 0,
             messageCount: info.messageCount,
             inputTokens: info.inputTokens ?? 0,
@@ -200,11 +198,14 @@ extension EventStoreManager {
             lastTurnInputTokens: info.lastTurnInputTokens ?? 0,
             cacheReadTokens: info.cacheReadTokens ?? 0,
             cacheCreationTokens: info.cacheCreationTokens ?? 0,
-            cost: info.cost ?? 0,
-            isFork: info.isFork,
-            serverOrigin: serverOrigin,
-            isChat: info.isChat ?? false
+            cost: info.cost ?? 0
         )
+        session.title = info.title
+        session.isFork = info.isFork
+        session.serverOrigin = serverOrigin
+        session.isChat = info.isChat ?? false
+        session.isProcessing = info.isRunning ?? false
+        return session
     }
 
     /// Merge existing local session data with server info.
@@ -215,17 +216,13 @@ extension EventStoreManager {
         // Use server lastActivity if available, otherwise keep local
         let lastActivityAt = serverInfo.lastActivity ?? existing.lastActivityAt
 
-        return CachedSession(
+        var session = CachedSession(
             id: existing.id,
             workspaceId: serverInfo.workingDirectory ?? existing.workspaceId,
-            rootEventId: existing.rootEventId,
-            headEventId: existing.headEventId,
-            title: title,
             latestModel: serverInfo.model,
             workingDirectory: serverInfo.workingDirectory ?? existing.workingDirectory,
             createdAt: serverInfo.createdAt,
             lastActivityAt: lastActivityAt,
-            archivedAt: nil,
             eventCount: existing.eventCount,
             messageCount: max(existing.messageCount, serverInfo.messageCount),
             inputTokens: serverInfo.inputTokens ?? existing.inputTokens,
@@ -233,11 +230,16 @@ extension EventStoreManager {
             lastTurnInputTokens: serverInfo.lastTurnInputTokens ?? existing.lastTurnInputTokens,
             cacheReadTokens: serverInfo.cacheReadTokens ?? existing.cacheReadTokens,
             cacheCreationTokens: serverInfo.cacheCreationTokens ?? existing.cacheCreationTokens,
-            cost: serverInfo.cost ?? existing.cost,
-            isFork: serverInfo.isFork,
-            serverOrigin: serverOrigin,
-            isChat: serverInfo.isChat ?? existing.isChat
+            cost: serverInfo.cost ?? existing.cost
         )
+        session.rootEventId = existing.rootEventId
+        session.headEventId = existing.headEventId
+        session.title = title
+        session.isFork = serverInfo.isFork
+        session.serverOrigin = serverOrigin
+        session.isChat = serverInfo.isChat ?? existing.isChat
+        session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
+        return session
     }
 
     /// Convert RawEvent to SessionEvent.

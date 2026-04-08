@@ -153,90 +153,29 @@ extension ChatViewModel {
         }
     }
 
-    // MARK: - Subagent Result Sending
+    // MARK: - Subagent Result Delivery
 
-    /// Send all pending subagent results to the agent as a single combined message.
-    /// Called from the "Send All" button in SubagentResultsListSheet.
-    func sendAllSubagentResults() {
+    /// Deliver all pending subagent results via server RPC.
+    /// The server retrieves unconsumed results, formats them, and spawns a prompt run (or queues).
+    /// Called from both "Send" (individual) and "Send All" buttons in subagent sheets.
+    func deliverSubagentResults() {
         let pending = subagentState.pendingSubagents
         guard !pending.isEmpty else { return }
-        logger.info("Sending all \(pending.count) pending subagent results", category: .chat)
+        logger.info("Delivering \(pending.count) pending subagent results via server", category: .chat)
 
         for subagent in pending {
             subagentState.markResultsSent(subagentSessionId: subagent.subagentSessionId)
         }
-
-        var sections: [String] = []
-        for subagent in pending {
-            let resultContent: String
-            if let error = subagent.error {
-                resultContent = "Error: \(error)"
-            } else if let fullOutput = subagent.fullOutput {
-                resultContent = fullOutput
-            } else if let summary = subagent.resultSummary {
-                resultContent = summary
-            } else {
-                resultContent = "Completed in \(subagent.currentTurn) turns"
-            }
-            sections.append("**Task:** \(subagent.task)\n**Results:**\n\(resultContent)")
-        }
-
-        let prompt = """
-        [SUBAGENT RESULTS - Please review and continue]
-
-        \(pending.count) sub-agents have completed. Here are all results:
-
-        \(sections.enumerated().map { "### Agent \($0.offset + 1)\n\($0.element)" }.joined(separator: "\n\n"))
-
-        Please review these results and continue with the relevant tasks.
-        """
-
-        inputText = prompt
-        sendMessage()
-        logger.info("Sent combined results for \(pending.count) subagents", category: .chat)
-    }
-
-    /// Send subagent results to the agent as a user message
-    /// Called when user taps "Send" in the subagent detail sheet for pending results
-    func sendSubagentResults(_ subagent: SubagentToolData) {
-        logger.info("Sending subagent results to agent: sessionId=\(subagent.subagentSessionId), status=\(subagent.status)", category: .chat)
-
-        guard subagent.status == .completed || subagent.status == .failed else {
-            logger.warning("Cannot send results for subagent that is not completed/failed: status=\(subagent.status)", category: .chat)
-            return
-        }
-
-        subagentState.markResultsSent(subagentSessionId: subagent.subagentSessionId)
-        logger.debug("Marked subagent results as sent: \(subagent.subagentSessionId)", category: .chat)
-
         subagentState.showDetailSheet = false
 
-        let resultContent: String
-        if let error = subagent.error {
-            resultContent = "Error: \(error)"
-        } else if let fullOutput = subagent.fullOutput {
-            resultContent = fullOutput
-        } else if let summary = subagent.resultSummary {
-            resultContent = summary
-        } else {
-            resultContent = "Completed in \(subagent.currentTurn) turns"
+        Task {
+            do {
+                let response = try await rpcClient.agent.deliverSubagentResults()
+                logInfo("Subagent results delivered: count=\(response.subagentCount), queued=\(response.queued)")
+            } catch {
+                logError("Failed to deliver subagent results: \(error.localizedDescription)")
+                showError("Could not deliver subagent results: \(error.localizedDescription)")
+            }
         }
-
-        let prompt = """
-        [SUBAGENT RESULTS - Please review and continue]
-
-        A sub-agent I previously spawned has completed. Here are the results:
-
-        **Task:** \(subagent.task)
-
-        **Results:**
-        \(resultContent)
-
-        Please review these results and continue with the relevant task.
-        """
-
-        inputText = prompt
-        sendMessage()
-        logger.info("Subagent results sent as user message: \(subagent.subagentSessionId)", category: .chat)
     }
 }

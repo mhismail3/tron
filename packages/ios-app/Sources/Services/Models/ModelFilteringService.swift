@@ -111,37 +111,30 @@ enum ModelFilteringService {
     static func organizeByProviderFamily(_ models: [ModelInfo]) -> [ProviderGroup] {
         guard !models.isEmpty else { return [] }
 
-        struct ProviderDef {
-            let id: String
-            let displayName: String
-            let color: Color
-            let icon: String
-            let filter: (ModelInfo) -> Bool
+        // Group models by provider
+        var providerMap: [String: [ModelInfo]] = [:]
+        for model in models {
+            providerMap[model.provider, default: []].append(model)
         }
 
-        let providers: [ProviderDef] = [
-            ProviderDef(id: "anthropic", displayName: "Anthropic", color: .tronCoral, icon: "IconAnthropic",
-                        filter: { $0.isAnthropic }),
-            ProviderDef(id: "openai-codex", displayName: "OpenAI", color: .tronSlate, icon: "IconOpenAI",
-                        filter: { $0.isCodex }),
-            ProviderDef(id: "google", displayName: "Google", color: .tronCyan, icon: "IconGoogle",
-                        filter: { $0.isGemini }),
-            ProviderDef(id: "minimax", displayName: "MiniMax", color: .tronRose, icon: "IconMiniMax",
-                        filter: { $0.isMiniMax }),
-            ProviderDef(id: "kimi", displayName: "Kimi", color: .tronIndigo, icon: "IconKimi",
-                        filter: { $0.isKimi }),
-        ]
+        // Sort providers by server-provided providerSortOrder
+        let sortedProviders = providerMap.sorted { lhs, rhs in
+            let lhsOrder = lhs.value.first?.providerSortOrder ?? 99
+            let rhsOrder = rhs.value.first?.providerSortOrder ?? 99
+            return lhsOrder < rhsOrder
+        }
 
         var groups: [ProviderGroup] = []
 
-        for provider in providers {
-            let providerModels = models.filter(provider.filter)
-            guard !providerModels.isEmpty else { continue }
+        for (providerId, providerModels) in sortedProviders {
+            // Use server-provided display name, fall back to provider ID
+            let displayName = providerModels.first?.providerDisplayName ?? providerId
+            let (color, icon) = providerVisuals(providerId)
 
-            // Group by family
+            // Group by family (server always provides family)
             var familyMap: [String: [ModelInfo]] = [:]
             for model in providerModels {
-                let fam = model.family ?? deriveFamilyFromId(model)
+                let fam = model.family ?? model.name
                 familyMap[fam, default: []].append(model)
             }
 
@@ -159,57 +152,15 @@ enum ModelFilteringService {
             }
 
             groups.append(ProviderGroup(
-                id: provider.id,
-                displayName: provider.displayName,
+                id: providerId,
+                displayName: displayName,
                 families: familyGroups,
-                color: provider.color,
-                icon: provider.icon
+                color: color,
+                icon: icon
             ))
         }
 
         return groups
-    }
-
-    /// Derive a family name from model ID when the server doesn't provide one
-    private static func deriveFamilyFromId(_ model: ModelInfo) -> String {
-        let id = model.id.lowercased()
-        // Anthropic
-        if id.contains("claude") {
-            if id.contains("4-6") || id.contains("4.6") { return "Claude 4.6" }
-            if id.contains("4-5") || id.contains("4.5") { return "Claude 4.5" }
-            if id.contains("4-1") || id.contains("4.1") { return "Claude 4.1" }
-            if id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return "Claude 4" }
-            if id.contains("3-7") || id.contains("3.7") { return "Claude 3.7" }
-            if id.contains("3-5") || id.contains("3.5") { return "Claude 3.5" }
-            return "Claude"
-        }
-        // OpenAI Codex
-        if id.contains("codex") || id.contains("gpt") {
-            if id.contains("5.3") { return "GPT-5.3" }
-            if id.contains("5.2") { return "GPT-5.2" }
-            if id.contains("5.1") { return "GPT-5.1" }
-            if id.contains("5.0") || id.contains("-5-") { return "GPT-5.0" }
-            return "GPT"
-        }
-        // Gemini
-        if id.contains("gemini") {
-            if id.contains("gemini-3") { return "Gemini 3" }
-            if id.contains("gemini-2.5") || id.contains("2-5") { return "Gemini 2.5" }
-            if id.contains("gemini-2") { return "Gemini 2" }
-            return "Gemini"
-        }
-        // MiniMax
-        if id.contains("minimax") {
-            return "MiniMax M2"
-        }
-        // Kimi
-        if id.contains("kimi") || id.contains("moonshot") {
-            if id.contains("k2.5") { return "Kimi K2.5" }
-            if id.contains("k2") { return "Kimi K2" }
-            if id.contains("moonshot") { return "Moonshot V1" }
-            return "Kimi"
-        }
-        return model.name
     }
 
     /// Extract a numeric version from a family name for sorting (e.g., "Claude 4.6" → 4.6)
@@ -239,11 +190,11 @@ enum ModelFilteringService {
     // MARK: - Sorting
 
     /// Sort by server-provided sortOrder within each provider.
-    /// Cross-provider: uses providerPriority.
+    /// Cross-provider: uses server-provided providerSortOrder.
     static func sortByTier(_ models: [ModelInfo]) -> [ModelInfo] {
         models.sorted { m1, m2 in
             if m1.provider != m2.provider {
-                return providerPriority(m1) < providerPriority(m2)
+                return (m1.providerSortOrder ?? 99) < (m2.providerSortOrder ?? 99)
             }
             return (m1.sortOrder ?? 999) < (m2.sortOrder ?? 999)
         }
@@ -264,13 +215,16 @@ enum ModelFilteringService {
 
     // MARK: - Private Helpers
 
-    private static func providerPriority(_ model: ModelInfo) -> Int {
-        if model.isAnthropic { return 0 }
-        if model.isCodex { return 1 }
-        if model.isGemini { return 2 }
-        if model.isMiniMax { return 3 }
-        if model.isKimi { return 4 }
-        return 99
+    /// Provider visual theming (color + icon). These are display concerns, not business logic.
+    private static func providerVisuals(_ providerId: String) -> (color: Color, icon: String) {
+        switch providerId {
+        case "anthropic": return (.tronCoral, "IconAnthropic")
+        case "openai-codex": return (.tronSlate, "IconOpenAI")
+        case "google": return (.tronCyan, "IconGoogle")
+        case "minimax": return (.tronRose, "IconMiniMax")
+        case "kimi": return (.tronIndigo, "IconKimi")
+        default: return (.secondary, "cpu")
+        }
     }
 }
 

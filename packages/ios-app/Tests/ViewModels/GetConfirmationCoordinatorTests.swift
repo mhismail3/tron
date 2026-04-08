@@ -8,7 +8,6 @@ import XCTest
 /// - Approve submission with/without note
 /// - Deny submission with/without note
 /// - Supersede on new user message
-/// - Prompt formatting for agent
 /// - Status transitions in message array
 /// - Edge cases: stale confirmations, empty notes, double submit
 @MainActor
@@ -76,7 +75,7 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
 
     // MARK: - Prepare Submission Tests (Phase 1: before sheet dismiss)
 
-    func testPrepareApprovalStoresPendingPrompt() {
+    func testPrepareApprovalStoresPendingSubmission() {
         let data = makeToolData(status: .pending)
         mockContext.getConfirmationState.currentData = data
         addConfirmationMessage(data: data)
@@ -84,12 +83,12 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         coordinator.prepareSubmission(.approved, note: "Go ahead", context: mockContext)
 
         XCTAssertTrue(mockContext.getConfirmationState.lastDecisionWasApproval)
-        XCTAssertNotNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
-        XCTAssertTrue(mockContext.getConfirmationState.pendingConfirmationPrompt?.contains("Decision: Approved") ?? false)
-        XCTAssertTrue(mockContext.getConfirmationState.pendingConfirmationPrompt?.contains("Note: Go ahead") ?? false)
+        XCTAssertNotNil(mockContext.getConfirmationState.pendingSubmission)
+        XCTAssertEqual(mockContext.getConfirmationState.pendingSubmission?.decision, "Approved")
+        XCTAssertEqual(mockContext.getConfirmationState.pendingSubmission?.note, "Go ahead")
     }
 
-    func testPrepareDenialStoresPendingPrompt() {
+    func testPrepareDenialStoresPendingSubmission() {
         let data = makeToolData(status: .pending)
         mockContext.getConfirmationState.currentData = data
         addConfirmationMessage(data: data)
@@ -97,9 +96,9 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         coordinator.prepareSubmission(.denied, note: "Too risky", context: mockContext)
 
         XCTAssertFalse(mockContext.getConfirmationState.lastDecisionWasApproval)
-        XCTAssertNotNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
-        XCTAssertTrue(mockContext.getConfirmationState.pendingConfirmationPrompt?.contains("Decision: Denied") ?? false)
-        XCTAssertTrue(mockContext.getConfirmationState.pendingConfirmationPrompt?.contains("Note: Too risky") ?? false)
+        XCTAssertNotNil(mockContext.getConfirmationState.pendingSubmission)
+        XCTAssertEqual(mockContext.getConfirmationState.pendingSubmission?.decision, "Denied")
+        XCTAssertEqual(mockContext.getConfirmationState.pendingSubmission?.note, "Too risky")
     }
 
     func testPrepareDoesNotSendPrompt() {
@@ -109,8 +108,8 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
 
         coordinator.prepareSubmission(.approved, note: nil, context: mockContext)
 
-        // No prompt should be sent during prepare phase
-        XCTAssertNil(mockContext.sentPrompt)
+        // No message should be appended during prepare phase
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
 
     func testPrepareUpdatesChipStatusToApproved() {
@@ -145,14 +144,14 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         }
     }
 
-    func testPrepareWithEmptyNoteOmitsNoteLine() {
+    func testPrepareWithEmptyNoteStoresEmptyNote() {
         let data = makeToolData(status: .pending)
         mockContext.getConfirmationState.currentData = data
         addConfirmationMessage(data: data)
 
         coordinator.prepareSubmission(.approved, note: "", context: mockContext)
 
-        XCTAssertFalse(mockContext.getConfirmationState.pendingConfirmationPrompt?.contains("Note:") ?? true)
+        XCTAssertNotNil(mockContext.getConfirmationState.pendingSubmission)
     }
 
     func testPrepareClearsSheetFlagButKeepsCurrentData() {
@@ -172,7 +171,7 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         // currentData is nil
         coordinator.prepareSubmission(.approved, note: nil, context: mockContext)
 
-        XCTAssertNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertNil(mockContext.getConfirmationState.pendingSubmission)
     }
 
     func testPrepareRejectsNonPendingStatus() {
@@ -182,40 +181,40 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
 
         coordinator.prepareSubmission(.approved, note: nil, context: mockContext)
 
-        XCTAssertNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertNil(mockContext.getConfirmationState.pendingSubmission)
         XCTAssertFalse(mockContext.getConfirmationState.showSheet)
     }
 
     // MARK: - Execute Pending Submission Tests (Phase 2: after sheet dismiss)
 
-    func testExecutePendingSendsPendingPrompt() {
-        // Given: A pending prompt was stored during prepare
-        mockContext.getConfirmationState.pendingConfirmationPrompt = "[Confirmation]\nDecision: Approved"
+    func testExecutePendingAppendsConfirmChip() {
+        // Given: A pending submission was stored during prepare
+        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
+        mockContext.getConfirmationState.lastDecisionWasApproval = true
 
         // When: Executing pending submission
         coordinator.executePendingSubmission(context: mockContext)
 
-        // Then: Prompt should be sent
-        XCTAssertNotNil(mockContext.sentPrompt)
-        XCTAssertTrue(mockContext.sentPrompt?.contains("Decision: Approved") ?? false)
+        // Then: A confirmed action chip should be appended
+        XCTAssertFalse(mockContext.appendedMessages.isEmpty)
     }
 
     func testExecutePendingClearsPendingStateAndCurrentData() {
-        mockContext.getConfirmationState.pendingConfirmationPrompt = "some prompt"
+        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
         mockContext.getConfirmationState.currentData = makeToolData(status: .approved)
 
         coordinator.executePendingSubmission(context: mockContext)
 
-        XCTAssertNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertNil(mockContext.getConfirmationState.pendingSubmission)
         XCTAssertNil(mockContext.getConfirmationState.currentData)
     }
 
     func testExecutePendingNoOpWhenNothingPending() {
-        mockContext.getConfirmationState.pendingConfirmationPrompt = nil
+        mockContext.getConfirmationState.pendingSubmission = nil
 
         coordinator.executePendingSubmission(context: mockContext)
 
-        XCTAssertNil(mockContext.sentPrompt)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
 
     func testFullPrepareAndExecuteFlow() {
@@ -230,15 +229,14 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         if case .getConfirmation(let updatedData) = mockContext.messages[0].content {
             XCTAssertEqual(updatedData.status, .approved)
         }
-        XCTAssertNil(mockContext.sentPrompt)
-        XCTAssertNotNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertNotNil(mockContext.getConfirmationState.pendingSubmission)
 
         // Phase 2: Execute (simulates onDismiss)
         coordinator.executePendingSubmission(context: mockContext)
 
-        XCTAssertNotNil(mockContext.sentPrompt)
-        XCTAssertTrue(mockContext.sentPrompt?.contains("Decision: Approved") ?? false)
-        XCTAssertNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertFalse(mockContext.appendedMessages.isEmpty)
+        XCTAssertNil(mockContext.getConfirmationState.pendingSubmission)
     }
 
     func testSwipeDismissWithoutSubmitDoesNotTrigger() {
@@ -249,15 +247,15 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         // Execute called from onDismiss without prior prepare
         coordinator.executePendingSubmission(context: mockContext)
 
-        XCTAssertNil(mockContext.sentPrompt)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
 
-    func testClearAllClearsPendingPrompt() {
-        mockContext.getConfirmationState.pendingConfirmationPrompt = "pending"
+    func testClearAllClearsPendingSubmission() {
+        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
 
         mockContext.getConfirmationState.clearAll()
 
-        XCTAssertNil(mockContext.getConfirmationState.pendingConfirmationPrompt)
+        XCTAssertNil(mockContext.getConfirmationState.pendingSubmission)
     }
 
     // MARK: - Supersede Tests
@@ -300,46 +298,6 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         } else { XCTFail() }
     }
 
-    // MARK: - Prompt Formatting Tests
-
-    func testFormatApprovedPromptWithNote() {
-        let data = makeToolData(status: .pending)
-        let prompt = coordinator.formatDecisionAsPrompt(data: data, decision: .approved, note: "Go ahead")
-
-        XCTAssertTrue(prompt.hasPrefix(AgentProtocol.confirmationAnswerPrefix))
-        XCTAssertTrue(prompt.contains("Action: Install ffmpeg"))
-        XCTAssertTrue(prompt.contains("Decision: Approved"))
-        XCTAssertTrue(prompt.contains("Note: Go ahead"))
-    }
-
-    func testFormatDeniedPromptWithoutNote() {
-        let data = makeToolData(status: .pending)
-        let prompt = coordinator.formatDecisionAsPrompt(data: data, decision: .denied, note: nil)
-
-        XCTAssertTrue(prompt.hasPrefix(AgentProtocol.confirmationAnswerPrefix))
-        XCTAssertTrue(prompt.contains("Decision: Denied"))
-        XCTAssertFalse(prompt.contains("Note:"))
-    }
-
-    func testFormatPromptRoundTripsWithDetector() {
-        let data = makeToolData(status: .pending)
-        let prompt = coordinator.formatDecisionAsPrompt(data: data, decision: .approved, note: "LGTM")
-
-        // The detector should be able to parse this
-        let parsed = GetConfirmationDetector.parseConfirmationResponse(from: prompt)
-        XCTAssertEqual(parsed.decision, .approved)
-        XCTAssertEqual(parsed.note, "LGTM")
-    }
-
-    func testFormatPromptRoundTripsForDenied() {
-        let data = makeToolData(status: .pending)
-        let prompt = coordinator.formatDecisionAsPrompt(data: data, decision: .denied, note: nil)
-
-        let parsed = GetConfirmationDetector.parseConfirmationResponse(from: prompt)
-        XCTAssertEqual(parsed.decision, .denied)
-        XCTAssertNil(parsed.note)
-    }
-
     // MARK: - Helpers
 
     private func makeToolData(
@@ -370,12 +328,15 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
 final class MockGetConfirmationContext: GetConfirmationContext {
     let getConfirmationState = GetConfirmationState()
     var messages: [ChatMessage] = []
-    var sentPrompt: String?
+    var appendedMessages: [ChatMessage] = []
+    var currentTurn: Int = 0
     var errorShown: String?
     var loggedMessages: [String] = []
 
-    func sendConfirmationPrompt(_ text: String) {
-        sentPrompt = text
+    let rpcClient = RPCClient()
+
+    func appendMessage(_ message: ChatMessage) {
+        appendedMessages.append(message)
     }
 
     // LoggingContext conformance

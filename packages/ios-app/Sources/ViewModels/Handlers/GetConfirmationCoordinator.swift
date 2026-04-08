@@ -9,8 +9,14 @@ protocol GetConfirmationContext: LoggingContext {
     /// Messages array for updating tool status
     var messages: [ChatMessage] { get set }
 
-    /// Send the formatted decision as a new prompt
-    func sendConfirmationPrompt(_ text: String)
+    /// RPC client for server communication
+    var rpcClient: RPCClient { get }
+
+    /// Append a message to the chat
+    func appendMessage(_ message: ChatMessage)
+
+    /// Increment turn counter
+    var currentTurn: Int { get set }
 }
 
 /// Coordinates GetConfirmation event handling and user interaction for ChatViewModel.
@@ -18,7 +24,7 @@ protocol GetConfirmationContext: LoggingContext {
 /// Responsibilities:
 /// - Sheet management (open/dismiss for pending and decided confirmations)
 /// - Decision submission and validation
-/// - Formatting decisions as prompts for the agent
+/// - Submitting decisions to the server via RPC (server constructs the agent prompt)
 /// - Marking pending confirmations as superseded when user bypasses
 @MainActor
 final class GetConfirmationCoordinator {
@@ -54,11 +60,11 @@ final class GetConfirmationCoordinator {
     // sheet dismiss animation + state mutations (isProcessing, inputText, keyboard resign)
     // glitches the safeAreaInset layout, making the InputBar disappear permanently.
     //
-    // Phase 1 (prepareSubmission): Updates chip, formats prompt, stores pending.
-    // Phase 2 (executePendingSubmission): Sends stored prompt after sheet dismiss completes.
+    // Phase 1 (prepareSubmission): Updates chip, stores structured submission data.
+    // Phase 2 (executePendingSubmission): Sends via server RPC after sheet dismiss completes.
 
-    /// Phase 1: Prepare submission — updates chip, formats prompt, stores as pending.
-    /// Called BEFORE sheet dismiss. Does NOT send the prompt.
+    /// Phase 1: Prepare submission — updates chip, stores structured data as pending.
+    /// Called BEFORE sheet dismiss. Does NOT send to server.
     func prepareSubmission(
         _ decision: ConfirmationDecision,
         note: String?,
@@ -94,29 +100,52 @@ final class GetConfirmationCoordinator {
             context: context
         )
 
-        // Format decision and store for deferred send
-        let prompt = formatDecisionAsPrompt(data: data, decision: decision, note: note)
-        context.getConfirmationState.pendingConfirmationPrompt = prompt
+        // Store structured submission data for deferred send via RPC
+        context.getConfirmationState.pendingSubmission = (
+            action: data.params.action,
+            decision: decision.rawValue,
+            note: note
+        )
 
         // Track decision for MessagingCoordinator chip
         context.getConfirmationState.lastDecisionWasApproval = (decision == .approved)
 
         // Keep currentData alive — the sheet reads it during its dismiss animation.
-        // Setting currentData = nil here would switch content to EmptyView(), causing
-        // a white flash. Cleared in executePendingSubmission after animation completes.
         context.getConfirmationState.showSheet = false
 
         context.logInfo("GetConfirmation submission prepared, awaiting sheet dismiss")
     }
 
-    /// Phase 2: Execute pending submission — sends the stored prompt.
+    /// Phase 2: Execute pending submission — sends via server RPC.
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
     func executePendingSubmission(context: GetConfirmationContext) {
-        guard let prompt = context.getConfirmationState.pendingConfirmationPrompt else { return }
-        context.getConfirmationState.pendingConfirmationPrompt = nil
+        guard let submission = context.getConfirmationState.pendingSubmission else { return }
+        context.getConfirmationState.pendingSubmission = nil
         context.getConfirmationState.currentData = nil
-        context.sendConfirmationPrompt(prompt)
-        context.logInfo("GetConfirmation decision submitted as prompt")
+
+        // Add confirmed action chip to chat
+        let approved = context.getConfirmationState.lastDecisionWasApproval
+        let confirmChip = ChatMessage(
+            role: .user,
+            content: .confirmedAction(approved: approved)
+        )
+        context.appendMessage(confirmChip)
+        context.currentTurn += 1
+
+        // Submit via server RPC (server constructs the agent prompt)
+        Task {
+            do {
+                _ = try await context.rpcClient.agent.submitConfirmation(
+                    action: submission.action,
+                    decision: submission.decision,
+                    note: submission.note
+                )
+                context.logInfo("GetConfirmation decision submitted via RPC")
+            } catch {
+                context.logError("Failed to submit confirmation: \(error.localizedDescription)")
+                context.showError("Failed to submit confirmation: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - State Management
@@ -132,32 +161,6 @@ final class GetConfirmationCoordinator {
                 context.logInfo("Marked GetConfirmation \(data.toolCallId) as superseded")
             }
         }
-    }
-
-    // MARK: - Formatting
-
-    /// Format a decision into a user prompt for the agent.
-    ///
-    /// Format:
-    /// ```
-    /// [Confirmation response]
-    ///
-    /// Action: Install ffmpeg via brew
-    /// Decision: Approved
-    /// Note: Go ahead
-    /// ```
-    func formatDecisionAsPrompt(
-        data: GetConfirmationToolData,
-        decision: ConfirmationDecision,
-        note: String?
-    ) -> String {
-        var lines: [String] = [AgentProtocol.confirmationAnswerPrefix, ""]
-        lines.append("Action: \(data.params.action)")
-        lines.append("Decision: \(decision.rawValue)")
-        if let note = note, !note.isEmpty {
-            lines.append("Note: \(note)")
-        }
-        return lines.joined(separator: "\n")
     }
 
     // MARK: - Private Helpers

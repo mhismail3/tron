@@ -40,7 +40,14 @@ extension ChatViewModel {
             currentTurn = turnCount
         }
 
-        // 4. Process in-flight state (if agent is running)
+        // 4a. Set agent phase from server-authoritative value
+        switch result.agentPhase {
+        case "processing": agentPhase = .processing
+        case "postProcessing": agentPhase = .postProcessing
+        default: agentPhase = .idle
+        }
+
+        // 4b. Process in-flight state (if agent is running)
         if let inFlight = result.inFlight {
             await processInFlightState(inFlight)
         }

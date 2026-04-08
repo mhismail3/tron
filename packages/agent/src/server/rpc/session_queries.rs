@@ -43,6 +43,7 @@ impl SessionQueryService {
         };
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
+        let orchestrator = ctx.orchestrator.clone();
         ctx.run_blocking("session.list", move || {
             let sessions =
                 session_manager
@@ -60,6 +61,7 @@ impl SessionQueryService {
                 .into_iter()
                 .map(|session| {
                     let is_active = session_manager.is_active(&session.id);
+                    let is_running = orchestrator.has_active_run(&session.id);
                     let preview = previews.get(&session.id);
                     json!({
                         "sessionId": session.id,
@@ -70,6 +72,7 @@ impl SessionQueryService {
                         "lastActivity": session.last_activity_at,
                         "endedAt": session.ended_at,
                         "isActive": is_active,
+                        "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
                         "isChat": session.source.as_deref() == Some("chat"),
                         "source": session.source,

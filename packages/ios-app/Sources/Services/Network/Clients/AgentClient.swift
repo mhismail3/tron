@@ -82,6 +82,39 @@ final class AgentClient: RPCDomainClient {
         let _: ClearQueueResult = try await ws.send(method: "agent.clearQueue", params: params)
     }
 
+    // MARK: - Subagent Result Delivery
+
+    /// Deliver pending subagent results as a server-constructed prompt.
+    /// The server formats the results and either spawns a prompt run or queues if busy.
+    func deliverSubagentResults() async throws -> DeliverSubagentResultsResponse {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = DeliverSubagentResultsParams(sessionId: sessionId)
+        return try await ws.send(method: "agent.deliverSubagentResults", params: params)
+    }
+
+    // MARK: - Confirmation/Answer Submission
+
+    /// Submit a confirmation decision for a GetConfirmation tool call.
+    /// Server constructs the prompt and spawns a prompt run (or queues if busy).
+    func submitConfirmation(action: String, decision: String, note: String?) async throws -> SubmitConfirmationResponse {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = SubmitConfirmationParams(
+            sessionId: sessionId,
+            action: action,
+            decision: decision,
+            note: note
+        )
+        return try await ws.send(method: "agent.submitConfirmation", params: params)
+    }
+
+    /// Submit answers for an AskUserQuestion tool call.
+    /// Server constructs the prompt and spawns a prompt run (or queues if busy).
+    func submitAnswers(questions: [AnswerSubmission]) async throws -> SubmitAnswersResponse {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = SubmitAnswersParams(sessionId: sessionId, questions: questions)
+        return try await ws.send(method: "agent.submitAnswers", params: params)
+    }
+
     func abort() async throws {
         guard let (ws, sessionId) = try? requireTransport().requireSession() else { return }
 

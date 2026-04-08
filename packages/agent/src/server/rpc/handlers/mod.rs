@@ -22,7 +22,9 @@
 //! `communication`, `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
+pub mod agent_confirmation;
 pub mod agent_queue;
+pub mod agent_subagent;
 pub mod auth;
 pub mod blob;
 pub mod browser;
@@ -94,6 +96,18 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("agent.queuePrompt", agent_queue::QueuePromptHandler);
     registry.register("agent.dequeuePrompt", agent_queue::DequeuePromptHandler);
     registry.register("agent.clearQueue", agent_queue::ClearQueueHandler);
+    registry.register(
+        "agent.deliverSubagentResults",
+        agent_subagent::DeliverSubagentResultsHandler,
+    );
+    registry.register(
+        "agent.submitConfirmation",
+        agent_confirmation::SubmitConfirmationHandler,
+    );
+    registry.register(
+        "agent.submitAnswers",
+        agent_confirmation::SubmitAnswersHandler,
+    );
 
     // Model
     registry.register("model.list", model::ListModelsHandler);
@@ -129,6 +143,7 @@ fn register_core(registry: &mut MethodRegistry) {
     // Settings
     registry.register("settings.get", settings::GetSettingsHandler);
     registry.register("settings.update", settings::UpdateSettingsHandler);
+    registry.register("settings.resetToDefaults", settings::ResetSettingsHandler);
 
     // Auth
     registry.register("auth.get", auth::GetAuthHandler);
@@ -528,8 +543,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            130,
-            "expected 130 methods, got {}",
+            134,
+            "expected 134 methods, got {}",
             reg.methods().len()
         );
     }

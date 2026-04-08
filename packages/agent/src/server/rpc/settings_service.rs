@@ -11,6 +11,13 @@ pub(crate) fn load_settings_value(path: &Path) -> Result<Value, RpcError> {
     })
 }
 
+pub(crate) fn reset_settings(path: &Path) -> Result<Value, RpcError> {
+    // Write empty object — reload_settings_from_path fills all defaults
+    write_settings_json(path, &Value::Object(serde_json::Map::default()))?;
+    crate::settings::reload_settings_from_path(path);
+    load_settings_value(path)
+}
+
 pub(crate) fn update_settings(path: &Path, updates: Value) -> Result<(), RpcError> {
     let current = read_settings_json(path)?;
     let merged = crate::settings::deep_merge(current, updates);

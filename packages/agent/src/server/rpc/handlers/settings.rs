@@ -25,6 +25,21 @@ impl MethodHandler for GetSettingsHandler {
     }
 }
 
+/// Reset all settings to defaults.
+pub struct ResetSettingsHandler;
+
+#[async_trait]
+impl MethodHandler for ResetSettingsHandler {
+    #[instrument(skip(self, ctx), fields(method = "settings.resetToDefaults"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let settings_path = ctx.settings_path.clone();
+        ctx.run_blocking("settings.resetToDefaults", move || {
+            settings_service::reset_settings(&settings_path)
+        })
+        .await
+    }
+}
+
 /// Update settings.
 pub struct UpdateSettingsHandler;
 
@@ -252,6 +267,48 @@ mod tests {
             .await
             .unwrap();
         assert!(nested_path.exists());
+    }
+
+    #[tokio::test]
+    async fn reset_settings_returns_defaults() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        // Customize a setting first
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({"settings": {"server": {"maxConcurrentSessions": 99}}})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Reset
+        let result = ResetSettingsHandler.handle(None, &ctx).await.unwrap();
+        assert!(result.is_object());
+        // maxConcurrentSessions should be back to default (10)
+        assert_eq!(result["server"]["maxConcurrentSessions"], 10);
+    }
+
+    #[tokio::test]
+    async fn reset_settings_clears_disk_customizations() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        // Write some customizations
+        let _ = UpdateSettingsHandler
+            .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
+            .await
+            .unwrap();
+        assert!(ctx.settings_path.exists());
+
+        // Reset
+        let _ = ResetSettingsHandler.handle(None, &ctx).await.unwrap();
+
+        // The file should still exist but contain only {}
+        let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
+        let saved: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(saved, json!({}));
     }
 
     #[tokio::test]

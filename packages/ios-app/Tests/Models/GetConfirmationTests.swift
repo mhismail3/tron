@@ -244,17 +244,4 @@ final class GetConfirmationTests: XCTestCase {
         XCTAssertEqual(params.reason.count, 2000)
     }
 
-    // MARK: - Tests: Protocol Constants
-
-    func testConfirmationAnswerPrefix() {
-        XCTAssertEqual(AgentProtocol.confirmationAnswerPrefix, "[Confirmation response]")
-        XCTAssertFalse(AgentProtocol.confirmationAnswerPrefix.isEmpty)
-    }
-
-    func testConfirmationPrefixDistinctFromAskUser() {
-        XCTAssertNotEqual(
-            AgentProtocol.confirmationAnswerPrefix,
-            AgentProtocol.askUserAnswerPrefix
-        )
-    }
 }

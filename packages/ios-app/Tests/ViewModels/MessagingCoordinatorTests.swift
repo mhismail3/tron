@@ -452,9 +452,6 @@ final class MockMessagingContext: MessagingContext {
     var draftStore: DraftStore?
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
-    var lastAnsweredQuestionCount: Int = 0
-    var lastConfirmationWasApproval: Bool = false
-
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false
     var lastSentText: String?

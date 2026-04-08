@@ -8,14 +8,8 @@ import Foundation
 /// comes from the server via WebSocket events or reconstruction.
 @Observable
 final class MessageQueueState {
-    /// Maximum queue capacity (enforced server-side, mirrored here for UI).
-    static let maxCapacity = 3
-
     /// Server-sourced pending queue items. Drives the pill chips UI.
     private(set) var queue: [PendingQueueItem] = []
-
-    /// Whether the queue is at capacity.
-    var isFull: Bool { queue.count >= Self.maxCapacity }
 
     /// Whether the queue has any messages.
     var hasMessages: Bool { !queue.isEmpty }

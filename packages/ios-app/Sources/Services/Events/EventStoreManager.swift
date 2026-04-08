@@ -101,7 +101,6 @@ final class EventStoreManager {
                 }
                 #endif
             }
-            UserDefaults.standard.set(Array(processingSessionIds), forKey: "tron.processingSessionIds")
         }
     }
 

@@ -594,14 +594,16 @@ fn agent_end_includes_error() {
 }
 
 #[test]
-fn agent_end_no_error_has_no_data() {
+fn agent_end_no_error_has_agent_phase() {
     let event = TronEvent::AgentEnd {
         base: BaseEvent::now("s1"),
         error: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.complete");
-    assert!(rpc.data.is_none());
+    let data = rpc.data.unwrap();
+    assert_eq!(data["agentPhase"], "postProcessing");
+    assert!(data.get("error").is_none());
 }
 
 #[test]

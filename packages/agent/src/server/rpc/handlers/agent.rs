@@ -12,9 +12,9 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 #[path = "agent_prompt_runtime.rs"]
-mod prompt_runtime;
+pub(crate) mod prompt_runtime;
 #[path = "agent_prompt_service.rs"]
-mod prompt_service;
+pub(crate) mod prompt_service;
 
 #[cfg(test)]
 use prompt_runtime::{

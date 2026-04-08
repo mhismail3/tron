@@ -20,9 +20,9 @@ final class AskUserQuestionState {
     /// Number of questions in the last submitted answer (set by AskUserQuestionCoordinator)
     var lastAnsweredQuestionCount: Int = 0
 
-    /// Pending answer prompt to send after sheet dismissal completes.
+    /// Pending answer submission to send after sheet dismissal completes.
     /// Set during prepareSubmission(), consumed by executePendingSubmission().
-    var pendingAnswerPrompt: String?
+    var pendingSubmission: [AnswerSubmission]?
 
     init() {}
 
@@ -37,6 +37,6 @@ final class AskUserQuestionState {
         currentData = nil
         answers = [:]
         calledInTurn = false
-        pendingAnswerPrompt = nil
+        pendingSubmission = nil
     }
 }

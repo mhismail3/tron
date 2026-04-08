@@ -187,9 +187,10 @@ struct ConsolidatedAnalytics {
         return (input, output, cacheRead, cacheCreation, cacheCreation5m, cacheCreation1h)
     }
 
-    // MARK: - Cost Calculation
+    // MARK: - Cost Breakdown Pricing (display-only)
 
-    /// Model pricing per million tokens (USD)
+    /// Model pricing per million tokens (USD).
+    /// Used only for the analytics cost breakdown display — total cost comes from the server.
     struct ModelPricing {
         let inputPerMillion: Double
         let outputPerMillion: Double
@@ -206,33 +207,26 @@ struct ConsolidatedAnalytics {
         )
     }
 
-    /// Get pricing for a model
+    /// Get pricing for a model (display-only, for analytics cost breakdown visualization).
+    /// Total cost is always server-provided — this is only used to estimate component proportions.
     static func getPricing(for model: String?) -> ModelPricing {
         guard let model = model?.lowercased() else { return .defaultPricing }
 
-        // Claude models - check specific versions first, then fallback to general patterns
-        // Opus 4.5 ($5/$25)
         if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus 4.5") {
             return ModelPricing(inputPerMillion: 5.0, outputPerMillion: 25.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
         }
-        // Opus legacy ($15/$75)
         if model.contains("opus") {
             return ModelPricing(inputPerMillion: 15.0, outputPerMillion: 75.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
         }
-        // Sonnet 4.5 ($3/$15) - same as sonnet 4
         if model.contains("sonnet") {
             return ModelPricing(inputPerMillion: 3.0, outputPerMillion: 15.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
         }
-        // Haiku 4.5 ($1/$5)
         if model.contains("haiku-4-5") || model.contains("haiku-4.5") || model.contains("haiku 4.5") {
             return ModelPricing(inputPerMillion: 1.0, outputPerMillion: 5.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
         }
-        // Haiku 3 legacy ($0.25/$1.25)
         if model.contains("haiku") {
             return ModelPricing(inputPerMillion: 0.25, outputPerMillion: 1.25, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
         }
-
-        // OpenAI models
         if model.contains("gpt-4o-mini") {
             return ModelPricing(inputPerMillion: 0.15, outputPerMillion: 0.60, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
         }
@@ -245,8 +239,6 @@ struct ConsolidatedAnalytics {
         if model.contains("o4-mini") {
             return ModelPricing(inputPerMillion: 1.10, outputPerMillion: 4.40, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
         }
-
-        // Gemini models
         if model.contains("gemini-2.5-pro") {
             return ModelPricing(inputPerMillion: 1.25, outputPerMillion: 10.0, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.25)
         }
@@ -255,41 +247,6 @@ struct ConsolidatedAnalytics {
         }
 
         return .defaultPricing
-    }
-
-    /// Calculate cost from token usage
-    static func calculateCost(
-        model: String?,
-        inputTokens: Int,
-        outputTokens: Int,
-        cacheReadTokens: Int,
-        cacheCreationTokens: Int,
-        cacheCreation5mTokens: Int = 0,
-        cacheCreation1hTokens: Int = 0
-    ) -> Double {
-        let pricing = getPricing(for: model)
-
-        // Base input tokens (excluding cache tokens which are billed separately)
-        let baseInputTokens = max(0, inputTokens - cacheReadTokens - cacheCreationTokens)
-        let baseInputCost = (Double(baseInputTokens) / 1_000_000) * pricing.inputPerMillion
-
-        // Cache creation cost — use per-TTL pricing when breakdown is available
-        let cacheCreationCost: Double
-        if cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0 {
-            let cost5m = (Double(cacheCreation5mTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-            let cost1h = (Double(cacheCreation1hTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite1hMultiplier
-            cacheCreationCost = cost5m + cost1h
-        } else {
-            cacheCreationCost = (Double(cacheCreationTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-        }
-
-        // Cache read cost (discounted rate)
-        let cacheReadCost = (Double(cacheReadTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheReadMultiplier
-
-        // Output cost
-        let outputCost = (Double(outputTokens) / 1_000_000) * pricing.outputPerMillion
-
-        return baseInputCost + cacheCreationCost + cacheReadCost + outputCost
     }
 
     // MARK: - Initialization
@@ -393,16 +350,6 @@ struct ConsolidatedAnalytics {
         }
 
         self.turns = turnEntries.enumerated().map { offset, value in
-            let finalCost = value.cost ?? Self.calculateCost(
-                model: value.model,
-                inputTokens: value.input,
-                outputTokens: value.output,
-                cacheReadTokens: value.cacheRead,
-                cacheCreationTokens: value.cacheCreation,
-                cacheCreation5mTokens: value.cacheCreation5m,
-                cacheCreation1hTokens: value.cacheCreation1h
-            )
-
             return TurnData(
                 turn: offset + 1,
                 inputTokens: value.input,
@@ -411,7 +358,7 @@ struct ConsolidatedAnalytics {
                 cacheCreationTokens: value.cacheCreation,
                 cacheCreation5mTokens: value.cacheCreation5m,
                 cacheCreation1hTokens: value.cacheCreation1h,
-                cost: finalCost,
+                cost: value.cost ?? 0,
                 latency: value.latency,
                 toolCount: value.tools.count,
                 tools: value.tools,

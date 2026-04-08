@@ -59,6 +59,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let source: String?
     /// Whether this is the persistent chat session
     let isChat: Bool?
+    /// Whether the agent is currently running in this session (server-authoritative)
+    let isRunning: Bool?
 
     var id: String { sessionId }
 

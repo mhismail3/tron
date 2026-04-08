@@ -153,6 +153,9 @@ impl SessionReconstructService {
             "inFlight": in_flight,
             "lastSequence": last_sequence,
             "isRunning": is_running,
+            // Note: "postProcessing" phase (between agent.complete and agent.ready) is not
+            // tracked by the orchestrator, so reconnection during that brief window shows "idle".
+            "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
             "pendingQueue": pending_queue,
         }))

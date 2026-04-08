@@ -70,23 +70,7 @@ final class SettingsState {
         guard !isLoaded else { return }
         do {
             let settings = try await rpcClient.settings.get()
-            preserveRecentCount = settings.compaction.preserveRecentCount
-            maxPreservedRatio = settings.compaction.maxPreservedRatio
-            triggerTokenThreshold = settings.compaction.triggerTokenThreshold
-            maxConcurrentSessions = settings.maxConcurrentSessions
-            rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
-            isolationMode = settings.isolationMode
-            cacheTtlSecs = settings.cacheTtlSecs
-            queueDrainMode = settings.queueDrainMode
-            connectionPresets = settings.connectionPresets
-            hooksLlmModel = settings.hooksLlmModel
-            builtinHooks = settings.builtinHooks
-            if let workspace = settings.defaultWorkspace {
-                quickSessionWorkspace = workspace
-            }
-            chatWorkspace = settings.chatWorkingDirectory ?? ""
-            skillsCompactionPolicy = settings.skillsCompactionPolicy
-            skillsShowIndex = settings.skillsShowIndex
+            applyServerSettings(settings)
             isLoaded = true
         } catch {
             loadError = error.localizedDescription
@@ -112,39 +96,31 @@ final class SettingsState {
 
     // MARK: - Reset
 
-    func resetToDefaults() {
-        preserveRecentCount = 5
-        maxPreservedRatio = 0.20
-        triggerTokenThreshold = 0.70
-        maxConcurrentSessions = 10
-        rulesDiscoverStandaloneFiles = true
-        isolationMode = "always"
-        cacheTtlSecs = 3600
-        queueDrainMode = "sequential"
-        quickSessionWorkspace = AppConstants.defaultWorkspace
-        chatWorkspace = ""
-        hooksLlmModel = "claude-haiku-4-5-20251001"
-        builtinHooks = []
-        skillsCompactionPolicy = "clearAll"
-        skillsShowIndex = "always"
+    /// Reset settings to server defaults via RPC. The server applies its own defaults
+    /// and returns the new values — no hardcoded defaults on the client.
+    func resetToDefaults(using rpcClient: RPCClient) async throws {
+        let settings = try await rpcClient.settings.resetToDefaults()
+        applyServerSettings(settings)
     }
 
-    // MARK: - Server Update Builder
-
-    func buildResetUpdate() -> ServerSettingsUpdate {
-        ServerSettingsUpdate(
-            server: .init(defaultWorkspace: AppConstants.defaultWorkspace, maxConcurrentSessions: 10),
-            context: .init(
-                compactor: .init(
-                preserveRecentCount: 5,
-                triggerTokenThreshold: 0.70,
-                maxPreservedRatio: 0.20
-                ),
-                rules: .init(discoverStandaloneFiles: true)
-            ),
-            session: .init(isolation: .init(mode: "always"), chat: .init(workingDirectory: ""), cacheTtlSecs: 3600, queueDrainMode: "sequential"),
-            hooks: .init(llmModel: "claude-haiku-4-5-20251001", builtinHooks: []),
-            skills: .init(compactionPolicy: "clearAll", showIndex: "always")
-        )
+    /// Apply a ServerSettings response to local state (shared by load and reset).
+    private func applyServerSettings(_ settings: ServerSettings) {
+        preserveRecentCount = settings.compaction.preserveRecentCount
+        maxPreservedRatio = settings.compaction.maxPreservedRatio
+        triggerTokenThreshold = settings.compaction.triggerTokenThreshold
+        maxConcurrentSessions = settings.maxConcurrentSessions
+        rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
+        isolationMode = settings.isolationMode
+        cacheTtlSecs = settings.cacheTtlSecs
+        queueDrainMode = settings.queueDrainMode
+        connectionPresets = settings.connectionPresets
+        hooksLlmModel = settings.hooksLlmModel
+        builtinHooks = settings.builtinHooks
+        if let workspace = settings.defaultWorkspace {
+            quickSessionWorkspace = workspace
+        }
+        chatWorkspace = settings.chatWorkingDirectory ?? ""
+        skillsCompactionPolicy = settings.skillsCompactionPolicy
+        skillsShowIndex = settings.skillsShowIndex
     }
 }
