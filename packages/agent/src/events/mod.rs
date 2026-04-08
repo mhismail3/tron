@@ -41,7 +41,7 @@ pub use reconstruct::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
 pub use sqlite::repositories::device_token::RegisterTokenResult;
-pub use sqlite::repositories::session::MessagePreview;
+pub use sqlite::repositories::session::{ActivitySummaryLine, MessagePreview};
 pub use sqlite::{
     ConnectionConfig, ConnectionPool, MigrationResult, PooledConnection, new_file, new_in_memory,
     run_migrations,

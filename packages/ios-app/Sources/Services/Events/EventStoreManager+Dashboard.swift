@@ -38,21 +38,16 @@ extension EventStoreManager {
             updateSessionActivityLines(sessionId: sessionId, lines: snapshot)
         }
         dashboardStreamManager.clearBuffer(for: sessionId)
-
-        do {
-            try await syncSessionEvents(sessionId: sessionId)
-        } catch {
-            logger.error("Failed to sync events after completion for \(sessionId): \(error)", category: .database)
-        }
-        extractDashboardInfoFromEvents(sessionId: sessionId)
+        // Server sends fresh activity lines via session.updated event
+        // (arrives shortly after agent.complete). No need to sync events
+        // or extract client-side.
     }
 
     /// Update dashboard display fields for a session.
     func updateSessionDashboardInfo(
         sessionId: String,
         lastUserPrompt: String? = nil,
-        lastAssistantResponse: String? = nil,
-        lastToolCount: Int? = nil
+        lastAssistantResponse: String? = nil
     ) {
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
             updateSession(at: index) { session in
@@ -61,9 +56,6 @@ extension EventStoreManager {
                 }
                 if let response = lastAssistantResponse {
                     session.lastAssistantResponse = response
-                }
-                if let toolCount = lastToolCount {
-                    session.lastToolCount = toolCount
                 }
             }
         }
@@ -76,29 +68,4 @@ extension EventStoreManager {
         }
     }
 
-    /// Extract dashboard info from events after sync.
-    /// Delegates to ContentExtractor utility.
-    func extractDashboardInfoFromEvents(sessionId: String) {
-        do {
-            let events = try eventDB.events.getBySession(sessionId)
-
-            let info = ContentExtractor.extractDashboardInfo(from: events)
-
-            updateSessionDashboardInfo(
-                sessionId: sessionId,
-                lastUserPrompt: info.lastUserPrompt,
-                lastAssistantResponse: info.lastAssistantResponse,
-                lastToolCount: info.lastToolCount
-            )
-
-            // Build activity lines from stored events for card display.
-            // Always rebuild — persisted lines from live snapshots may have stale subagent status.
-            let activityLines = ContentExtractor.extractActivityLines(from: events)
-            if !activityLines.isEmpty {
-                updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
-            }
-        } catch {
-            logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
-        }
-    }
 }

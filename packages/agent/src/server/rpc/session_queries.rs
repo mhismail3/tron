@@ -57,6 +57,10 @@ impl SessionQueryService {
                 .get_session_message_previews(&session_ids)
                 .unwrap_or_default();
 
+            let activity_summaries = event_store
+                .get_session_activity_summaries_batch(&session_ids)
+                .unwrap_or_default();
+
             let items: Vec<Value> = sessions
                 .into_iter()
                 .map(|session| {
@@ -87,6 +91,7 @@ impl SessionQueryService {
                         "parentSessionId": session.parent_session_id,
                         "lastUserPrompt": preview.and_then(|p| p.last_user_prompt.as_deref()),
                         "lastAssistantResponse": preview.and_then(|p| p.last_assistant_response.as_deref()),
+                        "activityLines": activity_summaries.get(&session.id).cloned().unwrap_or_default(),
                     })
                 })
                 .collect();

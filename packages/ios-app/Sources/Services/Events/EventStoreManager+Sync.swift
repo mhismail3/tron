@@ -50,29 +50,9 @@ extension EventStoreManager {
             loadSessions()
             seedProcessingStateFromSessions()
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
-
-            // Background: sync events for sessions missing activity lines
-            Task { await self.syncActivityLinesForDashboard() }
         } catch {
             logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
             ErrorHandler.shared.handle(error, context: "Session refresh")
-        }
-    }
-
-    /// Sync events and rebuild activity lines for all dashboard sessions.
-    /// Runs in background after session list refresh. Always re-extracts from
-    /// persisted events — avoids stale-data heuristics that miss edge cases.
-    func syncActivityLinesForDashboard() async {
-        let dashboardSessions = sessions.filter { !$0.isChat }
-        guard !dashboardSessions.isEmpty else { return }
-
-        for session in dashboardSessions.prefix(10) {
-            do {
-                try await syncSessionEvents(sessionId: session.id)
-                extractDashboardInfoFromEvents(sessionId: session.id)
-            } catch {
-                logger.debug("Failed to sync events for dashboard session \(session.id): \(error.localizedDescription)", category: .session)
-            }
         }
     }
 
@@ -205,6 +185,9 @@ extension EventStoreManager {
         session.serverOrigin = serverOrigin
         session.isChat = info.isChat ?? false
         session.isProcessing = info.isRunning ?? false
+        if let serverLines = info.activityLines {
+            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+        }
         return session
     }
 
@@ -239,6 +222,11 @@ extension EventStoreManager {
         session.serverOrigin = serverOrigin
         session.isChat = serverInfo.isChat ?? existing.isChat
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
+        if let serverLines = serverInfo.activityLines {
+            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+        } else {
+            session.lastActivityLines = existing.lastActivityLines
+        }
         return session
     }
 

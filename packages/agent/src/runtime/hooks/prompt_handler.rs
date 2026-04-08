@@ -355,6 +355,7 @@ impl HookHandler for PromptHookHandler {
                                 last_user_prompt: None,
                                 last_assistant_response: None,
                                 parent_session_id: None,
+                                activity_lines: None,
                             });
                         }
                     }
@@ -1203,6 +1204,7 @@ mod tests {
             last_user_prompt: None,
             last_assistant_response: None,
             parent_session_id: None,
+            activity_lines: None,
         };
 
         let json = serde_json::to_value(&event).unwrap();

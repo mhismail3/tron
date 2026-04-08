@@ -139,6 +139,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             last_user_prompt,
             last_assistant_response,
             parent_session_id,
+            activity_lines,
             ..
         } => Some(global(
             event,
@@ -158,6 +159,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "lastUserPrompt": last_user_prompt,
                 "lastAssistantResponse": last_assistant_response,
                 "parentSessionId": parent_session_id,
+                "activityLines": activity_lines,
             })),
         )),
         TronEvent::MemoryUpdating { .. } => Some(session_scoped(

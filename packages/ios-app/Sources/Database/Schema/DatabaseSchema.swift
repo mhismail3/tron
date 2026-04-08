@@ -6,7 +6,7 @@ import SQLite3
 enum DatabaseSchema {
 
     /// Current schema version for tracking migrations.
-    static let version = 7
+    static let version = 8
 
     // MARK: - Public API
 
@@ -134,6 +134,9 @@ enum DatabaseSchema {
 
         // Create archived_at index (safe after migration has run)
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived_at)")
+
+        // Migration: Add activity_lines_json for server-computed dashboard activity lines
+        try addColumnIfNotExists(db: db, table: "sessions", column: "activity_lines_json", definition: "TEXT")
     }
 
     /// Migrate old sessions table schema by rebuilding the table.

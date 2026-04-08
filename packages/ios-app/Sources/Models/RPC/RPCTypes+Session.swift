@@ -61,6 +61,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let isChat: Bool?
     /// Whether the agent is currently running in this session (server-authoritative)
     let isRunning: Bool?
+    /// Server-computed activity summary lines for dashboard cards
+    let activityLines: [ServerActivityLine]?
 
     var id: String { sessionId }
 

@@ -754,6 +754,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                     .as_ref()
                     .and_then(|preview| preview.last_assistant_response.clone()),
                 parent_session_id: update.session.parent_session_id.clone(),
+                activity_lines: Some(update.activity_lines),
             });
         }
         Ok(None) => {}

@@ -285,6 +285,9 @@ final class EventStoreManager {
             if let response = result.lastAssistantResponse {
                 session.lastAssistantResponse = response
             }
+            if let serverLines = result.activityLines {
+                session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+            }
         }
 
         // Also persist to local DB so the data survives app restarts
@@ -478,16 +481,10 @@ final class EventStoreManager {
     /// Actual loadSessions implementation (called directly or after debounce).
     private func _loadSessionsImmediate() {
         do {
-            // Preserve existing transient state before reloading
-            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, activityLines: [ActivityLine]?, isProcessing: Bool?)] = [:]
+            // Preserve transient state that isn't persisted to DB
+            var preservedState: [String: (activityLines: [ActivityLine]?, isProcessing: Bool?)] = [:]
             for session in sessions {
-                preservedDashboardInfo[session.id] = (
-                    session.lastUserPrompt,
-                    session.lastAssistantResponse,
-                    session.lastToolCount,
-                    session.lastActivityLines,
-                    session.isProcessing
-                )
+                preservedState[session.id] = (session.lastActivityLines, session.isProcessing)
             }
 
             // Filter by current server origin if enabled
@@ -496,11 +493,11 @@ final class EventStoreManager {
             chatSessionId = sessions.first(where: { $0.isChat })?.id
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"), chat: \(chatSessionId ?? "none"))", category: .session)
 
-            // Restore preserved transient state and extract dashboard info
+            // Restore preserved transient state
             for i in sessions.indices {
                 let sessionId = sessions[i].id
 
-                if let preserved = preservedDashboardInfo[sessionId] {
+                if let preserved = preservedState[sessionId] {
                     sessions[i].isProcessing = preserved.isProcessing
                     if let activityLines = preserved.activityLines {
                         sessions[i].lastActivityLines = activityLines
@@ -510,8 +507,6 @@ final class EventStoreManager {
                 if processingSessionIds.contains(sessionId) {
                     sessions[i].isProcessing = true
                 }
-
-                extractDashboardInfoFromEvents(sessionId: sessionId)
             }
         } catch {
             logger.error("Failed to load sessions: \(error.localizedDescription)", category: .session)

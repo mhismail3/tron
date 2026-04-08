@@ -326,53 +326,6 @@ final class ContentExtractorTests: XCTestCase {
         XCTAssertEqual(text, "")
     }
 
-    func testExtractToolCount_FromContentBlocks() {
-        let content: [[String: Any]] = [
-            ["type": "text", "text": "Hello"],
-            ["type": "tool_use", "id": "t1", "name": "Bash"],
-            ["type": "tool_use", "id": "t2", "name": "Read"]
-        ]
-        let count = ContentExtractor.extractToolCount(from: content)
-        XCTAssertEqual(count, 2)
-    }
-
-    func testExtractToolCount_FromStringContent() {
-        let count = ContentExtractor.extractToolCount(from: "Just text")
-        XCTAssertEqual(count, 0)
-    }
-
-    func testExtractDashboardInfo_FromEvents() {
-        let userEvent = SessionEvent(
-            id: "e1",
-            parentId: nil,
-            sessionId: "s1",
-            workspaceId: "/test",
-            type: "message.user",
-            timestamp: "2024-01-01T00:00:00Z",
-            sequence: 1,
-            payload: ["content": AnyCodable("What is 2+2?")]
-        )
-        let assistantEvent = SessionEvent(
-            id: "e2",
-            parentId: "e1",
-            sessionId: "s1",
-            workspaceId: "/test",
-            type: "message.assistant",
-            timestamp: "2024-01-01T00:00:01Z",
-            sequence: 2,
-            payload: ["content": AnyCodable([
-                ["type": "text", "text": "The answer is 4"],
-                ["type": "tool_use", "id": "t1", "name": "Calculator"]
-            ])]
-        )
-
-        let info = ContentExtractor.extractDashboardInfo(from: [userEvent, assistantEvent])
-
-        XCTAssertEqual(info.lastUserPrompt, "What is 2+2?")
-        XCTAssertEqual(info.lastAssistantResponse, "The answer is 4")
-        XCTAssertEqual(info.lastToolCount, 1)
-    }
-
     // MARK: - Payload-Based Methods Tests
 
     func testHasToolBlocks_DetectsToolUse() {

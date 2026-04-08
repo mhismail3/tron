@@ -25,8 +25,9 @@ final class SessionRepository {
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, archived_at, event_count,
              message_count, input_tokens, output_tokens, last_turn_input_tokens,
-             cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin, is_chat)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin, is_chat,
+             activity_lines_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -57,6 +58,15 @@ final class SessionRepository {
         transport.bindOptionalText(stmt, 20, session.serverOrigin)
         sqlite3_bind_int(stmt, 21, Int32(session.isChat ? 1 : 0))
 
+        // Persist activity lines as JSON
+        if let lines = session.lastActivityLines,
+           let data = try? JSONEncoder().encode(lines),
+           let json = String(data: data, encoding: .utf8) {
+            sqlite3_bind_text(stmt, 22, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        } else {
+            sqlite3_bind_null(stmt, 22)
+        }
+
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(transport.errorMessage)
         }
@@ -75,7 +85,7 @@ final class SessionRepository {
                    working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
                    cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                   is_chat
+                   is_chat, activity_lines_json
             FROM sessions WHERE id = ?
         """
 
@@ -105,7 +115,7 @@ final class SessionRepository {
                    working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
                    cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                   is_chat
+                   is_chat, activity_lines_json
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -318,7 +328,14 @@ final class SessionRepository {
         let serverOrigin = transport.getOptionalText(stmt, 19)
         let isChat = sqlite3_column_int(stmt, 20) != 0
 
-        return CachedSession(
+        // Decode persisted activity lines from JSON
+        var activityLines: [ActivityLine]?
+        if let jsonStr = transport.getOptionalText(stmt, 21),
+           let data = jsonStr.data(using: .utf8) {
+            activityLines = try? JSONDecoder().decode([ActivityLine].self, from: data)
+        }
+
+        var session = CachedSession(
             id: id,
             workspaceId: workspaceId,
             rootEventId: rootEventId,
@@ -341,6 +358,8 @@ final class SessionRepository {
             serverOrigin: serverOrigin,
             isChat: isChat
         )
+        session.lastActivityLines = activityLines
+        return session
     }
 
     /// Parse an event row from SQL result (for fork queries)

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use serde_json::Value;
-use crate::events::{EventStore, EventType, MessagePreview};
+use crate::events::{ActivitySummaryLine, EventStore, EventType, MessagePreview};
 use crate::runtime::orchestrator::event_persister::EventPersister;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::session_reconstructor::ReconstructedState;
@@ -185,6 +185,7 @@ pub struct ResumedPromptSession {
 pub struct SessionUpdateData {
     pub session: crate::events::sqlite::row_types::SessionRow,
     pub preview: Option<MessagePreview>,
+    pub activity_lines: Vec<ActivitySummaryLine>,
 }
 
 fn load_prompt_context_artifacts(
@@ -811,7 +812,11 @@ pub async fn load_session_update_data(
             .ok()
             .and_then(|mut previews| previews.remove(&session_id));
 
-        Ok(Some(SessionUpdateData { session, preview }))
+        let activity_lines = event_store
+            .get_session_activity_summaries(&session_id)
+            .unwrap_or_default();
+
+        Ok(Some(SessionUpdateData { session, preview, activity_lines }))
     })
     .await
 }

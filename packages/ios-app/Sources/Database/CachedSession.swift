@@ -33,7 +33,6 @@ struct CachedSession: Identifiable, Codable {
     // Dashboard display fields
     var lastUserPrompt: String?
     var lastAssistantResponse: String?
-    var lastToolCount: Int?
     var lastActivityLines: [ActivityLine]?
     var isProcessing: Bool?
 

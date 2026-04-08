@@ -734,6 +734,8 @@ tron_events! {
         last_assistant_response: Option<String>,
         #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
+        #[serde(rename = "activityLines", skip_serializing_if = "Option::is_none")]
+        activity_lines: Option<Vec<crate::events::sqlite::repositories::session::ActivitySummaryLine>>,
     } => "session_updated",
 
     /// Memory updating (shows spinner in iOS).
@@ -1760,6 +1762,7 @@ mod tests {
                 last_user_prompt: None,
                 last_assistant_response: None,
                 parent_session_id: None,
+                activity_lines: None,
             },
             TronEvent::MemoryUpdating { base: base.clone() },
             TronEvent::MemoryUpdated {
@@ -1978,6 +1981,7 @@ mod tests {
             last_user_prompt: Some("hello".into()),
             last_assistant_response: Some("world".into()),
             parent_session_id: None,
+            activity_lines: None,
         };
         assert_eq!(e.event_type(), "session_updated");
         assert_eq!(e.session_id(), "s1");

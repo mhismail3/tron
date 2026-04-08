@@ -292,7 +292,6 @@ extension EventStoreManager {
             cost: 0.0,
             lastUserPrompt: sourceSession?.lastUserPrompt,
             lastAssistantResponse: sourceSession?.lastAssistantResponse,
-            lastToolCount: nil,
             isProcessing: false,
             isFork: true,
             serverOrigin: serverOrigin

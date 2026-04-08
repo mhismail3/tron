@@ -129,6 +129,7 @@ fn session_updated_remains_global() {
         last_user_prompt: None,
         last_assistant_response: None,
         parent_session_id: None,
+        activity_lines: None,
     };
     let bridged = tron_event_to_bridged(&event);
     assert_eq!(bridged.scope, BroadcastScope::All);
@@ -977,6 +978,7 @@ fn all_event_types_have_wire_mapping() {
             last_user_prompt: None,
             last_assistant_response: None,
             parent_session_id: None,
+            activity_lines: None,
         },
         TronEvent::MemoryUpdating { base: base.clone() },
         TronEvent::MemoryUpdated {
@@ -1093,6 +1095,7 @@ fn session_updated_wire_type_and_data() {
         last_user_prompt: Some("hello".into()),
         last_assistant_response: Some("world".into()),
         parent_session_id: None,
+        activity_lines: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "session.updated");

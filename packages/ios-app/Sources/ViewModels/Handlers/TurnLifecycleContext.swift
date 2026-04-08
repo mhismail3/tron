@@ -79,5 +79,5 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
     func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) throws
 
     /// Update session dashboard info in database
-    func updateSessionDashboardInfo(lastAssistantResponse: String?, lastToolCount: Int?)
+    func updateSessionDashboardInfo(lastAssistantResponse: String?)
 }

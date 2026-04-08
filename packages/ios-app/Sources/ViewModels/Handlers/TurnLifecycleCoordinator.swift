@@ -244,11 +244,10 @@ final class TurnLifecycleCoordinator {
         // Remove catching-up notification if still present
         context.finalizeStreamingMessage()
 
-        // Update dashboard with final response and tool count
+        // Update dashboard with final response
         context.setSessionProcessing(false)
         context.updateSessionDashboardInfo(
-            lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200)),
-            lastToolCount: context.currentTurnToolCalls.isEmpty ? nil : context.currentTurnToolCalls.count
+            lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200))
         )
 
         context.currentToolMessages.removeAll()

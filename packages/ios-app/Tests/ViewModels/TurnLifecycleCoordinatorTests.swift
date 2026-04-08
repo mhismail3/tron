@@ -629,7 +629,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         // No-op for mock
     }
 
-    func updateSessionDashboardInfo(lastAssistantResponse: String?, lastToolCount: Int?) {
+    func updateSessionDashboardInfo(lastAssistantResponse: String?) {
         // No-op for mock
     }
 

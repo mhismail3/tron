@@ -147,6 +147,7 @@ impl MethodHandler for SwitchModelHandler {
                 last_user_prompt: None,
                 last_assistant_response: None,
                 parent_session_id: session.parent_session_id.clone(),
+                activity_lines: None,
             });
 
         Ok(serde_json::json!({

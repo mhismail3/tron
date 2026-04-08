@@ -6,7 +6,8 @@ use crate::events::errors::{EventStoreError, Result};
 use crate::events::sqlite::repositories::branch::BranchRepo;
 use crate::events::sqlite::repositories::event::EventRepo;
 use crate::events::sqlite::repositories::session::{
-    CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
+    ActivitySummaryLine, CreateSessionOptions, IncrementCounters, ListSessionsOptions,
+    MessagePreview, SessionRepo,
 };
 use crate::events::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::events::sqlite::row_types::SessionRow;
@@ -294,6 +295,31 @@ impl EventStore {
     ) -> Result<HashMap<String, MessagePreview>> {
         let conn = self.conn()?;
         SessionRepo::get_message_previews(&conn, session_ids)
+    }
+
+    /// Get activity summary lines for a single session's dashboard card.
+    pub fn get_session_activity_summaries(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ActivitySummaryLine>> {
+        let conn = self.conn()?;
+        SessionRepo::get_activity_summaries(&conn, session_id)
+    }
+
+    /// Get activity summaries for multiple sessions (batch).
+    pub fn get_session_activity_summaries_batch(
+        &self,
+        session_ids: &[&str],
+    ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {
+        let conn = self.conn()?;
+        let mut result = HashMap::new();
+        for &sid in session_ids {
+            result.insert(
+                sid.to_string(),
+                SessionRepo::get_activity_summaries(&conn, sid)?,
+            );
+        }
+        Ok(result)
     }
 
     /// Update session source (e.g. `"cron"` for scheduled sessions).

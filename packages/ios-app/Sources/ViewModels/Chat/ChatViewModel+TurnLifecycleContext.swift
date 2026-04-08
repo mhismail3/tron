@@ -163,11 +163,10 @@ extension ChatViewModel: TurnLifecycleContext {
     }
 
     /// Update session dashboard info in database (TurnLifecycleContext)
-    func updateSessionDashboardInfo(lastAssistantResponse: String?, lastToolCount: Int?) {
+    func updateSessionDashboardInfo(lastAssistantResponse: String?) {
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
-            lastAssistantResponse: lastAssistantResponse,
-            lastToolCount: lastToolCount
+            lastAssistantResponse: lastAssistantResponse
         )
     }
 

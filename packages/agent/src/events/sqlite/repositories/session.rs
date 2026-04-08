@@ -3,7 +3,11 @@
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
 
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::events::errors::Result;
@@ -110,6 +114,50 @@ fn extract_text_from_payload(payload_str: &str) -> String {
             texts.join("")
         }
         _ => String::new(),
+    }
+}
+
+/// Activity summary line for dashboard card display.
+/// Lightweight: iOS enriches with ToolRegistry for icons/colors/summaries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySummaryLine {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_args: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns: Option<i64>,
+}
+
+/// Truncation constants matching iOS `DashboardConstants`.
+const MAX_USER_PROMPT_LEN: usize = 100;
+const MAX_ASSISTANT_TEXT_LEN: usize = 200;
+const MAX_SUBAGENT_TEXT_LEN: usize = 50;
+const MAX_ACTIVITY_LINES: usize = 5;
+
+/// Extract first non-empty line from text.
+fn first_non_empty_line(text: &str) -> String {
+    text.split('\n')
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or(text.trim())
+        .to_string()
+}
+
+/// Truncate string to max length (char-aware).
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        s.chars().take(max_len).collect()
     }
 }
 
@@ -497,6 +545,201 @@ impl SessionRepo {
         }
 
         Ok(result)
+    }
+
+    /// Build activity summary lines for a session's dashboard card.
+    ///
+    /// Walks persisted events to produce a compact summary of recent activity.
+    /// iOS enriches each line with `ToolRegistry` for icons, colors, and argument summaries.
+    pub fn get_activity_summaries(
+        conn: &Connection,
+        session_id: &str,
+    ) -> Result<Vec<ActivitySummaryLine>> {
+        let mut stmt = conn.prepare(
+            "SELECT type, payload, tool_call_id FROM events
+             WHERE session_id = ?1
+               AND type IN ('message.user', 'message.assistant', 'tool.result',
+                            'subagent.spawned', 'subagent.completed', 'subagent.failed')
+             ORDER BY sequence ASC",
+        )?;
+
+        let rows: Vec<(String, String, Option<String>)> = stmt
+            .query_map(params![session_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        // Pass 1: collect tool result info by toolCallId
+        let mut tool_results: HashMap<String, (bool, Option<i64>)> = HashMap::new();
+        for (event_type, payload_str, _) in &rows {
+            if event_type == "tool.result" {
+                if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
+                    if let Some(tcid) = payload.get("toolCallId").and_then(|v| v.as_str()) {
+                        let is_error =
+                            payload.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let duration = payload.get("duration").and_then(|v| v.as_i64());
+                        tool_results.insert(tcid.to_string(), (is_error, duration));
+                    }
+                }
+            }
+        }
+
+        // Pass 1b: collect hook subagent IDs (spawned with tool_call_id IS NULL)
+        let mut hook_subagent_ids: HashSet<String> = HashSet::new();
+        for (event_type, payload_str, tool_call_id) in &rows {
+            if event_type == "subagent.spawned" && tool_call_id.is_none() {
+                if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
+                    if let Some(sub_id) =
+                        payload.get("subagentSessionId").and_then(|v| v.as_str())
+                    {
+                        hook_subagent_ids.insert(sub_id.to_string());
+                    }
+                }
+            }
+        }
+
+        // Pass 2: walk events in order, building activity lines
+        let mut lines: Vec<ActivitySummaryLine> = Vec::new();
+
+        for (event_type, payload_str, tool_call_id) in &rows {
+            let payload: Value = serde_json::from_str(payload_str).unwrap_or(Value::Null);
+
+            match event_type.as_str() {
+                "message.user" => {
+                    let text = extract_text_from_payload(payload_str);
+                    if !text.is_empty() {
+                        let fl = first_non_empty_line(&text);
+                        lines.push(ActivitySummaryLine {
+                            kind: "userPrompt".into(),
+                            text: Some(truncate(&fl, MAX_USER_PROMPT_LEN)),
+                            ..Default::default()
+                        });
+                    }
+                }
+                "message.assistant" => {
+                    if let Some(Value::Array(blocks)) = payload.get("content") {
+                        for block in blocks {
+                            let bt = block.get("type").and_then(|t| t.as_str());
+                            match bt {
+                                Some("text") => {
+                                    if let Some(text) =
+                                        block.get("text").and_then(|t| t.as_str())
+                                    {
+                                        let trimmed = text.trim();
+                                        if !trimmed.is_empty() {
+                                            let fl = first_non_empty_line(trimmed);
+                                            lines.push(ActivitySummaryLine {
+                                                kind: "text".into(),
+                                                text: Some(truncate(
+                                                    &fl,
+                                                    MAX_ASSISTANT_TEXT_LEN,
+                                                )),
+                                                ..Default::default()
+                                            });
+                                        }
+                                    }
+                                }
+                                Some("tool_use") => {
+                                    let name = block
+                                        .get("name")
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or("unknown");
+                                    if name == "SpawnSubagent" {
+                                        continue;
+                                    }
+                                    let tool_id = block.get("id").and_then(|id| id.as_str());
+                                    let input = block
+                                        .get("input")
+                                        .cloned()
+                                        .or_else(|| block.get("arguments").cloned());
+                                    let result = tool_id.and_then(|id| tool_results.get(id));
+
+                                    lines.push(ActivitySummaryLine {
+                                        kind: "tool".into(),
+                                        tool_name: Some(name.to_string()),
+                                        tool_args: input,
+                                        duration_ms: result.and_then(|(_, d)| *d),
+                                        is_error: result.map(|(e, _)| *e),
+                                        ..Default::default()
+                                    });
+                                }
+                                Some("thinking") => {
+                                    lines.push(ActivitySummaryLine {
+                                        kind: "thinking".into(),
+                                        ..Default::default()
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "subagent.spawned" => {
+                    if tool_call_id.is_some() {
+                        let task = payload
+                            .get("task")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("Sub-agent task");
+                        lines.push(ActivitySummaryLine {
+                            kind: "subagentSpawn".into(),
+                            text: Some(format!("Agent: {}", truncate(task, MAX_SUBAGENT_TEXT_LEN))),
+                            ..Default::default()
+                        });
+                    }
+                }
+                "subagent.completed" => {
+                    let sub_id = payload.get("subagentSessionId").and_then(|v| v.as_str());
+                    if sub_id.is_some_and(|id| hook_subagent_ids.contains(id)) {
+                        continue;
+                    }
+                    let turns = payload.get("totalTurns").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let duration = payload.get("duration").and_then(|v| v.as_i64());
+                    let complete_line = ActivitySummaryLine {
+                        kind: "subagentDone".into(),
+                        text: Some(format!("Agent complete ({turns} turns)")),
+                        duration_ms: duration,
+                        turns: Some(turns),
+                        ..Default::default()
+                    };
+                    if let Some(idx) = lines.iter().rposition(|l| l.kind == "subagentSpawn") {
+                        lines[idx] = complete_line;
+                    } else {
+                        lines.push(complete_line);
+                    }
+                }
+                "subagent.failed" => {
+                    let sub_id = payload.get("subagentSessionId").and_then(|v| v.as_str());
+                    if sub_id.is_some_and(|id| hook_subagent_ids.contains(id)) {
+                        continue;
+                    }
+                    let error = payload
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown error");
+                    let fail_line = ActivitySummaryLine {
+                        kind: "subagentFailed".into(),
+                        text: Some(format!(
+                            "Agent failed: {}",
+                            truncate(error, MAX_SUBAGENT_TEXT_LEN)
+                        )),
+                        ..Default::default()
+                    };
+                    if let Some(idx) = lines.iter().rposition(|l| l.kind == "subagentSpawn") {
+                        lines[idx] = fail_line;
+                    } else {
+                        lines.push(fail_line);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let start = lines.len().saturating_sub(MAX_ACTIVITY_LINES);
+        Ok(lines[start..].to_vec())
     }
 
     /// List subagent sessions for a parent.

@@ -30,6 +30,7 @@ enum SessionUpdatedPlugin: EventPlugin {
             let lastUserPrompt: String?
             let lastAssistantResponse: String?
             let parentSessionId: String?
+            let activityLines: [ServerActivityLine]?
         }
     }
 
@@ -51,6 +52,7 @@ enum SessionUpdatedPlugin: EventPlugin {
         let lastUserPrompt: String?
         let lastAssistantResponse: String?
         let parentSessionId: String?
+        let activityLines: [ServerActivityLine]?
     }
 
     // MARK: - Protocol Implementation
@@ -72,7 +74,8 @@ enum SessionUpdatedPlugin: EventPlugin {
             isActive: event.data?.isActive,
             lastUserPrompt: event.data?.lastUserPrompt,
             lastAssistantResponse: event.data?.lastAssistantResponse,
-            parentSessionId: event.data?.parentSessionId
+            parentSessionId: event.data?.parentSessionId,
+            activityLines: event.data?.activityLines
         )
     }
 }
