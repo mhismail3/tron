@@ -219,6 +219,7 @@ struct ChatSheetContent: View {
                 rpcClient: rpcClient,
                 onSendResults: { _ in
                     viewModel.deliverSubagentResults()
+                    sheetCoordinator?.dismiss()
                 }
             )
             .adaptivePresentationDetents([.medium, .large])
@@ -237,9 +238,11 @@ struct ChatSheetContent: View {
             rpcClient: rpcClient,
             onSendAll: {
                 viewModel.deliverSubagentResults()
+                sheetCoordinator?.dismiss()
             },
             onSendIndividual: { _ in
                 viewModel.deliverSubagentResults()
+                sheetCoordinator?.dismiss()
             }
         )
         .adaptivePresentationDetents([.medium, .large])
