@@ -1,34 +1,87 @@
 import SwiftUI
 
-/// Sheet showing full thinking content for a single block
-/// Uses iOS 26 liquid glass styling to match AskUserQuestionSheet
+/// Sheet showing full thinking content with real-time streaming support.
+///
+/// When thinking is actively streaming, content updates live and auto-scrolls to the bottom.
+/// When the user scrolls up, auto-scroll pauses until they return to the bottom.
+/// When streaming has ended, displays the final content statically (scrolled to top).
 @available(iOS 26.0, *)
 struct ThinkingDetailSheet: View {
-    let content: String
+    let state: ThinkingDetailState
     @Environment(\.dismiss) private var dismiss
+
+    private let bottomAnchorID = "thinking-bottom"
+    private let topAnchorID = "thinking-top"
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    let blocks = MarkdownBlockParser.parse(content)
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(topAnchorID)
+
+                        let blocks = MarkdownBlockParser.parse(state.displayContent)
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                            MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+                        }
+                        // Invisible anchor at the bottom for scroll tracking
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
+                    }
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .onScrollPhaseChange { _, newPhase in
+                    if newPhase == .interacting || newPhase == .tracking {
+                        state.userDidScroll()
                     }
                 }
-                .textSelection(.enabled)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 24)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let distanceFromBottom = geometry.contentSize.height
+                        - geometry.contentOffset.y
+                        - geometry.containerSize.height
+                    return distanceFromBottom < 50
+                } action: { _, isNearBottom in
+                    if isNearBottom {
+                        state.userReturnedToBottom()
+                    }
+                }
+                .onChange(of: state.displayContent) { _, _ in
+                    if state.shouldAutoScroll {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: state.isActivelyStreaming) { _, _ in
+                    // Force toolbar re-evaluation when streaming state changes
+                }
+                .onAppear {
+                    if state.isActivelyStreaming {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Thinking")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
-                        .foregroundStyle(.tronPurple)
+                    HStack(spacing: 6) {
+                        if state.showStreamingIndicator {
+                            PulsingIcon(icon: .thinking, size: 12, color: .tronPurple)
+                        }
+                        Text("Thinking")
+                            .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
+                            .foregroundStyle(.tronPurple)
+                    }
                 }
             }
         }
@@ -39,23 +92,46 @@ struct ThinkingDetailSheet: View {
 
 // MARK: - Fallback for iOS 17
 
+/// iOS 17 fallback: same dual-mode content but simpler scroll handling.
+/// Always auto-scrolls during streaming (no onScrollPhaseChange/onScrollGeometryChange).
 struct ThinkingDetailSheetFallback: View {
-    let content: String
+    let state: ThinkingDetailState
     @Environment(\.dismiss) private var dismiss
+
+    private let bottomAnchorID = "thinking-bottom"
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    let blocks = MarkdownBlockParser.parse(content)
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        let blocks = MarkdownBlockParser.parse(state.displayContent)
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                            MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+                        }
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
+                    }
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
+                }
+                .onChange(of: state.displayContent) { _, _ in
+                    if state.isActivelyStreaming {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
                     }
                 }
-                .textSelection(.enabled)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 24)
+                .onAppear {
+                    if state.isActivelyStreaming {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                }
             }
             .navigationTitle("Thinking")
             .navigationBarTitleDisplayMode(.inline)

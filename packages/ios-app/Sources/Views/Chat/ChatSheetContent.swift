@@ -79,7 +79,12 @@ struct ChatSheetContent: View {
             NotifyAppDetailSheet(data: data)
 
         case .thinkingDetail(let content):
-            ThinkingDetailSheet(content: content)
+            ThinkingDetailSheet(
+                state: ThinkingDetailState(
+                    thinkingState: viewModel.thinkingState,
+                    staticContent: content
+                )
+            )
 
         case .commandToolDetail(let data):
             commandToolDetailSheet(fallback: data)
