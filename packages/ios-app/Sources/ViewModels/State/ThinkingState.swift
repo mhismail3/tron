@@ -41,6 +41,12 @@ final class ThinkingState {
         isStreaming = true
     }
 
+    /// Mark streaming as complete without clearing accumulated text.
+    /// Called when text deltas start arriving (thinking block is done but turn continues).
+    func markStreamingComplete() {
+        isStreaming = false
+    }
+
     /// Start a new turn for thinking
     func startTurn(_ turnNumber: Int, model: String?) {
         currentText = ""

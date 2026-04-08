@@ -511,6 +511,7 @@ final class ChatViewModel {
 
         messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
         messageWindowManager.updateMessage(messages[index])
+        thinkingState.markStreamingComplete()
     }
 
     /// Force flush any pending text updates (called before completion)

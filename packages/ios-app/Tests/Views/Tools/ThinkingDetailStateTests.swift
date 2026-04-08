@@ -112,6 +112,25 @@ struct ThinkingDetailStateTests {
         #expect(state.displayContent == "Turn 1 snapshot")
     }
 
+    @Test("markStreamingComplete stops indicator but preserves content")
+    func testMarkStreamingCompleteStopsIndicator() {
+        let thinking = ThinkingState()
+        thinking.handleThinkingDelta("Thinking about architecture")
+        let state = ThinkingDetailState(thinkingState: thinking, staticContent: "snapshot")
+
+        #expect(state.showStreamingIndicator)
+        #expect(state.isActivelyStreaming)
+        #expect(state.shouldAutoScroll)
+
+        // Text deltas start — thinking block is done but turn continues
+        thinking.markStreamingComplete()
+
+        #expect(!state.showStreamingIndicator)
+        #expect(!state.isActivelyStreaming)
+        #expect(!state.shouldAutoScroll)
+        #expect(state.displayContent == "Thinking about architecture")
+    }
+
     @Test("clearCurrentStreaming falls back to staticContent")
     func testClearCurrentStreamingFallback() {
         let thinking = ThinkingState()

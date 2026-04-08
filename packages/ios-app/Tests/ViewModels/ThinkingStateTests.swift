@@ -98,6 +98,39 @@ final class ThinkingStateTests: XCTestCase {
         XCTAssertEqual(p2?.model, "model-b")
     }
 
+    // MARK: - markStreamingComplete
+
+    func testMarkStreamingCompleteSetsStreamingFalse() {
+        let state = ThinkingState()
+        state.handleThinkingDelta("thinking content")
+        XCTAssertTrue(state.isStreaming)
+
+        state.markStreamingComplete()
+
+        XCTAssertFalse(state.isStreaming)
+    }
+
+    func testMarkStreamingCompletePreservesCurrentText() {
+        let state = ThinkingState()
+        state.handleThinkingDelta("preserved content")
+
+        state.markStreamingComplete()
+
+        XCTAssertEqual(state.currentText, "preserved content")
+    }
+
+    func testMarkStreamingCompleteDoesNotAffectEndTurn() {
+        let state = ThinkingState()
+        state.startTurn(1, model: "claude-opus-4-6")
+        state.handleThinkingDelta("thinking")
+        state.markStreamingComplete()
+
+        let payload = state.endTurn()
+
+        XCTAssertNotNil(payload)
+        XCTAssertEqual(payload?.content, "thinking")
+    }
+
     // MARK: - Cleanup
 
     func testClearCurrentStreamingResetsTextAndStreaming() {
