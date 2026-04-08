@@ -15,10 +15,12 @@ extension ChatViewModel {
         //    Uses reconstructSessionState() as single source of truth — same path as DB fallback.
         let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
         applyReconstructedConfig(state)
-        restoreSubagentState(from: state)
 
-        // 2. Replace displayed messages with reconstructed history
+        // 2. Replace displayed messages, then convert subagent tools using lifecycle events.
+        //    Order matters: restoreSubagentState modifies allReconstructedMessages in-place,
+        //    so it must run AFTER the array is set (matches loadPersistedMessagesAsync ordering).
         allReconstructedMessages = state.messages
+        restoreSubagentState(from: state)
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
         displayedMessageCount = batchSize
         hasMoreMessages = result.hasMoreEvents || allReconstructedMessages.count > batchSize
@@ -278,11 +280,13 @@ extension ChatViewModel {
             switch msg.content {
             case .toolUse(let data): return data.toolCallId == toolCall.toolCallId
             case .getConfirmation(let data): return data.toolCallId == toolCall.toolCallId
+            case .subagent(let data): return data.toolCallId == toolCall.toolCallId
             default: return false
             }
         }) {
-            // For .toolUse, update with richer in-flight data (streaming output, startedAt).
-            // For .getConfirmation, preserve the existing content type — don't downgrade to .toolUse.
+            // Only update .toolUse with richer in-flight data (streaming output, startedAt).
+            // .getConfirmation and .subagent have authoritative content from persisted lifecycle
+            // events — don't downgrade to .toolUse.
             if case .toolUse = messages[existingIdx].content {
                 messages[existingIdx].content = .toolUse(toolUseData)
             }
