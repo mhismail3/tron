@@ -338,7 +338,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.agentPhase = .idle
 
         // When
-        let result = TurnStartPlugin.Result(turnNumber: 1)
+        let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then - should be processing (not idle)
@@ -350,7 +350,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.agentPhase = .postProcessing
 
         // When
-        let result = TurnStartPlugin.Result(turnNumber: 2)
+        let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then - should clear stale postProcessing and set to processing
@@ -362,7 +362,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.agentPhase = .processing
 
         // When - turn starts: should remain processing
-        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1))
+        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing"))
         XCTAssertEqual(viewModel.agentPhase, .processing)
 
         // When - complete: should transition to postProcessing
@@ -382,7 +382,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.currentToolMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
 
         // When
-        let result = TurnStartPlugin.Result(turnNumber: 2)
+        let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then - tool tracking should be cleared
@@ -395,7 +395,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.askUserQuestionCalledInTurn = true
 
         // When
-        let result = TurnStartPlugin.Result(turnNumber: 1)
+        let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then
@@ -407,7 +407,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.thinkingMessageId = UUID()
 
         // When
-        let result = TurnStartPlugin.Result(turnNumber: 1)
+        let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then
@@ -524,7 +524,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // When - simulate a full turn
 
         // 1. Turn starts
-        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1))
+        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing"))
 
         // 2. Agent thinks
         viewModel.handleThinkingDelta("Let me analyze this...")

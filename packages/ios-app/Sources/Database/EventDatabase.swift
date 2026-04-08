@@ -104,22 +104,6 @@ final class EventDatabase: DatabaseTransport {
         try execute("DELETE FROM session_drafts")
     }
 
-    /// Remove duplicate events for a session, preferring events with richer content (tool blocks).
-    /// When content richness is equal, prefers server events (evt_*) over local events (UUIDs).
-    /// Call this to repair databases that have accumulated duplicates.
-    /// - Note: Delegates to EventDeduplicator for business logic.
-    func deduplicateSession(_ sessionId: String) throws -> Int {
-        let deduplicator = EventDeduplicator(eventDB: self)
-        return try deduplicator.deduplicateSession(sessionId)
-    }
-
-    /// Deduplicate all sessions in the database
-    /// - Note: Delegates to EventDeduplicator for business logic.
-    func deduplicateAllSessions() throws -> Int {
-        let deduplicator = EventDeduplicator(eventDB: self)
-        return try deduplicator.deduplicateAllSessions()
-    }
-
     // MARK: - DatabaseTransport Helpers
 
     var errorMessage: String {

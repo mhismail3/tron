@@ -333,7 +333,7 @@ final class MockGetConfirmationContext: GetConfirmationContext {
     var errorShown: String?
     var loggedMessages: [String] = []
 
-    let rpcClient = RPCClient()
+    let rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:0")!)
 
     func appendMessage(_ message: ChatMessage) {
         appendedMessages.append(message)

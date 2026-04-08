@@ -26,7 +26,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.askUserQuestionCalledInTurn = true
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -39,7 +39,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.streamingText = "Some text"
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -52,7 +52,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.thinkingMessageId = UUID()
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -64,7 +64,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentModel = "claude-3-opus"
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 3)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 3, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -80,7 +80,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 2)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -90,7 +90,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartEnqueuesTurnBoundary() {
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 5)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 5, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -100,7 +100,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartResetsAnimationCoordinatorToolState() {
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
@@ -115,7 +115,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then

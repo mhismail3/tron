@@ -195,9 +195,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Initialize event store manager
         eventStoreManager.initialize()
 
-        // Repair any duplicate events from previous sessions
-        eventStoreManager.repairDuplicates()
-
         isInitialized = true
         TronLogger.shared.info("DependencyContainer initialized with \(eventStoreManager.sessions.count) sessions", category: .session)
     }

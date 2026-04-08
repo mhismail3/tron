@@ -919,27 +919,6 @@ final class DashboardStreamManagerSnapshotTests: XCTestCase {
     }
 }
 
-// MARK: - ContentExtractor Activity Lines Tests
-
-@MainActor
-final class ContentExtractorActivityLineTests: XCTestCase {
-
-    /// Build a SessionEvent with the given type and payload.
-    private func makeEvent(type: String, payload: [String: AnyCodable]) -> SessionEvent {
-        SessionEvent(
-            id: UUID().uuidString,
-            parentId: nil,
-            sessionId: "test-session",
-            workspaceId: "ws",
-            type: type,
-            timestamp: "2026-01-01T00:00:00Z",
-            sequence: 0,
-            payload: payload
-        )
-    }
-
-}
-
 // MARK: - ActivityLine Tests
 
 @MainActor

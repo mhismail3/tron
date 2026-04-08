@@ -19,8 +19,6 @@ protocol EventDatabaseProtocol: AnyObject {
 
     // MARK: - Utilities
     func clearAll() throws
-    func deduplicateSession(_ sessionId: String) throws -> Int
-    func deduplicateAllSessions() throws -> Int
 }
 
 // MARK: - EventDatabase Conformance

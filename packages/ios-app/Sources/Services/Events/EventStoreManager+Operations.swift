@@ -350,36 +350,4 @@ extension EventStoreManager {
         UserDefaults.standard.removeObject(forKey: "tron.activeSessionId")
         logger.info("Cleared all local data", category: .session)
     }
-
-    /// Repair the database by removing duplicate events.
-    func repairDuplicates() {
-        do {
-            let removed = try eventDB.deduplicateAllSessions()
-            if removed > 0 {
-                logger.info("Database repair: removed \(removed) duplicate events", category: .session)
-                loadSessions()
-            }
-        } catch {
-            logger.error("Failed to repair duplicates: \(error.localizedDescription)", category: .session)
-        }
-    }
-
-    /// Repair a specific session by removing duplicate events
-    func repairSession(_ sessionId: String) {
-        do {
-            let removed = try eventDB.deduplicateSession(sessionId)
-            if removed > 0 {
-                logger.info("Repaired session \(sessionId): removed \(removed) duplicate events", category: .session)
-                Task {
-                    do {
-                        try await updateSessionMetadata(sessionId: sessionId)
-                    } catch {
-                        logger.warning("Failed to update metadata after repair for session \(sessionId.prefix(12))...: \(error.localizedDescription)", category: .session)
-                    }
-                }
-            }
-        } catch {
-            logger.error("Failed to repair session \(sessionId): \(error.localizedDescription)", category: .session)
-        }
-    }
 }

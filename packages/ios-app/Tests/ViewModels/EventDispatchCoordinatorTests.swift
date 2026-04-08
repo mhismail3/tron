@@ -105,7 +105,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
     func testDispatch_turnStart_callsHandleTurnStart() {
         // Given: A turn start result
-        let result = TurnStartPlugin.Result(turnNumber: 1)
+        let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
 
         // When: Dispatching
         coordinator.dispatch(
