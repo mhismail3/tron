@@ -111,6 +111,11 @@ final class SheetCoordinator {
         present(.subagentDetail)
     }
 
+    /// Show consolidated subagent results list sheet
+    func showSubagentResultsList() {
+        present(.subagentResultsList)
+    }
+
     /// Show notify app detail sheet
     func showNotifyApp(_ data: NotifyAppChipData) {
         present(.notifyApp(data))

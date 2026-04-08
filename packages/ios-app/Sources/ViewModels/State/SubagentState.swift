@@ -163,6 +163,14 @@ final class SubagentState {
         updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .dismissed }
     }
 
+    // MARK: - Computed Properties
+
+    /// Subagents with pending results awaiting user action
+    var pendingSubagents: [SubagentToolData] {
+        subagents.values
+            .filter { ($0.status == .completed || $0.status == .failed) && $0.resultDeliveryStatus == .pending }
+            .sorted { $0.subagentSessionId < $1.subagentSessionId }
+    }
 
     // MARK: - UI Actions
 

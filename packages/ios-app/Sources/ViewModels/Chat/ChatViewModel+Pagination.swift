@@ -218,6 +218,23 @@ extension ChatViewModel {
                 return false
             }
         }
+
+        // Consolidate individual subagentResultAvailable notifications into a single grouped notification
+        var resultEntries: [SubagentResultEntry] = []
+        var indicesToRemove = IndexSet()
+        for (i, msg) in allReconstructedMessages.enumerated() {
+            if case .systemEvent(.subagentResultAvailable(let sid, let task, let success)) = msg.content {
+                resultEntries.append(SubagentResultEntry(subagentSessionId: sid, taskPreview: task, success: success))
+                indicesToRemove.insert(i)
+            }
+        }
+        if !resultEntries.isEmpty {
+            allReconstructedMessages.remove(atOffsets: indicesToRemove)
+            allReconstructedMessages.append(ChatMessage(
+                role: .system,
+                content: .systemEvent(.subagentResultsReady(results: resultEntries))
+            ))
+        }
     }
 
     /// Load more older messages when user scrolls to top.

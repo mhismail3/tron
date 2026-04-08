@@ -89,14 +89,22 @@ struct SystemEventView: View {
             TurnFailedNotificationView(error: error, code: code, recoverable: recoverable)
 
         case .subagentResultAvailable(let subagentSessionId, let taskPreview, let success):
+            // Legacy individual notification (from persisted events before consolidation)
             SubagentResultNotificationView(
-                subagentSessionId: subagentSessionId,
-                taskPreview: taskPreview,
-                success: success,
+                results: [SubagentResultEntry(subagentSessionId: subagentSessionId, taskPreview: taskPreview, success: success)],
                 onTap: {
                     onTap?(.subagentResult(sessionId: subagentSessionId))
                 }
             )
+
+        case .subagentResultsReady(let results):
+            SubagentResultNotificationView(results: results) {
+                if results.count == 1 {
+                    onTap?(.subagentResult(sessionId: results[0].subagentSessionId))
+                } else {
+                    onTap?(.subagentResultsReady(results: results))
+                }
+            }
 
         case .providerError(let data):
             ProviderErrorNotificationView(

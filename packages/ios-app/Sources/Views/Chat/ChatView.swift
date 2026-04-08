@@ -517,6 +517,8 @@ struct ChatView: View {
             }
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
+        case .subagentResultsReady:
+            sheetCoordinator.showSubagentResultsList()
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
         case .memoryRetainDetail(let title, let summary):

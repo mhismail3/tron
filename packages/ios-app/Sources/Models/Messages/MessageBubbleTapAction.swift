@@ -13,6 +13,7 @@ enum MessageBubbleTapAction {
     case notifyApp(NotifyAppChipData)
     case commandTool(CommandToolChipData)
     case subagentResult(sessionId: String)
+    case subagentResultsReady(results: [SubagentResultEntry])
     case providerError(ProviderErrorDetailData)
     case memoryRetainDetail(title: String, summary: String?)
 }

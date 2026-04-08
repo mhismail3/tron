@@ -99,17 +99,32 @@ extension ChatViewModel {
             return
         }
 
-        let notification = ChatMessage(
-            role: .system,
-            content: .systemEvent(.subagentResultAvailable(
-                subagentSessionId: result.subagentSessionId,
-                taskPreview: subagent.taskPreview,
-                success: result.success
-            ))
+        let entry = SubagentResultEntry(
+            subagentSessionId: result.subagentSessionId,
+            taskPreview: subagent.taskPreview,
+            success: result.success
         )
-        appendToMessages(notification)
-        messageWindowManager.appendMessage(notification)
-        logger.info("Added subagent result notification to chat: \(result.subagentSessionId)", category: .chat)
+
+        // Consolidate: update existing notification or create new one
+        if let existingIdx = messages.lastIndex(where: { msg in
+            if case .systemEvent(.subagentResultsReady) = msg.content { return true }
+            return false
+        }) {
+            if case .systemEvent(.subagentResultsReady(var results)) = messages[existingIdx].content {
+                results.append(entry)
+                messages[existingIdx].content = .systemEvent(.subagentResultsReady(results: results))
+                messageWindowManager.updateMessage(messages[existingIdx])
+                logger.info("Updated consolidated notification: \(results.count) results", category: .chat)
+            }
+        } else {
+            let notification = ChatMessage(
+                role: .system,
+                content: .systemEvent(.subagentResultsReady(results: [entry]))
+            )
+            appendToMessages(notification)
+            messageWindowManager.appendMessage(notification)
+            logger.info("Created subagent result notification: \(result.subagentSessionId)", category: .chat)
+        }
     }
 
     // MARK: - Subagent Helpers
@@ -139,6 +154,47 @@ extension ChatViewModel {
     }
 
     // MARK: - Subagent Result Sending
+
+    /// Send all pending subagent results to the agent as a single combined message.
+    /// Called from the "Send All" button in SubagentResultsListSheet.
+    func sendAllSubagentResults() {
+        let pending = subagentState.pendingSubagents
+        guard !pending.isEmpty else { return }
+        logger.info("Sending all \(pending.count) pending subagent results", category: .chat)
+
+        for subagent in pending {
+            subagentState.markResultsSent(subagentSessionId: subagent.subagentSessionId)
+        }
+
+        var sections: [String] = []
+        for subagent in pending {
+            let resultContent: String
+            if let error = subagent.error {
+                resultContent = "Error: \(error)"
+            } else if let fullOutput = subagent.fullOutput {
+                resultContent = fullOutput
+            } else if let summary = subagent.resultSummary {
+                resultContent = summary
+            } else {
+                resultContent = "Completed in \(subagent.currentTurn) turns"
+            }
+            sections.append("**Task:** \(subagent.task)\n**Results:**\n\(resultContent)")
+        }
+
+        let prompt = """
+        [SUBAGENT RESULTS - Please review and continue]
+
+        \(pending.count) sub-agents have completed. Here are all results:
+
+        \(sections.enumerated().map { "### Agent \($0.offset + 1)\n\($0.element)" }.joined(separator: "\n\n"))
+
+        Please review these results and continue with the relevant tasks.
+        """
+
+        inputText = prompt
+        sendMessage()
+        logger.info("Sent combined results for \(pending.count) subagents", category: .chat)
+    }
 
     /// Send subagent results to the agent as a user message
     /// Called when user taps "Send" in the subagent detail sheet for pending results

@@ -34,8 +34,10 @@ enum SystemEvent: Equatable, Hashable {
     case catchingUp
     /// Turn failed with error
     case turnFailed(error: String, code: String?, recoverable: Bool)
-    /// Subagent completed while parent was idle - results available for review
+    /// Subagent completed while parent was idle - results available for review (individual, from persisted events)
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
+    /// Consolidated subagent results notification - groups multiple completed subagents into one notification
+    case subagentResultsReady(results: [SubagentResultEntry])
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
     /// Memory retain in progress (shows spinner pill)
@@ -64,6 +66,8 @@ enum SystemEvent: Equatable, Hashable {
         case .turnFailed:                 return .tronError
         case .subagentResultAvailable(_, _, let success):
             return success ? .tronSuccess : .tronError
+        case .subagentResultsReady(let results):
+            return results.allSatisfy(\.success) ? .tronSuccess : .tronError
         case .providerError:              return .tronError
         case .memoryRetainInProgress:     return .tronPink
         case .memoryRetained:             return .tronPink
@@ -109,6 +113,11 @@ enum SystemEvent: Equatable, Hashable {
             return "Request failed: \(error)"
         case .subagentResultAvailable(_, let taskPreview, let success):
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
+        case .subagentResultsReady(let results):
+            if results.count == 1 {
+                return results[0].success ? "Agent completed: \(results[0].taskPreview)" : "Agent failed: \(results[0].taskPreview)"
+            }
+            return "\(results.count) agent results ready"
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category, provider: data.provider)
             return "\(label): \(data.message)"
@@ -210,4 +219,14 @@ enum SystemEvent: Equatable, Hashable {
         default: return level.capitalized
         }
     }
+}
+
+// MARK: - Subagent Result Entry
+
+/// Lightweight entry for consolidated subagent result notifications.
+/// Used by `SystemEvent.subagentResultsReady` to group multiple completed subagents.
+struct SubagentResultEntry: Equatable, Hashable {
+    let subagentSessionId: String
+    let taskPreview: String
+    let success: Bool
 }

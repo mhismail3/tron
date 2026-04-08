@@ -58,6 +58,7 @@ enum ChatSheet: Identifiable, Equatable {
 
     // Notification sheets
     case notifyApp(NotifyAppChipData)
+    case subagentResultsList
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
 
@@ -90,6 +91,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "getConfirmation"
         case .subagentDetail:
             return "subagent"
+        case .subagentResultsList:
+            return "subagentResultsList"
         case .notifyApp(let data):
             return "notifyApp-\(data.toolCallId)"
         case .thinkingDetail:
@@ -126,6 +129,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.getConfirmation, .getConfirmation):
             return true
         case (.subagentDetail, .subagentDetail):
+            return true
+        case (.subagentResultsList, .subagentResultsList):
             return true
         case (.notifyApp(let data1), .notifyApp(let data2)):
             return data1.toolCallId == data2.toolCallId

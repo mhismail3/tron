@@ -75,6 +75,9 @@ struct ChatSheetContent: View {
         case .subagentDetail:
             subagentDetailSheet
 
+        case .subagentResultsList:
+            subagentResultsListSheet
+
         case .notifyApp(let data):
             NotifyAppDetailSheet(data: data)
 
@@ -222,5 +225,23 @@ struct ChatSheetContent: View {
         } else {
             EmptyView()
         }
+    }
+
+    @ViewBuilder
+    private var subagentResultsListSheet: some View {
+        let pending = viewModel.subagentState.pendingSubagents
+        SubagentResultsListSheet(
+            pendingSubagents: pending,
+            subagentState: viewModel.subagentState,
+            eventStoreManager: eventStoreManager,
+            rpcClient: rpcClient,
+            onSendAll: {
+                viewModel.sendAllSubagentResults()
+            },
+            onSendIndividual: { subagent in
+                viewModel.sendSubagentResults(subagent)
+            }
+        )
+        .adaptivePresentationDetents([.medium, .large])
     }
 }

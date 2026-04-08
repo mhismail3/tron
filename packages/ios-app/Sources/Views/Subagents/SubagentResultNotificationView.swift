@@ -1,24 +1,45 @@
 import SwiftUI
 
-/// Notification chip shown when a subagent completes while the parent agent is idle.
-/// Tapping opens the subagent detail sheet where results can be sent to the agent.
+/// Notification chip shown when subagent(s) complete while the parent agent is idle.
+/// Adapts layout for single vs multiple results:
+/// - Single: shows task preview + "Review >"
+/// - Multiple: shows count summary + "Review N >"
 @available(iOS 26.0, *)
 struct SubagentResultNotificationView: View {
-    let subagentSessionId: String
-    let taskPreview: String
-    let success: Bool
+    let results: [SubagentResultEntry]
     var onTap: (() -> Void)?
 
+    private var isSingleResult: Bool { results.count == 1 }
+    private var allSucceeded: Bool { results.allSatisfy(\.success) }
+
     private var accentColor: Color {
-        success ? .tronSuccess : .tronError
+        allSucceeded ? .tronSuccess : .tronError
     }
 
     private var iconName: String {
-        success ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+        allSucceeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
     }
 
     private var titleText: String {
-        success ? "Agent results ready" : "Agent failed"
+        if isSingleResult {
+            return results[0].success ? "Agent results ready" : "Agent failed"
+        }
+        return "\(results.count) agent results ready"
+    }
+
+    private var subtitleText: String {
+        if isSingleResult {
+            return results[0].taskPreview
+        }
+        let succeeded = results.filter(\.success).count
+        let failed = results.count - succeeded
+        if failed == 0 { return "All completed successfully" }
+        if succeeded == 0 { return "All failed" }
+        return "\(succeeded) completed, \(failed) failed"
+    }
+
+    private var reviewText: String {
+        isSingleResult ? "Review" : "Review \(results.count)"
     }
 
     var body: some View {
@@ -36,7 +57,7 @@ struct SubagentResultNotificationView: View {
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
-                    Text(taskPreview)
+                    Text(subtitleText)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
@@ -46,7 +67,7 @@ struct SubagentResultNotificationView: View {
 
                 // Tap hint
                 HStack(spacing: 4) {
-                    Text("Review")
+                    Text(reviewText)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
                     Image(systemName: "chevron.right")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -55,6 +76,7 @@ struct SubagentResultNotificationView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .glassEffect(
