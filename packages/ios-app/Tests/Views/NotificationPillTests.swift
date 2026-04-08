@@ -15,6 +15,11 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
+    func testCompactionReasonDisplayProgressSignal() {
+        let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "progress_signal")
+        XCTAssertNotNil(view)
+    }
+
     func testCompactionTokensSaved() {
         let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
         // 50000 tokens saved = 50.0k

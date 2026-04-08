@@ -102,6 +102,7 @@ impl SessionCommandService {
         .await?;
 
         ctx.orchestrator.remove_sequence_counter(&session_id);
+        ctx.orchestrator.remove_compaction_handler(&session_id);
 
         let _ = ctx
             .orchestrator
@@ -179,6 +180,7 @@ impl SessionCommandService {
         .await?;
 
         ctx.orchestrator.remove_sequence_counter(&session_id);
+        ctx.orchestrator.remove_compaction_handler(&session_id);
 
         let _ = ctx
             .orchestrator
@@ -330,6 +332,7 @@ impl SessionCommandService {
             .await?;
 
         ctx.orchestrator.remove_sequence_counter(&old_id);
+        ctx.orchestrator.remove_compaction_handler(&old_id);
         ctx.orchestrator.init_sequence_counter(&new_id, 0);
 
         let _ = ctx

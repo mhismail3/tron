@@ -718,4 +718,19 @@ mod tests {
         assert_eq!(back.title, "Test");
         assert_eq!(back.tokens, 10);
     }
+
+    /// Verify that CompactionConfig and CompactionTriggerConfig use the same
+    /// default threshold, preventing the RPC `shouldCompact` query from
+    /// diverging from the auto-compaction trigger.
+    #[test]
+    fn threshold_parity_defaults() {
+        let compaction_cfg = CompactionConfig::default();
+        let trigger_cfg = CompactionTriggerConfig::default();
+        assert!(
+            (compaction_cfg.threshold - trigger_cfg.trigger_token_threshold).abs() < f64::EPSILON,
+            "CompactionConfig::threshold ({}) must equal CompactionTriggerConfig::trigger_token_threshold ({})",
+            compaction_cfg.threshold,
+            trigger_cfg.trigger_token_threshold,
+        );
+    }
 }

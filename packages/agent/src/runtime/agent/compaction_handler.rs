@@ -1,7 +1,13 @@
 //! Compaction handler — sole owner of compaction logic.
 //!
 //! Uses multi-signal triggering: token threshold and progress signals
-//! (git push, gh pr, etc.). Runs at pre-turn.
+//! (git push, gh pr, worktree commits, etc.). Runs at pre-turn.
+//!
+//! The handler determines the [`CompactionReason`] internally from the
+//! signal that fired (`ThresholdExceeded` vs `ProgressSignal`).
+//!
+//! Event types and bash commands are recorded between compactions and
+//! cleared after successful compaction.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -142,11 +148,14 @@ pub struct CompactionHandler {
     compaction_done: Arc<Notify>,
     subagent_manager: Option<Arc<SubagentManager>>,
     /// Optional event persister for `compact.boundary` persistence.
-    persister: Option<Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
+    persister: Mutex<Option<Arc<crate::runtime::orchestrator::event_persister::EventPersister>>>,
     /// Multi-signal compaction trigger.
     trigger: Mutex<CompactionTrigger>,
     /// Bash commands accumulated between compactions for progress-signal detection.
     pending_bash_commands: Mutex<Vec<String>>,
+    /// Event types accumulated between compactions for progress-signal detection
+    /// (e.g. `"worktree.commit"`).
+    pending_event_types: Mutex<Vec<String>>,
 }
 
 /// RAII guard that resets `is_compacting` and notifies waiters on drop.
@@ -170,9 +179,10 @@ impl CompactionHandler {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: None,
-            persister: None,
+            persister: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
             pending_bash_commands: Mutex::new(Vec::new()),
+            pending_event_types: Mutex::new(Vec::new()),
         }
     }
 
@@ -185,18 +195,19 @@ impl CompactionHandler {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: Some(manager),
-            persister: None,
+            persister: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
             pending_bash_commands: Mutex::new(Vec::new()),
+            pending_event_types: Mutex::new(Vec::new()),
         }
     }
 
     /// Set the event persister for `compact.boundary` persistence.
     pub fn set_persister(
-        &mut self,
+        &self,
         persister: Arc<crate::runtime::orchestrator::event_persister::EventPersister>,
     ) {
-        self.persister = Some(persister);
+        *self.persister.lock().unwrap() = Some(persister);
     }
 
     /// Whether a compaction is in progress.
@@ -213,6 +224,15 @@ impl CompactionHandler {
             .push(command.to_owned());
     }
 
+    /// Record an event type for progress-signal detection.
+    /// Called when worktree commits or other significant events occur.
+    pub fn record_event_type(&self, event_type: &str) {
+        self.pending_event_types
+            .lock()
+            .unwrap()
+            .push(event_type.to_owned());
+    }
+
     /// Wait for an in-progress compaction to complete, with timeout.
     ///
     /// Returns immediately if no compaction is running.
@@ -225,6 +245,9 @@ impl CompactionHandler {
 
     /// Check if compaction is needed (using multi-signal trigger) and execute if so.
     ///
+    /// The trigger reason is determined internally from the signal that fired
+    /// (token threshold → `ThresholdExceeded`, progress signal → `ProgressSignal`).
+    ///
     /// Returns `true` if compaction was performed.
     pub async fn check_and_compact(
         &self,
@@ -232,23 +255,24 @@ impl CompactionHandler {
         hooks: &Option<Arc<HookEngine>>,
         session_id: &str,
         emitter: &Arc<EventEmitter>,
-        reason: CompactionReason,
         sequence_counter: Option<&AtomicI64>,
     ) -> Result<bool, RuntimeError> {
+        // Early return: no meaningful ratio if context_limit is zero.
+        let context_limit = context_manager.get_context_limit();
+        if context_limit == 0 {
+            return Ok(false);
+        }
+
         // Build trigger input from current state
         let current_tokens = context_manager.get_current_tokens();
-        let context_limit = context_manager.get_context_limit();
         #[allow(clippy::cast_precision_loss)]
-        let token_ratio = if context_limit > 0 {
-            current_tokens as f64 / context_limit as f64
-        } else {
-            0.0
-        };
+        let token_ratio = current_tokens as f64 / context_limit as f64;
 
         let pending_commands = self.pending_bash_commands.lock().unwrap().clone();
+        let pending_events = self.pending_event_types.lock().unwrap().clone();
         let trigger_input = CompactionTriggerInput {
             current_token_ratio: token_ratio,
-            recent_event_types: Vec::new(), // No DB event access at pre-turn
+            recent_event_types: pending_events,
             recent_tool_calls: pending_commands,
         };
 
@@ -256,6 +280,14 @@ impl CompactionHandler {
         if !trigger_result.compact {
             return Ok(false);
         }
+
+        // Determine reason from trigger: token ratio triggers report a percentage,
+        // progress signals report "commit" or "progress signal".
+        let reason = if trigger_result.reason.contains("token ratio") {
+            CompactionReason::ThresholdExceeded
+        } else {
+            CompactionReason::ProgressSignal
+        };
 
         debug!(
             reason = %trigger_result.reason,
@@ -270,6 +302,7 @@ impl CompactionHandler {
         if success {
             self.trigger.lock().unwrap().reset();
             self.pending_bash_commands.lock().unwrap().clear();
+            self.pending_event_types.lock().unwrap().clear();
         }
 
         Ok(success)
@@ -336,15 +369,27 @@ impl CompactionHandler {
         let result =
             Self::run_summarizer(context_manager, session_id, self.subagent_manager.as_ref()).await;
 
+        let tokens_after = context_manager.get_current_tokens();
+
+        if tokens_after >= tokens_before && result.is_ok() {
+            warn!(
+                session_id,
+                tokens_before,
+                tokens_after,
+                "compaction did not reduce token count"
+            );
+        }
+
+        let persister = self.persister.lock().unwrap().clone();
         Ok(Self::emit_compaction_events(
             result,
             compaction_start,
             tokens_before,
-            context_manager.get_current_tokens(),
+            tokens_after,
             session_id,
             emitter,
             reason,
-            self.persister.as_ref(),
+            persister.as_ref(),
             sequence_counter,
         )
         .await)
@@ -688,6 +733,32 @@ mod tests {
         handler.record_bash_command("git push origin main");
         let cmds = handler.pending_bash_commands.lock().unwrap();
         assert_eq!(cmds.len(), 3);
+    }
+
+    // -- Event type recording --
+
+    #[test]
+    fn record_event_type_accumulates() {
+        let handler = CompactionHandler::default();
+        handler.record_event_type("worktree.commit");
+        handler.record_event_type("worktree.commit");
+        let events = handler.pending_event_types.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "worktree.commit");
+    }
+
+    #[test]
+    fn event_types_initially_empty() {
+        let handler = CompactionHandler::default();
+        let events = handler.pending_event_types.lock().unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn set_persister_via_shared_ref() {
+        let handler = CompactionHandler::default();
+        // Verify set_persister works through &self (not &mut self)
+        assert!(handler.persister.lock().unwrap().is_none());
     }
 
 }

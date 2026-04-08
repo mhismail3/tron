@@ -74,7 +74,7 @@ pub struct TronAgent {
     hooks: Option<Arc<HookEngine>>,
     context_manager: ContextManager,
     emitter: Arc<EventEmitter>,
-    compaction: CompactionHandler,
+    compaction: Arc<CompactionHandler>,
     session_id: String,
     current_turn: AtomicU32,
     is_running: AtomicBool,
@@ -96,13 +96,13 @@ pub struct TronAgent {
 impl TronAgent {
     /// Create a new agent from bundled dependencies.
     pub fn new(config: AgentConfig, deps: AgentDeps, session_id: String) -> Self {
-        let compaction = match deps.subagent_manager {
+        let compaction = Arc::new(match deps.subagent_manager {
             Some(ref mgr) => CompactionHandler::with_subagent_manager(
                 mgr.clone(),
                 deps.compaction_trigger_config,
             ),
             None => CompactionHandler::new(deps.compaction_trigger_config),
-        };
+        });
         Self {
             config,
             provider: deps.provider,
@@ -188,7 +188,7 @@ impl TronAgent {
                 registry: &self.registry,
                 guardrails: &self.guardrails,
                 hooks: &self.hooks,
-                compaction: &self.compaction,
+                compaction: &*self.compaction,
                 session_id: &self.session_id,
                 emitter: &self.emitter,
                 cancel: &self.abort_token,
@@ -393,6 +393,11 @@ impl TronAgent {
     /// Get the emitter.
     pub fn emitter(&self) -> &Arc<EventEmitter> {
         &self.emitter
+    }
+
+    /// Get the compaction handler (for orchestrator registration).
+    pub fn compaction_handler(&self) -> &Arc<CompactionHandler> {
+        &self.compaction
     }
 
 }

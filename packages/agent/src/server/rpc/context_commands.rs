@@ -85,6 +85,16 @@ async fn execute_compaction(
     session_id: String,
     edited_summary: Option<String>,
 ) -> Result<crate::runtime::context::types::CompactionResult, RpcError> {
+    // If an agent is actively running, check concurrency guard to prevent
+    // racing with auto-compaction.
+    if let Some(handler) = ctx.orchestrator.get_compaction_handler(&session_id) {
+        if handler.is_compacting() {
+            return Err(RpcError::Internal {
+                message: "Compaction already in progress".to_string(),
+            });
+        }
+    }
+
     let prepared = prepare_session_context(ctx, "context.compaction.prepare", &session_id).await?;
     let mut context_manager = prepared.context_manager;
     let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);

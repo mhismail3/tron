@@ -13,6 +13,7 @@ use crate::core::events::TronEvent;
 use metrics::gauge;
 use tracing::{debug, info, instrument, trace, warn};
 
+use crate::runtime::agent::compaction_handler::CompactionHandler;
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
 use crate::runtime::orchestrator::session_manager::{SessionFilter, SessionManager};
@@ -94,6 +95,9 @@ pub struct Orchestrator {
     /// Per-session monotonic sequence counters.
     /// Key: session_id, Value: shared atomic counter (current value = last assigned).
     sequence_counters: Arc<DashMap<String, Arc<AtomicI64>>>,
+    /// Per-session compaction handlers for active agent sessions.
+    /// Registered when an agent starts, removed when it ends.
+    compaction_handlers: Arc<DashMap<String, Arc<CompactionHandler>>>,
 }
 
 impl Orchestrator {
@@ -107,6 +111,7 @@ impl Orchestrator {
             tool_tracker: Mutex::new(ToolCallTracker::new()),
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
             sequence_counters: Arc::new(DashMap::new()),
+            compaction_handlers: Arc::new(DashMap::new()),
         }
     }
 
@@ -180,6 +185,34 @@ impl Orchestrator {
         self.sequence_counters
             .get(session_id)
             .map(|entry| Arc::clone(entry.value()))
+    }
+
+    // ── Per-session compaction handlers ──
+
+    /// Register a compaction handler for a session.
+    ///
+    /// Called when an agent starts running so that RPC compaction
+    /// requests can route through the handler (with concurrency guard
+    /// and PreCompact hooks).
+    pub fn register_compaction_handler(&self, session_id: &str, handler: Arc<CompactionHandler>) {
+        let _ = self
+            .compaction_handlers
+            .insert(session_id.to_string(), handler);
+        trace!(session_id, "compaction handler registered");
+    }
+
+    /// Get the compaction handler for a session (if an agent is active).
+    pub fn get_compaction_handler(&self, session_id: &str) -> Option<Arc<CompactionHandler>> {
+        self.compaction_handlers
+            .get(session_id)
+            .map(|entry| Arc::clone(entry.value()))
+    }
+
+    /// Remove the compaction handler for a session (cleanup on session end).
+    pub fn remove_compaction_handler(&self, session_id: &str) {
+        if self.compaction_handlers.remove(session_id).is_some() {
+            trace!(session_id, "compaction handler removed");
+        }
     }
 
     /// Start tracking a run for a session.
@@ -322,8 +355,9 @@ impl Orchestrator {
         // Cancel all pending tool calls
         self.tool_tracker.lock().cancel_all();
 
-        // Clear all sequence counters
+        // Clear all sequence counters and compaction handlers
         self.sequence_counters.clear();
+        self.compaction_handlers.clear();
 
         // List all active sessions and end them
         let sessions = self

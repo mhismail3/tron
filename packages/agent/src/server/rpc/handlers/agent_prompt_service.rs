@@ -532,6 +532,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     agent.set_abort_token(cancel_token);
     agent.set_persister(Some(persister.clone()));
+    orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
 
     let user_event_payload = build_user_event_payload(
         &prompt,
@@ -679,6 +680,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
     let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast, sequence_counter).await;
+    orchestrator.remove_compaction_handler(&session_id);
 
     let _ = persister.flush().await;
 

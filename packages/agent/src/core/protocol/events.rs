@@ -249,8 +249,10 @@ pub struct ActivatedRuleInfo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionReason {
-    /// Token threshold exceeded or progress signal detected.
+    /// Token threshold exceeded.
     ThresholdExceeded,
+    /// Progress signal detected (commit, push, PR, tag).
+    ProgressSignal,
     /// User requested compaction.
     Manual,
 }

@@ -13,12 +13,20 @@ final class ProtocolConstantsTests: XCTestCase {
         XCTAssertEqual(CompactionReason.manual.rawValue, "manual")
     }
 
+    func testCompactionReasonProgressSignalRawValue() {
+        XCTAssertEqual(CompactionReason.progressSignal.rawValue, "progress_signal")
+    }
+
     func testCompactionReasonThresholdExceededDisplayText() {
         XCTAssertEqual(CompactionReason.thresholdExceeded.displayText, "threshold")
     }
 
     func testCompactionReasonManualDisplayText() {
         XCTAssertEqual(CompactionReason.manual.displayText, "manual")
+    }
+
+    func testCompactionReasonProgressSignalDisplayText() {
+        XCTAssertEqual(CompactionReason.progressSignal.displayText, "progress")
     }
 
     func testCompactionReasonUnknownValue() {
@@ -28,6 +36,7 @@ final class ProtocolConstantsTests: XCTestCase {
 
     func testCompactionReasonDetailDisplayText() {
         XCTAssertEqual(CompactionReason.thresholdExceeded.detailDisplayText, "Threshold")
+        XCTAssertEqual(CompactionReason.progressSignal.detailDisplayText, "Progress Signal")
         XCTAssertEqual(CompactionReason.manual.detailDisplayText, "Manual")
     }
 

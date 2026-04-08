@@ -12,7 +12,7 @@ use std::time::Instant;
 use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
-use crate::core::events::{BaseEvent, CompactionReason, TronEvent};
+use crate::core::events::{BaseEvent, TronEvent};
 use crate::core::messages::Context;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::Provider;
@@ -126,7 +126,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             hooks,
             session_id,
             emitter,
-            CompactionReason::ThresholdExceeded,
             sequence_counter,
         )
         .await
