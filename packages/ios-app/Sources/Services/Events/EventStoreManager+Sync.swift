@@ -58,23 +58,14 @@ extension EventStoreManager {
         }
     }
 
-    /// Sync events for dashboard sessions that need activity line extraction.
-    /// Runs in background after session list refresh to populate rich card content.
-    /// Re-extracts for sessions with stale data (tool chips missing summaries).
+    /// Sync events and rebuild activity lines for all dashboard sessions.
+    /// Runs in background after session list refresh. Always re-extracts from
+    /// persisted events — avoids stale-data heuristics that miss edge cases.
     func syncActivityLinesForDashboard() async {
-        let sessionsNeedingSync = sessions.filter { session in
-            guard !session.isChat else { return false }
-            guard let lines = session.lastActivityLines, !lines.isEmpty else { return true }
-            // Re-extract if any tool chip is missing summary data (stale from old code)
-            let hasStaleToolChips = lines.contains { line in
-                (line.kind == .toolStart || line.kind == .toolEnd) && line.summary == nil && line.displayName == nil
-            }
-            return hasStaleToolChips
-        }
+        let dashboardSessions = sessions.filter { !$0.isChat }
+        guard !dashboardSessions.isEmpty else { return }
 
-        guard !sessionsNeedingSync.isEmpty else { return }
-
-        for session in sessionsNeedingSync.prefix(10) {
+        for session in dashboardSessions.prefix(10) {
             do {
                 try await syncSessionEvents(sessionId: session.id)
                 extractDashboardInfoFromEvents(sessionId: session.id)

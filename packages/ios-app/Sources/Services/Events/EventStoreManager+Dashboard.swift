@@ -167,15 +167,11 @@ extension EventStoreManager {
                 lastToolCount: info.lastToolCount
             )
 
-            // Build activity lines from stored events for card display
-            // Skip if session already has activity lines with summaries (e.g., from live snapshot)
-            let existingLines = sessions.first(where: { $0.id == sessionId })?.lastActivityLines
-            let hasGoodLines = existingLines?.contains(where: { $0.summary != nil }) ?? false
-            if !hasGoodLines {
-                let activityLines = ContentExtractor.extractActivityLines(from: events)
-                if !activityLines.isEmpty {
-                    updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
-                }
+            // Build activity lines from stored events for card display.
+            // Always rebuild — persisted lines from live snapshots may have stale subagent status.
+            let activityLines = ContentExtractor.extractActivityLines(from: events)
+            if !activityLines.isEmpty {
+                updateSessionActivityLines(sessionId: sessionId, lines: activityLines)
             }
         } catch {
             logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
