@@ -110,6 +110,9 @@ pub struct LlmHookResultPayload {
     /// Error message if the hook failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Structured suggestions parsed from suggest-prompts hook output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<Vec<String>>,
     /// Timestamp.
     pub timestamp: String,
 }

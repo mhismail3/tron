@@ -43,47 +43,46 @@ extension EventStoreManager {
         logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
 
-    /// Delete a session (local + server)
-    /// Uses optimistic UI update: removes from local array first, then persists
+    /// Delete a session (server-confirmed, then local cleanup).
+    /// Marks as deleting, archives on server, then removes locally.
+    /// Reverts on server failure to prevent zombie sessions on next sync.
     func deleteSession(_ sessionId: String) async throws {
-        // 1. Optimistically remove from local array (triggers smooth List animation)
-        let removed = removeSessionLocally(sessionId)
+        // 1. Mark as deleting (UI shows dimmed/spinner state)
+        markSessionDeleting(sessionId, isDeleting: true)
 
-        // 2. If this was the active session, update immediately
+        // 2. If this was the active session, switch away immediately
         let wasActiveSession = activeSessionId == sessionId
         if wasActiveSession {
-            setActiveSession(sessions.first?.id)
+            setActiveSession(sessions.first(where: { $0.id != sessionId })?.id)
         }
 
-        // 3. Attempt database deletion
+        // 3. Archive on server first — server is authoritative
+        do {
+            try await rpcClient.session.archive(sessionId)
+        } catch {
+            // Revert: un-mark deleting and restore active session
+            markSessionDeleting(sessionId, isDeleting: false)
+            if wasActiveSession {
+                setActiveSession(sessionId)
+            }
+            logger.error("Server archive failed: \(error.localizedDescription)", category: .session)
+            throw error
+        }
+
+        // 4. Server confirmed — now clean up locally
+        _ = removeSessionLocally(sessionId)
         do {
             try eventDB.sessions.delete(sessionId)
             try eventDB.events.deleteBySession(sessionId)
             draftStore?.deleteSessionDraft(sessionId: sessionId)
         } catch {
-            // Rollback: restore the session to local array
-            if let (session, index) = removed {
-                insertSessionLocally(session, at: index)
-                if wasActiveSession {
-                    setActiveSession(sessionId)
-                }
-            }
-            logger.error("Failed to delete session from database: \(error.localizedDescription)", category: .session)
-            throw error
+            logger.error("Local cleanup failed after server archive: \(error.localizedDescription)", category: .session)
         }
 
-        // 4. Try to archive on server (optional, don't rollback on failure)
-        do {
-            try await rpcClient.session.archive(sessionId)
-        } catch {
-            logger.warning("Server archive failed (continuing): \(error.localizedDescription)", category: .session)
-        }
-
-        // 5. DON'T call loadSessions() - the local array is already correct
         logger.info("Archived session: \(sessionId)", category: .session)
     }
 
-    /// Archive all sessions (delete locally, optionally notify server)
+    /// Archive all sessions (server-confirmed, then local cleanup).
     /// The persistent chat session is excluded — it cannot be archived.
     func archiveAllSessions() async {
         let sessionsToArchive = sessions.filter { !$0.isChat }
@@ -95,33 +94,32 @@ extension EventStoreManager {
 
         logger.info("Archiving \(sessionsToArchive.count) sessions...", category: .session)
 
-        // Remove non-chat sessions from local array (optimistic, all at once for smooth animation)
-        let chatOnly = sessions.filter { $0.isChat }
-        setSessions(chatOnly)
+        // Mark all as deleting
+        for session in sessionsToArchive {
+            markSessionDeleting(session.id, isDeleting: true)
+        }
 
         // Switch to chat session if the active session is being archived
         if let activeId = activeSessionId, sessionsToArchive.contains(where: { $0.id == activeId }) {
             setActiveSession(chatSessionId)
         }
 
-        // Then persist deletions
+        // Archive each on server, then clean up locally
         for session in sessionsToArchive {
             do {
+                try await rpcClient.session.archive(session.id)
+                _ = removeSessionLocally(session.id)
                 try eventDB.sessions.delete(session.id)
                 try eventDB.events.deleteBySession(session.id)
-
-                do {
-                    try await rpcClient.session.archive(session.id)
-                } catch {
-                    logger.warning("Server archive failed for \(session.id) (continuing): \(error.localizedDescription)", category: .session)
-                }
+                draftStore?.deleteSessionDraft(sessionId: session.id)
             } catch {
+                // Revert this session's deleting state; continue with others
+                markSessionDeleting(session.id, isDeleting: false)
                 logger.error("Failed to archive session \(session.id): \(error.localizedDescription)", category: .session)
             }
         }
 
-        // DON'T call loadSessions() - array is already cleared
-        logger.info("Archived \(sessionsToArchive.count) sessions", category: .session)
+        logger.info("Archived sessions", category: .session)
     }
 
     /// Update session token counts and cost (called when streaming accumulates tokens)

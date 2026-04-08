@@ -89,6 +89,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             output_tokens,
             success,
             error,
+            suggestions,
             ..
         } => {
             let mut data = json!({
@@ -103,6 +104,9 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             });
             set_opt(&mut data, "output", output);
             set_opt(&mut data, "error", error);
+            if let Some(suggestions) = suggestions {
+                data["suggestions"] = json!(suggestions);
+            }
             Some(session_scoped(event, "hook.llm_result", Some(data)))
         }
         _ => None,

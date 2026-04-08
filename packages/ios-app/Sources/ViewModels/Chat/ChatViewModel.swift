@@ -160,7 +160,7 @@ final class ChatViewModel {
     var compactionInProgressMessageId: UUID?
     /// ID of the memory-retain-in-progress notification (replaced when retain completes)
     var memoryRetainInProgressMessageId: UUID?
-    /// Defensive timeout: if agent.ready never arrives after agent.complete, recover after 10s
+    /// Safety-net timeout: if agent.ready never arrives after agent.complete, warn at 15s, recover at 30s
     @ObservationIgnored
     var postProcessingTimeoutTask: Task<Void, Never>?
 

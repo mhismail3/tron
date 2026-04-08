@@ -451,6 +451,12 @@ final class EventStoreManager {
         sessions.insert(session, at: clampedIndex)
     }
 
+    /// Mark a session as deleting/not-deleting in the local array.
+    func markSessionDeleting(_ sessionId: String, isDeleting: Bool) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].isDeleting = isDeleting
+    }
+
     // MARK: - Session List (from EventDatabase)
 
     /// Debounce task for loadSessions — coalesces rapid calls

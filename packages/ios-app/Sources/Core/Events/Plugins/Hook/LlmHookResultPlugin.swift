@@ -22,6 +22,7 @@ enum LlmHookResultPlugin: DispatchableEventPlugin {
             let outputTokens: Int?
             let success: Bool
             let error: String?
+            let suggestions: [String]?
         }
     }
 
@@ -30,6 +31,7 @@ enum LlmHookResultPlugin: DispatchableEventPlugin {
         let hookId: String
         let output: String?
         let success: Bool
+        let suggestions: [String]?
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
@@ -37,7 +39,8 @@ enum LlmHookResultPlugin: DispatchableEventPlugin {
             hookName: event.data.hookName,
             hookId: event.data.hookId,
             output: event.data.output,
-            success: event.data.success
+            success: event.data.success,
+            suggestions: event.data.suggestions
         )
     }
 

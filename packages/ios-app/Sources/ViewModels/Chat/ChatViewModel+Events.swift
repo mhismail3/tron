@@ -155,13 +155,21 @@ extension ChatViewModel {
         agentPhase = .postProcessing
         pullUpPanelState.awaitingSuggestions = true
 
-        // Defensive timeout: if agent.ready never arrives, recover the send button
+        // Safety-net timeout: server guarantees agent.ready delivery (hooks are fail-open),
+        // so this only fires on network delivery failure (WebSocket drop during background).
+        // Warning at 15s to aid diagnostics, recovery at 30s.
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(15))
             guard let self, !Task.isCancelled else { return }
             if self.agentPhase == .postProcessing {
-                self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
+                self.logWarning("Post-processing: 15s without agent.ready — server hooks may be slow or WebSocket dropped")
+            }
+
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled else { return }
+            if self.agentPhase == .postProcessing {
+                self.logWarning("Post-processing timeout (30s) — agent.ready never arrived, recovering")
                 self.agentPhase = .idle
             }
         }

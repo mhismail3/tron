@@ -252,7 +252,7 @@ struct WaitToolDetailSheet: View {
         if jobId.hasPrefix("proc-") {
             if let process = viewModel.processState.processes[jobId] {
                 switch process.status {
-                case .running, .backgrounded: return .running
+                case .running, .backgrounded, .cancelling: return .running
                 case .completed: return .completed
                 case .failed: return .failed
                 case .cancelled: return .cancelled

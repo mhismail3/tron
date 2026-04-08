@@ -42,16 +42,19 @@ extension ChatViewModel: ProcessEventHandler {
 
     // MARK: - Actions
 
-    /// Cancel a running job via RPC.
+    /// Cancel a running job via RPC with server confirmation.
     func cancelProcess(_ processId: String) {
-        processState.markCancelled(processId)
+        processState.markCancelling(processId)
         launchBackground { [weak self] in
             guard let self else { return }
             do {
                 try await self.rpcClient.job.cancel(jobId: processId, sessionId: self.sessionId)
+                self.processState.confirmCancelled(processId)
                 self.logInfo("Cancelled job: \(processId)")
             } catch {
+                self.processState.revertCancelling(processId)
                 self.logWarning("Failed to cancel job \(processId): \(error)")
+                self.showError("Failed to cancel process")
             }
         }
     }

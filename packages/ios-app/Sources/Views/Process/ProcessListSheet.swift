@@ -93,6 +93,10 @@ private struct ProcessRow: View {
                         Text("running...")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronEmerald.opacity(0.7))
+                    } else if process.status == .cancelling {
+                        Text("cancelling...")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     if let exitCode = process.exitCode, exitCode != 0 {
                         Text("exit \(exitCode)")
@@ -102,7 +106,7 @@ private struct ProcessRow: View {
                 }
             }
             Spacer()
-            if process.status == .running {
+            if process.status == .running || process.status == .backgrounded {
                 Button {
                     onCancel(process.id)
                 } label: {
@@ -110,6 +114,10 @@ private struct ProcessRow: View {
                         .font(.system(size: 22))
                         .foregroundStyle(.tronError.opacity(0.8))
                 }
+            } else if process.status == .cancelling {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.tronTextMuted)
             }
         }
         .padding(.horizontal, 16)
@@ -133,6 +141,10 @@ private struct ProcessRow: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 20))
                 .foregroundStyle(.tronError)
+        case .cancelling:
+            ProgressView()
+                .controlSize(.small)
+                .tint(.tronTextMuted)
         case .cancelled:
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 20))

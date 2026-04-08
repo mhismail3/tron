@@ -6,15 +6,11 @@ extension ChatViewModel: HookEventHandler {
     func handleLlmHookResult(_ result: LlmHookResultPlugin.Result) {
         guard pullUpPanelState.awaitingSuggestions else { return }
         guard result.hookId.contains("suggest-prompts"),
-              result.success,
-              let output = result.output else { return }
+              result.success else { return }
 
-        let suggestions = output
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && $0.count < 80 }
+        guard let suggestions = result.suggestions, !suggestions.isEmpty else { return }
 
-        pullUpPanelState.suggestions = Array(suggestions.prefix(5))
+        pullUpPanelState.suggestions = suggestions
         pullUpPanelState.awaitingSuggestions = false
     }
 }

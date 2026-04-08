@@ -552,6 +552,9 @@ tron_events! {
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// Structured suggestions parsed from suggest-prompts hook output.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestions: Option<Vec<String>>,
     } => "hook.llm_result",
 
     // -- Session --
@@ -1645,6 +1648,7 @@ mod tests {
                 output_tokens: 5,
                 success: true,
                 error: None,
+                suggestions: None,
             },
             TronEvent::SessionSaved {
                 base: base.clone(),

@@ -60,14 +60,25 @@ struct SessionSidebar: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    sessionToArchive = session.id
-                                    showArchiveConfirmation = true
-                                } label: {
-                                    Image(systemName: "archivebox")
+                            .opacity(session.isDeleting ? 0.4 : 1.0)
+                            .allowsHitTesting(!session.isDeleting)
+                            .overlay(alignment: .trailing) {
+                                if session.isDeleting {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .padding(.trailing, 16)
                                 }
-                                .tint(.tronEmerald)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if !session.isDeleting {
+                                    Button {
+                                        sessionToArchive = session.id
+                                        showArchiveConfirmation = true
+                                    } label: {
+                                        Image(systemName: "archivebox")
+                                    }
+                                    .tint(.tronEmerald)
+                                }
                             }
                         }
                     }

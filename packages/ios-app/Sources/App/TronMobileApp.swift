@@ -129,11 +129,16 @@ struct TronMobileApp: App {
                 // When returning to foreground, handle reconnection and refresh session list
                 if newPhase == .active && oldPhase != .active {
                     Task {
-                        // Clear badge count
-                        do {
-                            try await UNUserNotificationCenter.current().setBadgeCount(0)
-                        } catch {
-                            TronLogger.shared.debug("Failed to clear badge: \(error)", category: .notification)
+                        // Sync badge with server unread count
+                        await container.notificationStore.refresh()
+                        if container.notificationStore.unreadCount == 0 {
+                            await container.notificationStore.clearBadge()
+                        } else {
+                            do {
+                                try await UNUserNotificationCenter.current().setBadgeCount(container.notificationStore.unreadCount)
+                            } catch {
+                                TronLogger.shared.debug("Failed to update badge: \(error)", category: .notification)
+                            }
                         }
 
                         // Handle reconnection based on current connection state

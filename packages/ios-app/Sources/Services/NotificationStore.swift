@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// Observable store for the notification inbox.
 ///
@@ -64,7 +65,7 @@ final class NotificationStore {
         }
     }
 
-    /// Mark all notifications as read.
+    /// Mark all notifications as read and clear the app badge.
     func markAllRead() async {
         do {
             _ = try await rpcClient.notifications.markAllRead()
@@ -87,8 +88,18 @@ final class NotificationStore {
                 )
             }
             unreadCount = 0
+            await clearBadge()
         } catch {
             TronLogger.shared.warning("Failed to mark all notifications as read: \(error)", category: .notification)
+        }
+    }
+
+    /// Clear the app badge count after server confirms no unread notifications.
+    func clearBadge() async {
+        do {
+            try await UNUserNotificationCenter.current().setBadgeCount(0)
+        } catch {
+            TronLogger.shared.debug("Failed to clear badge: \(error)", category: .notification)
         }
     }
 }

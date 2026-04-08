@@ -43,6 +43,9 @@ struct CachedSession: Identifiable, Codable {
     /// Server origin (host:port) this session was synced from
     var serverOrigin: String?
 
+    /// Whether this session is pending server deletion
+    var isDeleting: Bool = false
+
     /// Whether this is the persistent chat session
     var isChat: Bool = false
 

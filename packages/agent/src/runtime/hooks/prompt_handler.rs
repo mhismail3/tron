@@ -209,6 +209,18 @@ impl PromptHookHandler {
         Some(truncated)
     }
 
+    /// Parse raw LLM output into structured suggestions.
+    /// Each non-empty line under 80 chars becomes a suggestion, max 5.
+    fn parse_suggestions(output: &str) -> Vec<String> {
+        output
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && line.len() < 80)
+            .take(5)
+            .map(String::from)
+            .collect()
+    }
+
     /// Truncate output for event storage.
     fn truncate_output(output: &str) -> Option<String> {
         let trimmed = output.trim();
@@ -380,10 +392,19 @@ impl HookHandler for PromptHookHandler {
                         })
                         .unwrap_or((0, 0));
 
+                    // Parse structured suggestions for suggest-prompts hooks
+                    let suggestions = if is_suggest_prompts {
+                        output_text.as_ref().map(|text| {
+                            Self::parse_suggestions(text)
+                        })
+                    } else {
+                        None
+                    };
+
                     // Persist to EventStore so should_generate_title() can
                     // find this result on subsequent prompts.
                     if let Some(store) = &event_store {
-                        let payload = serde_json::json!({
+                        let mut payload = serde_json::json!({
                             "hookName": hook_name,
                             "hookId": hook_id,
                             "hookEvent": hook_event,
@@ -395,6 +416,9 @@ impl HookHandler for PromptHookHandler {
                             "success": true,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
+                        if let Some(ref s) = suggestions {
+                            payload["suggestions"] = serde_json::json!(s);
+                        }
                         if let Err(e) = store.append(&crate::events::AppendOptions {
                             session_id: &session_id,
                             event_type: crate::events::EventType::LlmHookResult,
@@ -419,6 +443,7 @@ impl HookHandler for PromptHookHandler {
                         output_tokens,
                         success: true,
                         error: None,
+                        suggestions,
                     });
                 }
                 Err(e) => {
@@ -466,6 +491,7 @@ impl HookHandler for PromptHookHandler {
                         output_tokens: 0,
                         success: false,
                         error: Some(e.to_string()),
+                        suggestions: None,
                     });
                 }
             }
@@ -744,6 +770,51 @@ mod tests {
             PromptHookHandler::clean_branch_name("-fuzzy-purple-elephant-"),
             Some("fuzzy-purple-elephant".to_string())
         );
+    }
+
+    // --- parse_suggestions tests ---
+
+    #[test]
+    fn test_parse_suggestions_basic() {
+        let output = "Fix the login bug\nAdd error handling\nRefactor the parser";
+        let result = PromptHookHandler::parse_suggestions(output);
+        assert_eq!(result, vec!["Fix the login bug", "Add error handling", "Refactor the parser"]);
+    }
+
+    #[test]
+    fn test_parse_suggestions_trims_whitespace() {
+        let output = "  Fix the login bug  \n  Add error handling  ";
+        let result = PromptHookHandler::parse_suggestions(output);
+        assert_eq!(result, vec!["Fix the login bug", "Add error handling"]);
+    }
+
+    #[test]
+    fn test_parse_suggestions_skips_empty_lines() {
+        let output = "Fix the login bug\n\n\nAdd error handling\n\n";
+        let result = PromptHookHandler::parse_suggestions(output);
+        assert_eq!(result, vec!["Fix the login bug", "Add error handling"]);
+    }
+
+    #[test]
+    fn test_parse_suggestions_max_five() {
+        let output = "One\nTwo\nThree\nFour\nFive\nSix\nSeven";
+        let result = PromptHookHandler::parse_suggestions(output);
+        assert_eq!(result.len(), 5);
+        assert_eq!(result[4], "Five");
+    }
+
+    #[test]
+    fn test_parse_suggestions_filters_long_lines() {
+        let long = "A".repeat(80);
+        let output = format!("Short suggestion\n{long}\nAnother short one");
+        let result = PromptHookHandler::parse_suggestions(&output);
+        assert_eq!(result, vec!["Short suggestion", "Another short one"]);
+    }
+
+    #[test]
+    fn test_parse_suggestions_empty_input() {
+        assert!(PromptHookHandler::parse_suggestions("").is_empty());
+        assert!(PromptHookHandler::parse_suggestions("   \n  \n  ").is_empty());
     }
 
     // --- Trait implementation tests (no SubagentManager needed) ---
