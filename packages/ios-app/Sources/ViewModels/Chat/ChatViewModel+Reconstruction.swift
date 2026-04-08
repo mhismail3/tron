@@ -87,6 +87,7 @@ extension ChatViewModel {
 
         let toolCallMap = Dictionary(uniqueKeysWithValues: inFlight.toolCalls.map { ($0.toolCallId, $0) })
         var accumulatedThinking = ""
+        let messageCountBefore = messages.count
 
         for (index, item) in inFlight.contentSequence.enumerated() {
             let isLastInSequence = index == inFlight.contentSequence.count - 1
@@ -95,6 +96,21 @@ extension ChatViewModel {
             case .text(let text):
                 guard !text.isEmpty else { continue }
                 let isStreaming = isLastInSequence && inFlight.streaming?.type == "text"
+
+                // Dedup: if a completed text message with identical content already exists
+                // from persisted events, skip creating a duplicate
+                if !isStreaming {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if messages.contains(where: { msg in
+                        if case .text(let existing) = msg.content {
+                            return existing == trimmed || existing == text
+                        }
+                        return false
+                    }) {
+                        logger.info("[RECONSTRUCT] Skipping duplicate text from in-flight (already in persisted events)", category: .session)
+                        continue
+                    }
+                }
 
                 if isStreaming {
                     // Last text + actively streaming → create streaming message
@@ -115,17 +131,26 @@ extension ChatViewModel {
 
                 thinkingState.seedCatchUpThinking(accumulatedThinking, isStreaming: isThinkingStreaming)
 
-                if thinkingMessageId == nil {
-                    let msg = ChatMessage.thinking(accumulatedThinking, isStreaming: isThinkingStreaming)
-                    messages.append(msg)
-                    thinkingMessageId = msg.id
-                } else if let id = thinkingMessageId,
-                          let idx = MessageFinder.indexById(id, in: messages) {
+                // Dedup: check thinkingMessageId first, then scan for existing thinking
+                // message from persisted events (thinkingMessageId is nil after cleanUpStreamingState)
+                let existingThinkingIdx: Int? = thinkingMessageId.flatMap { id in
+                    MessageFinder.indexById(id, in: messages)
+                } ?? messages.lastIndex(where: { msg in
+                    if case .thinking = msg.content { return true }
+                    return false
+                })
+
+                if let idx = existingThinkingIdx {
                     messages[idx].content = .thinking(
                         visible: accumulatedThinking,
                         isExpanded: false,
                         isStreaming: isThinkingStreaming
                     )
+                    thinkingMessageId = messages[idx].id
+                } else {
+                    let msg = ChatMessage.thinking(accumulatedThinking, isStreaming: isThinkingStreaming)
+                    messages.append(msg)
+                    thinkingMessageId = msg.id
                 }
 
             case .toolRef(let toolCallId):
@@ -135,8 +160,10 @@ extension ChatViewModel {
             }
         }
 
+        let newMessages = messages.count - messageCountBefore
+        let updatedMessages = inFlight.contentSequence.count - newMessages
         messageIndex.rebuild(from: messages)
-        logger.info("[RECONSTRUCT] In-flight done: \(inFlight.contentSequence.count) items processed, messages now \(messages.count)", category: .session)
+        logger.info("[RECONSTRUCT] In-flight done: \(inFlight.contentSequence.count) items, \(newMessages) new, \(updatedMessages) deduplicated, messages now \(messages.count)", category: .session)
     }
 
     /// Process a single in-flight tool call into a UI message.
@@ -170,6 +197,18 @@ extension ChatViewModel {
 
         // AskUserQuestion: create interactive form instead of generic tool chip
         if kind == .askUserQuestion {
+            // Dedup: if an AskUserQuestion message with this toolCallId already exists
+            // from persisted events, skip creating a duplicate
+            if messages.contains(where: { msg in
+                if case .askUserQuestion(let data) = msg.content {
+                    return data.toolCallId == toolCall.toolCallId
+                }
+                return false
+            }) {
+                logger.info("[RECONSTRUCT] Skipping duplicate AskUserQuestion id=\(toolCall.toolCallId)", category: .session)
+                return
+            }
+
             let isActive = toolCall.status == ToolCallStatus.running.rawValue
                 || toolCall.status == ToolCallStatus.generating.rawValue
 
@@ -232,6 +271,26 @@ extension ChatViewModel {
             durationMs: durationMs,
             streamingOutput: (status == .running) ? toolCall.streamingOutput : nil
         )
+
+        // Dedup: if a tool message with this toolCallId already exists (from persisted
+        // message.assistant), update it with in-flight details rather than creating a duplicate.
+        if let existingIdx = messages.firstIndex(where: { msg in
+            switch msg.content {
+            case .toolUse(let data): return data.toolCallId == toolCall.toolCallId
+            case .getConfirmation(let data): return data.toolCallId == toolCall.toolCallId
+            default: return false
+            }
+        }) {
+            // For .toolUse, update with richer in-flight data (streaming output, startedAt).
+            // For .getConfirmation, preserve the existing content type — don't downgrade to .toolUse.
+            if case .toolUse = messages[existingIdx].content {
+                messages[existingIdx].content = .toolUse(toolUseData)
+            }
+            currentToolMessages[messages[existingIdx].id] = messages[existingIdx]
+            animationCoordinator.makeToolVisible(toolCall.toolCallId)
+            logger.info("[RECONSTRUCT] Deduplicated tool message for \(toolCall.toolName) id=\(toolCall.toolCallId)", category: .session)
+            return
+        }
 
         let toolMessage = ChatMessage(
             id: messageId,

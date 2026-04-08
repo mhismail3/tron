@@ -5,6 +5,13 @@
 //! events + in-flight state are returned in one response with monotonic sequence
 //! numbers for deterministic dedup.
 //!
+//! ## In-flight reconciliation
+//!
+//! When tools are executing, `message.assistant` has already been persisted (containing
+//! thinking, text, and tool_use blocks), but the turn accumulator still holds the same
+//! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when tools
+//! are past "generating" status, preventing duplicate content on iOS reconstruction.
+//!
 //! ## Response shape
 //!
 //! ```text
@@ -159,18 +166,64 @@ impl SessionReconstructService {
         let (text, tool_calls, content_sequence) =
             orchestrator.turn_accumulators().get_state(session_id)?;
 
-        // Derive streaming state from the last content item
-        let streaming = if !text.is_empty() {
-            Some(json!({ "type": "text", "content": text }))
-        } else {
-            None
-        };
+        Some(Self::reconcile_in_flight(text, tool_calls, content_sequence))
+    }
 
-        Some(json!({
-            "toolCalls": tool_calls,
-            "contentSequence": content_sequence,
-            "streaming": streaming,
-        }))
+    /// Reconcile in-flight accumulator state against persisted events.
+    ///
+    /// When any tool has progressed past "generating" status, tool execution has
+    /// started, which means `message.assistant` was persisted (tools only execute
+    /// after persist). In that case, text and thinking in the accumulator duplicate
+    /// the persisted event — strip them from the response to prevent iOS duplication.
+    ///
+    /// Tool calls and tool_ref items are always preserved since they carry live
+    /// status (running/completed, streamingOutput, startedAt) not in persisted events.
+    fn reconcile_in_flight(text: String, tool_calls: Value, content_sequence: Value) -> Value {
+        // Detect if message.assistant has been persisted for this turn.
+        // Any tool past "generating" means tool execution started → message.assistant persisted.
+        let tools_executing = tool_calls
+            .as_array()
+            .map(|calls| {
+                calls.iter().any(|tc| {
+                    tc.get("status")
+                        .and_then(|s| s.as_str())
+                        .is_some_and(|s| s != "generating")
+                })
+            })
+            .unwrap_or(false);
+
+        if tools_executing {
+            // Strip text/thinking from content sequence — already in persisted message.assistant.
+            // Keep only tool_ref items (they carry live status not in persisted events).
+            let filtered: Vec<Value> = content_sequence
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .filter(|item| {
+                    item.get("type").and_then(|t| t.as_str()) == Some("tool_ref")
+                })
+                .cloned()
+                .collect();
+
+            json!({
+                "toolCalls": tool_calls,
+                "contentSequence": filtered,
+                "streaming": null,
+            })
+        } else {
+            // LLM still streaming — keep everything (no persisted message.assistant yet).
+            let streaming = if !text.is_empty() {
+                Some(json!({ "type": "text", "content": text }))
+            } else {
+                None
+            };
+
+            json!({
+                "toolCalls": tool_calls,
+                "contentSequence": content_sequence,
+                "streaming": streaming,
+            })
+        }
     }
 }
 
@@ -178,53 +231,231 @@ impl SessionReconstructService {
 mod tests {
     use super::*;
 
+    // ── reconcile_in_flight tests ──
+
     #[test]
-    fn test_build_in_flight_json_shape() {
-        // Verify the JSON structure matches the documented response format
-        let text = "partial text".to_string();
-        let tool_calls = json!([{
-            "toolCallId": "tc_1",
-            "toolName": "bash",
-            "status": "running",
-        }]);
-        let content_sequence = json!([
-            { "type": "text", "text": "partial text" },
-            { "type": "tool_ref", "toolCallId": "tc_1" },
-        ]);
+    fn strips_text_thinking_when_tools_executing() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "I'll run sleep 10.".into(),
+            json!([{
+                "toolCallId": "tc_1",
+                "toolName": "bash",
+                "status": "running",
+                "startedAt": "2026-04-07T12:00:00Z",
+                "streamingOutput": "running...",
+            }]),
+            json!([
+                { "type": "thinking", "thinking": "The user wants sleep 10." },
+                { "type": "text", "text": "I'll run sleep 10." },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+            ]),
+        );
 
-        let streaming = if !text.is_empty() {
-            Some(json!({ "type": "text", "content": text }))
-        } else {
-            None
-        };
+        // Text/thinking stripped — already in persisted message.assistant
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 1);
+        assert_eq!(seq[0]["type"], "tool_ref");
+        assert_eq!(seq[0]["toolCallId"], "tc_1");
 
-        let in_flight = json!({
-            "toolCalls": tool_calls,
-            "contentSequence": content_sequence,
-            "streaming": streaming,
-        });
+        // Streaming cleared
+        assert!(result["streaming"].is_null());
 
-        assert!(in_flight["toolCalls"].is_array());
-        assert_eq!(in_flight["toolCalls"][0]["status"], "running");
-        assert!(in_flight["contentSequence"].is_array());
-        assert_eq!(in_flight["streaming"]["type"], "text");
-        assert_eq!(in_flight["streaming"]["content"], "partial text");
+        // Tool calls preserved with full detail
+        let tools = result["toolCalls"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["status"], "running");
+        assert_eq!(tools[0]["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(tools[0]["streamingOutput"], "running...");
     }
 
     #[test]
-    fn test_no_streaming_when_text_empty() {
-        let text = String::new();
-        let streaming = if !text.is_empty() {
-            Some(json!({ "type": "text", "content": text }))
-        } else {
-            None
-        };
-        assert!(streaming.is_none());
+    fn keeps_text_thinking_when_still_generating() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "Let me think...".into(),
+            json!([{
+                "toolCallId": "tc_1",
+                "toolName": "bash",
+                "status": "generating",
+            }]),
+            json!([
+                { "type": "thinking", "thinking": "Planning..." },
+                { "type": "text", "text": "Let me think..." },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+            ]),
+        );
+
+        // Everything kept — LLM still streaming, no persisted message.assistant yet
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 3);
+        assert_eq!(seq[0]["type"], "thinking");
+        assert_eq!(seq[1]["type"], "text");
+        assert_eq!(seq[2]["type"], "tool_ref");
+
+        // Streaming active
+        assert_eq!(result["streaming"]["type"], "text");
+        assert_eq!(result["streaming"]["content"], "Let me think...");
     }
+
+    #[test]
+    fn keeps_everything_when_no_tools() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "Here is my response...".into(),
+            json!([]),
+            json!([
+                { "type": "thinking", "thinking": "I'll explain." },
+                { "type": "text", "text": "Here is my response..." },
+            ]),
+        );
+
+        // Everything kept — text-only response still streaming
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 2);
+        assert_eq!(seq[0]["type"], "thinking");
+        assert_eq!(seq[1]["type"], "text");
+
+        // Streaming active
+        assert_eq!(result["streaming"]["type"], "text");
+    }
+
+    #[test]
+    fn strips_when_mixed_tool_statuses() {
+        // One tool running, one still generating — strip because at least one is executing
+        let result = SessionReconstructService::reconcile_in_flight(
+            "Running tools...".into(),
+            json!([
+                { "toolCallId": "tc_1", "toolName": "bash", "status": "running" },
+                { "toolCallId": "tc_2", "toolName": "read", "status": "generating" },
+            ]),
+            json!([
+                { "type": "thinking", "thinking": "Let me run both." },
+                { "type": "text", "text": "Running tools..." },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "tool_ref", "toolCallId": "tc_2" },
+            ]),
+        );
+
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 2); // Only tool_refs
+        assert_eq!(seq[0]["toolCallId"], "tc_1");
+        assert_eq!(seq[1]["toolCallId"], "tc_2");
+        assert!(result["streaming"].is_null());
+
+        // Both tool calls preserved
+        assert_eq!(result["toolCalls"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn strips_when_tool_completed() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "Done.".into(),
+            json!([{
+                "toolCallId": "tc_1",
+                "toolName": "read",
+                "status": "completed",
+                "result": "file contents...",
+                "completedAt": "2026-04-07T12:00:01Z",
+            }]),
+            json!([
+                { "type": "text", "text": "Done." },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+            ]),
+        );
+
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 1);
+        assert_eq!(seq[0]["type"], "tool_ref");
+        assert!(result["streaming"].is_null());
+    }
+
+    #[test]
+    fn strips_when_tool_errored() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "Trying...".into(),
+            json!([{
+                "toolCallId": "tc_1",
+                "toolName": "bash",
+                "status": "error",
+                "isError": true,
+                "result": "command not found",
+            }]),
+            json!([
+                { "type": "text", "text": "Trying..." },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+            ]),
+        );
+
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 1);
+        assert_eq!(seq[0]["type"], "tool_ref");
+    }
+
+    #[test]
+    fn preserves_streaming_output_and_timestamps() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            "text".into(),
+            json!([{
+                "toolCallId": "tc_1",
+                "toolName": "bash",
+                "status": "running",
+                "arguments": { "command": "sleep 10" },
+                "startedAt": "2026-04-07T12:00:00Z",
+                "streamingOutput": "partial output line 1\nline 2\n",
+                "isError": false,
+            }]),
+            json!([
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+            ]),
+        );
+
+        let tool = &result["toolCalls"][0];
+        assert_eq!(tool["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(tool["streamingOutput"], "partial output line 1\nline 2\n");
+        assert_eq!(tool["arguments"]["command"], "sleep 10");
+        assert_eq!(tool["isError"], false);
+    }
+
+    #[test]
+    fn no_streaming_when_text_empty_and_no_tools() {
+        let result = SessionReconstructService::reconcile_in_flight(
+            String::new(),
+            json!([]),
+            json!([
+                { "type": "thinking", "thinking": "hmm" },
+            ]),
+        );
+
+        assert!(result["streaming"].is_null());
+        assert_eq!(result["contentSequence"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn strips_multiple_text_and_thinking_blocks() {
+        // Interleaved: thinking, text, tool, text, tool
+        let result = SessionReconstructService::reconcile_in_flight(
+            "second text".into(),
+            json!([
+                { "toolCallId": "tc_1", "toolName": "bash", "status": "running" },
+                { "toolCallId": "tc_2", "toolName": "read", "status": "running" },
+            ]),
+            json!([
+                { "type": "thinking", "thinking": "plan A" },
+                { "type": "text", "text": "first text" },
+                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "thinking", "thinking": "plan B" },
+                { "type": "text", "text": "second text" },
+                { "type": "tool_ref", "toolCallId": "tc_2" },
+            ]),
+        );
+
+        let seq = result["contentSequence"].as_array().unwrap();
+        assert_eq!(seq.len(), 2);
+        assert!(seq.iter().all(|item| item["type"] == "tool_ref"));
+    }
+
+    // ── Legacy tests (kept for backward compat of response shape) ──
 
     #[test]
     fn test_reconstruct_response_shape() {
-        // Verify the overall response JSON has all required keys
         let response = json!({
             "events": [],
             "hasMoreEvents": false,
