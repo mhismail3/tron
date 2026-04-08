@@ -150,7 +150,7 @@ final class SessionRepository {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       is_chat
+                       is_chat, activity_lines_json
                 FROM sessions
                 WHERE server_origin = ?
                 ORDER BY last_activity_at DESC
@@ -161,7 +161,7 @@ final class SessionRepository {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       is_chat
+                       is_chat, activity_lines_json
                 FROM sessions ORDER BY last_activity_at DESC
             """
         }
