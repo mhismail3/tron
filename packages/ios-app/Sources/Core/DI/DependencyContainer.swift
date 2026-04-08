@@ -279,7 +279,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Set background state for battery optimization
     func setBackgroundState(_ inBackground: Bool) {
         rpcClient.setBackgroundState(inBackground)
-        eventStoreManager.setBackgroundState(inBackground)
     }
 
     /// Verify connection is alive

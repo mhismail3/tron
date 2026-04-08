@@ -450,25 +450,6 @@ final class ContentExtractorTests: XCTestCase {
     }
 }
 
-// MARK: - SessionStateChecker Tests
-
-@MainActor
-final class SessionStateCheckerTests: XCTestCase {
-
-    func testProcessingStateTracking() {
-        // Test that we can track processing state independently
-        var processingIds: Set<String> = []
-
-        // Add session
-        processingIds.insert("session-1")
-        XCTAssertTrue(processingIds.contains("session-1"))
-
-        // Remove session
-        processingIds.remove("session-1")
-        XCTAssertFalse(processingIds.contains("session-1"))
-    }
-}
-
 // MARK: - EventTreeNode Tests
 
 @MainActor

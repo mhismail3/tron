@@ -56,22 +56,6 @@ final class EventStoreManager {
     /// TTL-based cache for turn content used to enrich server events
     let turnContentCache = TurnContentCache()
 
-    // MARK: - Polling Components
-
-    /// Manages dashboard polling lifecycle with background suspension
-    @ObservationIgnored
-    private(set) lazy var dashboardPoller: DashboardPoller = {
-        let poller = DashboardPoller()
-        poller.delegate = self
-        return poller
-    }()
-
-    /// Checks session processing states from the server
-    @ObservationIgnored
-    private(set) lazy var sessionStateChecker: SessionStateChecker = {
-        SessionStateChecker(rpcClient: rpcClient)
-    }()
-
     /// Handles synchronization of session events with the server
     @ObservationIgnored
     private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
@@ -83,9 +67,6 @@ final class EventStoreManager {
     private(set) lazy var dashboardStreamManager = DashboardStreamManager()
 
     // MARK: - Processing State
-
-    /// Deterministic counter for full-scan polling (triggers every 10th cycle)
-    var pollCycleCounter: Int = 0
 
     var processingSessionIds: Set<String> = [] {
         didSet {
@@ -119,7 +100,6 @@ final class EventStoreManager {
     /// Update the RPC client (e.g., when server settings change)
     func updateRPCClient(_ client: RPCClient) {
         rpcClient = client
-        sessionStateChecker.updateRPCClient(client)
         sessionSynchronizer.updateRPCClient(client)
         setupGlobalEventHandlers()
         logger.info("RPC client updated to \(client.serverOrigin)", category: .session)
@@ -145,10 +125,21 @@ final class EventStoreManager {
     /// Handle global events for dashboard updates (plugin-based)
     private func handleGlobalEventV2(_ event: ParsedEventV2) {
         switch event.eventType {
+        case SessionProcessingChangedPlugin.eventType:
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? SessionProcessingChangedPlugin.Result {
+                guard sessions.contains(where: { $0.id == sessionId }) else { break }
+                setSessionProcessing(sessionId, isProcessing: result.isProcessing)
+                if result.isProcessing {
+                    dashboardStreamManager.handleEvent(.turnStart, sessionId: sessionId)
+                } else {
+                    dashboardStreamManager.handleEvent(.complete, sessionId: sessionId)
+                    Task { await self.finalizeSessionCompletion(sessionId: sessionId) }
+                }
+            }
+
         case TurnStartPlugin.eventType:
             if let sessionId = event.sessionId {
-                logger.info("Global: Session \(sessionId) started processing", category: .session)
-                setSessionProcessing(sessionId, isProcessing: true)
                 dashboardStreamManager.handleEvent(.turnStart, sessionId: sessionId)
             }
 

@@ -29,76 +29,6 @@ extension EventStoreManager {
         }
     }
 
-    // MARK: - Background State
-
-    /// Set background state to pause polling and save battery.
-    /// Delegates to DashboardPoller.
-    func setBackgroundState(_ inBackground: Bool) {
-        dashboardPoller.setBackgroundState(inBackground)
-    }
-
-    // MARK: - Dashboard Polling
-
-    /// Start polling for session processing states.
-    /// Delegates to DashboardPoller.
-    func startDashboardPolling() {
-        dashboardPoller.start()
-    }
-
-    /// Stop polling.
-    /// Delegates to DashboardPoller.
-    func stopDashboardPolling() {
-        dashboardPoller.stop()
-    }
-
-    /// Poll all sessions to check their processing state.
-    /// Skips the active WebSocket session — it already receives real-time state via events.
-    func pollAllSessionStates() async {
-        let connectedSessionId = rpcClient.currentSessionId
-        pollCycleCounter += 1
-        let isFullScan = pollCycleCounter % 10 == 0
-
-        // Single pass: partition sessions into processing vs idle
-        var processing: [CachedSession] = []
-        var idle: [CachedSession] = []
-
-        for session in sessions where session.id != connectedSessionId {
-            if session.isProcessing == true || processingSessionIds.contains(session.id) {
-                processing.append(session)
-            } else if isFullScan {
-                processing.append(session)
-            } else {
-                idle.append(session)
-            }
-        }
-
-        let candidates = processing.isEmpty && !isFullScan ? Array(idle.prefix(3)) : processing
-
-        for session in candidates {
-            guard !sessionStateChecker.shouldSkip(sessionId: session.id) else { continue }
-            await checkSessionProcessingState(sessionId: session.id)
-        }
-    }
-
-    /// Check a single session's processing state from the server.
-    func checkSessionProcessingState(sessionId: String) async {
-        let wasProcessing = processingSessionIds.contains(sessionId) ||
-            (sessions.first(where: { $0.id == sessionId })?.isProcessing == true)
-
-        guard let isNowProcessing = await sessionStateChecker.checkProcessingState(sessionId: sessionId) else {
-            return
-        }
-
-        if wasProcessing != isNowProcessing {
-            logger.info("Session \(sessionId) processing state changed: \(wasProcessing) -> \(isNowProcessing)")
-            setSessionProcessing(sessionId, isProcessing: isNowProcessing)
-
-            if wasProcessing && !isNowProcessing {
-                await finalizeSessionCompletion(sessionId: sessionId)
-            }
-        }
-    }
-
     /// Finalize a session that has stopped processing.
     /// Snapshots live buffer, persists activity lines, syncs events, and extracts dashboard info.
     /// Idempotent: safe to call from both the CompletePlugin event path and the polling path.
@@ -170,22 +100,5 @@ extension EventStoreManager {
         } catch {
             logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
         }
-    }
-}
-
-// MARK: - DashboardPollerDelegate Conformance
-
-extension EventStoreManager: DashboardPollerDelegate {
-
-    func pollerShouldPreWarm() async {
-        await sessionStateChecker.preWarmConnection()
-    }
-
-    func pollerShouldPollSessions() async {
-        await pollAllSessionStates()
-    }
-
-    func pollerHasProcessingSessions() -> Bool {
-        !processingSessionIds.isEmpty
     }
 }

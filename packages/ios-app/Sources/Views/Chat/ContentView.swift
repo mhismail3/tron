@@ -78,9 +78,6 @@ struct ContentView: View {
                    eventStoreManager.sessionExists(activeId) {
                     selectedSessionId = activeId
                 }
-                // Start polling for session processing states when dashboard is visible
-                eventStoreManager.startDashboardPolling()
-
                 // Refresh session list from server if already connected
                 // (handles the case where WebSocket connected before this view appeared)
                 if rpcClient.connectionState.isConnected {
@@ -97,10 +94,7 @@ struct ContentView: View {
                     handlePendingShare()
                 }
             }
-            .onDisappear {
-                // Stop polling when leaving the dashboard
-                eventStoreManager.stopDashboardPolling()
-            }
+            .onDisappear {}
             .onChange(of: rpcClient.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
                     coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)

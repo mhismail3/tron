@@ -607,6 +607,40 @@ fn agent_end_no_error_has_agent_phase() {
 }
 
 #[test]
+fn converts_session_processing_changed_true() {
+    let event = TronEvent::SessionProcessingChanged {
+        base: BaseEvent::now("s1"),
+        is_processing: true,
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.event_type, "session.processing_changed");
+    let data = rpc.data.unwrap();
+    assert_eq!(data["isProcessing"], true);
+}
+
+#[test]
+fn converts_session_processing_changed_false() {
+    let event = TronEvent::SessionProcessingChanged {
+        base: BaseEvent::now("s1"),
+        is_processing: false,
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.event_type, "session.processing_changed");
+    let data = rpc.data.unwrap();
+    assert_eq!(data["isProcessing"], false);
+}
+
+#[test]
+fn session_processing_changed_is_global() {
+    let event = TronEvent::SessionProcessingChanged {
+        base: BaseEvent::now("s1"),
+        is_processing: true,
+    };
+    let bridged = tron_event_to_bridged(&event);
+    assert_eq!(bridged.scope, BroadcastScope::All);
+}
+
+#[test]
 fn error_includes_context() {
     let event = TronEvent::Error {
         base: BaseEvent::now("s1"),

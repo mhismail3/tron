@@ -350,6 +350,12 @@ tron_events! {
     /// Agent ready (post-processing complete, safe to send next message).
     AgentReady {} => "agent_ready",
 
+    /// Session processing state changed (global broadcast for dashboard).
+    SessionProcessingChanged {
+        #[serde(rename = "isProcessing")]
+        is_processing: bool,
+    } => "session_processing_changed",
+
     /// Agent interrupted by user.
     AgentInterrupted {
         turn: u32,
@@ -1111,6 +1117,15 @@ pub fn agent_ready_event(session_id: impl Into<String>) -> TronEvent {
     }
 }
 
+/// Create a session-processing-changed event.
+#[must_use]
+pub fn session_processing_changed_event(session_id: impl Into<String>, is_processing: bool) -> TronEvent {
+    TronEvent::SessionProcessingChanged {
+        base: BaseEvent::now(session_id),
+        is_processing,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Type guards
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1526,6 +1541,10 @@ mod tests {
                 error: None,
             },
             TronEvent::AgentReady { base: base.clone() },
+            TronEvent::SessionProcessingChanged {
+                base: base.clone(),
+                is_processing: true,
+            },
             TronEvent::AgentInterrupted {
                 base: base.clone(),
                 turn: 1,

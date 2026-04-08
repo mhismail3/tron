@@ -170,6 +170,12 @@ impl TronAgent {
                 base: BaseEvent::now(&self.session_id),
             });
         }
+        // Global broadcast for dashboard: this session is now processing
+        let _ = self.emitter.emit(TronEvent::SessionProcessingChanged {
+            base: BaseEvent::now(&self.session_id),
+            is_processing: true,
+        });
+
         debug!(session_id = %self.session_id, "agent run started");
 
         let max_turns = self.config.max_turns;
@@ -313,6 +319,12 @@ impl TronAgent {
                 error: error.clone(),
             });
         }
+
+        // Global broadcast for dashboard: this session stopped processing
+        let _ = self.emitter.emit(TronEvent::SessionProcessingChanged {
+            base: BaseEvent::now(&self.session_id),
+            is_processing: false,
+        });
 
         // _guard drops here, resetting is_running (even on panic)
 

@@ -433,6 +433,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             });
             Some(session_scoped(event, "worktree.renamed", Some(data)))
         }
+        TronEvent::SessionProcessingChanged { is_processing, .. } => Some(global(
+            event,
+            "session.processing_changed",
+            Some(json!({ "isProcessing": is_processing })),
+        )),
         TronEvent::SessionSaved { .. } | TronEvent::SessionLoaded { .. } => {
             Some(session_scoped(event, event.event_type(), Some(json!({}))))
         }

@@ -25,8 +25,6 @@ final class ContentViewCoordinator {
     /// Called when connection state transitions to connected.
     /// Refreshes session list and re-validates the current session's workspace.
     func handleConnectionEstablished(selectedSessionId: String?) {
-        eventStoreManager.startDashboardPolling()
-
         Task {
             await eventStoreManager.refreshSessionList()
         }
