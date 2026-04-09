@@ -204,7 +204,14 @@ impl MethodHandler for GetSinceHandler {
             events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
         }
 
-        let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+
+        // Enrich GetConfirmation/AskUserQuestion tool.call events — same
+        // pass applied by session.reconstruct and events.getHistory, so
+        // incremental sync sees consistent enriched payloads.
+        crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
+            &mut wire_events,
+        );
 
         // Include nextCursor for incremental sync
         let next_cursor = events.last().map(|e| e.id.clone());
