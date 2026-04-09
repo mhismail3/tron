@@ -34,36 +34,50 @@ struct ErrorClassificationTests {
 
     // MARK: - WebFetch Classifier
 
-    @Test("WebFetch classifies HTTP errors")
+    private func webFetchDetails(errorClass: String?, httpStatus: Int? = nil) -> [String: AnyCodable]? {
+        guard errorClass != nil || httpStatus != nil else { return nil }
+        var d: [String: AnyCodable] = [:]
+        if let errorClass { d["errorClass"] = AnyCodable(errorClass) }
+        if let httpStatus { d["httpStatus"] = AnyCodable(httpStatus) }
+        return d
+    }
+
+    @Test("WebFetch classifies HTTP errors from structured details")
     func testWebFetchHTTPErrors() {
-        let c404 = WebFetchDetailParser.classifyError("HTTP 404 not found")
-        #expect(c404.title == "Page Not Found")
-        #expect(c404.code == "HTTP 404")
+        let c404 = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "not_found", httpStatus: 404))
+        #expect(c404?.title == "Page Not Found")
+        #expect(c404?.code == "HTTP 404")
 
-        let c403 = WebFetchDetailParser.classifyError("403 Forbidden")
-        #expect(c403.title == "Access Forbidden")
+        let c403 = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "forbidden", httpStatus: 403))
+        #expect(c403?.title == "Access Forbidden")
 
-        let cTimeout = WebFetchDetailParser.classifyError("Request timed out")
-        #expect(cTimeout.title == "Request Timed Out")
-        #expect(cTimeout.code == nil)
+        let cTimeout = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "timeout"))
+        #expect(cTimeout?.title == "Request Timed Out")
+        #expect(cTimeout?.code == nil)
     }
 
-    @Test("WebFetch classifies network errors")
+    @Test("WebFetch classifies network errors from structured details")
     func testWebFetchNetworkErrors() {
-        let dns = WebFetchDetailParser.classifyError("Could not resolve host")
-        #expect(dns.title == "DNS Error")
+        let dns = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "dns"))
+        #expect(dns?.title == "DNS Error")
 
-        let ssl = WebFetchDetailParser.classifyError("SSL certificate error")
-        #expect(ssl.title == "SSL Error")
+        let ssl = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "ssl"))
+        #expect(ssl?.title == "SSL Error")
 
-        let blocked = WebFetchDetailParser.classifyError("Domain blocked")
-        #expect(blocked.title == "Domain Blocked")
+        let blocked = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "blocked"))
+        #expect(blocked?.title == "Domain Blocked")
     }
 
-    @Test("WebFetch returns fallback for unknown errors")
+    @Test("WebFetch returns fallback for unknown errorClass")
     func testWebFetchFallback() {
-        let unknown = WebFetchDetailParser.classifyError("something weird happened")
-        #expect(unknown.title == "Fetch Failed")
+        let unknown = WebFetchDetailParser.classify(details: webFetchDetails(errorClass: "weird"))
+        #expect(unknown?.title == "Fetch Failed")
+    }
+
+    @Test("WebFetch returns nil when details have no errorClass")
+    func testWebFetchNoErrorClass() {
+        #expect(WebFetchDetailParser.classify(details: [:]) == nil)
+        #expect(WebFetchDetailParser.classify(details: nil) == nil)
     }
 
     // MARK: - WebSearch Classifier
@@ -131,53 +145,71 @@ struct ErrorClassificationTests {
 
     // MARK: - Search Classifier
 
-    @Test("Search classifies invalid regex")
+    private func searchDetails(errorClass: String?, error: String? = nil) -> [String: AnyCodable]? {
+        var d: [String: AnyCodable] = [:]
+        if let errorClass { d["errorClass"] = AnyCodable(errorClass) }
+        if let error { d["error"] = AnyCodable(error) }
+        return d.isEmpty ? nil : d
+    }
+
+    @Test("Search classifies invalid_pattern from structured details")
     func testSearchInvalidRegex() {
-        let c = SearchErrorClassifier.classify("Invalid regex pattern: [invalid - unterminated character class")
+        let c = SearchErrorClassifier.classify(details: searchDetails(errorClass: "invalid_pattern"))
         #expect(c.title == "Invalid Pattern")
         #expect(c.code == nil)
     }
 
-    @Test("Search classifies permission denied")
-    func testSearchPermissionDenied() {
-        let c = SearchErrorClassifier.classify("Permission denied: /root/secret")
-        #expect(c.title == "Permission Denied")
-        #expect(c.code == "EACCES")
-    }
-
-    @Test("Search classifies path not found")
-    func testSearchPathNotFound() {
-        let c = SearchErrorClassifier.classify("No such file or directory: /missing/path")
-        #expect(c.title == "Path Not Found")
-        #expect(c.code == "ENOENT")
-    }
-
-    @Test("Search returns fallback for unknown")
+    @Test("Search returns fallback for other errorClass")
     func testSearchFallback() {
-        let c = SearchErrorClassifier.classify("something weird happened")
+        let c = SearchErrorClassifier.classify(details: searchDetails(errorClass: "other"))
         #expect(c.title == "Search Failed")
+    }
+
+    @Test("Search returns fallback when details nil")
+    func testSearchNilDetails() {
+        let c = SearchErrorClassifier.classify(details: nil)
+        #expect(c.title == "Search Failed")
+    }
+
+    @Test("Search reads errorMessage from details")
+    func testSearchErrorMessage() {
+        let msg = SearchErrorClassifier.errorMessage(
+            from: searchDetails(errorClass: "invalid_pattern", error: "Invalid regex: [unterminated"))
+        #expect(msg == "Invalid regex: [unterminated")
     }
 
     // MARK: - Glob Classifier
 
-    @Test("Glob classifies permission denied")
-    func testGlobPermissionDenied() {
-        let c = GlobErrorClassifier.classify("EACCES: Permission denied")
-        #expect(c.title == "Permission Denied")
-        #expect(c.code == "EACCES")
+    private func globDetails(errorClass: String?, error: String? = nil) -> [String: AnyCodable]? {
+        var d: [String: AnyCodable] = [:]
+        if let errorClass { d["errorClass"] = AnyCodable(errorClass) }
+        if let error { d["error"] = AnyCodable(error) }
+        return d.isEmpty ? nil : d
     }
 
-    @Test("Glob classifies path not found")
-    func testGlobPathNotFound() {
-        let c = GlobErrorClassifier.classify("ENOENT: No such file or directory")
-        #expect(c.title == "Path Not Found")
-        #expect(c.code == "ENOENT")
+    @Test("Glob classifies invalid_pattern from structured details")
+    func testGlobInvalidPattern() {
+        let c = GlobErrorClassifier.classify(details: globDetails(errorClass: "invalid_pattern"))
+        #expect(c.title == "Invalid Glob Pattern")
     }
 
-    @Test("Glob returns fallback for unknown")
+    @Test("Glob returns fallback for other errorClass")
     func testGlobFallback() {
-        let c = GlobErrorClassifier.classify("unexpected glob error")
-        #expect(c.title == "Search Failed")
+        let c = GlobErrorClassifier.classify(details: globDetails(errorClass: "other"))
+        #expect(c.title == "Find Failed")
+    }
+
+    @Test("Glob returns fallback when details nil")
+    func testGlobNilDetails() {
+        let c = GlobErrorClassifier.classify(details: nil)
+        #expect(c.title == "Find Failed")
+    }
+
+    @Test("Glob reads errorMessage from details")
+    func testGlobErrorMessage() {
+        let msg = GlobErrorClassifier.errorMessage(
+            from: globDetails(errorClass: "invalid_pattern", error: "Invalid glob pattern: [bad"))
+        #expect(msg == "Invalid glob pattern: [bad")
     }
 
     // MARK: - Bash Classifier

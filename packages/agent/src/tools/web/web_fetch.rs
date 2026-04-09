@@ -14,7 +14,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ContentSummarizer, HttpClient, HttpRequest, ToolContext, TronTool};
@@ -29,6 +29,75 @@ use crate::tools::web::url_validator::{UrlValidatorConfig, validate_url};
 const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
 const MAX_CONTENT_TOKENS: usize = 50_000;
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+
+/// Classify a WebFetch failure into a structured error class so iOS can
+/// render a chip without scanning text. See `iOS SearchErrorClassifier` /
+/// `WebFetchDetailParser` for the consumer side.
+///
+/// Returns one of: `"not_found"`, `"forbidden"`, `"unauthorized"`,
+/// `"rate_limited"`, `"server_error"`, `"timeout"`, `"dns"`, `"ssl"`,
+/// `"redirect"`, `"blocked"`, `"too_large"`, `"invalid_url"`, `"network"`,
+/// or `"other"`.
+pub(crate) fn classify_web_fetch_error(status: Option<u16>, message: &str) -> &'static str {
+    if let Some(s) = status {
+        match s {
+            401 => return "unauthorized",
+            403 => return "forbidden",
+            404 => return "not_found",
+            429 => return "rate_limited",
+            500..=599 => return "server_error",
+            _ => {}
+        }
+    }
+    let lower = message.to_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "timeout";
+    }
+    if lower.contains("no such host")
+        || lower.contains("dns")
+        || lower.contains("failed to resolve")
+        || lower.contains("name resolution")
+    {
+        return "dns";
+    }
+    if lower.contains("ssl") || lower.contains("certificate") || lower.contains("tls") {
+        return "ssl";
+    }
+    if lower.contains("redirect") {
+        return "redirect";
+    }
+    if lower.contains("blocked") || lower.contains("not allowed") {
+        return "blocked";
+    }
+    if lower.contains("too large") {
+        return "too_large";
+    }
+    if lower.contains("invalid url") || lower.contains("invalid host") || lower.contains("url parse") {
+        return "invalid_url";
+    }
+    if lower.contains("network") || lower.contains("connection") {
+        return "network";
+    }
+    "other"
+}
+
+/// Build an error TronToolResult with structured details for WebFetch.
+fn web_fetch_error(message: impl Into<String>, status: Option<u16>) -> TronToolResult {
+    let msg = message.into();
+    let class = classify_web_fetch_error(status, &msg);
+    TronToolResult {
+        content: ToolResultBody::Blocks(vec![
+            crate::core::content::ToolResultContent::text(&msg),
+        ]),
+        details: Some(json!({
+            "error": msg,
+            "errorClass": class,
+            "httpStatus": status,
+        })),
+        is_error: Some(true),
+        stop_turn: None,
+    }
+}
 
 /// The `WebFetch` tool fetches URLs and can either summarize HTML or return raw HTTP responses.
 pub struct WebFetchTool {
@@ -193,10 +262,10 @@ impl TronTool for WebFetchTool {
         if let Some(ref b) = body
             && b.len() > MAX_BODY_SIZE
         {
-            return Ok(error_result(format!(
-                "Request body too large: {} bytes (max {MAX_BODY_SIZE})",
-                b.len()
-            )));
+            return Ok(web_fetch_error(
+                format!("Request body too large: {} bytes (max {MAX_BODY_SIZE})", b.len()),
+                None,
+            ));
         }
 
         // Validate URL
@@ -206,7 +275,7 @@ impl TronTool for WebFetchTool {
         };
         let url = match validate_url(&raw_url, &config) {
             Ok(u) => u,
-            Err(e) => return Ok(error_result(e.to_string())),
+            Err(e) => return Ok(web_fetch_error(e.to_string(), None)),
         };
 
         // Determine mode: summarization vs raw
@@ -242,11 +311,13 @@ impl WebFetchTool {
                         crate::core::content::ToolResultContent::text(&cached.answer),
                     ]),
                     details: Some(json!({
+                        "mode": "summarization",
                         "url": cached.url,
                         "title": cached.title,
                         "prompt": prompt,
                         "fromCache": true,
                         "subagentSessionId": cached.subagent_session_id,
+                        "answer": cached.answer,
                     })),
                     is_error: None,
                     stop_turn: None,
@@ -257,18 +328,21 @@ impl WebFetchTool {
         // Fetch via simple GET
         let response = match self.http.get(url).await {
             Ok(r) => r,
-            Err(e) => return Ok(error_result(format!("HTTP request failed: {e}"))),
+            Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
         };
 
         if response.status != 200 {
-            return Ok(error_result(format!("HTTP {} for {url}", response.status)));
+            return Ok(web_fetch_error(
+                format!("HTTP {} for {url}", response.status),
+                Some(response.status),
+            ));
         }
 
         if response.body.len() > max_size {
-            return Ok(error_result(format!(
-                "Response too large: {} bytes (max {max_size})",
-                response.body.len()
-            )));
+            return Ok(web_fetch_error(
+                format!("Response too large: {} bytes (max {max_size})", response.body.len()),
+                None,
+            ));
         }
 
         // Parse HTML
@@ -320,6 +394,7 @@ impl WebFetchTool {
                 &answer,
             )]),
             details: Some(json!({
+                "mode": "summarization",
                 "url": url,
                 "title": title,
                 "originalLength": parsed.original_length,
@@ -327,6 +402,7 @@ impl WebFetchTool {
                 "prompt": prompt,
                 "fromCache": false,
                 "subagentSessionId": subagent_session_id,
+                "answer": answer,
             })),
             is_error: None,
             stop_turn: None,
@@ -375,14 +451,14 @@ impl WebFetchTool {
 
         let response = match self.http.request(&req).await {
             Ok(r) => r,
-            Err(e) => return Ok(error_result(format!("HTTP request failed: {e}"))),
+            Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
         };
 
         if response.body.len() > max_size {
-            return Ok(error_result(format!(
-                "Response too large: {} bytes (max {max_size})",
-                response.body.len()
-            )));
+            return Ok(web_fetch_error(
+                format!("Response too large: {} bytes (max {max_size})", response.body.len()),
+                Some(response.status),
+            ));
         }
 
         // Handle binary response: base64-encode if content-type is not text/*
@@ -417,7 +493,7 @@ impl WebFetchTool {
             "HTTP {} {}\n\n{}",
             response.status,
             url,
-            display_body,
+            &display_body,
         );
 
         Ok(TronToolResult {
@@ -425,12 +501,14 @@ impl WebFetchTool {
                 output,
             )]),
             details: Some(json!({
+                "mode": "raw",
                 "url": url,
                 "method": method,
-                "status": response.status,
+                "httpStatus": response.status,
                 "contentType": response.content_type,
                 "responseHeaders": resp_headers_json,
                 "bodyLength": response.body.len(),
+                "body": display_body,
             })),
             is_error: None,
             stop_turn: None,
@@ -894,7 +972,7 @@ mod tests {
         assert!(text.contains("key"));
         let d = r.details.unwrap();
         assert_eq!(d["method"], "POST");
-        assert_eq!(d["status"], 200);
+        assert_eq!(d["httpStatus"], 200);
     }
 
     #[tokio::test]
@@ -990,7 +1068,7 @@ mod tests {
             .unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["method"], "HEAD");
-        assert_eq!(d["status"], 200);
+        assert_eq!(d["httpStatus"], 200);
     }
 
     #[tokio::test]
@@ -1080,7 +1158,7 @@ mod tests {
             .await
             .unwrap();
         let d = r.details.unwrap();
-        assert_eq!(d["status"], 200);
+        assert_eq!(d["httpStatus"], 200);
         assert!(d["responseHeaders"].is_object());
         assert_eq!(d["responseHeaders"]["x-request-id"], "test-123");
     }
@@ -1099,7 +1177,7 @@ mod tests {
         // Raw mode returns method= prefix, not HTML-parsed content
         let d = r.details.unwrap();
         assert_eq!(d["method"], "GET");
-        assert!(d.get("status").is_some());
+        assert!(d.get("httpStatus").is_some());
     }
 
     #[tokio::test]
@@ -1128,7 +1206,7 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         let d = r.details.unwrap();
-        assert_eq!(d["status"], 404);
+        assert_eq!(d["httpStatus"], 404);
     }
 
     #[tokio::test]
@@ -1417,7 +1495,7 @@ mod tests {
         let text = extract_text(&r);
         assert!(text.contains("follow=false"));
         let d = r.details.unwrap();
-        assert_eq!(d["status"], 301);
+        assert_eq!(d["httpStatus"], 301);
     }
 
     // ─── Error handling tests ────────────────────────────────────────
@@ -1611,5 +1689,116 @@ mod tests {
         let text = extract_text(&r);
         assert!(!text.contains("base64-encoded"));
         assert!(text.contains("plain text content"));
+    }
+
+    // ─── Error classification ────────────────────────────────────────────
+
+    #[test]
+    fn classify_by_http_status() {
+        assert_eq!(classify_web_fetch_error(Some(401), ""), "unauthorized");
+        assert_eq!(classify_web_fetch_error(Some(403), ""), "forbidden");
+        assert_eq!(classify_web_fetch_error(Some(404), ""), "not_found");
+        assert_eq!(classify_web_fetch_error(Some(429), ""), "rate_limited");
+        assert_eq!(classify_web_fetch_error(Some(500), ""), "server_error");
+        assert_eq!(classify_web_fetch_error(Some(503), ""), "server_error");
+    }
+
+    #[test]
+    fn classify_by_message_text() {
+        assert_eq!(classify_web_fetch_error(None, "request timed out"), "timeout");
+        assert_eq!(classify_web_fetch_error(None, "no such host"), "dns");
+        assert_eq!(
+            classify_web_fetch_error(None, "failed to resolve address"),
+            "dns"
+        );
+        assert_eq!(
+            classify_web_fetch_error(None, "SSL certificate expired"),
+            "ssl"
+        );
+        assert_eq!(classify_web_fetch_error(None, "too many redirects"), "redirect");
+        assert_eq!(classify_web_fetch_error(None, "domain blocked"), "blocked");
+        assert_eq!(
+            classify_web_fetch_error(None, "Response too large: 99 bytes"),
+            "too_large"
+        );
+        assert_eq!(classify_web_fetch_error(None, "invalid url scheme"), "invalid_url");
+        assert_eq!(classify_web_fetch_error(None, "network unreachable"), "network");
+    }
+
+    #[test]
+    fn classify_unknown_returns_other() {
+        assert_eq!(classify_web_fetch_error(None, "something weird"), "other");
+    }
+
+    #[test]
+    fn http_status_wins_over_text_keywords() {
+        // A 404 with "timeout" in the message is still not_found.
+        assert_eq!(
+            classify_web_fetch_error(Some(404), "request timed out"),
+            "not_found"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_404_emits_structured_details() {
+        let http = Arc::new(MockHttp::get_only(|_| Ok(HttpResponse {
+            status: 404, body: "".into(), content_type: None, headers: HashMap::new(),
+        })));
+        let tool = WebFetchTool::new(http);
+        let r = tool
+            .execute(json!({"url": "https://example.com/missing", "prompt": "q"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let d = r.details.as_ref().expect("details present");
+        assert_eq!(d["errorClass"], "not_found");
+        assert_eq!(d["httpStatus"], 404);
+        assert!(d["error"].as_str().unwrap().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn network_failure_emits_structured_details() {
+        let http = Arc::new(MockHttp::get_only(|_| Err("connection timed out".into())));
+        let tool = WebFetchTool::new(http);
+        let r = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let d = r.details.as_ref().expect("details present");
+        assert_eq!(d["errorClass"], "timeout");
+        assert!(d.get("httpStatus").is_some_and(|v| v.is_null()));
+    }
+
+    #[tokio::test]
+    async fn invalid_url_emits_structured_details() {
+        let http = Arc::new(html_response(""));
+        let tool = WebFetchTool::new(http);
+        let r = tool
+            .execute(json!({"url": "not-a-url", "prompt": "q"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let d = r.details.as_ref().expect("details present");
+        assert!(d.get("errorClass").is_some());
+        assert!(d.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn raw_mode_success_uses_http_status_key() {
+        // Raw success now emits `httpStatus` for consistency with error path.
+        let http = Arc::new(full_mock());
+        let tool = WebFetchTool::new(http);
+        let r = tool
+            .execute(
+                json!({"url": "https://api.example.com/echo", "method": "POST", "body": {"x": 1}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        let d = r.details.as_ref().unwrap();
+        assert_eq!(d["httpStatus"], 200);
+        assert!(d.get("status").is_none());
     }
 }

@@ -2,14 +2,32 @@ import SwiftUI
 
 // MARK: - Glob Error Classifier
 
-enum GlobErrorClassifier: ErrorClassifying {
-    static func classify(_ message: String) -> ErrorClassification {
-        if message.contains("Permission denied") || message.contains("EACCES") {
-            return ErrorClassification(icon: "lock.fill", title: "Permission Denied", code: "EACCES", suggestion: "The process does not have permission to search this location.")
+/// Reads the structured `errorClass` field from `tool.details` and maps it
+/// to a display classification. Never scans error message text.
+///
+/// The server (`packages/agent/src/tools/fs/find.rs`) populates
+/// `details.errorClass` with `"invalid_pattern"` or `"other"`.
+enum GlobErrorClassifier {
+    static func classify(details: [String: AnyCodable]?) -> ErrorClassification {
+        let cls = details?["errorClass"]?.value as? String
+        switch cls {
+        case "invalid_pattern":
+            return ErrorClassification(
+                icon: "exclamationmark.triangle.fill",
+                title: "Invalid Glob Pattern",
+                code: nil,
+                suggestion: "Check the glob pattern syntax (e.g. `**/*.rs`).")
+        default:
+            return ErrorClassification(
+                icon: "exclamationmark.triangle.fill",
+                title: "Find Failed",
+                code: nil,
+                suggestion: "An unexpected error occurred while searching.")
         }
-        if message.contains("No such file") || message.contains("ENOENT") || message.contains("not found") {
-            return ErrorClassification(icon: "questionmark.folder", title: "Path Not Found", code: "ENOENT", suggestion: "Check that the search path exists.")
-        }
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil, suggestion: "An unexpected error occurred during file search.")
+    }
+
+    /// Raw error message pulled from `details.error`.
+    static func errorMessage(from details: [String: AnyCodable]?) -> String? {
+        details?["error"]?.value as? String
     }
 }

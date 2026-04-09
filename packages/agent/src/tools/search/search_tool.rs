@@ -12,7 +12,7 @@ use regex::Regex;
 static AST_METAVAR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\$[A-Z_][A-Z0-9_]*|\$\$\$").unwrap());
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::search::ast_search;
@@ -25,6 +25,39 @@ use crate::tools::utils::validation::{get_optional_string, get_optional_u64, val
 /// Returns `true` if `pattern` contains AST metavariables (`$VAR` or `$$$`).
 fn has_ast_metavariables(pattern: &str) -> bool {
     AST_METAVAR_RE.is_match(pattern)
+}
+
+/// Classify a Search tool failure into a structured error class for iOS.
+///
+/// In practice the text-search path only errors on invalid regex patterns;
+/// AST search errors bubble up as `ToolError::Internal`. Keep the classifier
+/// open to future error kinds without text-scanning on the client.
+pub(crate) fn classify_search_error(message: &str) -> &'static str {
+    let lower = message.to_lowercase();
+    if lower.contains("invalid regex")
+        || lower.contains("invalid pattern")
+        || lower.contains("unterminated")
+    {
+        return "invalid_pattern";
+    }
+    "other"
+}
+
+/// Build an error TronToolResult with structured details for Search.
+fn search_error(message: impl Into<String>) -> TronToolResult {
+    let msg = message.into();
+    let class = classify_search_error(&msg);
+    TronToolResult {
+        content: ToolResultBody::Blocks(vec![
+            crate::core::content::ToolResultContent::text(&msg),
+        ]),
+        details: Some(json!({
+            "error": msg,
+            "errorClass": class,
+        })),
+        is_error: Some(true),
+        stop_turn: None,
+    }
 }
 
 /// The unified `Search` tool — routes to text or AST search.
@@ -152,7 +185,7 @@ Examples:\n\
                     is_error: None,
                     stop_turn: None,
                 }),
-                Err(msg) => Ok(error_result(msg)),
+                Err(msg) => Ok(search_error(msg)),
             }
         }
     }
@@ -289,6 +322,21 @@ mod tests {
             .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Invalid regex"));
+        let d = r.details.as_ref().expect("details present");
+        assert_eq!(d["errorClass"], "invalid_pattern");
+        assert!(d["error"].as_str().unwrap().contains("Invalid regex"));
+    }
+
+    #[test]
+    fn classify_invalid_regex_patterns() {
+        assert_eq!(classify_search_error("Invalid regex pattern: ["), "invalid_pattern");
+        assert_eq!(classify_search_error("unterminated character class"), "invalid_pattern");
+        assert_eq!(classify_search_error("invalid pattern"), "invalid_pattern");
+    }
+
+    #[test]
+    fn classify_unknown_returns_other() {
+        assert_eq!(classify_search_error("weird failure"), "other");
     }
 
     #[tokio::test]

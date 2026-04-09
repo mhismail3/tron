@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
@@ -18,6 +18,36 @@ use crate::tools::utils::validation::{
 };
 
 const DEFAULT_MAX_RESULTS: usize = 200;
+
+/// Classify a Find (Glob) tool failure into a structured error class.
+///
+/// Only `"invalid_pattern"` and `"other"` are currently reachable — the
+/// Find tool validates nothing else. Keep the classifier open for
+/// future errors without text-scanning on the client.
+pub(crate) fn classify_find_error(message: &str) -> &'static str {
+    let lower = message.to_lowercase();
+    if lower.contains("invalid glob") || lower.contains("invalid pattern") {
+        return "invalid_pattern";
+    }
+    "other"
+}
+
+/// Build an error TronToolResult with structured details for Find.
+fn find_error(message: impl Into<String>) -> TronToolResult {
+    let msg = message.into();
+    let class = classify_find_error(&msg);
+    TronToolResult {
+        content: ToolResultBody::Blocks(vec![
+            crate::core::content::ToolResultContent::text(&msg),
+        ]),
+        details: Some(json!({
+            "error": msg,
+            "errorClass": class,
+        })),
+        is_error: Some(true),
+        stop_turn: None,
+    }
+}
 
 /// Format byte count as human-readable size (matching TS server output).
 #[allow(clippy::cast_precision_loss)]
@@ -215,7 +245,7 @@ impl TronTool for FindTool {
             .build()
         {
             Ok(g) => g.compile_matcher(),
-            Err(e) => return Ok(error_result(format!("Invalid glob pattern: {e}"))),
+            Err(e) => return Ok(find_error(format!("Invalid glob pattern: {e}"))),
         };
 
         let find_params = FindParams {
@@ -535,5 +565,33 @@ mod tests {
         let text = extract_text(&r);
         assert!(text.contains("visible.txt"));
         assert!(!text.contains("secret.txt"));
+    }
+
+    // ── Error classification ──
+
+    #[test]
+    fn classify_invalid_glob_patterns() {
+        assert_eq!(classify_find_error("Invalid glob pattern: "), "invalid_pattern");
+        assert_eq!(classify_find_error("invalid pattern: bad"), "invalid_pattern");
+    }
+
+    #[test]
+    fn classify_find_unknown_returns_other() {
+        assert_eq!(classify_find_error("some weird failure"), "other");
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_emits_structured_details() {
+        let dir = TempDir::new().unwrap();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool
+            .execute(json!({"pattern": "[invalid"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        let d = r.details.as_ref().expect("details present");
+        assert_eq!(d["errorClass"], "invalid_pattern");
+        assert!(d["error"].as_str().unwrap().contains("Invalid glob"));
     }
 }

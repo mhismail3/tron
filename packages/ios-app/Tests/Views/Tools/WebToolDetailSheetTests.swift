@@ -7,153 +7,222 @@ import Foundation
 @Suite("WebFetchDetailParser")
 struct WebFetchDetailParserTests {
 
-    // MARK: - Error Extraction
-
-    @Test("Extracts error from 'Error:' prefix")
-    func testExtractErrorPrefix() {
-        let error = WebFetchDetailParser.extractError(from: "Error: HTTP 404 - Page not found")
-        #expect(error == "HTTP 404 - Page not found")
+    private func details(
+        errorClass: String? = nil,
+        error: String? = nil,
+        httpStatus: Int? = nil,
+        fromCache: Bool? = nil
+    ) -> [String: AnyCodable] {
+        var d: [String: AnyCodable] = [:]
+        if let errorClass { d["errorClass"] = AnyCodable(errorClass) }
+        if let error { d["error"] = AnyCodable(error) }
+        if let httpStatus { d["httpStatus"] = AnyCodable(httpStatus) }
+        if let fromCache { d["fromCache"] = AnyCodable(fromCache) }
+        return d
     }
 
-    @Test("Extracts error from JSON error field")
-    func testExtractErrorJSON() {
-        let error = WebFetchDetailParser.extractError(from: "{\"error\": \"Connection refused\"}")
-        #expect(error == "Connection refused")
+    @Test("Reads server-provided error message")
+    func testErrorMessage() {
+        #expect(
+            WebFetchDetailParser.errorMessage(from: details(error: "HTTP 404 for https://x"))
+                == "HTTP 404 for https://x"
+        )
     }
 
-    @Test("Returns raw string for unrecognized error format")
-    func testExtractErrorFallback() {
-        let msg = "Something went wrong"
-        let error = WebFetchDetailParser.extractError(from: msg)
-        #expect(error == msg)
+    @Test("Returns nil when no error present")
+    func testNoError() {
+        #expect(WebFetchDetailParser.errorMessage(from: [:]) == nil)
+        #expect(WebFetchDetailParser.errorMessage(from: nil) == nil)
     }
 
-    // MARK: - Error Classification
-
-    @Test("Classifies 404 error")
-    func testClassify404() {
-        let info = WebFetchDetailParser.classifyError("HTTP 404 - Page not found")
-        #expect(info.title == "Page Not Found")
-        #expect(info.code == "HTTP 404")
-        #expect(info.icon == "questionmark.folder")
+    @Test("Classifies not_found with HTTP code label")
+    func testClassifyNotFound() {
+        let info = WebFetchDetailParser.classify(
+            details: details(errorClass: "not_found", httpStatus: 404)
+        )
+        #expect(info?.title == "Page Not Found")
+        #expect(info?.code == "HTTP 404")
+        #expect(info?.icon == "questionmark.folder")
     }
 
-    @Test("Classifies 403 error")
-    func testClassify403() {
-        let info = WebFetchDetailParser.classifyError("HTTP 403 Forbidden")
-        #expect(info.title == "Access Forbidden")
-        #expect(info.code == "HTTP 403")
+    @Test("Classifies forbidden, unauthorized, rate_limited, server_error")
+    func testClassifyHttpCategories() {
+        let forbidden = WebFetchDetailParser.classify(
+            details: details(errorClass: "forbidden", httpStatus: 403))
+        #expect(forbidden?.title == "Access Forbidden")
+        #expect(forbidden?.code == "HTTP 403")
+
+        let unauth = WebFetchDetailParser.classify(
+            details: details(errorClass: "unauthorized", httpStatus: 401))
+        #expect(unauth?.title == "Unauthorized")
+
+        let rate = WebFetchDetailParser.classify(
+            details: details(errorClass: "rate_limited", httpStatus: 429))
+        #expect(rate?.title == "Rate Limited")
+
+        let server = WebFetchDetailParser.classify(
+            details: details(errorClass: "server_error", httpStatus: 503))
+        #expect(server?.title == "Server Error")
+        #expect(server?.code == "HTTP 503")
     }
 
-    @Test("Classifies 401 error")
-    func testClassify401() {
-        let info = WebFetchDetailParser.classifyError("Unauthorized access (401)")
-        #expect(info.title == "Unauthorized")
-        #expect(info.code == "HTTP 401")
+    @Test("Classifies network-level errors without httpStatus")
+    func testClassifyNetworkLevel() {
+        for (cls, expected) in [
+            ("timeout", "Request Timed Out"),
+            ("dns", "DNS Error"),
+            ("ssl", "SSL Error"),
+            ("redirect", "Redirect Detected"),
+            ("blocked", "Domain Blocked"),
+            ("too_large", "Response Too Large"),
+            ("invalid_url", "Invalid URL"),
+            ("network", "Network Error"),
+        ] {
+            let info = WebFetchDetailParser.classify(details: details(errorClass: cls))
+            #expect(info?.title == expected)
+            #expect(info?.code == nil)
+        }
     }
 
-    @Test("Classifies rate limit error")
-    func testClassifyRateLimit() {
-        let info = WebFetchDetailParser.classifyError("Rate limit exceeded (429)")
-        #expect(info.title == "Rate Limited")
-        #expect(info.code == "HTTP 429")
+    @Test("Falls back to Fetch Failed for unknown errorClass")
+    func testClassifyUnknown() {
+        let info = WebFetchDetailParser.classify(details: details(errorClass: "weird"))
+        #expect(info?.title == "Fetch Failed")
     }
 
-    @Test("Classifies 500 error")
-    func testClassify500() {
-        let info = WebFetchDetailParser.classifyError("Internal server error (500)")
-        #expect(info.title == "Server Error")
-        #expect(info.code == "HTTP 500")
+    @Test("Returns nil when no errorClass present")
+    func testClassifyNoClass() {
+        #expect(WebFetchDetailParser.classify(details: [:]) == nil)
+        #expect(WebFetchDetailParser.classify(details: nil) == nil)
     }
 
-    @Test("Classifies timeout error")
-    func testClassifyTimeout() {
-        let info = WebFetchDetailParser.classifyError("Request timed out after 30 seconds")
-        #expect(info.title == "Request Timed Out")
-        #expect(info.code == nil)
-    }
-
-    @Test("Classifies DNS error")
-    func testClassifyDNS() {
-        let info = WebFetchDetailParser.classifyError("Could not resolve host: no such host")
-        #expect(info.title == "DNS Error")
-        #expect(info.code == nil)
-    }
-
-    @Test("Classifies SSL error")
-    func testClassifySSL() {
-        let info = WebFetchDetailParser.classifyError("SSL certificate verification failed")
-        #expect(info.title == "SSL Error")
-    }
-
-    @Test("Classifies redirect error")
-    func testClassifyRedirect() {
-        let info = WebFetchDetailParser.classifyError("Page redirected to a different host")
-        #expect(info.title == "Redirect Detected")
-    }
-
-    @Test("Classifies blocked domain error")
-    func testClassifyBlocked() {
-        let info = WebFetchDetailParser.classifyError("Domain blocked from fetching")
-        #expect(info.title == "Domain Blocked")
-    }
-
-    @Test("Classifies generic error")
-    func testClassifyGeneric() {
-        let info = WebFetchDetailParser.classifyError("Something unexpected happened")
-        #expect(info.title == "Fetch Failed")
-        #expect(info.code == nil)
-    }
-
-    // MARK: - Cache Detection
-
-    @Test("Detects cached response")
-    func testIsCachedTrue() {
-        #expect(WebFetchDetailParser.isCached("fromCache: true") == true)
-    }
-
-    @Test("Returns false for non-cached response")
-    func testIsCachedFalse() {
-        #expect(WebFetchDetailParser.isCached("Normal response content") == false)
+    @Test("isCached reads structured fromCache flag")
+    func testIsCached() {
+        #expect(WebFetchDetailParser.isCached(details: details(fromCache: true)))
+        #expect(!WebFetchDetailParser.isCached(details: details(fromCache: false)))
+        #expect(!WebFetchDetailParser.isCached(details: [:]))
+        #expect(!WebFetchDetailParser.isCached(details: nil))
     }
 }
 
-// MARK: - WebFetch Raw Mode Detail Tests
+// MARK: - WebFetchParsedResult Tests
 
-@Suite("WebFetch Raw Mode Details")
-struct WebFetchRawModeDetailTests {
+@Suite("WebFetch Parsing")
+@MainActor
+struct WebFetchParsingTests {
 
-    @Test("isCached returns false for raw mode responses")
-    func testNotCachedInRawMode() {
-        // Even if the text contains "fromCache" and "true", raw mode is never cached
-        let parsed = WebFetchParsedResult(
-            from: "HTTP 200 https://example.com\n\nfromCache: true\nthe content is true",
-            arguments: "{\"url\": \"https://example.com\", \"rawResponse\": true}"
-        )
-        #expect(!parsed.isCached)
+    @Test("Parses summarization answer from details")
+    func testSummarizationAnswer() {
+        let d: [String: AnyCodable] = [
+            "mode": AnyCodable("summarization"),
+            "answer": AnyCodable("The answer is 42."),
+            "fromCache": AnyCodable(false),
+        ]
+        let r = WebFetchParsedResult(details: d, arguments: "{\"url\": \"https://example.com\"}")
+        #expect(r.displayContent == "The answer is 42.")
+        #expect(r.error == nil)
+        #expect(!r.isRawMode)
+        #expect(!r.isCached)
     }
 
-    @Test("Error classification not applied in raw mode for non-2xx")
-    func testNoErrorClassificationInRawMode() {
-        // In raw mode, a 404 is not an error — it's just data
-        let parsed = WebFetchParsedResult(
-            from: "HTTP 404 https://api.example.com/missing\n\n{\"error\": \"not_found\"}",
-            arguments: "{\"url\": \"https://api.example.com/missing\", \"rawResponse\": true}"
+    @Test("Parses raw mode body from details")
+    func testRawBody() {
+        let d: [String: AnyCodable] = [
+            "mode": AnyCodable("raw"),
+            "method": AnyCodable("POST"),
+            "httpStatus": AnyCodable(201),
+            "body": AnyCodable("{\"ok\": true}"),
+        ]
+        let r = WebFetchParsedResult(
+            details: d,
+            arguments: "{\"url\": \"https://api.example.com/x\", \"method\": \"POST\"}"
         )
-        // error should be nil because raw mode doesn't classify HTTP errors
-        #expect(parsed.error == nil)
-        #expect(parsed.isRawMode)
+        #expect(r.isRawMode)
+        #expect(r.httpMethod == "POST")
+        #expect(r.httpStatus == 201)
+        #expect(r.displayContent == "{\"ok\": true}")
     }
 
-    @Test("Summarization mode still classifies errors")
-    func testSummarizationModeStillClassifiesErrors() {
-        let parsed = WebFetchParsedResult(
-            from: "Error: HTTP 404 - Page not found",
-            arguments: "{\"url\": \"https://example.com/bad\", \"prompt\": \"Read\"}"
+    @Test("Parses error from details — no displayContent")
+    func testErrorResult() {
+        let d: [String: AnyCodable] = [
+            "error": AnyCodable("HTTP 404 for https://example.com/missing"),
+            "errorClass": AnyCodable("not_found"),
+            "httpStatus": AnyCodable(404),
+        ]
+        let r = WebFetchParsedResult(
+            details: d,
+            arguments: "{\"url\": \"https://example.com/missing\", \"prompt\": \"Read\"}"
         )
-        #expect(!parsed.isRawMode)
-        #expect(parsed.error != nil)
-        #expect(parsed.error?.contains("404") == true)
+        #expect(r.error?.contains("404") == true)
+        #expect(r.displayContent.isEmpty)
+    }
+
+    @Test("Extracts source URL and domain from arguments")
+    func testSourceExtraction() {
+        let r = WebFetchParsedResult(
+            details: nil,
+            arguments: "{\"url\": \"https://docs.anthropic.com/en/docs\"}"
+        )
+        #expect(r.source?.url == "https://docs.anthropic.com/en/docs")
+        #expect(r.source?.domain == "docs.anthropic.com")
+    }
+
+    @Test("Reads title from details")
+    func testTitleFromDetails() {
+        let d: [String: AnyCodable] = [
+            "mode": AnyCodable("summarization"),
+            "title": AnyCodable("My Page Title"),
+            "answer": AnyCodable("content"),
+        ]
+        let r = WebFetchParsedResult(
+            details: d,
+            arguments: "{\"url\": \"https://example.com\"}"
+        )
+        #expect(r.source?.title == "My Page Title")
+    }
+
+    @Test("Strips www. from domain")
+    func testWWWStripping() {
+        let r = WebFetchParsedResult(
+            details: nil,
+            arguments: "{\"url\": \"https://www.example.com/page\"}"
+        )
+        #expect(r.source?.domain == "example.com")
+    }
+
+    @Test("Handles missing URL gracefully")
+    func testMissingURL() {
+        let r = WebFetchParsedResult(details: nil, arguments: "{}")
+        #expect(r.source == nil)
+    }
+
+    @Test("Extracts subagent session id from metadata")
+    func testSubagentSessionIdMetadata() {
+        let d: [String: AnyCodable] = [
+            "mode": AnyCodable("summarization"),
+            "answer": AnyCodable("x"),
+            "subagentSessionId": AnyCodable("sub-sess-abc123"),
+        ]
+        let r = WebFetchParsedResult(
+            details: d,
+            arguments: "{\"url\": \"https://example.com\"}"
+        )
+        #expect(r.metadata?.subagentSessionId == "sub-sess-abc123")
+    }
+
+    @Test("Empty subagent session id yields nil metadata")
+    func testEmptySubagentSessionId() {
+        let d: [String: AnyCodable] = [
+            "mode": AnyCodable("summarization"),
+            "answer": AnyCodable("x"),
+            "subagentSessionId": AnyCodable(""),
+        ]
+        let r = WebFetchParsedResult(
+            details: d,
+            arguments: "{\"url\": \"https://example.com\"}"
+        )
+        #expect(r.metadata == nil)
     }
 }
 
@@ -219,82 +288,6 @@ struct WebSearchDetailParserTests {
     func testNilDetails() {
         let info = WebSearchDetailParser.classify(details: nil)
         #expect(info.title == "Search Failed")
-    }
-}
-
-// MARK: - WebFetchParsedResult Tests
-
-@Suite("WebFetch Parsing")
-@MainActor
-struct WebFetchParsingTests {
-
-    @Test("Parses answer from simple result")
-    func testSimpleAnswer() {
-        let result = WebFetchParsedResult(from: "The answer is 42.", arguments: "{\"url\": \"https://example.com\"}")
-        #expect(result.answer == "The answer is 42.")
-        #expect(result.error == nil)
-    }
-
-    @Test("Extracts answer before Source: line")
-    func testAnswerBeforeSource() {
-        let result = WebFetchParsedResult(
-            from: "Main content here.\n\nSource: https://example.com",
-            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"Read\"}"
-        )
-        #expect(result.answer == "Main content here.")
-    }
-
-    @Test("Extracts answer before --- separator")
-    func testAnswerBeforeSeparator() {
-        let result = WebFetchParsedResult(
-            from: "Content before separator.\n\n---\nUse WebFetch to read more.",
-            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"Read\"}"
-        )
-        #expect(result.answer == "Content before separator.")
-    }
-
-    @Test("Parses error result")
-    func testErrorResult() {
-        let result = WebFetchParsedResult(
-            from: "Error: HTTP 404 - Page not found",
-            arguments: "{\"url\": \"https://example.com/missing\", \"prompt\": \"Read\"}"
-        )
-        #expect(result.error != nil)
-        #expect(result.answer.isEmpty)
-    }
-
-    @Test("Extracts source URL from arguments")
-    func testSourceExtraction() {
-        let result = WebFetchParsedResult(
-            from: "Content here",
-            arguments: "{\"url\": \"https://docs.anthropic.com/en/docs\"}"
-        )
-        #expect(result.source?.url == "https://docs.anthropic.com/en/docs")
-        #expect(result.source?.domain == "docs.anthropic.com")
-    }
-
-    @Test("Extracts title from result")
-    func testTitleExtraction() {
-        let result = WebFetchParsedResult(
-            from: "Content here\n\nTitle: My Page Title",
-            arguments: "{\"url\": \"https://example.com\"}"
-        )
-        #expect(result.source?.title == "My Page Title")
-    }
-
-    @Test("Strips www. from domain")
-    func testWWWStripping() {
-        let result = WebFetchParsedResult(
-            from: "Content",
-            arguments: "{\"url\": \"https://www.example.com/page\"}"
-        )
-        #expect(result.source?.domain == "example.com")
-    }
-
-    @Test("Handles missing URL gracefully")
-    func testMissingURL() {
-        let result = WebFetchParsedResult(from: "Content", arguments: "{}")
-        #expect(result.source == nil)
     }
 }
 

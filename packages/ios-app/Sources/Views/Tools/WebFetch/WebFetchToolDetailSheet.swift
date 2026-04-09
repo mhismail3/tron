@@ -31,12 +31,11 @@ struct WebFetchToolDetailSheet: View {
     }
 
     private var parsed: WebFetchParsedResult {
-        WebFetchParsedResult(from: data.result ?? data.streamingOutput ?? "", arguments: data.arguments)
+        WebFetchParsedResult(details: data.details, arguments: data.arguments)
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
-            || (data.result?.contains("[Response truncated") == true)
+        data.isResultTruncated
     }
 
     var body: some View {
@@ -75,12 +74,12 @@ struct WebFetchToolDetailSheet: View {
                     if let error = parsed.error {
                         fetchErrorSection(error)
                             .sheetSection()
-                    } else if !parsed.answer.isEmpty {
+                    } else if !parsed.displayContent.isEmpty {
                         if parsed.isRawMode {
-                            WebFetchRawResponseBodySection(answer: parsed.answer, tint: tint)
+                            WebFetchRawResponseBodySection(answer: parsed.displayContent, tint: tint)
                                 .sheetSection()
                         } else {
-                            WebFetchAnswerSection(answer: parsed.answer, tint: tint)
+                            WebFetchAnswerSection(answer: parsed.displayContent, tint: tint)
                                 .sheetSection()
                         }
                     } else {
@@ -88,8 +87,8 @@ struct WebFetchToolDetailSheet: View {
                             .sheetSection()
                     }
                 case .error:
-                    if let result = data.result {
-                        fetchErrorSection(WebFetchDetailParser.extractError(from: result))
+                    if let error = parsed.error {
+                        fetchErrorSection(error)
                             .sheetSection()
                     }
                 case .running:
@@ -113,7 +112,7 @@ struct WebFetchToolDetailSheet: View {
                     color: status < 300 ? .tronEmerald : status < 400 ? .tronAmber : .tronError
                 )
             }
-            if !parsed.isRawMode && (parsed.isCached || WebFetchParsedResult.isCachedFromDetails(data.details)) {
+            if !parsed.isRawMode && parsed.isCached {
                 ToolInfoPill(icon: "arrow.triangle.2.circlepath", label: "Cached", color: .tronEmerald)
             }
             if parsed.isRawMode {
@@ -134,7 +133,13 @@ struct WebFetchToolDetailSheet: View {
     // MARK: - Error Section
 
     private func fetchErrorSection(_ errorMessage: String) -> some View {
-        let classification = WebFetchDetailParser.classifyError(errorMessage)
+        let classification = WebFetchDetailParser.classify(details: data.details)
+            ?? ErrorClassification(
+                icon: "exclamationmark.triangle.fill",
+                title: "Fetch Failed",
+                code: nil,
+                suggestion: "An error occurred while fetching the page."
+            )
 
         return ToolClassifiedErrorSection(
             errorMessage: errorMessage,
@@ -155,16 +160,9 @@ struct WebFetchToolDetailSheet: View {
 
     @ViewBuilder
     private var runningSection: some View {
-        if let output = data.streamingOutput, !output.isEmpty {
-            let streamParsed = WebFetchParsedResult(from: output, arguments: data.arguments)
-            if !streamParsed.answer.isEmpty {
-                WebFetchStreamingAnswerSection(answer: streamParsed.answer, tint: tint)
-            } else {
-                ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
-            }
-        } else {
-            ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
-        }
+        // During streaming, we have neither a structured details payload nor a
+        // final answer. Show a spinner until the tool completes.
+        ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
     }
 }
 

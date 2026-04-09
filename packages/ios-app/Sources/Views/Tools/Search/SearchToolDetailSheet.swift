@@ -166,9 +166,10 @@ struct SearchToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let classification = SearchErrorClassifier.classify(result)
-        return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
-            Text(result)
+        let classification = SearchErrorClassifier.classify(details: data.details)
+        let errorMessage = SearchErrorClassifier.errorMessage(from: data.details) ?? result
+        return ToolClassifiedErrorSection(errorMessage: errorMessage, classification: classification, colorScheme: colorScheme) {
+            Text(errorMessage)
                 .font(TronTypography.codeContent)
                 .foregroundStyle(TintedColors(accent: .tronError, colorScheme: colorScheme).body)
                 .textSelection(.enabled)

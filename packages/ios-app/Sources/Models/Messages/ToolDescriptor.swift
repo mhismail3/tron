@@ -206,7 +206,7 @@ enum ToolRegistry {
             },
             viewerFactory: { tool, isExpanded in
                 AnyView(WebFetchResultViewer(
-                    result: tool.result ?? "",
+                    details: tool.details,
                     arguments: tool.arguments,
                     isExpanded: isExpanded
                 ))

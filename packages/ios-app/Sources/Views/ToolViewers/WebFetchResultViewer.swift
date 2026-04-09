@@ -1,36 +1,35 @@
 import SwiftUI
 
-/// Displays WebFetch tool results with source attribution and formatted answer
+/// Displays WebFetch tool results with source attribution and formatted answer.
+///
+/// Reads every structured field from server-provided `tool.details`:
+/// `mode`, `answer`, `body`, `httpStatus`, `method`, `url`, `title`,
+/// `fromCache`, `subagentSessionId`, `error`, `errorClass`. No text parsing.
 struct WebFetchResultViewer: View {
-    let result: String
+    let details: [String: AnyCodable]?
     let arguments: String
     @Binding var isExpanded: Bool
 
     private var parsedResult: WebFetchParsedResult {
-        WebFetchParsedResult(from: result, arguments: arguments)
+        WebFetchParsedResult(details: details, arguments: arguments)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Source Header (with method badge for raw mode)
             if let source = parsedResult.source {
                 SourceHeader(source: source, mode: parsedResult.mode)
             }
 
-            // Raw mode: status code display
             if let status = parsedResult.httpStatus {
                 HttpStatusBadge(status: status, method: parsedResult.httpMethod ?? "GET")
             }
 
-            // Error Display (summarization mode only — raw mode non-2xx is not an error)
             if let error = parsedResult.error {
                 WebFetchErrorBanner(message: error)
-            } else if !parsedResult.answer.isEmpty {
-                // Answer/Body Content
-                AnswerSection(answer: parsedResult.answer, isExpanded: $isExpanded)
+            } else if !parsedResult.displayContent.isEmpty {
+                AnswerSection(answer: parsedResult.displayContent, isExpanded: $isExpanded)
             }
 
-            // Metadata Footer (summarization mode only)
             if let metadata = parsedResult.metadata, metadata.subagentSessionId != nil {
                 MetadataFooter(metadata: metadata)
             }
@@ -53,7 +52,6 @@ private struct SourceHeader: View {
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronInfo)
 
-                // Show method badge in raw mode
                 if case .raw(let method, _) = mode, method != "GET" {
                     Text(method)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .bold))
@@ -230,136 +228,61 @@ private struct MetadataFooter: View {
 // MARK: - Data Models
 
 /// Whether the WebFetch result is from summarization mode or raw HTTP mode.
-enum WebFetchMode {
-    /// Legacy summarization mode (GET + prompt → parse HTML → summarize)
+enum WebFetchMode: Equatable {
     case summarization
-    /// Raw HTTP mode (any method, returns status + headers + body)
     case raw(method: String, status: Int?)
 }
 
+/// WebFetch result parsed from server-provided `tool.details`.
+///
+/// The server (`packages/agent/src/tools/web/web_fetch.rs`) populates every
+/// field below. iOS does not scan text. See
+/// `WebFetchDetailParser` for error decoding.
 struct WebFetchParsedResult {
-    let answer: String
+    /// Primary display content: summarization answer OR raw response body.
+    let displayContent: String
     let source: WebFetchSource?
     let error: String?
     let metadata: WebFetchMetadata?
     let mode: WebFetchMode
+    /// Whether the result came from cache (summarization only).
+    let isCached: Bool
 
-    /// Detect mode from arguments: if method is present and not GET,
-    /// or rawResponse is true, or prompt is absent → raw mode.
-    static func detectMode(arguments: String) -> WebFetchMode {
-        let method = ToolArgumentParser.string("method", from: arguments)?.uppercased()
-        let rawResponse = ToolArgumentParser.boolean("rawResponse", from: arguments) ?? false
-        let prompt = ToolArgumentParser.string("prompt", from: arguments)
-
-        let isRaw = rawResponse || method != nil && method != "GET" || prompt == nil
-        if isRaw {
-            return .raw(method: method ?? "GET", status: nil)
-        }
-        return .summarization
-    }
-
-    init(from result: String, arguments: String) {
-        let detectedMode = Self.detectMode(arguments: arguments)
-        let source = Self.extractSource(from: result, arguments: arguments)
-
-        switch detectedMode {
-        case .summarization:
-            // Legacy behavior: parse answer, errors, metadata from result text
-            if result.hasPrefix("Error:") || result.contains("\"error\"") {
-                self.error = Self.extractError(from: result)
-                self.answer = ""
-                self.metadata = nil
-            } else {
-                self.answer = Self.extractAnswer(from: result)
-                self.error = nil
-                self.metadata = Self.extractMetadata(from: result)
-            }
-            self.source = source
-            self.mode = .summarization
-
-        case .raw(let method, _):
-            // Raw HTTP mode: parse "HTTP {status} {url}\n\n{body}" format
-            let (status, body) = Self.parseRawResponse(result)
-            self.answer = body
-            self.error = nil
-            self.metadata = nil
-            self.source = source
-            self.mode = .raw(method: method, status: status)
-        }
-    }
-
-    // MARK: - Raw HTTP Parsing
-
-    /// Parse "HTTP {status} {url}\n\n{body}" format from raw mode output.
-    private static func parseRawResponse(_ result: String) -> (status: Int?, body: String) {
-        // Check for "HTTP {status} " prefix
-        if result.hasPrefix("HTTP ") {
-            // Find the end of the status line
-            if let newlineRange = result.range(of: "\n\n") {
-                let statusLine = String(result[result.startIndex..<newlineRange.lowerBound])
-                let body = String(result[newlineRange.upperBound...])
-
-                // Extract status code: "HTTP 200 https://..."
-                let parts = statusLine.components(separatedBy: " ")
-                let status = parts.count >= 2 ? Int(parts[1]) : nil
-                return (status, body.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-        }
-        return (nil, result)
-    }
-
-    // MARK: - Summarization Parsing (legacy)
-
-    private static func extractAnswer(from result: String) -> String {
-        var content = result
-
-        // Remove source attribution section if present
-        if let range = content.range(of: "\n\nSource:") {
-            content = String(content[..<range.lowerBound])
-        }
-        if let range = content.range(of: "\n\n---") {
-            content = String(content[..<range.lowerBound])
-        }
-
-        return content.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func extractSource(from result: String, arguments: String) -> WebFetchSource? {
-        // Extract URL from arguments via ToolArgumentParser
+    init(details: [String: AnyCodable]?, arguments: String) {
+        let modeString = details?["mode"]?.value as? String
         let url = ToolArgumentParser.url(from: arguments)
-        guard !url.isEmpty else { return nil }
-
-        // Extract title from result if present (summarization mode)
-        var title = ""
-        if let match = result.firstMatch(of: /Title:\s*(.+)/) {
-            title = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
+        let title = (details?["title"]?.value as? String) ?? ""
         let domain = ToolArgumentParser.extractDomain(from: url)
 
-        return WebFetchSource(url: url, domain: domain, title: title)
-    }
+        self.source = url.isEmpty
+            ? nil
+            : WebFetchSource(url: url, domain: domain, title: title)
+        self.error = WebFetchDetailParser.errorMessage(from: details)
+        self.isCached = WebFetchDetailParser.isCached(details: details)
 
-    private static func extractError(from result: String) -> String {
-        if result.hasPrefix("Error:") {
-            return String(result.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let match = result.firstMatch(of: /"error"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return result
-    }
+        let httpStatus: Int? = {
+            if let i = details?["httpStatus"]?.value as? Int { return i }
+            if let d = details?["httpStatus"]?.value as? Double { return Int(d) }
+            return nil
+        }()
 
-    private static func extractMetadata(from result: String) -> WebFetchMetadata? {
-        var sessionId: String?
-        if let match = result.firstMatch(of: /subagentSessionId["\s:]+([a-zA-Z0-9_-]+)/) {
-            sessionId = String(match.1)
+        if modeString == "raw" {
+            let method = (details?["method"]?.value as? String) ?? "GET"
+            self.mode = .raw(method: method, status: httpStatus)
+            self.displayContent = (details?["body"]?.value as? String) ?? ""
+            self.metadata = nil
+        } else {
+            // Summarization (default when mode absent, e.g. errors before mode was set)
+            self.mode = .summarization
+            self.displayContent = (details?["answer"]?.value as? String) ?? ""
+            let sessionId = details?["subagentSessionId"]?.value as? String
+            if let sid = sessionId, !sid.isEmpty {
+                self.metadata = WebFetchMetadata(fetchedAt: nil, subagentSessionId: sid)
+            } else {
+                self.metadata = nil
+            }
         }
-        guard sessionId != nil else { return nil }
-        return WebFetchMetadata(fetchedAt: nil, subagentSessionId: sessionId)
     }
-
-    // MARK: - Helpers
 
     /// Whether this is a raw HTTP mode result.
     var isRawMode: Bool {
@@ -395,24 +318,34 @@ struct WebFetchMetadata {
 
 #if DEBUG
 #Preview("WebFetch - Summarization") {
-    VStack(spacing: 16) {
-        WebFetchResultViewer(
-            result: """
+    let summarizationDetails: [String: AnyCodable] = [
+        "mode": AnyCodable("summarization"),
+        "url": AnyCodable("https://docs.anthropic.com/en/docs/about-claude/models"),
+        "title": AnyCodable("Claude Models - Anthropic Documentation"),
+        "answer": AnyCodable("""
             Claude has three main model families available:
 
             1. **Claude 3.5 Sonnet** - The most intelligent model, best for complex tasks
             2. **Claude 3.5 Haiku** - Fast and cost-effective for simple tasks
             3. **Claude 3 Opus** - High capability for demanding applications
-
-            Source: https://docs.anthropic.com/en/docs/about-claude/models
-            Title: Claude Models - Anthropic Documentation
-            """,
+            """),
+        "fromCache": AnyCodable(false),
+        "subagentSessionId": AnyCodable("sub-sess-abc"),
+    ]
+    let errorDetails: [String: AnyCodable] = [
+        "error": AnyCodable("HTTP 404 for https://example.com/nonexistent"),
+        "errorClass": AnyCodable("not_found"),
+        "httpStatus": AnyCodable(404),
+    ]
+    return VStack(spacing: 16) {
+        WebFetchResultViewer(
+            details: summarizationDetails,
             arguments: "{\"url\": \"https://docs.anthropic.com/en/docs/about-claude/models\", \"prompt\": \"What models are available?\"}",
             isExpanded: .constant(false)
         )
 
         WebFetchResultViewer(
-            result: "Error: HTTP 404 - Page not found",
+            details: errorDetails,
             arguments: "{\"url\": \"https://example.com/nonexistent\", \"prompt\": \"Read this page\"}",
             isExpanded: .constant(false)
         )
@@ -422,19 +355,16 @@ struct WebFetchMetadata {
 }
 
 #Preview("WebFetch - Raw HTTP POST") {
-    WebFetchResultViewer(
-        result: "HTTP 201 https://api.example.com/items\n\n{\"id\": 42, \"name\": \"New Item\", \"created\": true}",
+    let details: [String: AnyCodable] = [
+        "mode": AnyCodable("raw"),
+        "url": AnyCodable("https://api.example.com/items"),
+        "method": AnyCodable("POST"),
+        "httpStatus": AnyCodable(201),
+        "body": AnyCodable("{\"id\": 42, \"name\": \"New Item\", \"created\": true}"),
+    ]
+    return WebFetchResultViewer(
+        details: details,
         arguments: "{\"url\": \"https://api.example.com/items\", \"method\": \"POST\", \"body\": {\"name\": \"New Item\"}}",
-        isExpanded: .constant(false)
-    )
-    .padding()
-    .background(Color.tronBackground)
-}
-
-#Preview("WebFetch - Raw HTTP GET") {
-    WebFetchResultViewer(
-        result: "HTTP 200 https://api.example.com/health\n\n{\"status\": \"ok\", \"uptime\": 12345}",
-        arguments: "{\"url\": \"https://api.example.com/health\", \"rawResponse\": true}",
         isExpanded: .constant(false)
     )
     .padding()
