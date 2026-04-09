@@ -19,35 +19,42 @@ Selection priority: direct (.p8 on disk) > relay (build-time env vars) > disable
 
 ## Relay Mode (Default for Distributed Builds)
 
-Users who install the Tron server get push notifications automatically — no credential setup required. The relay URL and HMAC secret are compiled into release builds via:
+Users who install the Tron server get push notifications automatically — no credential setup required. The relay URL and HMAC secret are compiled into release builds from `~/.tron/system/auth.json`.
 
-```bash
-TRON_RELAY_URL="https://relay.tron.dev" \
-TRON_RELAY_SECRET="<secret>" \
-cargo build --release
+### Build Integration
+
+The build scripts (`tron deploy`, `tron dev -b`) read relay credentials from auth.json:
+
+```json
+{
+  "relay": {
+    "url": "https://tron-push-relay.<subdomain>.workers.dev",
+    "secret": "<shared HMAC secret>"
+  }
+}
 ```
 
-The relay is a Cloudflare Worker at `packages/relay/` that holds the `.p8` key in Wrangler secrets and forwards notifications to APNs.
+These are passed as compile-time env vars (`TRON_RELAY_URL`, `TRON_RELAY_SECRET`) and baked into the binary via `option_env!()`. Users never see or configure these values.
 
 ### Deploying the Relay
+
+The relay is a Cloudflare Worker at `packages/relay/` (see its README for full details):
 
 ```bash
 cd packages/relay
 npm install
-wrangler secret put APNS_KEY_P8     # paste .p8 file contents
-wrangler secret put APNS_KEY_ID     # 10-char key ID
-wrangler secret put APNS_TEAM_ID    # 10-char team ID
-wrangler secret put TRON_RELAY_SECRET  # shared HMAC secret
-wrangler deploy
+npx wrangler login
+npx wrangler deploy
+# Set secrets (one-time):
+cat ~/.tron/system/mods/apns/AuthKey_*.p8 | npx wrangler secret put APNS_KEY_P8
+npx wrangler secret put APNS_KEY_ID       # 10-char key ID
+npx wrangler secret put APNS_TEAM_ID      # 10-char team ID
+npx wrangler secret put TRON_RELAY_SECRET  # same secret as in auth.json
 ```
 
-### Environment Override
+### Environment Routing
 
-By default, relay mode uses production APNs. For sandbox:
-
-```bash
-TRON_RELAY_ENVIRONMENT=sandbox cargo run
-```
+The APNs environment (sandbox vs production) is determined per-device-token, not per-server. When the iOS app registers its token, it includes its environment. The relay routes each token to the correct APNs host automatically.
 
 ## Direct Mode (Developer Setup)
 
