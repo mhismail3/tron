@@ -112,7 +112,6 @@ Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** t
 | `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
 | `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` (KNOWLEDGE) |
 | `~/.tron/database/` | `~/.tron/system/database/` (DATABASE) |
-| `~/.tron/workspace/cron/` | `~/.tron/workspace/automations/` (AUTOMATIONS) |
 
 ### 6. Validate Database References
 
