@@ -47,19 +47,16 @@ struct SkillActiveParams: Encodable {
 
 struct SkillActivateResult: Decodable {
     let success: Bool
-    let alreadyActive: Bool?
     let skill: SkillActivateInfo?
 
     struct SkillActivateInfo: Decodable {
         let name: String
         let source: String
-        let tokens: Int?
     }
 }
 
 struct SkillDeactivateResult: Decodable {
     let success: Bool
-    let wasActive: Bool?
     let deactivatedSkill: String?
 }
 
@@ -80,7 +77,6 @@ struct SkillActiveResult: Decodable {
     struct ActiveSkillInfo: Decodable {
         let name: String
         let source: String
-        let tokens: Int?
     }
 
     struct PendingSpellInfo: Decodable {

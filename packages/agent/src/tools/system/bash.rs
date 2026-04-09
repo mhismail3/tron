@@ -270,7 +270,6 @@ impl BashTool {
                     details: Some(json!({
                         "command": command,
                         "exitCode": -1,
-                        "duration": result.duration_ms,
                         "description": description,
                         "processId": process_id,
                         "interrupted": true,
@@ -292,7 +291,6 @@ impl BashTool {
                 let mut details = json!({
                     "command": command,
                     "exitCode": exit_code,
-                    "duration": result.duration_ms,
                     "description": description,
                     "processId": process_id,
                     "blobId": result.blob_id,

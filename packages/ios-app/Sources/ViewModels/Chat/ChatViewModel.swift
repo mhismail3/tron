@@ -43,7 +43,7 @@ final class ChatViewModel {
     /// Display stream state (active stream, frames, sheet, stop tracking)
     var displayStreamState = DisplayStreamState()
 
-    // MARK: - Input State (delegated to InputBarState for backward compatibility)
+    // MARK: - Input State (delegated to InputBarState)
 
     /// Text input - delegated to inputBarState
     var inputText: String {

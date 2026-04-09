@@ -89,7 +89,8 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
     }
 }
 
-// Convenience init without custom leading toolbar (backward compat for all other tool sheets).
+// Convenience init for the common case with no custom leading toolbar.
+// Only BashToolDetailSheet currently uses the generic init with leadingToolbar:.
 @available(iOS 26.0, *)
 extension ToolDetailSheetContainer where LeadingToolbar == EmptyView {
     init(

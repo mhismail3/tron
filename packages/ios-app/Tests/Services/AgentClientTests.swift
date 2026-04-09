@@ -71,7 +71,7 @@ struct AgentClientTests {
             activateSkillCallCount += 1
             lastActivatedSkill = skillName
             let json = """
-            {"success": true, "skill": {"name": "\(skillName)", "source": "global", "tokens": 100}}
+            {"success": true, "skill": {"name": "\(skillName)", "source": "global"}}
             """
             return try! JSONDecoder().decode(SkillActivateResult.self, from: json.data(using: .utf8)!)
         }
@@ -80,7 +80,7 @@ struct AgentClientTests {
             deactivateSkillCallCount += 1
             lastDeactivatedSkill = skillName
             let json = """
-            {"success": true, "wasActive": true, "deactivatedSkill": "\(skillName)"}
+            {"success": true, "deactivatedSkill": "\(skillName)"}
             """
             return try! JSONDecoder().decode(SkillDeactivateResult.self, from: json.data(using: .utf8)!)
         }
@@ -181,7 +181,7 @@ struct AgentClientTests {
         #expect(mock.deactivateSkillCallCount == 1)
         #expect(mock.lastDeactivatedSkill == "browser")
         #expect(result.success == true)
-        #expect(result.wasActive == true)
+        #expect(result.deactivatedSkill == "browser")
     }
 
     @Test("Cast spell calls correctly")
