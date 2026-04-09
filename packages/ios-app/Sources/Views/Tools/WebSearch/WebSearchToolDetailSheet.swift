@@ -20,7 +20,7 @@ struct WebSearchToolDetailSheet: View {
     }
 
     private var parsed: WebSearchParsedResults {
-        WebSearchParsedResults(from: data.result ?? data.streamingOutput ?? "", arguments: data.arguments)
+        WebSearchParsedResults(details: data.details, arguments: data.arguments)
     }
 
     private var endpoint: String? {
@@ -37,7 +37,7 @@ struct WebSearchToolDetailSheet: View {
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
+        data.isResultTruncated
     }
 
     var body: some View {
@@ -75,10 +75,11 @@ struct WebSearchToolDetailSheet: View {
                             .sheetSection()
                     }
                 case .error:
-                    if let result = data.result {
-                        searchErrorSection(WebSearchDetailParser.extractError(from: result))
-                            .sheetSection()
-                    }
+                    let message = WebSearchDetailParser.errorMessage(from: data.details)
+                        ?? data.result
+                        ?? "Search failed"
+                    searchErrorSection(message)
+                        .sheetSection()
                 case .running:
                     runningSection
                         .sheetSection()
@@ -247,58 +248,15 @@ struct WebSearchToolDetailSheet: View {
     private func searchErrorSection(_ errorMessage: String) -> some View {
         ToolClassifiedErrorSection(
             errorMessage: errorMessage,
-            classification: WebSearchDetailParser.classifyError(errorMessage),
+            classification: WebSearchDetailParser.classify(details: data.details),
             colorScheme: colorScheme
         )
     }
 
     // MARK: - Running Section
 
-    @ViewBuilder
     private var runningSection: some View {
-        if let output = data.streamingOutput, !output.isEmpty {
-            let streaming = WebSearchParsedResults(from: output, arguments: data.arguments)
-            if !streaming.results.isEmpty {
-                streamingResultsSection(streaming)
-            } else {
-                ToolRunningSpinner(title: "Results", accent: .tronInfo, tint: tint, actionText: "Searching the web...")
-            }
-        } else {
-            ToolRunningSpinner(title: "Results", accent: .tronInfo, tint: tint, actionText: "Searching the web...")
-        }
-    }
-
-    private func streamingResultsSection(_ streaming: WebSearchParsedResults) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.heading)
-
-                Spacer()
-
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.tronInfo)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Color.tronInfo.opacity(0.1))
-                            .frame(height: 1)
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 4)
-                    }
-                    searchResultRow(result, index: index + 1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 6)
-            .sectionFill(.tronInfo, compact: streaming.results.count < 100)
-        }
+        ToolRunningSpinner(title: "Results", accent: .tronInfo, tint: tint, actionText: "Searching the web...")
     }
 
     // MARK: - Helpers
@@ -326,44 +284,76 @@ struct WebSearchToolDetailSheet: View {
 // MARK: - WebSearch Detail Parser
 
 /// Error classification for WebSearch detail sheet.
+///
+/// Reads structured fields written by the server
+/// (`packages/agent/src/tools/web/web_search.rs`). The server emits
+/// `details.error` (message) and `details.errorClass` (enum-like string),
+/// so iOS does not scan any free-form error text.
 enum WebSearchDetailParser {
 
-    static func extractError(from result: String) -> String {
-        if let match = result.firstMatch(of: /Error:\s*(.+)/) {
-            return String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let match = result.firstMatch(of: /"error"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return result
+    /// Pull the server-provided error message from details.
+    static func errorMessage(from details: [String: AnyCodable]?) -> String? {
+        details?["error"]?.value as? String
     }
 
-    static func classifyError(_ message: String) -> ErrorClassification {
-        let lower = message.lowercased()
+    /// Pull the server-provided error class from details.
+    static func errorClass(from details: [String: AnyCodable]?) -> String? {
+        details?["errorClass"]?.value as? String
+    }
 
-        if lower.contains("rate limit") || lower.contains("429") {
-            return ErrorClassification(icon: "clock.badge.exclamationmark", title: "Rate Limited", code: "429",
-                    suggestion: "Too many search requests. Try again in a moment.")
+    /// Build an `ErrorClassification` from structured server details.
+    static func classify(details: [String: AnyCodable]?) -> ErrorClassification {
+        switch errorClass(from: details) {
+        case "rate_limited":
+            return ErrorClassification(
+                icon: "clock.badge.exclamationmark",
+                title: "Rate Limited",
+                code: "429",
+                suggestion: "Too many search requests. Try again in a moment."
+            )
+        case "api_key":
+            return ErrorClassification(
+                icon: "key.fill",
+                title: "API Key Error",
+                code: "401",
+                suggestion: "The search API key is invalid or expired."
+            )
+        case "quota":
+            return ErrorClassification(
+                icon: "chart.bar.xaxis",
+                title: "Quota Exceeded",
+                code: nil,
+                suggestion: "The monthly search quota has been reached."
+            )
+        case "timeout":
+            return ErrorClassification(
+                icon: "clock.arrow.circlepath",
+                title: "Search Timed Out",
+                code: nil,
+                suggestion: "The search took too long to respond. Try again."
+            )
+        case "invalid_query":
+            return ErrorClassification(
+                icon: "exclamationmark.triangle.fill",
+                title: "Invalid Query",
+                code: nil,
+                suggestion: "The search query is invalid or too long."
+            )
+        case "network":
+            return ErrorClassification(
+                icon: "wifi.exclamationmark",
+                title: "Network Error",
+                code: nil,
+                suggestion: "Could not reach the search service."
+            )
+        default:
+            return ErrorClassification(
+                icon: "exclamationmark.triangle.fill",
+                title: "Search Failed",
+                code: nil,
+                suggestion: "An error occurred while searching the web."
+            )
         }
-        if lower.contains("api key") || lower.contains("authentication") || lower.contains("401") {
-            return ErrorClassification(icon: "key.fill", title: "API Key Error", code: "401",
-                    suggestion: "The search API key is invalid or expired.")
-        }
-        if lower.contains("quota") || lower.contains("exceeded") {
-            return ErrorClassification(icon: "chart.bar.xaxis", title: "Quota Exceeded", code: nil,
-                    suggestion: "The monthly search quota has been reached.")
-        }
-        if lower.contains("timeout") || lower.contains("timed out") {
-            return ErrorClassification(icon: "clock.arrow.circlepath", title: "Search Timed Out", code: nil,
-                    suggestion: "The search took too long to respond. Try again.")
-        }
-        if lower.contains("invalid") && lower.contains("query") {
-            return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Invalid Query", code: nil,
-                    suggestion: "The search query is invalid or too long.")
-        }
-
-        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil,
-                suggestion: "An error occurred while searching the web.")
     }
 }
 

@@ -1135,3 +1135,175 @@ async fn bash_async_dangerous_command_still_blocked() {
         .unwrap();
     assert_eq!(r.is_error, Some(true));
 }
+
+// ── classify_bash_error ──────────────────────────────────────────
+
+#[test]
+fn classify_returns_none_on_success() {
+    assert_eq!(classify_bash_error(Some(0), "", false), None);
+    assert_eq!(classify_bash_error(Some(0), "some stdout", false), None);
+}
+
+#[test]
+fn classify_timeout_wins_over_exit_code() {
+    assert_eq!(
+        classify_bash_error(Some(124), "Permission denied", true),
+        Some("timeout")
+    );
+    assert_eq!(classify_bash_error(None, "", true), Some("timeout"));
+}
+
+#[test]
+fn classify_permission_denied_from_stderr() {
+    assert_eq!(
+        classify_bash_error(Some(1), "bash: /root/x: Permission denied", false),
+        Some("permission_denied")
+    );
+    assert_eq!(
+        classify_bash_error(Some(13), "EACCES: permission denied", false),
+        Some("permission_denied")
+    );
+    // Case insensitive
+    assert_eq!(
+        classify_bash_error(Some(1), "PERMISSION DENIED", false),
+        Some("permission_denied")
+    );
+}
+
+#[test]
+fn classify_unknown_failure_returns_none() {
+    assert_eq!(
+        classify_bash_error(Some(2), "command not found", false),
+        None
+    );
+}
+
+#[test]
+fn classify_ignores_permission_text_on_successful_exit() {
+    // Success with permission text in output shouldn't classify as permission_denied.
+    assert_eq!(
+        classify_bash_error(Some(0), "Permission denied (ignored)", false),
+        None
+    );
+}
+
+// ── Tool details carry structured error metadata ──────────────────────────────
+
+#[tokio::test]
+async fn details_include_timed_out_and_error_class_on_timeout() {
+    let tool = BashTool::new(Arc::new(MockRunner::with_timeout()), None);
+    // Use stdin to force the direct-run path (not managed execution).
+    let r = tool
+        .execute(
+            json!({"command": "sleep 10", "stdin": ""}),
+            &make_ctx(),
+        )
+        .await
+        .unwrap();
+    let details = r.details.as_ref().expect("details present");
+    assert_eq!(details["timedOut"], true);
+    assert_eq!(details["errorClass"], "timeout");
+    assert_eq!(details["exitCode"], 124);
+}
+
+#[tokio::test]
+async fn details_include_permission_denied_error_class() {
+    // Runner that emits permission-denied stderr
+    struct PermDenyRunner;
+    #[async_trait]
+    impl ProcessRunner for PermDenyRunner {
+        async fn run_command(
+            &self,
+            _command: &str,
+            _opts: &ProcessOptions,
+        ) -> Result<crate::tools::traits::ProcessOutput, ToolError> {
+            Ok(crate::tools::traits::ProcessOutput {
+                stdout: String::new(),
+                stderr: "bash: /root/secret: Permission denied".into(),
+                exit_code: 1,
+                duration_ms: 5,
+                timed_out: false,
+                interrupted: false,
+            })
+        }
+    }
+    let tool = BashTool::new(Arc::new(PermDenyRunner), None);
+    let r = tool
+        .execute(
+            json!({"command": "cat /root/secret", "stdin": ""}),
+            &make_ctx(),
+        )
+        .await
+        .unwrap();
+    let details = r.details.as_ref().expect("details present");
+    assert_eq!(details["errorClass"], "permission_denied");
+    assert_eq!(details["timedOut"], false);
+    assert_eq!(r.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn details_no_error_class_on_success() {
+    let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
+    let r = tool
+        .execute(
+            json!({"command": "echo hi", "stdin": ""}),
+            &make_ctx(),
+        )
+        .await
+        .unwrap();
+    let details = r.details.as_ref().expect("details present");
+    assert!(details.get("errorClass").is_none());
+    assert_eq!(details["timedOut"], false);
+}
+
+#[tokio::test]
+async fn dangerous_command_details_carry_blocked_error_class() {
+    let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
+    let r = tool
+        .execute(json!({"command": "rm -rf /"}), &make_ctx())
+        .await
+        .unwrap();
+    assert_eq!(r.is_error, Some(true));
+    let details = r.details.as_ref().expect("blocked result has details");
+    assert_eq!(details["errorClass"], "blocked");
+}
+
+#[tokio::test]
+async fn backgrounded_details_carry_backgrounded_flag() {
+    // Spawn a runner whose task never completes before the blocking timeout.
+    // We use a very short blocking timeout so spawn_managed backgrounds it.
+    struct SlowRunner;
+    #[async_trait]
+    impl ProcessRunner for SlowRunner {
+        async fn run_command(
+            &self,
+            _command: &str,
+            _opts: &ProcessOptions,
+        ) -> Result<crate::tools::traits::ProcessOutput, ToolError> {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Ok(crate::tools::traits::ProcessOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                duration_ms: 60_000,
+                timed_out: false,
+                interrupted: false,
+            })
+        }
+    }
+    let tool = BashTool::new(Arc::new(SlowRunner), None);
+    let mut ctx = make_ctx();
+    let pm = Arc::new(crate::runtime::orchestrator::process_manager::ProcessManager::new());
+    ctx.process_manager = Some(pm);
+
+    let r = tool
+        .execute(
+            json!({"command": "sleep 60", "timeout": 50_u64}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let details = r.details.as_ref().expect("details present");
+    assert_eq!(details["backgrounded"], true);
+    assert!(details.get("processId").is_some());
+}

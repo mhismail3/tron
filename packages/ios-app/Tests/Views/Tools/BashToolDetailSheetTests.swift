@@ -153,33 +153,6 @@ struct BashOutputHelpersTests {
         #expect(result == "hello ...")
     }
 
-    // MARK: - Exit Code Extraction
-
-    @Test("Extracts exit code from standard error message")
-    func testExtractExitCode() {
-        let result = "Command failed with exit code 1:\nerror output"
-        let code = BashOutputHelpers.extractExitCode(from: result)
-        #expect(code == 1)
-    }
-
-    @Test("Extracts multi-digit exit code")
-    func testExtractMultiDigitExitCode() {
-        let code = BashOutputHelpers.extractExitCode(from: "exit code 130")
-        #expect(code == 130)
-    }
-
-    @Test("Returns nil for success output")
-    func testExtractExitCodeSuccess() {
-        let code = BashOutputHelpers.extractExitCode(from: "normal output")
-        #expect(code == nil)
-    }
-
-    @Test("Returns nil for nil input")
-    func testExtractExitCodeNil() {
-        let code = BashOutputHelpers.extractExitCode(from: nil)
-        #expect(code == nil)
-    }
-
     // MARK: - Line Number Width
 
     @Test("Width scales with digit count")

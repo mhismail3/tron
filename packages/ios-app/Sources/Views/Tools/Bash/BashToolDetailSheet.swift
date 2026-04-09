@@ -70,16 +70,14 @@ struct BashToolDetailSheet: View {
 
     private var exitCode: Int? {
         BashDetailsHelper.exitCode(from: data.details)
-            ?? BashOutputHelpers.extractExitCode(from: data.result)
     }
 
     private var isBlocked: Bool {
-        guard let result = data.result else { return false }
-        return result.contains("Command blocked") || result.contains("blocked for safety")
+        BashDetailsHelper.isBlocked(from: data.details)
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
+        data.isResultTruncated || (data.details?["truncated"]?.value as? Bool == true)
     }
 
     private var cleanOutput: String {
@@ -293,7 +291,7 @@ struct BashToolDetailSheet: View {
     // MARK: - Error Fallback Section
 
     private func errorFallbackSection(_ result: String) -> some View {
-        let classification = BashErrorClassifier.classify(result)
+        let classification = BashErrorClassifier.classify(details: data.details)
         return ToolClassifiedErrorSection(errorMessage: result, classification: classification, colorScheme: colorScheme) {
             Text(result)
                 .font(TronTypography.codeContent)
@@ -321,8 +319,7 @@ struct BashToolDetailSheet: View {
     }
 
     private var isBackgroundedProcess: Bool {
-        processId != nil
-            && data.result?.contains("Process backgrounded:") == true
+        BashDetailsHelper.isBackgrounded(from: data.details)
     }
 
     private var isJobActive: Bool {

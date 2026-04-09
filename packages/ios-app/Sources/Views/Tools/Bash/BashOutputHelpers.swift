@@ -55,15 +55,6 @@ enum BashOutputHelpers {
         return line.isEmpty ? " " : line
     }
 
-    /// Extract exit code from error result text (e.g., "Command failed with exit code 1:")
-    static func extractExitCode(from result: String?) -> Int? {
-        guard let result else { return nil }
-        if let match = result.firstMatch(of: /exit code (\d+)/) {
-            return Int(match.1)
-        }
-        return nil
-    }
-
     /// Calculate line number gutter width based on total line count.
     static func lineNumberWidth(lineCount: Int) -> CGFloat {
         let digits = max(String(lineCount).count, 1)

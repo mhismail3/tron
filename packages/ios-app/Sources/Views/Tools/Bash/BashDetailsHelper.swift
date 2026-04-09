@@ -47,6 +47,27 @@ enum BashDetailsHelper {
         details?["processId"]?.value as? String
     }
 
+    /// Whether the server marked this command as auto-backgrounded.
+    static func isBackgrounded(from details: [String: AnyCodable]?) -> Bool {
+        details?["backgrounded"]?.value as? Bool ?? false
+    }
+
+    /// Whether the server marked this command as timed out.
+    static func timedOut(from details: [String: AnyCodable]?) -> Bool {
+        details?["timedOut"]?.value as? Bool ?? false
+    }
+
+    /// Structured error class string from the server, if any.
+    /// Values: "timeout", "permission_denied", "blocked", "interrupted".
+    static func errorClass(from details: [String: AnyCodable]?) -> String? {
+        details?["errorClass"]?.value as? String
+    }
+
+    /// Whether the command was blocked for safety (dangerous pattern).
+    static func isBlocked(from details: [String: AnyCodable]?) -> Bool {
+        errorClass(from: details) == "blocked"
+    }
+
     /// Determine sandbox mode from arguments.
     /// Returns nil (no sandbox), "lightweight", or "docker".
     static func sandboxMode(from args: String) -> String? {

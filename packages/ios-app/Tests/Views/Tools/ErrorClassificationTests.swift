@@ -68,17 +68,65 @@ struct ErrorClassificationTests {
 
     // MARK: - WebSearch Classifier
 
-    @Test("WebSearch classifies API errors")
-    func testWebSearchAPIErrors() {
-        let rateLimit = WebSearchDetailParser.classifyError("Rate limit exceeded (429)")
-        #expect(rateLimit.title == "Rate Limited")
-        #expect(rateLimit.code == "429")
+    private func webSearchDetails(errorClass: String?) -> [String: AnyCodable]? {
+        guard let errorClass else { return nil }
+        return ["errorClass": AnyCodable(errorClass)]
+    }
 
-        let apiKey = WebSearchDetailParser.classifyError("Invalid API key")
-        #expect(apiKey.title == "API Key Error")
+    @Test("WebSearch classifies rate_limited")
+    func testWebSearchRateLimited() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "rate_limited"))
+        #expect(c.title == "Rate Limited")
+        #expect(c.code == "429")
+    }
 
-        let quota = WebSearchDetailParser.classifyError("Quota exceeded")
-        #expect(quota.title == "Quota Exceeded")
+    @Test("WebSearch classifies api_key")
+    func testWebSearchApiKey() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "api_key"))
+        #expect(c.title == "API Key Error")
+    }
+
+    @Test("WebSearch classifies quota")
+    func testWebSearchQuota() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "quota"))
+        #expect(c.title == "Quota Exceeded")
+    }
+
+    @Test("WebSearch classifies timeout")
+    func testWebSearchTimeout() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "timeout"))
+        #expect(c.title == "Search Timed Out")
+    }
+
+    @Test("WebSearch classifies invalid_query")
+    func testWebSearchInvalidQuery() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "invalid_query"))
+        #expect(c.title == "Invalid Query")
+    }
+
+    @Test("WebSearch classifies network")
+    func testWebSearchNetwork() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "network"))
+        #expect(c.title == "Network Error")
+    }
+
+    @Test("WebSearch falls back for unknown errorClass")
+    func testWebSearchUnknown() {
+        let c = WebSearchDetailParser.classify(details: webSearchDetails(errorClass: "unknown"))
+        #expect(c.title == "Search Failed")
+    }
+
+    @Test("WebSearch falls back when details missing")
+    func testWebSearchMissingDetails() {
+        let c = WebSearchDetailParser.classify(details: nil)
+        #expect(c.title == "Search Failed")
+    }
+
+    @Test("WebSearch reads errorMessage from details")
+    func testWebSearchErrorMessage() {
+        let details: [String: AnyCodable] = ["error": AnyCodable("Brave API error: HTTP 429")]
+        let msg = WebSearchDetailParser.errorMessage(from: details)
+        #expect(msg == "Brave API error: HTTP 429")
     }
 
     // MARK: - Search Classifier
@@ -134,30 +182,71 @@ struct ErrorClassificationTests {
 
     // MARK: - Bash Classifier
 
-    @Test("Bash classifies exit code error")
+    /// Helper: build a details dict for the bash classifier.
+    private func bashDetails(exitCode: Int? = nil, errorClass: String? = nil) -> [String: AnyCodable] {
+        var d: [String: AnyCodable] = [:]
+        if let code = exitCode { d["exitCode"] = AnyCodable(code) }
+        if let cls = errorClass { d["errorClass"] = AnyCodable(cls) }
+        return d
+    }
+
+    @Test("Bash classifies exit code from structured details")
     func testBashExitCode() {
-        let c = BashErrorClassifier.classify("Command failed with exit code 1")
+        let c = BashErrorClassifier.classify(details: bashDetails(exitCode: 1))
         #expect(c.title == "Command Failed")
         #expect(c.code == "EXIT 1")
     }
 
-    @Test("Bash classifies timeout")
+    @Test("Bash classifies multi-digit exit codes")
+    func testBashMultiDigitExitCode() {
+        let c = BashErrorClassifier.classify(details: bashDetails(exitCode: 130))
+        #expect(c.code == "EXIT 130")
+    }
+
+    @Test("Bash classifies timeout from server errorClass")
     func testBashTimeout() {
-        let c = BashErrorClassifier.classify("Command timed out after 120s")
+        let c = BashErrorClassifier.classify(details: bashDetails(errorClass: "timeout"))
         #expect(c.title == "Command Timed Out")
         #expect(c.code == nil)
     }
 
-    @Test("Bash classifies permission denied")
+    @Test("Bash classifies permission denied from server errorClass")
     func testBashPermissionDenied() {
-        let c = BashErrorClassifier.classify("Permission denied: /usr/sbin/something")
+        let c = BashErrorClassifier.classify(details: bashDetails(errorClass: "permission_denied"))
         #expect(c.title == "Permission Denied")
         #expect(c.code == "EACCES")
     }
 
-    @Test("Bash returns fallback for unknown")
-    func testBashFallback() {
-        let c = BashErrorClassifier.classify("something went wrong")
+    @Test("Bash classifies blocked command from server errorClass")
+    func testBashBlocked() {
+        let c = BashErrorClassifier.classify(details: bashDetails(errorClass: "blocked"))
+        #expect(c.title == "Command Blocked")
+    }
+
+    @Test("Bash classifies interrupted from server errorClass")
+    func testBashInterrupted() {
+        let c = BashErrorClassifier.classify(details: bashDetails(errorClass: "interrupted"))
+        #expect(c.title == "Interrupted")
+    }
+
+    @Test("Bash returns fallback for missing details")
+    func testBashMissingDetails() {
+        let c = BashErrorClassifier.classify(details: nil)
         #expect(c.title == "Command Failed")
+        #expect(c.code == nil)
+    }
+
+    @Test("Bash returns exit code fallback when errorClass missing")
+    func testBashExitCodeFallback() {
+        let c = BashErrorClassifier.classify(details: bashDetails(exitCode: 2))
+        #expect(c.title == "Command Failed")
+        #expect(c.code == "EXIT 2")
+    }
+
+    @Test("Bash errorClass wins over exit code")
+    func testBashErrorClassPrecedence() {
+        // Even if exitCode is present, a structured errorClass takes precedence.
+        let c = BashErrorClassifier.classify(details: bashDetails(exitCode: 124, errorClass: "timeout"))
+        #expect(c.title == "Command Timed Out")
     }
 }

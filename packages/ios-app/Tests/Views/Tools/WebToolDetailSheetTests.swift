@@ -162,67 +162,63 @@ struct WebFetchRawModeDetailTests {
 @Suite("WebSearchDetailParser")
 struct WebSearchDetailParserTests {
 
-    // MARK: - Error Extraction
-
-    @Test("Extracts error from 'Error:' prefix")
-    func testExtractErrorPrefix() {
-        let error = WebSearchDetailParser.extractError(from: "Error: Rate limit exceeded")
-        #expect(error == "Rate limit exceeded")
+    private func details(errorClass: String? = nil, error: String? = nil) -> [String: AnyCodable] {
+        var d: [String: AnyCodable] = [:]
+        if let errorClass { d["errorClass"] = AnyCodable(errorClass) }
+        if let error { d["error"] = AnyCodable(error) }
+        return d
     }
 
-    @Test("Extracts error from JSON error field")
-    func testExtractErrorJSON() {
-        let error = WebSearchDetailParser.extractError(from: "{\"error\": \"API key invalid\"}")
-        #expect(error == "API key invalid")
+    @Test("Reads server-provided error message from details")
+    func testErrorMessageFromDetails() {
+        let msg = WebSearchDetailParser.errorMessage(from: details(error: "HTTP 429"))
+        #expect(msg == "HTTP 429")
     }
 
-    @Test("Returns raw string for unrecognized format")
-    func testExtractErrorFallback() {
-        let msg = "Unknown error"
-        let error = WebSearchDetailParser.extractError(from: msg)
-        #expect(error == msg)
-    }
-
-    // MARK: - Error Classification
-
-    @Test("Classifies rate limit error")
+    @Test("Classifies rate_limited from server errorClass")
     func testClassifyRateLimit() {
-        let info = WebSearchDetailParser.classifyError("Rate limit exceeded (429)")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "rate_limited"))
         #expect(info.title == "Rate Limited")
         #expect(info.code == "429")
     }
 
-    @Test("Classifies API key error")
+    @Test("Classifies api_key from server errorClass")
     func testClassifyAPIKey() {
-        let info = WebSearchDetailParser.classifyError("Invalid API key")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "api_key"))
         #expect(info.title == "API Key Error")
         #expect(info.code == "401")
     }
 
-    @Test("Classifies quota error")
+    @Test("Classifies quota from server errorClass")
     func testClassifyQuota() {
-        let info = WebSearchDetailParser.classifyError("Monthly quota exceeded")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "quota"))
         #expect(info.title == "Quota Exceeded")
         #expect(info.code == nil)
     }
 
-    @Test("Classifies timeout error")
+    @Test("Classifies timeout from server errorClass")
     func testClassifyTimeout() {
-        let info = WebSearchDetailParser.classifyError("Search request timed out")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "timeout"))
         #expect(info.title == "Search Timed Out")
     }
 
-    @Test("Classifies invalid query error")
+    @Test("Classifies invalid_query from server errorClass")
     func testClassifyInvalidQuery() {
-        let info = WebSearchDetailParser.classifyError("Invalid query parameter")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "invalid_query"))
         #expect(info.title == "Invalid Query")
     }
 
-    @Test("Classifies generic error")
+    @Test("Falls back to Search Failed for unknown errorClass")
     func testClassifyGeneric() {
-        let info = WebSearchDetailParser.classifyError("Something went wrong")
+        let info = WebSearchDetailParser.classify(details: details(errorClass: "unknown"))
         #expect(info.title == "Search Failed")
         #expect(info.code == nil)
+    }
+
+    @Test("Falls back when details nil")
+    func testNilDetails() {
+        let info = WebSearchDetailParser.classify(details: nil)
+        #expect(info.title == "Search Failed")
     }
 }
 
@@ -308,67 +304,60 @@ struct WebFetchParsingTests {
 @MainActor
 struct WebSearchParsingTests {
 
+    private func details(results: [[String: Any]] = [], error: String? = nil, resultCount: Int? = nil) -> [String: AnyCodable] {
+        var d: [String: AnyCodable] = [:]
+        d["results"] = AnyCodable(results)
+        if let error { d["error"] = AnyCodable(error) }
+        if let resultCount { d["resultCount"] = AnyCodable(resultCount) }
+        return d
+    }
+
     @Test("Extracts query from arguments")
     func testQueryExtraction() {
-        let result = WebSearchParsedResults(from: "No results", arguments: "{\"query\": \"Swift async\"}")
+        let result = WebSearchParsedResults(details: details(), arguments: "{\"query\": \"Swift async\"}")
         #expect(result.query == "Swift async")
     }
 
-    @Test("Parses bold-title format results")
-    func testBoldTitleResults() {
-        let text = "Found 2 results:\n\n1. **First Result Title**\n   https://example.com/first\n   This is the first snippet.\n\n2. **Second Result Title**\n   https://example.com/second\n   This is the second snippet."
-        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"test\"}")
+    @Test("Decodes results from structured details")
+    func testDecodesResults() {
+        let results: [[String: Any]] = [
+            ["title": "First", "url": "https://example.com/first", "snippet": "first snippet"],
+            ["title": "Second", "url": "https://example.com/second", "snippet": "second snippet"],
+        ]
+        let result = WebSearchParsedResults(
+            details: details(results: results),
+            arguments: "{\"query\": \"test\"}"
+        )
         #expect(result.results.count == 2)
-        guard result.results.count >= 2 else { return }
-        #expect(result.results[0].title == "First Result Title")
+        #expect(result.results[0].title == "First")
         #expect(result.results[0].url == "https://example.com/first")
-        #expect(result.results[0].snippet.contains("first snippet"))
-        #expect(result.results[1].title == "Second Result Title")
+        #expect(result.results[0].snippet == "first snippet")
+        #expect(result.results[1].title == "Second")
     }
 
-    @Test("Parses markdown-link format results (real server format)")
-    func testMarkdownLinkResults() {
-        let text = "1. [Claude AI Pricing](https://example.com/pricing)\n   February 2026 Updates: <strong>Anthropic released</strong> new pricing.\n\n2. [Claude Code Changelog](https://example.com/changelog)\n   Complete version history with all releases."
-        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"claude pricing\"}")
-        #expect(result.results.count == 2)
-        guard result.results.count >= 2 else { return }
-        #expect(result.results[0].title == "Claude AI Pricing")
-        #expect(result.results[0].url == "https://example.com/pricing")
-        #expect(result.results[0].snippet == "February 2026 Updates: Anthropic released new pricing.")
-        #expect(result.results[1].title == "Claude Code Changelog")
-        #expect(result.results[1].url == "https://example.com/changelog")
-    }
-
-    @Test("Strips HTML tags from snippets")
-    func testHTMLTagStripping() {
-        let text = "1. [Result Title](https://example.com)\n   Text with <strong>bold</strong> and <em>italic</em> content."
-        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"test\"}")
-        #expect(result.results.count == 1)
-        guard let first = result.results.first else { return }
-        #expect(first.snippet == "Text with bold and italic content.")
-    }
-
-    @Test("Extracts total results count")
-    func testTotalResultsCount() {
-        let text = "Found 15 results:\n\n1. **Title**\nhttps://example.com\nSnippet."
-        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"test\"}")
+    @Test("Uses resultCount from details for totalResults")
+    func testTotalResultsFromDetails() {
+        let result = WebSearchParsedResults(
+            details: details(results: [["title": "t", "url": "u", "snippet": "s"]], resultCount: 15),
+            arguments: "{\"query\": \"test\"}"
+        )
         #expect(result.totalResults == 15)
     }
 
-    @Test("Detects error in results")
-    func testErrorDetection() {
+    @Test("Reads server-provided error message")
+    func testErrorFromDetails() {
         let result = WebSearchParsedResults(
-            from: "Error: Rate limit exceeded",
+            details: details(error: "Rate limit exceeded"),
             arguments: "{\"query\": \"test\"}"
         )
-        #expect(result.error != nil)
+        #expect(result.error == "Rate limit exceeded")
         #expect(result.results.isEmpty)
     }
 
-    @Test("Returns empty results for no matches")
-    func testNoMatches() {
+    @Test("Returns empty results for empty array")
+    func testEmptyResults() {
         let result = WebSearchParsedResults(
-            from: "Found 0 results for 'nonexistent'",
+            details: details(results: [], resultCount: 0),
             arguments: "{\"query\": \"nonexistent\"}"
         )
         #expect(result.results.isEmpty)
@@ -376,8 +365,15 @@ struct WebSearchParsingTests {
 
     @Test("Handles empty query gracefully")
     func testEmptyQuery() {
-        let result = WebSearchParsedResults(from: "Results", arguments: "{}")
+        let result = WebSearchParsedResults(details: details(), arguments: "{}")
         #expect(result.query == "")
+    }
+
+    @Test("Handles nil details")
+    func testNilDetails() {
+        let result = WebSearchParsedResults(details: nil, arguments: "{\"query\": \"test\"}")
+        #expect(result.results.isEmpty)
+        #expect(result.error == nil)
     }
 }
 

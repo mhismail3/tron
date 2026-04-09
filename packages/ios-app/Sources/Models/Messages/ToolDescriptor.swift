@@ -225,7 +225,7 @@ enum ToolRegistry {
             },
             viewerFactory: { tool, isExpanded in
                 AnyView(WebSearchResultViewer(
-                    result: tool.result ?? "",
+                    details: tool.details,
                     arguments: tool.arguments,
                     isExpanded: isExpanded
                 ))

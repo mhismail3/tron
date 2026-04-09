@@ -275,6 +275,7 @@ impl BashTool {
                         "processId": process_id,
                         "interrupted": true,
                         "userCancelled": true,
+                        "errorClass": "interrupted",
                     })),
                     is_error: Some(true),
                     stop_turn: None,
@@ -283,17 +284,27 @@ impl BashTool {
             Some(result) => {
                 // Completed within blocking timeout — inline the result.
                 let exit_code = result.exit_code.unwrap_or(-1);
+                let error_class = classify_bash_error(
+                    result.exit_code,
+                    &result.output,
+                    result.timed_out,
+                );
+                let mut details = json!({
+                    "command": command,
+                    "exitCode": exit_code,
+                    "duration": result.duration_ms,
+                    "description": description,
+                    "processId": process_id,
+                    "blobId": result.blob_id,
+                    "timedOut": result.timed_out,
+                });
+                if let Some(class) = error_class {
+                    details["errorClass"] = json!(class);
+                }
 
                 Ok(TronToolResult {
                     content: ToolResultBody::Text(result.output),
-                    details: Some(json!({
-                        "command": command,
-                        "exitCode": exit_code,
-                        "duration": result.duration_ms,
-                        "description": description,
-                        "processId": process_id,
-                        "blobId": result.blob_id,
-                    })),
+                    details: Some(details),
                     is_error: if exit_code != 0 { Some(true) } else { None },
                     stop_turn: None,
                 })
@@ -321,6 +332,7 @@ impl BashTool {
                         "command": command,
                         "processId": process_id,
                         "description": description,
+                        "backgrounded": true,
                         "backgroundedByUser": user_initiated,
                     })),
                     is_error: None,
@@ -329,6 +341,34 @@ impl BashTool {
             }
         }
     }
+}
+
+/// Classify a bash execution failure into a structured error class.
+///
+/// Returns `Some(class)` when the failure matches a known pattern, `None`
+/// otherwise. Called server-side so iOS can render a structured error chip
+/// without scanning stderr text.
+///
+/// Classes:
+/// - `"timeout"`: command exceeded its blocking/kill timeout
+/// - `"permission_denied"`: stderr indicates permission / EACCES failure
+/// - `"blocked"`: command matched a dangerous pattern and was refused
+pub(crate) fn classify_bash_error(
+    exit_code: Option<i32>,
+    stderr: &str,
+    timed_out: bool,
+) -> Option<&'static str> {
+    if timed_out {
+        return Some("timeout");
+    }
+    if exit_code != Some(0) {
+        // Permission denied is a common stderr substring across OSes.
+        let lower = stderr.to_lowercase();
+        if lower.contains("permission denied") || lower.contains("eacces") {
+            return Some("permission_denied");
+        }
+    }
+    None
 }
 
 /// Check if a PTY prompt string indicates sensitive input.
@@ -424,7 +464,15 @@ impl TronTool for BashTool {
 
         // Check dangerous patterns
         if let Some(reason) = Self::check_dangerous(&command) {
-            return Ok(error_result(reason));
+            return Ok(TronToolResult {
+                content: ToolResultBody::Text(reason),
+                details: Some(json!({
+                    "command": command,
+                    "errorClass": "blocked",
+                })),
+                is_error: Some(true),
+                stop_turn: None,
+            });
         }
 
         let timeout_ms = get_optional_u64(&params, "timeout")
@@ -563,18 +611,28 @@ impl TronTool for BashTool {
                     combined.push_str(&docker_output.stderr);
                 }
                 let is_error = if docker_output.exit_code != 0 { Some(true) } else { None };
+                let docker_error_class = classify_bash_error(
+                    Some(docker_output.exit_code),
+                    &docker_output.stderr,
+                    docker_output.timed_out,
+                );
+                let mut docker_details = json!({
+                    "command": docker_cmd,
+                    "exitCode": docker_output.exit_code,
+                    "durationMs": docker_output.duration_ms,
+                    "sandbox": "docker",
+                    "image": self.sandbox_default_image,
+                    "description": description,
+                    "timedOut": docker_output.timed_out,
+                });
+                if let Some(class) = docker_error_class {
+                    docker_details["errorClass"] = json!(class);
+                }
                 return Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         crate::core::content::ToolResultContent::text(&combined),
                     ]),
-                    details: Some(json!({
-                        "command": docker_cmd,
-                        "exitCode": docker_output.exit_code,
-                        "durationMs": docker_output.duration_ms,
-                        "sandbox": "docker",
-                        "image": self.sandbox_default_image,
-                        "description": description,
-                    })),
+                    details: Some(docker_details),
                     is_error,
                     stop_turn: None,
                 });
@@ -618,6 +676,14 @@ impl TronTool for BashTool {
         if let Some(ws) = sandbox_workspace {
             let _ = ws.cleanup().await;
         }
+
+        // Classify error before consuming stderr below.
+        let error_class = classify_bash_error(
+            Some(output.exit_code),
+            &output.stderr,
+            output.timed_out,
+        );
+        let timed_out_flag = output.timed_out;
 
         // Combine stdout + stderr
         let mut combined = output.stdout;
@@ -672,9 +738,13 @@ impl TronTool for BashTool {
             "originalTokens": estimate_tokens(original_chars),
             "finalTokens": estimate_tokens(combined.len()),
             "interrupted": output.interrupted,
+            "timedOut": timed_out_flag,
             "description": description,
             "blobId": blob_id,
         });
+        if let Some(class) = error_class {
+            details["errorClass"] = json!(class);
+        }
         // Include shell/interactive/ptyInput in details for audit
         if shell_used != "bash" {
             details["shell"] = json!(shell_used);

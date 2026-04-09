@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// Displays WebSearch results as a list of search results with clickable links
+/// Displays WebSearch results as a list of search results with clickable links.
+///
+/// Reads structured results from `tool.details.results` (server-provided).
+/// Falls back to empty state if details are missing.
 struct WebSearchResultViewer: View {
-    let result: String
+    let details: [String: AnyCodable]?
     let arguments: String
     @Binding var isExpanded: Bool
 
     private var parsedResults: WebSearchParsedResults {
-        WebSearchParsedResults(from: result, arguments: arguments)
+        WebSearchParsedResults(details: details, arguments: arguments)
     }
 
     var body: some View {
@@ -191,152 +194,49 @@ private struct WebSearchErrorBanner: View {
 
 // MARK: - Data Models
 
+/// Structured WebSearch results, sourced from server-provided `tool.details`.
+///
+/// The server (`packages/agent/src/tools/web/web_search.rs`) populates
+/// `details.results` with an array of `{title, url, snippet, age?}` objects
+/// and `details.error` / `details.errorClass` on failure. iOS reads these
+/// directly — no text parsing.
 struct WebSearchParsedResults {
     let query: String
     let results: [SearchResult]
     let totalResults: Int?
     let error: String?
 
-    init(from result: String, arguments: String) {
-        // Extract query from arguments
-        if let match = arguments.firstMatch(of: /"query"\s*:\s*"([^"]+)"/) {
-            self.query = String(match.1)
-                .replacingOccurrences(of: "\\", with: "")
-        } else {
-            self.query = ""
-        }
+    init(details: [String: AnyCodable]?, arguments: String) {
+        self.query = ToolArgumentParser.query(from: arguments)
 
-        // Check for error
-        if result.contains("Error:") || result.contains("\"error\"") {
-            self.error = Self.extractError(from: result)
+        if let errorMessage = details?["error"]?.value as? String {
+            self.error = errorMessage
             self.results = []
             self.totalResults = nil
             return
         }
 
         self.error = nil
-        self.results = Self.parseResults(from: result)
-        self.totalResults = Self.extractTotalResults(from: result) ?? self.results.count
+        self.results = Self.decodeResults(from: details)
+        if let count = details?["resultCount"]?.value as? Int {
+            self.totalResults = count
+        } else if let count = details?["resultCount"]?.value as? Double {
+            self.totalResults = Int(count)
+        } else {
+            self.totalResults = self.results.count
+        }
     }
 
-    private static func extractError(from result: String) -> String {
-        if let match = result.firstMatch(of: /Error:\s*(.+)/) {
-            return String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func decodeResults(from details: [String: AnyCodable]?) -> [SearchResult] {
+        guard let raw = details?["results"]?.value as? [[String: Any]] else { return [] }
+        return raw.compactMap { dict in
+            guard let title = dict["title"] as? String,
+                  let url = dict["url"] as? String
+            else { return nil }
+            let snippet = (dict["snippet"] as? String) ?? ""
+            let age = dict["age"] as? String
+            return SearchResult(title: title, url: url, snippet: snippet, age: age)
         }
-        if let match = result.firstMatch(of: /"error"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return "Search failed"
-    }
-
-    private static func extractTotalResults(from result: String) -> Int? {
-        if let match = result.firstMatch(of: /Found\s+(\d+)\s+results?/) {
-            return Int(match.1)
-        }
-        if let match = result.firstMatch(of: /"totalResults"\s*:\s*(\d+)/) {
-            return Int(match.1)
-        }
-        return nil
-    }
-
-    private static func parseResults(from result: String) -> [SearchResult] {
-        var results: [SearchResult] = []
-
-        let lines = result.components(separatedBy: "\n")
-        var currentTitle = ""
-        var currentUrl = ""
-        var currentSnippet = ""
-        var inResult = false
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Format A: "1. [Title](URL)" — markdown link (real server format)
-            if let match = trimmed.firstMatch(of: /^(\d+)\.\s+\[(.+?)\]\((.+?)\)/) {
-                if !currentTitle.isEmpty && !currentUrl.isEmpty {
-                    results.append(SearchResult(
-                        title: currentTitle,
-                        url: currentUrl,
-                        snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
-                        age: nil
-                    ))
-                }
-                currentTitle = String(match.2)
-                currentUrl = String(match.3)
-                currentSnippet = ""
-                inResult = true
-            }
-            // Format B: "1. **Title**" — bold title, URL on next line
-            else if let match = trimmed.firstMatch(of: /^(\d+)\.\s+\*\*(.+?)\*\*$/) {
-                if !currentTitle.isEmpty && !currentUrl.isEmpty {
-                    results.append(SearchResult(
-                        title: currentTitle,
-                        url: currentUrl,
-                        snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
-                        age: nil
-                    ))
-                }
-                currentTitle = String(match.2)
-                currentUrl = ""
-                currentSnippet = ""
-                inResult = true
-            }
-            // Format C: "1. Title" — plain numbered title
-            else if let match = trimmed.firstMatch(of: /^(\d+)\.\s+(.+)$/) {
-                if !inResult {
-                    if !currentTitle.isEmpty && !currentUrl.isEmpty {
-                        results.append(SearchResult(
-                            title: currentTitle,
-                            url: currentUrl,
-                            snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
-                            age: nil
-                        ))
-                    }
-                    currentTitle = String(match.2)
-                    currentUrl = ""
-                    currentSnippet = ""
-                    inResult = true
-                }
-            }
-            // URL on its own line
-            else if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
-                currentUrl = trimmed
-            }
-            // URL: prefix
-            else if trimmed.hasPrefix("URL:") {
-                currentUrl = trimmed.replacingOccurrences(of: "URL:", with: "").trimmingCharacters(in: .whitespaces)
-            }
-            // Snippet content (after URL is known)
-            else if inResult && !trimmed.isEmpty && !currentUrl.isEmpty {
-                if currentSnippet.isEmpty {
-                    currentSnippet = trimmed
-                } else {
-                    currentSnippet += " " + trimmed
-                }
-            }
-            // Might be URL before snippet
-            else if inResult && !trimmed.isEmpty && !currentTitle.isEmpty {
-                if trimmed.hasPrefix("http") {
-                    currentUrl = trimmed
-                }
-            }
-        }
-
-        // Don't forget the last result
-        if !currentTitle.isEmpty && !currentUrl.isEmpty {
-            results.append(SearchResult(
-                title: currentTitle,
-                url: currentUrl,
-                snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
-                age: nil
-            ))
-        }
-
-        return results
-    }
-
-    private static func stripHTMLTags(_ text: String) -> String {
-        text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
     }
 }
 
@@ -358,36 +258,40 @@ struct SearchResult {
 
 #if DEBUG
 #Preview("WebSearch Results") {
-    ScrollView {
+    let sampleResults: [[String: Any]] = [
+        [
+            "title": "Swift Concurrency - Apple Developer",
+            "url": "https://developer.apple.com/documentation/swift/concurrency",
+            "snippet": "Learn about Swift's modern approach to writing concurrent and asynchronous code.",
+        ],
+        [
+            "title": "Async/Await in Swift - Swift by Sundell",
+            "url": "https://www.swiftbysundell.com/articles/async-await-in-swift/",
+            "snippet": "A comprehensive guide to using async/await in Swift applications.",
+        ],
+    ]
+    let okDetails: [String: AnyCodable] = [
+        "results": AnyCodable(sampleResults),
+        "resultCount": AnyCodable(sampleResults.count),
+    ]
+    let errDetails: [String: AnyCodable] = [
+        "error": AnyCodable("Brave API error: HTTP 429"),
+        "errorClass": AnyCodable("rate_limited"),
+    ]
+    return ScrollView {
         VStack(spacing: 16) {
             WebSearchResultViewer(
-                result: """
-                Found 3 results for 'Swift async await':
-
-                1. **Swift Concurrency - Apple Developer**
-                   https://developer.apple.com/documentation/swift/concurrency
-                   Learn about Swift's modern approach to writing concurrent and asynchronous code.
-
-                2. **Async/Await in Swift - Swift by Sundell**
-                   https://www.swiftbysundell.com/articles/async-await-in-swift/
-                   A comprehensive guide to using async/await in Swift applications.
-
-                3. **WWDC21: Meet async/await in Swift**
-                   https://developer.apple.com/videos/play/wwdc2021/10132/
-                   Watch the introduction of async/await at WWDC 2021.
-                """,
+                details: okDetails,
                 arguments: "{\"query\": \"Swift async await\"}",
                 isExpanded: .constant(false)
             )
-
             WebSearchResultViewer(
-                result: "Error: Rate limit exceeded - try again later",
+                details: errDetails,
                 arguments: "{\"query\": \"test query\"}",
                 isExpanded: .constant(false)
             )
-
             WebSearchResultViewer(
-                result: "Found 0 results for 'xyznonexistentquery123'",
+                details: ["results": AnyCodable([] as [[String: Any]]), "resultCount": AnyCodable(0)],
                 arguments: "{\"query\": \"xyznonexistentquery123\"}",
                 isExpanded: .constant(false)
             )
