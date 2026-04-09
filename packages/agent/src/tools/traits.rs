@@ -277,7 +277,6 @@ pub struct NotifyResult {
     /// Whether the notification was sent successfully.
     pub success: bool,
     /// Diagnostic message (device count, errors).
-    #[serde(default)]
     pub message: Option<String>,
     /// Number of devices that received the notification successfully.
     pub success_count: u32,

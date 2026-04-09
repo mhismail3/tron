@@ -80,7 +80,6 @@ struct SkillActiveResult: Decodable {
     struct ActiveSkillInfo: Decodable {
         let name: String
         let source: String
-        let addedVia: String?
         let tokens: Int?
     }
 

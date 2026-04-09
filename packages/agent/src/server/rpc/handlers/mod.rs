@@ -19,7 +19,7 @@
 //!
 //! `browser` (stream), `worktree` (git), `transcription`,
 //! `device` (push tokens), `notifications` (inbox), `plan`,
-//! `communication`, `voice_notes`, `git`, `sandbox`
+//! `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
 pub mod agent_confirmation;
@@ -28,7 +28,6 @@ pub mod agent_subagent;
 pub mod auth;
 pub mod blob;
 pub mod browser;
-pub mod communication;
 pub mod context;
 pub mod cron;
 pub mod device;
@@ -263,15 +262,6 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("plan.enter", plan::EnterPlanHandler);
     registry.register("plan.exit", plan::ExitPlanHandler);
     registry.register("plan.getState", plan::GetPlanStateHandler);
-
-    // Communication
-    registry.register("communication.send", communication::SendHandler);
-    registry.register("communication.receive", communication::ReceiveHandler);
-    registry.register("communication.subscribe", communication::SubscribeHandler);
-    registry.register(
-        "communication.unsubscribe",
-        communication::UnsubscribeHandler,
-    );
 
     // Voice Notes
     registry.register("voiceNotes.save", voice_notes::SaveHandler);
@@ -543,8 +533,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            134,
-            "expected 134 methods, got {}",
+            130,
+            "expected 130 methods, got {}",
             reg.methods().len()
         );
     }

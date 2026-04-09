@@ -264,7 +264,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **134 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **130 methods** across three groups.
 
 ### Connection
 
@@ -309,7 +309,7 @@ All messages use JSON-RPC 2.0 framing:
 | `filesystem` | 4 | `filesystem.listDir`, `filesystem.getHome`, `filesystem.createDir`, `file.read` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
-### Platform (53)
+### Platform (49)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -320,7 +320,6 @@ All messages use JSON-RPC 2.0 framing:
 | `transcribe` | 3 | `transcribe.audio`, `transcribe.listModels`, `transcribe.downloadModel` |
 | `device` | 3 | `device.register`, `device.unregister`, `device.respond` |
 | `plan` | 3 | `plan.enter`, `plan.exit`, `plan.getState` |
-| `communication` | 4 | `communication.send`, `communication.receive`, `communication.subscribe`, `communication.unsubscribe` |
 | `voiceNotes` | 3 | `voiceNotes.save`, `voiceNotes.list`, `voiceNotes.delete` |
 | `git` | 1 | `git.clone` |
 | `sandbox` | 5 | `sandbox.listContainers`, `sandbox.startContainer`, `sandbox.stopContainer`, `sandbox.killContainer`, `sandbox.removeContainer` |

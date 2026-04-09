@@ -211,7 +211,6 @@ final class SkillStoreTests: XCTestCase {
         {
             "name": "test-skill",
             "source": "global",
-            "addedVia": "mention",
             "eventId": "evt_123"
         }
         """.data(using: .utf8)!
@@ -221,7 +220,6 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skillInfo.name, "test-skill")
         XCTAssertEqual(skillInfo.source, .global)
-        XCTAssertEqual(skillInfo.addedVia, .mention)
         XCTAssertEqual(skillInfo.eventId, "evt_123")
         XCTAssertEqual(skillInfo.id, "test-skill")
     }
@@ -232,7 +230,6 @@ final class SkillStoreTests: XCTestCase {
         {
             "name": "my-project-skill",
             "source": "project",
-            "addedVia": "explicit",
             "eventId": "evt_456"
         }
         """.data(using: .utf8)!
@@ -242,22 +239,7 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skillInfo.name, "my-project-skill")
         XCTAssertEqual(skillInfo.source, .project)
-        XCTAssertEqual(skillInfo.addedVia, .explicit)
         XCTAssertEqual(skillInfo.eventId, "evt_456")
-    }
-
-    /// Test SkillAddMethod enum decoding
-    func testSkillAddMethodDecoding() throws {
-        let mentionJSON = "\"mention\"".data(using: .utf8)!
-        let explicitJSON = "\"explicit\"".data(using: .utf8)!
-
-        let decoder = JSONDecoder()
-
-        let mention = try decoder.decode(SkillAddMethod.self, from: mentionJSON)
-        XCTAssertEqual(mention, .mention)
-
-        let explicit = try decoder.decode(SkillAddMethod.self, from: explicitJSON)
-        XCTAssertEqual(explicit, .explicit)
     }
 
     /// Test SkillRemoveResponse decoding - success case
@@ -298,13 +280,11 @@ final class SkillStoreTests: XCTestCase {
             {
                 "name": "skill-one",
                 "source": "global",
-                "addedVia": "mention",
                 "eventId": "evt_1"
             },
             {
                 "name": "skill-two",
                 "source": "project",
-                "addedVia": "explicit",
                 "eventId": "evt_2"
             }
         ]
@@ -317,11 +297,9 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skills[0].name, "skill-one")
         XCTAssertEqual(skills[0].source, .global)
-        XCTAssertEqual(skills[0].addedVia, .mention)
 
         XCTAssertEqual(skills[1].name, "skill-two")
         XCTAssertEqual(skills[1].source, .project)
-        XCTAssertEqual(skills[1].addedVia, .explicit)
     }
 
     /// Test AddedSkillInfo Equatable conformance
@@ -329,21 +307,18 @@ final class SkillStoreTests: XCTestCase {
         let skill1 = AddedSkillInfo(
             name: "test",
             source: .global,
-            addedVia: .mention,
             eventId: "evt_1",
             tokens: nil
         )
         let skill2 = AddedSkillInfo(
             name: "test",
             source: .global,
-            addedVia: .mention,
             eventId: "evt_1",
             tokens: nil
         )
         let skill3 = AddedSkillInfo(
             name: "different",
             source: .project,
-            addedVia: .explicit,
             eventId: "evt_2",
             tokens: nil
         )
@@ -357,7 +332,6 @@ final class SkillStoreTests: XCTestCase {
         let skill = AddedSkillInfo(
             name: "my-skill",
             source: .global,
-            addedVia: .mention,
             eventId: "evt_123",
             tokens: nil
         )
