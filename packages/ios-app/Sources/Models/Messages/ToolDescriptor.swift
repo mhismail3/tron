@@ -104,7 +104,8 @@ enum ToolRegistry {
             viewerFactory: { tool, _ in
                 AnyView(EditResultViewer(
                     filePath: ToolArgumentParser.filePath(from: tool.arguments),
-                    result: tool.result ?? ""
+                    result: tool.result ?? "",
+                    details: tool.details
                 ))
             }
         ),

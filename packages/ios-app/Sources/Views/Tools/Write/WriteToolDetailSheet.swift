@@ -124,7 +124,7 @@ struct WriteToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let error = FileOperationError.parse(from: result, operation: .write)
+        let error = FileOperationError.from(details: data.details, result: result, operation: .write)
         let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
 
         return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {

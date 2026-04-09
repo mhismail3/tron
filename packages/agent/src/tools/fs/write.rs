@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, TronToolResult, text_result};
+use crate::core::tools::{Tool, ToolCategory, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::tools::utils::fs_errors::format_fs_error;
+use crate::tools::utils::fs_errors::{fs_error_from_message, fs_error_result};
 use crate::tools::utils::path::{resolve_path, warn_path_traversal};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::{validate_path_not_root, validate_required_string};
@@ -69,39 +69,43 @@ impl TronTool for WriteTool {
         let content = match params.get("content") {
             Some(Value::String(s)) => s.clone(),
             Some(Value::Null) | None => {
-                return Ok(text_result(
+                return Ok(fs_error_from_message(
                     "Missing required parameter: content (the content to write)",
-                    true,
+                    "invalid_path",
+                    &file_path,
                 ));
             }
             _ => {
-                return Ok(text_result(
+                return Ok(fs_error_from_message(
                     "Invalid type for parameter: content (expected string)",
-                    true,
+                    "invalid_path",
+                    &file_path,
                 ));
             }
         };
 
         if content.len() > MAX_CONTENT_SIZE {
-            return Ok(text_result(
+            return Ok(fs_error_from_message(
                 format!(
                     "Content too large: {} bytes (max {} MB)",
                     content.len(),
                     MAX_CONTENT_SIZE / 1024 / 1024
                 ),
-                true,
+                "too_large",
+                &file_path,
             ));
         }
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
         warn_path_traversal(&resolved, "Write");
+        let resolved_str = resolved.to_string_lossy().to_string();
         let existed = self.fs.exists(&resolved);
 
         // Create parent directories
         if let Some(parent) = resolved.parent()
             && let Err(e) = self.fs.create_dir_all(parent).await
         {
-            return Ok(format_fs_error(
+            return Ok(fs_error_result(
                 &e,
                 &parent.to_string_lossy(),
                 "creating directory",
@@ -110,7 +114,7 @@ impl TronTool for WriteTool {
 
         let bytes = content.as_bytes();
         if let Err(e) = self.fs.write_file(&resolved, bytes).await {
-            return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "writing"));
+            return Ok(fs_error_result(&e, &resolved_str, "writing"));
         }
 
         let bytes_written = bytes.len();

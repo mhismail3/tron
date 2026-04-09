@@ -30,6 +30,127 @@ pub fn generate_unified_diff(old: &str, new: &str, context_lines: usize) -> Stri
     format_hunks(&old_lines, &new_lines, &ops, context_lines)
 }
 
+/// Generate a structured diff between two strings as an array of typed
+/// line objects for iOS to render without parsing text.
+///
+/// Each entry is one of:
+/// - `{"type": "hunk_header", "oldStart": u64, "oldCount": u64, "newStart": u64, "newCount": u64}`
+/// - `{"type": "context", "content": String, "oldLine": u64, "newLine": u64}`
+/// - `{"type": "deletion", "content": String, "oldLine": u64}`
+/// - `{"type": "addition", "content": String, "newLine": u64}`
+pub fn generate_structured_diff(
+    old: &str,
+    new: &str,
+    context_lines: usize,
+) -> Vec<serde_json::Value> {
+    if old == new {
+        return Vec::new();
+    }
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let ops = compute_edit_ops(&old_lines, &new_lines);
+    if ops.is_empty() {
+        return Vec::new();
+    }
+    format_hunks_structured(&old_lines, &new_lines, &ops, context_lines)
+}
+
+fn format_hunks_structured(
+    old: &[&str],
+    new: &[&str],
+    ops: &[EditOp],
+    context_lines: usize,
+) -> Vec<serde_json::Value> {
+    use serde_json::json;
+
+    let mut changes: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < ops.len() {
+        if matches!(ops[i], EditOp::Equal(..)) {
+            i += 1;
+        } else {
+            let start = i;
+            while i < ops.len() && !matches!(ops[i], EditOp::Equal(..)) {
+                i += 1;
+            }
+            changes.push((start, i));
+        }
+    }
+    if changes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut output: Vec<serde_json::Value> = Vec::new();
+    for &(change_start, change_end) in &changes {
+        let ctx_start = change_start.saturating_sub(context_lines);
+        let ctx_end = (change_end + context_lines).min(ops.len());
+
+        let mut old_start: usize = 0;
+        let mut old_count: u64 = 0;
+        let mut new_start: usize = 0;
+        let mut new_count: u64 = 0;
+        let mut first = true;
+        let mut hunk_body: Vec<serde_json::Value> = Vec::new();
+
+        for op in &ops[ctx_start..ctx_end] {
+            match op {
+                EditOp::Equal(oi, ni) => {
+                    if first {
+                        old_start = oi + 1;
+                        new_start = ni + 1;
+                        first = false;
+                    }
+                    old_count += 1;
+                    new_count += 1;
+                    hunk_body.push(json!({
+                        "type": "context",
+                        "content": old[*oi],
+                        "oldLine": oi + 1,
+                        "newLine": ni + 1,
+                    }));
+                }
+                EditOp::Delete(oi) => {
+                    if first {
+                        old_start = oi + 1;
+                        new_start = if *oi < new.len() { oi + 1 } else { new.len() + 1 };
+                        first = false;
+                    }
+                    old_count += 1;
+                    hunk_body.push(json!({
+                        "type": "deletion",
+                        "content": old[*oi],
+                        "oldLine": oi + 1,
+                    }));
+                }
+                EditOp::Insert(ni) => {
+                    if first {
+                        old_start = if *ni < old.len() { ni + 1 } else { old.len() + 1 };
+                        new_start = ni + 1;
+                        first = false;
+                    }
+                    new_count += 1;
+                    hunk_body.push(json!({
+                        "type": "addition",
+                        "content": new[*ni],
+                        "newLine": ni + 1,
+                    }));
+                }
+            }
+        }
+
+        output.push(json!({
+            "type": "hunk_header",
+            "oldStart": old_start as u64,
+            "oldCount": old_count,
+            "newStart": new_start as u64,
+            "newCount": new_count,
+        }));
+        output.extend(hunk_body);
+    }
+
+    output
+}
+
 /// Edit operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EditOp {

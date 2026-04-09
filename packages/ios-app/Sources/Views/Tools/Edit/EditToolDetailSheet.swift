@@ -23,8 +23,7 @@ struct EditToolDetailSheet: View {
     }
 
     private var diffLines: [EditDiffLine] {
-        guard let result = data.result else { return [] }
-        return EditDiffParser.parse(from: result)
+        EditDiffParser.parse(details: data.details)
     }
 
     private var diffStats: (added: Int, removed: Int) {
@@ -32,17 +31,21 @@ struct EditToolDetailSheet: View {
     }
 
     private var hasDiff: Bool {
-        data.result?.contains("@@") == true
+        !diffLines.isEmpty
     }
 
+    /// Structured success note built from server-provided details.
+    /// Server emits `details.replacements: u64` on a successful edit.
     private var successMessage: String? {
-        guard let result = data.result else { return nil }
-        for line in result.components(separatedBy: "\n") {
-            if line.hasPrefix("Successfully") {
-                return line
-            }
-        }
-        return nil
+        guard data.status == .success else { return nil }
+        let replacements: Int? = {
+            if let i = data.details?["replacements"]?.value as? Int { return i }
+            if let d = data.details?["replacements"]?.value as? Double { return Int(d) }
+            return nil
+        }()
+        guard let count = replacements, count > 0 else { return nil }
+        let noun = count == 1 ? "replacement" : "replacements"
+        return "Successfully made \(count) \(noun)"
     }
 
     var body: some View {
@@ -126,7 +129,7 @@ struct EditToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let error = EditError.parse(from: result)
+        let error = FileOperationError.from(details: data.details, result: result, operation: .edit)
         let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
 
         return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
@@ -150,29 +153,76 @@ struct EditToolDetailSheet: View {
 
 // MARK: - Edit Diff Parser
 
-/// Parses unified diff format from Edit tool results into structured diff lines.
+/// Parses diff lines for display.
+///
+/// - `parse(details:)` — the thin-client path. Reads structured diff lines
+///   emitted by the Edit tool (`packages/agent/src/tools/utils/diff.rs::generate_structured_diff`)
+///   as `tool.details.diffLines`. Zero text parsing.
+/// - `parse(from:)` — the git-diff path. Used by the worktree file detail
+///   sheet to render raw `git diff` output. `git diff` is standard unified
+///   diff text; there is no server-side structured representation for it.
 enum EditDiffParser {
 
-    static func parse(from result: String) -> [EditDiffLine] {
+    static func parse(details: [String: AnyCodable]?) -> [EditDiffLine] {
+        guard let raw = details?["diffLines"]?.value as? [[String: Any]] else {
+            return []
+        }
+        var lines: [EditDiffLine] = []
+        var index = 0
+        for entry in raw {
+            guard let type = entry["type"] as? String else { continue }
+            switch type {
+            case "hunk_header":
+                if !lines.isEmpty {
+                    lines.append(EditDiffLine(id: index, type: .separator, content: "", lineNum: nil))
+                    index += 1
+                }
+            case "context":
+                let content = (entry["content"] as? String) ?? ""
+                let lineNum = Self.readLine(entry, "newLine")
+                lines.append(EditDiffLine(id: index, type: .context, content: content, lineNum: lineNum))
+                index += 1
+            case "addition":
+                let content = (entry["content"] as? String) ?? ""
+                let lineNum = Self.readLine(entry, "newLine")
+                lines.append(EditDiffLine(id: index, type: .addition, content: content, lineNum: lineNum))
+                index += 1
+            case "deletion":
+                let content = (entry["content"] as? String) ?? ""
+                let lineNum = Self.readLine(entry, "oldLine")
+                lines.append(EditDiffLine(id: index, type: .deletion, content: content, lineNum: lineNum))
+                index += 1
+            default:
+                break
+            }
+        }
+        return lines
+    }
+
+    private static func readLine(_ entry: [String: Any], _ key: String) -> Int? {
+        if let i = entry[key] as? Int { return i }
+        if let d = entry[key] as? Double { return Int(d) }
+        return nil
+    }
+
+    /// Parse unified diff text (e.g., from `git diff`) into diff lines.
+    /// Used by the worktree FileDetailSheet. NOT used by Edit tool results —
+    /// those come in as structured `tool.details.diffLines`.
+    static func parse(from diff: String) -> [EditDiffLine] {
         var lines: [EditDiffLine] = []
         var oldLineNum = 0
         var newLineNum = 0
         var index = 0
         var inDiff = false
 
-        for rawLine in result.components(separatedBy: "\n") {
-            // Skip success/info lines before the diff
-            if rawLine.hasPrefix("Successfully") || rawLine.hasPrefix("successfully") { continue }
+        for rawLine in diff.components(separatedBy: "\n") {
             if rawLine.isEmpty && !inDiff { continue }
-
             if rawLine.hasPrefix("@@") {
                 inDiff = true
-                // Parse line numbers from hunk header
                 if let match = rawLine.firstMatch(of: /@@ -(\d+),?\d* \+(\d+),?\d* @@/) {
                     oldLineNum = Int(match.1) ?? 0
                     newLineNum = Int(match.2) ?? 0
                 }
-                // Add separator between hunks (not before the first one)
                 if !lines.isEmpty {
                     lines.append(EditDiffLine(id: index, type: .separator, content: "", lineNum: nil))
                     index += 1
@@ -187,12 +237,10 @@ enum EditDiffParser {
                 index += 1
             } else if inDiff && !rawLine.hasPrefix("+++") && !rawLine.hasPrefix("---") {
                 let content = rawLine.hasPrefix(" ") ? String(rawLine.dropFirst()) : rawLine
-                if !content.isEmpty || inDiff {
-                    lines.append(EditDiffLine(id: index, type: .context, content: content, lineNum: newLineNum))
-                    oldLineNum += 1
-                    newLineNum += 1
-                    index += 1
-                }
+                lines.append(EditDiffLine(id: index, type: .context, content: content, lineNum: newLineNum))
+                oldLineNum += 1
+                newLineNum += 1
+                index += 1
             }
         }
         return lines
@@ -227,116 +275,10 @@ struct EditDiffLine: Identifiable {
     let lineNum: Int?
 }
 
-// MARK: - Edit Error
-
-/// Classifies Edit tool error messages into structured types.
-enum EditError {
-    case stringNotFound
-    case multipleMatches(count: Int)
-    case sameStrings
-    case missingParameter(name: String)
-    case fileNotFound(path: String)
-    case permissionDenied(path: String)
-    case generic(message: String)
-
-    static func parse(from result: String) -> EditError {
-        if result.contains("old_string not found") || result.contains("does not exist in") {
-            return .stringNotFound
-        }
-        if result.contains("appears multiple times") || result.contains("multiple occurrences") {
-            let count = extractOccurrenceCount(from: result)
-            return .multipleMatches(count: count)
-        }
-        if result.contains("old_string and new_string are the same") {
-            return .sameStrings
-        }
-        if result.contains("Missing required parameter") {
-            let name = extractParameterName(from: result)
-            return .missingParameter(name: name)
-        }
-        if result.contains("File not found") || result.contains("ENOENT") {
-            let path = extractPath(from: result, prefix: "File not found:")
-            return .fileNotFound(path: path)
-        }
-        if result.contains("Permission denied") || result.contains("EACCES") {
-            let path = extractPath(from: result, prefix: "Permission denied:")
-            return .permissionDenied(path: path)
-        }
-        return .generic(message: result)
-    }
-
-    var title: String {
-        switch self {
-        case .stringNotFound: return "String Not Found"
-        case .multipleMatches: return "Multiple Matches"
-        case .sameStrings: return "No Change Needed"
-        case .missingParameter: return "Missing Parameter"
-        case .fileNotFound: return "File Not Found"
-        case .permissionDenied: return "Permission Denied"
-        case .generic: return "Edit Error"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .stringNotFound: return "magnifyingglass"
-        case .multipleMatches: return "doc.on.doc.fill"
-        case .sameStrings: return "equal.circle"
-        case .missingParameter: return "exclamationmark.triangle.fill"
-        case .fileNotFound: return "questionmark.folder"
-        case .permissionDenied: return "lock.fill"
-        case .generic: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    var errorCode: String? {
-        switch self {
-        case .fileNotFound: return "ENOENT"
-        case .permissionDenied: return "EACCES"
-        default: return nil
-        }
-    }
-
-    var suggestion: String {
-        switch self {
-        case .stringNotFound:
-            return "The exact text to replace was not found in the file. Check for whitespace differences or verify the file contents."
-        case .multipleMatches(let count):
-            return "Found \(count) occurrences. Use replace_all to replace all, or add surrounding context to make the match unique."
-        case .sameStrings:
-            return "The old and new strings are identical. No edit is needed."
-        case .missingParameter(let name):
-            return "The \(name) parameter is required but was not provided."
-        case .fileNotFound:
-            return "Check that the file path is correct and the file exists."
-        case .permissionDenied:
-            return "The process does not have permission to edit this file."
-        case .generic:
-            return "An unexpected error occurred while editing the file."
-        }
-    }
-
-    private static func extractPath(from result: String, prefix: String) -> String {
-        if let range = result.range(of: prefix) {
-            return result[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return ""
-    }
-
-    private static func extractOccurrenceCount(from result: String) -> Int {
-        if let match = result.firstMatch(of: /(\d+) occurrence/) {
-            return Int(match.1) ?? 0
-        }
-        return 0
-    }
-
-    private static func extractParameterName(from result: String) -> String {
-        if let match = result.firstMatch(of: /Missing required parameter:\s*(\w+)/) {
-            return String(match.1)
-        }
-        return "unknown"
-    }
-}
+// Note: Edit tool errors are classified via the shared FileOperationError
+// type (which reads server-provided `details.errorClass`). This file used
+// to carry a separate EditError enum that scanned error text; it was
+// deleted with the thin-client migration.
 
 // MARK: - Previews
 

@@ -286,7 +286,8 @@ enum CommandToolResultRouter {
         case "edit":
             EditResultViewer(
                 filePath: ToolArgumentParser.filePath(from: data.arguments),
-                result: result
+                result: result,
+                details: data.details
             )
         case "bash":
             BashResultViewer(

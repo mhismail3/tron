@@ -2,130 +2,132 @@ import Testing
 import Foundation
 @testable import TronMobile
 
-// MARK: - FileOperationError Read Parsing Tests
+// MARK: - FileOperationError Read Tests
 
-@Suite("FileOperationError Read Parsing")
+@Suite("FileOperationError Read (structured)")
 struct FileOperationErrorReadTests {
 
-    @Test("Parses 'File not found' error")
+    private func details(
+        errorClass: String,
+        path: String = "/path/to/file.swift",
+        error: String = ""
+    ) -> [String: AnyCodable] {
+        [
+            "errorClass": AnyCodable(errorClass),
+            "path": AnyCodable(path),
+            "error": AnyCodable(error),
+        ]
+    }
+
+    @Test("not_found → fileNotFound")
     func testFileNotFound() {
-        let error = FileOperationError.parse(from: "File not found: /path/to/missing.swift", operation: .read)
-        guard case .fileNotFound(let path) = error else {
-            Issue.record("Expected .fileNotFound, got \(error)")
-            return
+        let e = FileOperationError.from(
+            details: details(errorClass: "not_found", path: "/path/to/missing.swift"),
+            result: nil,
+            operation: .read
+        )
+        if case .fileNotFound(let path) = e {
+            #expect(path == "/path/to/missing.swift")
+        } else {
+            Issue.record("expected .fileNotFound, got \(e)")
         }
-        #expect(path == "/path/to/missing.swift")
-        #expect(error.title == "File Not Found")
-        #expect(error.icon == "questionmark.folder")
-        #expect(error.errorCode == "ENOENT")
-        #expect(error.suggestion.contains("file path is correct"))
+        #expect(e.title == "File Not Found")
+        #expect(e.errorCode == "ENOENT")
     }
 
-    @Test("Parses 'Permission denied' error")
+    @Test("permission_denied")
     func testPermissionDenied() {
-        let error = FileOperationError.parse(from: "Permission denied: /etc/shadow", operation: .read)
-        guard case .permissionDenied(let path) = error else {
-            Issue.record("Expected .permissionDenied, got \(error)")
-            return
+        let e = FileOperationError.from(
+            details: details(errorClass: "permission_denied", path: "/etc/shadow"),
+            result: nil,
+            operation: .read
+        )
+        if case .permissionDenied(let path) = e {
+            #expect(path == "/etc/shadow")
+        } else {
+            Issue.record("expected .permissionDenied, got \(e)")
         }
-        #expect(path == "/etc/shadow")
-        #expect(error.title == "Permission Denied")
-        #expect(error.icon == "lock.fill")
-        #expect(error.errorCode == "EACCES")
-        #expect(error.suggestion.contains("permission"))
+        #expect(e.errorCode == "EACCES")
     }
 
-    @Test("Parses 'Path is a directory' error")
+    @Test("is_a_directory")
     func testIsDirectory() {
-        let error = FileOperationError.parse(from: "Path is a directory, not a file: /Users/moose/Sources", operation: .read)
-        guard case .isDirectory(let path) = error else {
-            Issue.record("Expected .isDirectory, got \(error)")
-            return
+        let e = FileOperationError.from(
+            details: details(errorClass: "is_a_directory", path: "/Users/moose/Sources"),
+            result: nil,
+            operation: .read
+        )
+        if case .isDirectory(let path) = e {
+            #expect(path == "/Users/moose/Sources")
+        } else {
+            Issue.record("expected .isDirectory, got \(e)")
         }
-        #expect(path == "/Users/moose/Sources")
-        #expect(error.title == "Path Is a Directory")
-        #expect(error.icon == "folder.fill")
-        #expect(error.errorCode == "EISDIR")
-        #expect(error.suggestion.contains("directory"))
+        #expect(e.errorCode == "EISDIR")
     }
 
-    @Test("Parses 'Missing required parameter' as invalidPath")
+    @Test("invalid_path")
     func testInvalidPath() {
-        let error = FileOperationError.parse(from: "Missing required parameter: file_path must be provided", operation: .read)
-        guard case .invalidPath = error else {
-            Issue.record("Expected .invalidPath, got \(error)")
-            return
+        let e = FileOperationError.from(
+            details: details(errorClass: "invalid_path"),
+            result: nil,
+            operation: .read
+        )
+        if case .invalidPath = e { /* ok */ } else {
+            Issue.record("expected .invalidPath, got \(e)")
         }
-        #expect(error.title == "Invalid Path")
-        #expect(error.errorCode == nil)
-        #expect(error.suggestion.contains("missing or invalid"))
     }
 
-    @Test("Parses generic error message with read operation context")
-    func testGenericError() {
+    @Test("too_large")
+    func testTooLarge() {
+        let e = FileOperationError.from(
+            details: details(errorClass: "too_large"),
+            result: nil,
+            operation: .read
+        )
+        if case .tooLarge = e { /* ok */ } else {
+            Issue.record("expected .tooLarge, got \(e)")
+        }
+        #expect(e.title == "File Too Large")
+    }
+
+    @Test("binary")
+    func testBinary() {
+        let e = FileOperationError.from(
+            details: details(errorClass: "binary"),
+            result: nil,
+            operation: .read
+        )
+        if case .binaryFile = e { /* ok */ } else {
+            Issue.record("expected .binaryFile, got \(e)")
+        }
+    }
+
+    @Test("unknown errorClass → generic")
+    func testGeneric() {
         let msg = "Error reading file: unexpected I/O failure"
-        let error = FileOperationError.parse(from: msg, operation: .read)
-        guard case .generic(let message, let operation) = error else {
-            Issue.record("Expected .generic, got \(error)")
-            return
+        let e = FileOperationError.from(
+            details: details(errorClass: "wat", error: msg),
+            result: msg,
+            operation: .read
+        )
+        if case .generic(let message, let op) = e {
+            #expect(message == msg)
+            #expect(op == .read)
+        } else {
+            Issue.record("expected .generic, got \(e)")
         }
-        #expect(message == msg)
-        #expect(operation == .read)
-        #expect(error.title == "Read Error")
-        #expect(error.icon == "exclamationmark.triangle.fill")
-        #expect(error.errorCode == nil)
+        #expect(e.title == "Read Error")
     }
 
-    @Test("Detects ENOENT from raw error code as directoryNotFound")
-    func testEnoentCode() {
-        let error = FileOperationError.parse(from: "ENOENT: no such file or directory, open '/path/file'", operation: .read)
-        guard case .directoryNotFound = error else {
-            Issue.record("Expected .directoryNotFound for bare ENOENT, got \(error)")
-            return
+    @Test("nil details falls back to generic with result text")
+    func testNilDetails() {
+        let msg = "Something broke"
+        let e = FileOperationError.from(details: nil, result: msg, operation: .read)
+        if case .generic(let message, _) = e {
+            #expect(message == msg)
+        } else {
+            Issue.record("expected .generic, got \(e)")
         }
-    }
-
-    @Test("Detects EACCES from raw error code in message")
-    func testEaccesCode() {
-        let error = FileOperationError.parse(from: "EACCES: permission denied, open '/path/file'", operation: .read)
-        guard case .permissionDenied = error else {
-            Issue.record("Expected .permissionDenied for EACCES, got \(error)")
-            return
-        }
-    }
-
-    @Test("Detects EISDIR from raw error code in message")
-    func testEisdirCode() {
-        let error = FileOperationError.parse(from: "EISDIR: illegal operation on a directory", operation: .read)
-        guard case .isDirectory = error else {
-            Issue.record("Expected .isDirectory for EISDIR, got \(error)")
-            return
-        }
-    }
-
-    @Test("Distinguishes fileNotFound from directoryNotFound")
-    func testFileVsDirectoryNotFound() {
-        let fileError = FileOperationError.parse(from: "File not found: /missing.txt", operation: .read)
-        guard case .fileNotFound = fileError else {
-            Issue.record("Expected .fileNotFound for 'File not found:' prefix")
-            return
-        }
-
-        let dirError = FileOperationError.parse(from: "directory does not exist", operation: .read)
-        guard case .directoryNotFound = dirError else {
-            Issue.record("Expected .directoryNotFound for 'directory does not exist'")
-            return
-        }
-    }
-
-    @Test("Handles empty error message")
-    func testEmptyMessage() {
-        let error = FileOperationError.parse(from: "", operation: .read)
-        guard case .generic(let message, _) = error else {
-            Issue.record("Expected .generic for empty string")
-            return
-        }
-        #expect(message == "")
     }
 }
 

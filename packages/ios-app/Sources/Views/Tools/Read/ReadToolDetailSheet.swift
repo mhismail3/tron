@@ -114,7 +114,7 @@ struct ReadToolDetailSheet: View {
     // MARK: - E. Error Section
 
     private func errorSection(_ result: String) -> some View {
-        let error = FileOperationError.parse(from: result, operation: .read)
+        let error = FileOperationError.from(details: data.details, result: result, operation: .read)
         let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
 
         return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
@@ -143,8 +143,8 @@ struct ReadToolDetailSheet: View {
     // MARK: - Computed Helpers
 
     private var isTruncated: Bool {
-        data.isResultTruncated ||
-        (data.result?.contains("[Output truncated") == true)
+        data.isResultTruncated
+            || (data.details?["truncated"]?.value as? Bool == true)
     }
 
     private var lineRangeText: String? {

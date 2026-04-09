@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::tools::utils::diff::generate_unified_diff;
-use crate::tools::utils::fs_errors::format_fs_error;
+use crate::tools::utils::diff::{generate_structured_diff, generate_unified_diff};
+use crate::tools::utils::fs_errors::{fs_error_from_message, fs_error_result};
 use crate::tools::utils::path::{resolve_path, warn_path_traversal};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::validate_required_string;
@@ -80,8 +80,10 @@ impl TronTool for EditTool {
         let old_string = match params.get("old_string") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Ok(error_result(
+                return Ok(fs_error_from_message(
                     "Missing required parameter: old_string (the string to find)",
+                    "invalid_path",
+                    &file_path,
                 ));
             }
         };
@@ -89,19 +91,27 @@ impl TronTool for EditTool {
         let new_string = match params.get("new_string") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Ok(error_result(
+                return Ok(fs_error_from_message(
                     "Missing required parameter: new_string (the replacement string)",
+                    "invalid_path",
+                    &file_path,
                 ));
             }
         };
 
         if old_string.is_empty() {
-            return Ok(error_result("old_string must not be empty"));
+            return Ok(fs_error_from_message(
+                "old_string must not be empty",
+                "empty_pattern",
+                &file_path,
+            ));
         }
 
         if old_string == new_string {
-            return Ok(error_result(
+            return Ok(fs_error_from_message(
                 "old_string and new_string are identical — no changes would be made",
+                "identical_strings",
+                &file_path,
             ));
         }
 
@@ -112,33 +122,41 @@ impl TronTool for EditTool {
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
         warn_path_traversal(&resolved, "Edit");
+        let resolved_str = resolved.to_string_lossy().to_string();
 
         // Pre-read metadata size check (fail-open: if metadata() errors, proceed)
         if let Ok(meta) = self.fs.metadata(&resolved).await {
             #[allow(clippy::cast_possible_truncation)]
             let file_size = meta.len() as usize;
             if file_size > MAX_FILE_SIZE {
-                return Ok(error_result(format!(
-                    "File too large to edit: {} bytes (max {} MB)",
-                    file_size,
-                    MAX_FILE_SIZE / 1024 / 1024
-                )));
+                return Ok(fs_error_from_message(
+                    format!(
+                        "File too large to edit: {file_size} bytes (max {} MB)",
+                        MAX_FILE_SIZE / 1024 / 1024
+                    ),
+                    "too_large",
+                    &resolved_str,
+                ));
             }
         }
 
         // Read the file
         let bytes = match self.fs.read_file(&resolved).await {
             Ok(b) => b,
-            Err(e) => return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "reading")),
+            Err(e) => return Ok(fs_error_result(&e, &resolved_str, "reading")),
         };
 
         // Post-read size check (hard limit)
         if bytes.len() > MAX_FILE_SIZE {
-            return Ok(error_result(format!(
-                "File too large to edit: {} bytes (max {} MB)",
-                bytes.len(),
-                MAX_FILE_SIZE / 1024 / 1024
-            )));
+            return Ok(fs_error_from_message(
+                format!(
+                    "File too large to edit: {} bytes (max {} MB)",
+                    bytes.len(),
+                    MAX_FILE_SIZE / 1024 / 1024
+                ),
+                "too_large",
+                &resolved_str,
+            ));
         }
 
         let content = String::from_utf8_lossy(&bytes).into_owned();
@@ -147,15 +165,27 @@ impl TronTool for EditTool {
         let count = content.matches(&old_string).count();
         if count == 0 {
             let preview = truncate_preview(&old_string, 50);
-            return Ok(error_result(format!(
-                "old_string not found in file: \"{preview}\""
-            )));
+            return Ok(fs_error_from_message(
+                format!("old_string not found in file: \"{preview}\""),
+                "pattern_not_found",
+                &resolved_str,
+            ));
         }
 
         if count > 1 && !replace_all {
-            return Ok(error_result(format!(
-                "Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."
-            )));
+            return Ok(TronToolResult {
+                content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                    format!("Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."),
+                )]),
+                details: Some(json!({
+                    "error": format!("Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."),
+                    "errorClass": "multiple_occurrences",
+                    "path": resolved_str,
+                    "occurrences": count,
+                })),
+                is_error: Some(true),
+                stop_turn: None,
+            });
         }
 
         // Perform replacement
@@ -167,12 +197,13 @@ impl TronTool for EditTool {
 
         let replacements = if replace_all { count } else { 1 };
 
-        // Generate diff
+        // Generate diff (both text for the agent and structured for iOS)
         let diff = generate_unified_diff(&content, &new_content, 3);
+        let diff_lines = generate_structured_diff(&content, &new_content, 3);
 
         // Write the modified file
         if let Err(e) = self.fs.write_file(&resolved, new_content.as_bytes()).await {
-            return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "writing"));
+            return Ok(fs_error_result(&e, &resolved_str, "writing"));
         }
 
         let details = json!({
@@ -180,7 +211,7 @@ impl TronTool for EditTool {
             "replacements": replacements,
             "oldStringPreview": truncate_preview(&old_string, 50),
             "newStringPreview": truncate_preview(&new_string, 50),
-            "diff": diff,
+            "diffLines": diff_lines,
         });
 
         Ok(TronToolResult {
@@ -415,7 +446,19 @@ mod tests {
             .unwrap();
         let details = result.details.unwrap();
         assert_eq!(details["replacements"], 1);
-        assert!(details["diff"].as_str().unwrap().contains("@@"));
+        let diff_lines = details["diffLines"].as_array().expect("diffLines array");
+        assert!(!diff_lines.is_empty());
+        // First entry is always a hunk header.
+        assert_eq!(diff_lines[0]["type"], "hunk_header");
+        // Must contain at least one addition and one deletion (lines, not substrings).
+        let has_deletion = diff_lines
+            .iter()
+            .any(|e| e["type"] == "deletion" && e["content"].as_str() == Some("hello world"));
+        let has_addition = diff_lines
+            .iter()
+            .any(|e| e["type"] == "addition" && e["content"].as_str() == Some("goodbye world"));
+        assert!(has_deletion, "expected deletion of full old line");
+        assert!(has_addition, "expected addition of full new line");
     }
 
     #[tokio::test]

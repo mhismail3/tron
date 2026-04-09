@@ -272,10 +272,18 @@ struct WaitToolDetailSheet: View {
     }
 
     private func parseStatusFromResult(jobId: String) -> JobStatus {
-        guard let result = data.result else { return .unknown }
-        if result.contains("completed (\(jobId))") { return .completed }
-        if result.contains("failed (\(jobId))") { return .failed }
-        if result.contains("[STILL RUNNING") { return .running }
+        // Server emits a structured jobs array in tool.details. Read it
+        // directly — zero text scanning.
+        guard let jobs = data.details?["jobs"]?.value as? [[String: Any]] else {
+            return .unknown
+        }
+        for job in jobs where (job["id"] as? String) == jobId {
+            switch job["status"] as? String {
+            case "completed": return .completed
+            case "failed": return .failed
+            default: return .unknown
+            }
+        }
         return .unknown
     }
 

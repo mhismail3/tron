@@ -397,8 +397,6 @@ impl WebFetchTool {
                 "mode": "summarization",
                 "url": url,
                 "title": title,
-                "originalLength": parsed.original_length,
-                "parsedLength": parsed.parsed_length,
                 "prompt": prompt,
                 "fromCache": false,
                 "subagentSessionId": subagent_session_id,

@@ -170,59 +170,62 @@ struct WriteResultViewer: View {
 struct EditResultViewer: View {
     let filePath: String
     let result: String
+    let details: [String: AnyCodable]?
 
-    /// Check if result contains a proper diff format
+    private typealias Line = (type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)
+
+    /// Whether structured diff lines are available from server details.
     private var hasDiffFormat: Bool {
-        result.contains("@@") && (result.contains("-") || result.contains("+"))
+        !diffLines.isEmpty
     }
 
     private var diffStats: (added: Int, removed: Int) {
         var added = 0
         var removed = 0
-        for line in result.components(separatedBy: "\n") {
-            if line.hasPrefix("+") && !line.hasPrefix("+++") {
-                added += 1
-            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
-                removed += 1
+        for line in diffLines {
+            switch line.type {
+            case .addition: added += 1
+            case .deletion: removed += 1
+            default: break
             }
         }
         return (added, removed)
     }
 
-    private var diffLines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] {
-        var lines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] = []
-        var oldLineNum = 0
-        var newLineNum = 0
-        var inDiff = false
-
-        for line in result.components(separatedBy: "\n") {
-            // Skip the "Successfully replaced..." line
-            if line.contains("Successfully") || line.contains("successfully") {
-                continue
-            }
-
-            if line.hasPrefix("@@") {
-                inDiff = true
-                // Parse hunk header for line numbers
-                if let match = line.firstMatch(of: /@@ -(\d+),?\d* \+(\d+),?\d* @@/) {
-                    oldLineNum = Int(match.1) ?? 0
-                    newLineNum = Int(match.2) ?? 0
-                }
-                lines.append((.hunk, line, nil, nil))
-            } else if line.hasPrefix("+") && !line.hasPrefix("+++") {
-                lines.append((.addition, String(line.dropFirst()), nil, newLineNum))
-                newLineNum += 1
-            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
-                lines.append((.deletion, String(line.dropFirst()), oldLineNum, nil))
-                oldLineNum += 1
-            } else if inDiff && !line.hasPrefix("+++") && !line.hasPrefix("---") && !line.isEmpty {
-                let content = line.hasPrefix(" ") ? String(line.dropFirst()) : line
-                lines.append((.context, content, oldLineNum, newLineNum))
-                oldLineNum += 1
-                newLineNum += 1
+    private var diffLines: [Line] {
+        guard let raw = details?["diffLines"]?.value as? [[String: Any]] else {
+            return []
+        }
+        var out: [Line] = []
+        for entry in raw {
+            guard let type = entry["type"] as? String else { continue }
+            switch type {
+            case "hunk_header":
+                out.append((.hunk, "", nil, nil))
+            case "context":
+                let content = (entry["content"] as? String) ?? ""
+                let oldLine = readLine(entry, "oldLine")
+                let newLine = readLine(entry, "newLine")
+                out.append((.context, content, oldLine, newLine))
+            case "addition":
+                let content = (entry["content"] as? String) ?? ""
+                let newLine = readLine(entry, "newLine")
+                out.append((.addition, content, nil, newLine))
+            case "deletion":
+                let content = (entry["content"] as? String) ?? ""
+                let oldLine = readLine(entry, "oldLine")
+                out.append((.deletion, content, oldLine, nil))
+            default:
+                break
             }
         }
-        return lines
+        return out
+    }
+
+    private func readLine(_ entry: [String: Any], _ key: String) -> Int? {
+        if let i = entry[key] as? Int { return i }
+        if let d = entry[key] as? Double { return Int(d) }
+        return nil
     }
 
     var body: some View {

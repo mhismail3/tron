@@ -26,16 +26,21 @@ struct GlobToolDetailSheet: View {
         GlobResultParser.parse(data.result ?? data.streamingOutput ?? "")
     }
 
-    private var isTruncated: Bool {
-        data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
+    private var matchCount: Int {
+        if let c = data.details?["matchCount"]?.value as? Int { return c }
+        if let c = data.details?["matchCount"]?.value as? Double { return Int(c) }
+        return parsedFiles.count
     }
 
-    private var isLimitReached: Bool {
-        data.result?.contains("[Showing") == true && data.result?.contains("limit reached") == true
+    private var isTruncated: Bool {
+        data.isResultTruncated
+            || (data.details?["truncated"]?.value as? Bool == true)
     }
+
+    private var isLimitReached: Bool { isTruncated }
 
     private var isNoResults: Bool {
-        data.result?.contains("No files found matching:") == true
+        matchCount == 0
     }
 
     var body: some View {

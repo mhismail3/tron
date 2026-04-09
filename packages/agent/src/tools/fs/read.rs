@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
-use crate::tools::utils::fs_errors::format_fs_error;
+use crate::tools::utils::fs_errors::{fs_error_from_message, fs_error_result};
 use crate::tools::utils::path::{resolve_path, warn_path_traversal};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::{TruncateOptions, estimate_tokens, truncate_output};
@@ -86,46 +86,57 @@ impl TronTool for ReadTool {
         let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         let limit = params.get("limit").and_then(Value::as_u64);
 
+        let resolved_str = resolved.to_string_lossy().to_string();
+
         // Check metadata before reading (prevents OOM on huge files)
         if let Ok(meta) = self.fs.metadata(&resolved).await {
             if meta.is_dir() {
-                return Ok(error_result(format!(
-                    "Is a directory: {}",
-                    resolved.display()
-                )));
+                return Ok(fs_error_from_message(
+                    format!("Is a directory: {resolved_str}"),
+                    "is_a_directory",
+                    &resolved_str,
+                ));
             }
             #[allow(clippy::cast_possible_truncation)]
             let file_size = meta.len() as usize;
             if file_size > MAX_FILE_SIZE {
-                return Ok(error_result(format!(
-                    "File too large: {} bytes (max {} MB). Use offset/limit for partial reads.",
-                    file_size,
-                    MAX_FILE_SIZE / 1024 / 1024
-                )));
+                return Ok(fs_error_from_message(
+                    format!(
+                        "File too large: {file_size} bytes (max {} MB). Use offset/limit for partial reads.",
+                        MAX_FILE_SIZE / 1024 / 1024
+                    ),
+                    "too_large",
+                    &resolved_str,
+                ));
             }
         }
 
         let bytes = match self.fs.read_file(&resolved).await {
             Ok(b) => b,
-            Err(e) => return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "reading")),
+            Err(e) => return Ok(fs_error_result(&e, &resolved_str, "reading")),
         };
 
         // File size guard
         if bytes.len() > MAX_FILE_SIZE {
-            return Ok(error_result(format!(
-                "File too large: {} bytes (max {} MB). Use offset/limit for partial reads.",
-                bytes.len(),
-                MAX_FILE_SIZE / 1024 / 1024
-            )));
+            return Ok(fs_error_from_message(
+                format!(
+                    "File too large: {} bytes (max {} MB). Use offset/limit for partial reads.",
+                    bytes.len(),
+                    MAX_FILE_SIZE / 1024 / 1024
+                ),
+                "too_large",
+                &resolved_str,
+            ));
         }
 
         // Binary detection
         let check_len = bytes.len().min(8192);
         if bytes[..check_len].contains(&0) {
-            return Ok(error_result(format!(
-                "Cannot read binary file: {}",
-                resolved.display()
-            )));
+            return Ok(fs_error_from_message(
+                format!("Cannot read binary file: {resolved_str}"),
+                "binary",
+                &resolved_str,
+            ));
         }
 
         let content = String::from_utf8_lossy(&bytes);

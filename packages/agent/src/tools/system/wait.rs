@@ -111,6 +111,7 @@ impl TronTool for WaitTool {
 
         let results = self.job_manager.wait_for_jobs(&ids, mode, timeout).await?;
         let output = format_results(&results);
+        let jobs_json = structured_jobs(&results);
 
         Ok(TronToolResult {
             content: ToolResultBody::Text(output),
@@ -118,11 +119,32 @@ impl TronTool for WaitTool {
                 "jobCount": results.len(),
                 "completed": results.iter().filter(|r| r.success).count(),
                 "failed": results.iter().filter(|r| !r.success).count(),
+                "jobs": jobs_json,
             })),
             is_error: None,
             stop_turn: None,
         })
     }
+}
+
+/// Build structured per-job records for iOS to render without text-scanning.
+fn structured_jobs(results: &[JobResult]) -> Vec<serde_json::Value> {
+    results
+        .iter()
+        .map(|r| {
+            let kind = match r.kind {
+                JobKind::Process => "process",
+                JobKind::Agent => "agent",
+            };
+            let status = if r.success { "completed" } else { "failed" };
+            json!({
+                "id": r.id,
+                "kind": kind,
+                "status": status,
+                "durationMs": r.duration_ms,
+            })
+        })
+        .collect()
 }
 
 /// Format job results as readable markdown.
