@@ -11,7 +11,9 @@ enum MessageHandlers {
     /// Transform message.user event into a ChatMessage.
     ///
     /// User messages contain the user's input to the agent.
-    /// Special handling for AskUserQuestion answer messages.
+    /// Interactive-tool responses (confirmation, answered questions) are
+    /// identified by the server-provided `messageKind` field and rendered
+    /// as chips — iOS does not parse the message text content for these.
     static func transformUserMessage(
         _ payload: [String: AnyCodable],
         timestamp: Date
@@ -24,35 +26,27 @@ enum MessageHandlers {
             return nil
         }
 
-        // AskUserQuestion answer prompts - render as a chip instead of full text
-        if parsed.content.contains("[Answers to your questions]") {
-            // Count the questions by parsing the message (count ** markers)
-            let questionCount = parsed.content.components(separatedBy: "\n**").count - 1
+        // Server-provided structured chip rendering (see
+        // `packages/agent/src/server/rpc/handlers/agent_confirmation.rs` and
+        // `interactive_tool_enrichment.rs`). No text scanning needed — the
+        // server tags these messages with `messageKind` on the live path
+        // and back-fills historical events during reconstruction.
+        switch parsed.messageKind {
+        case "answered_questions":
             return ChatMessage(
                 role: .user,
-                content: .answeredQuestions(questionCount: max(1, questionCount)),
+                content: .answeredQuestions(questionCount: max(1, parsed.answerCount ?? 1)),
                 timestamp: timestamp
             )
-        }
-
-        // GetConfirmation response prompts - render as a chip instead of full text.
-        // Format (case-sensitive, matches server agent_confirmation.rs):
-        //   [Confirmation response]
-        //
-        //   Action: ...
-        //   Decision: Approved|Denied
-        //   Note: ...
-        if parsed.content.contains("[Confirmation response]") {
-            let approved = parsed.content
-                .components(separatedBy: "\n")
-                .contains { line in
-                    line.trimmingCharacters(in: .whitespaces) == "Decision: Approved"
-                }
+        case "confirmation_response":
+            let approved = parsed.confirmationDecision == "Approved"
             return ChatMessage(
                 role: .user,
                 content: .confirmedAction(approved: approved),
                 timestamp: timestamp
             )
+        default:
+            break
         }
 
         // Skip empty user messages (unless they have attachments, skills, or spells)

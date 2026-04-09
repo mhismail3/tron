@@ -1076,7 +1076,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
             rawEvent(type: "message.user", payload: [
-                "content": AnyCodable("[Answers to your questions]\n\n**What is your name?**\nAnswer: Alice")
+                "content": AnyCodable("[Answers to your questions]\n\n**What is your name?**\nAnswer: Alice"),
+                "messageKind": AnyCodable("answered_questions"),
+                "answerCount": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3)
         ]
 

@@ -92,6 +92,7 @@ impl MethodHandler for PromptHandler {
                 reasoning_level,
                 images,
                 attachments,
+                message_metadata: None,
             },
         );
 

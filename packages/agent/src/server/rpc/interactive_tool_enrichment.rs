@@ -30,6 +30,15 @@
 //! - `parsedAnswers`: array of
 //!   `{questionId, selectedValues: [...], otherValue: String?}`
 //!
+//! In addition, the associated `message.user` event (the one that triggered
+//! the enrichment) gets back-filled with the same structured fields that the
+//! server writes on the live path via `build_user_event_payload`:
+//! - `messageKind`: `"confirmation_response"` | `"answered_questions"`
+//! - `confirmationDecision` / `confirmationNote` / `answerCount`
+//!
+//! This means iOS can render the matching confirmation/answers chip from
+//! historical events without scanning the text content.
+//!
 //! ## INVARIANT
 //!
 //! The text formats parsed here must match exactly what
@@ -48,6 +57,10 @@ const ANSWERS_MARKER: &str = "[Answers to your questions]";
 /// the first subsequent `message.user` event, and injects the parsed status
 /// into the tool call's `payload` object. Non-interactive tool calls and
 /// all other event types are left untouched.
+///
+/// The matching `message.user` event also gets back-filled with the same
+/// structured `messageKind` + decision/count fields that the live path
+/// emits via `build_user_event_payload`.
 pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
     // First pass: collect positions of interactive tool.call events so we
     // can mutate them afterward without running into borrow-checker issues
@@ -69,30 +82,79 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         .collect();
 
     for (call_idx, tool_name) in positions {
-        let user_msg = find_first_user_message_after(events, call_idx);
+        let user_msg_position = find_first_user_message_after(events, call_idx);
+        let user_msg_content = user_msg_position.map(|idx| {
+            events[idx]
+                .get("payload")
+                .and_then(|p| p.get("content"))
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_default()
+        });
+
         let fields = match tool_name.as_str() {
-            "GetConfirmation" => parse_confirmation(user_msg.as_deref()),
+            "GetConfirmation" => parse_confirmation(user_msg_content.as_deref()),
             "AskUserQuestion" => {
                 let questions = extract_questions(&events[call_idx]);
-                parse_answers(user_msg.as_deref(), &questions)
+                parse_answers(user_msg_content.as_deref(), &questions)
             }
             _ => continue,
         };
+
+        // Back-fill the trailing message.user payload with the same
+        // structured metadata the live path would emit. Only applies when
+        // the marker was actually found (status is approved/denied/answered).
+        if let (Some(user_idx), Some(status)) = (
+            user_msg_position,
+            fields.get("toolStatus").and_then(Value::as_str),
+        ) && matches!(status, "approved" | "denied" | "answered")
+        {
+            let user_fields =
+                build_user_message_metadata(tool_name.as_str(), &fields);
+            inject_into_payload(&mut events[user_idx], user_fields);
+        }
+
         inject_into_payload(&mut events[call_idx], fields);
     }
 }
 
-/// Find the `content` of the first `message.user` event strictly after the
+/// Derive the structured fields that should be back-filled into the
+/// `message.user` payload from the already-parsed tool.call fields.
+fn build_user_message_metadata(
+    tool_name: &str,
+    tool_fields: &Map<String, Value>,
+) -> Map<String, Value> {
+    let mut out = Map::new();
+    match tool_name {
+        "GetConfirmation" => {
+            let _ = out.insert("messageKind".into(), json!("confirmation_response"));
+            if let Some(decision) = tool_fields.get("confirmationDecision") {
+                let _ = out.insert("confirmationDecision".into(), decision.clone());
+            }
+            if let Some(note) = tool_fields.get("confirmationNote") {
+                let _ = out.insert("confirmationNote".into(), note.clone());
+            }
+        }
+        "AskUserQuestion" => {
+            let _ = out.insert("messageKind".into(), json!("answered_questions"));
+            if let Some(parsed) = tool_fields.get("parsedAnswers").and_then(Value::as_array) {
+                let _ = out.insert("answerCount".into(), json!(parsed.len()));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// Find the index of the first `message.user` event strictly after the
 /// given index. Returns `None` if none exists (tool call is still pending).
-fn find_first_user_message_after(events: &[Value], from: usize) -> Option<String> {
+fn find_first_user_message_after(events: &[Value], from: usize) -> Option<usize> {
     events
         .iter()
+        .enumerate()
         .skip(from + 1)
-        .find(|e| e.get("type").and_then(Value::as_str) == Some("message.user"))
-        .and_then(|e| e.get("payload"))
-        .and_then(|p| p.get("content"))
-        .and_then(Value::as_str)
-        .map(String::from)
+        .find(|(_, e)| e.get("type").and_then(Value::as_str) == Some("message.user"))
+        .map(|(i, _)| i)
 }
 
 /// Parse a `[Confirmation response]`-prefixed user message into
@@ -597,5 +659,102 @@ mod tests {
         ];
         enrich_interactive_tool_statuses(&mut events);
         assert_eq!(events[0]["payload"]["toolStatus"], "approved");
+    }
+
+    // ── message.user back-fill ────────────────────────────────────────
+
+    #[test]
+    fn user_message_backfilled_for_confirmation_approved() {
+        let mut events = vec![
+            make_tool_call("GetConfirmation", "tc1", json!({})),
+            make_user_msg("[Confirmation response]\n\nDecision: Approved\nNote: looks good"),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let user_payload = &events[1]["payload"];
+        assert_eq!(user_payload["messageKind"], "confirmation_response");
+        assert_eq!(user_payload["confirmationDecision"], "Approved");
+        assert_eq!(user_payload["confirmationNote"], "looks good");
+    }
+
+    #[test]
+    fn user_message_backfilled_for_confirmation_denied_without_note() {
+        let mut events = vec![
+            make_tool_call("GetConfirmation", "tc1", json!({})),
+            make_user_msg("[Confirmation response]\n\nDecision: Denied"),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let user_payload = &events[1]["payload"];
+        assert_eq!(user_payload["messageKind"], "confirmation_response");
+        assert_eq!(user_payload["confirmationDecision"], "Denied");
+        assert!(user_payload.get("confirmationNote").is_none());
+    }
+
+    #[test]
+    fn user_message_backfilled_for_answered_questions() {
+        let args = json!({"questions": [
+            {"id": "q1", "question": "A?"},
+            {"id": "q2", "question": "B?"}
+        ]});
+        let mut events = vec![
+            make_tool_call("AskUserQuestion", "tc1", args),
+            make_user_msg(
+                "[Answers to your questions]\n\n**A?**\nAnswer: yes\n\n**B?**\nAnswer: no",
+            ),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let user_payload = &events[1]["payload"];
+        assert_eq!(user_payload["messageKind"], "answered_questions");
+        assert_eq!(user_payload["answerCount"], 2);
+    }
+
+    #[test]
+    fn user_message_not_backfilled_when_superseded() {
+        let mut events = vec![
+            make_tool_call("GetConfirmation", "tc1", json!({})),
+            make_user_msg("nevermind, something else"),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let user_payload = &events[1]["payload"];
+        // Superseded user messages are plain text — no messageKind injected.
+        assert!(user_payload.get("messageKind").is_none());
+        assert_eq!(events[0]["payload"]["toolStatus"], "superseded");
+    }
+
+    #[test]
+    fn user_message_not_backfilled_when_pending() {
+        // Tool.call present, no user message after — nothing to back-fill.
+        let mut events = vec![make_tool_call("GetConfirmation", "tc1", json!({}))];
+        enrich_interactive_tool_statuses(&mut events);
+        assert_eq!(events[0]["payload"]["toolStatus"], "pending");
+    }
+
+    #[test]
+    fn user_message_backfill_preserves_content() {
+        let mut events = vec![
+            make_tool_call("GetConfirmation", "tc1", json!({})),
+            make_user_msg("[Confirmation response]\n\nDecision: Approved"),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let content = events[1]["payload"]["content"].as_str().unwrap();
+        assert!(content.contains("Approved"));
+    }
+
+    #[test]
+    fn user_message_backfill_for_answered_questions_empty_parsed() {
+        // When the answer text doesn't match any known question, parsedAnswers
+        // is empty but toolStatus is still "answered". The user message should
+        // still be back-filled with messageKind=answered_questions and
+        // answerCount=0.
+        let args = json!({"questions": [{"id": "q1", "question": "Color?"}]});
+        let mut events = vec![
+            make_tool_call("AskUserQuestion", "tc1", args),
+            make_user_msg(
+                "[Answers to your questions]\n\n**Different?**\nAnswer: x",
+            ),
+        ];
+        enrich_interactive_tool_statuses(&mut events);
+        let user_payload = &events[1]["payload"];
+        assert_eq!(user_payload["messageKind"], "answered_questions");
+        assert_eq!(user_payload["answerCount"], 0);
     }
 }

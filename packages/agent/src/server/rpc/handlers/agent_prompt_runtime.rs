@@ -20,10 +20,15 @@ use crate::server::rpc::session_context::{ContextArtifactsService, collect_dynam
 /// When the prompt includes images or attachments, the payload is enriched
 /// so that session resume can reconstruct client UI and the LLM can see
 /// previously-sent images in reconstructed history.
+///
+/// The optional `extra_metadata` object is merged into the payload (top-level
+/// fields like `messageKind`, `confirmationDecision`, `answerCount` used by
+/// interactive-tool handlers so iOS can render chips from structured data).
 pub fn build_user_event_payload(
     prompt: &str,
     images: Option<&[Value]>,
     attachments: Option<&[Value]>,
+    extra_metadata: Option<&Value>,
 ) -> Value {
     let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
@@ -90,6 +95,13 @@ pub fn build_user_event_payload(
     let mut payload = serde_json::json!({ "content": content });
     if let Some(c) = image_count {
         payload["imageCount"] = Value::Number(c.into());
+    }
+    if let Some(Value::Object(extra)) = extra_metadata {
+        if let Value::Object(ref mut obj) = payload {
+            for (k, v) in extra {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
     }
     payload
 }

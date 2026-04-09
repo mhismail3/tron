@@ -22,6 +22,16 @@ struct UserMessagePayload {
     let skills: [Skill]?
     /// Spells referenced in this message (ephemeral skills, rendered as pink chips)
     let spells: [Skill]?
+    /// Server-provided structured message kind for interactive-tool responses.
+    /// Values: `"confirmation_response"`, `"answered_questions"`. When present,
+    /// iOS renders a chip instead of the plain text content.
+    let messageKind: String?
+    /// Structured confirmation decision for `messageKind == "confirmation_response"`.
+    let confirmationDecision: String?
+    /// Optional note text accompanying a confirmation decision.
+    let confirmationNote: String?
+    /// Number of questions answered for `messageKind == "answered_questions"`.
+    let answerCount: Int?
 
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
@@ -134,6 +144,12 @@ struct UserMessagePayload {
         } else {
             self.spells = nil
         }
+
+        // Structured interactive-tool response metadata (server-provided).
+        self.messageKind = payload.string("messageKind")
+        self.confirmationDecision = payload.string("confirmationDecision")
+        self.confirmationNote = payload.string("confirmationNote")
+        self.answerCount = payload.int("answerCount")
     }
 }
 

@@ -45,6 +45,18 @@ impl MethodHandler for SubmitConfirmationHandler {
         }
         let prompt = lines.join("\n");
 
+        // Structured metadata for iOS chip rendering (persisted in the
+        // message.user event payload alongside the text content).
+        let mut metadata_obj = serde_json::Map::new();
+        metadata_obj.insert("messageKind".into(), serde_json::json!("confirmation_response"));
+        metadata_obj.insert("confirmationDecision".into(), serde_json::json!(decision));
+        if let Some(ref n) = note {
+            if !n.is_empty() {
+                metadata_obj.insert("confirmationNote".into(), serde_json::json!(n));
+            }
+        }
+        let message_metadata = Some(Value::Object(metadata_obj));
+
         let session = AgentCommandService::load_prompt_session(ctx, &session_id).await?;
         let deps = ctx
             .agent_deps
@@ -68,6 +80,7 @@ impl MethodHandler for SubmitConfirmationHandler {
                         reasoning_level: None,
                         images: None,
                         attachments: None,
+                        message_metadata,
                     },
                 );
                 Ok(serde_json::json!({
@@ -161,6 +174,12 @@ impl MethodHandler for SubmitAnswersHandler {
         }
         let prompt = lines.join("\n");
 
+        // Structured metadata for iOS chip rendering.
+        let message_metadata = Some(serde_json::json!({
+            "messageKind": "answered_questions",
+            "answerCount": answers.len(),
+        }));
+
         let session = AgentCommandService::load_prompt_session(ctx, &session_id).await?;
         let deps = ctx
             .agent_deps
@@ -184,6 +203,7 @@ impl MethodHandler for SubmitAnswersHandler {
                         reasoning_level: None,
                         images: None,
                         attachments: None,
+                        message_metadata,
                     },
                 );
                 Ok(serde_json::json!({

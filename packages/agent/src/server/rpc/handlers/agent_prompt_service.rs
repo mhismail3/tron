@@ -25,6 +25,11 @@ pub struct PromptRequest {
     pub reasoning_level: Option<String>,
     pub images: Option<Vec<Value>>,
     pub attachments: Option<Vec<Value>>,
+    /// Optional structured metadata merged into the emitted `message.user`
+    /// event payload. Used by interactive tool handlers (confirmation,
+    /// answers) to tag the message with `messageKind` and structured fields
+    /// so iOS can render a chip without parsing text content.
+    pub message_metadata: Option<Value>,
 }
 
 struct PromptRunPlan {
@@ -209,6 +214,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         reasoning_level,
         images,
         attachments,
+        message_metadata,
     } = request;
 
     // Pre-clone deps needed for auto-drain after the run completes
@@ -538,6 +544,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         &prompt,
         images.as_deref(),
         attachments.as_deref(),
+        message_metadata.as_ref(),
     );
     if let Err(error) =
         persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
@@ -934,6 +941,7 @@ fn drain_prompt_queue(
             reasoning_level: None,
             images: None,
             attachments: None,
+            message_metadata: None,
         },
     };
 
