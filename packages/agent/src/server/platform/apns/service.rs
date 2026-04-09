@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::config::ApnsConfig;
+use super::sender::PushSender;
 use super::types::{ApnsNotification, ApnsSendResult};
 
 /// JWT token validity period (55 minutes — refresh before Apple's 1-hour expiry).
@@ -233,19 +234,6 @@ impl ApnsService {
         }
     }
 
-    /// Send a notification to multiple devices in parallel.
-    pub async fn send_to_many(
-        &self,
-        device_tokens: &[String],
-        notification: &ApnsNotification,
-    ) -> Vec<ApnsSendResult> {
-        let futures: Vec<_> = device_tokens
-            .iter()
-            .map(|token| self.send(token, notification))
-            .collect();
-        futures::future::join_all(futures).await
-    }
-
     /// Get a cached JWT or generate a new one.
     fn get_or_refresh_token(&self) -> Result<String, ApnsError> {
         let mut cached = self.cached_token.lock();
@@ -311,6 +299,24 @@ impl ApnsService {
         }
 
         payload
+    }
+}
+
+#[async_trait::async_trait]
+impl PushSender for ApnsService {
+    async fn send_to_many(
+        &self,
+        device_tokens: &[String],
+        notification: &ApnsNotification,
+        _environment: &str,
+    ) -> Vec<ApnsSendResult> {
+        // Direct mode uses the environment from its own config (ApnsConfig),
+        // not the per-token environment, since the host is fixed at init time.
+        let futures: Vec<_> = device_tokens
+            .iter()
+            .map(|token| self.send(token, notification))
+            .collect();
+        futures::future::join_all(futures).await
     }
 }
 

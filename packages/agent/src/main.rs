@@ -62,10 +62,31 @@ use tron::tools::registry::ToolRegistry;
 mod tool_factory;
 use tool_factory::ToolRegistryConfig;
 
+/// Resolved push notification transport.
 #[cfg(feature = "apns")]
-type ApnsServiceOption = Option<Arc<tron::server::platform::apns::ApnsService>>;
+#[derive(Clone)]
+enum PushService {
+    /// Direct APNs delivery via .p8 key on disk.
+    Direct(Arc<tron::server::platform::apns::ApnsService>),
+    /// Relay delivery via Cloudflare Worker.
+    Relay(Arc<tron::server::platform::apns::relay::RelayClient>),
+}
+
+#[cfg(feature = "apns")]
+impl PushService {
+    /// Get a type-erased push sender for consumers that don't need to know the transport.
+    fn as_sender(&self) -> Arc<dyn tron::server::platform::apns::PushSender> {
+        match self {
+            PushService::Direct(apns) => apns.clone(),
+            PushService::Relay(relay) => relay.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "apns")]
+type PushServiceOption = Option<PushService>;
 #[cfg(not(feature = "apns"))]
-type ApnsServiceOption = Option<()>;
+type PushServiceOption = Option<()>;
 
 /// Tron agent — server and CLI tools.
 #[derive(Parser, Debug)]
@@ -225,29 +246,64 @@ fn init_logging(
     Ok((log_handle, flush_task))
 }
 
-/// Initialize APNS service (optional — only if config exists).
-fn init_apns() -> ApnsServiceOption {
+/// Initialize push notification service.
+///
+/// Priority: direct .p8 on disk → relay (build-time or runtime env) → disabled.
+fn init_push() -> PushServiceOption {
     #[cfg(feature = "apns")]
     {
-        let svc = tron::server::platform::apns::load_apns_config().and_then(|apns_config| {
-            match tron::server::platform::apns::ApnsService::new(apns_config) {
-                Ok(svc) => {
-                    tracing::info!("APNS service initialized — push notifications enabled");
-                    Some(Arc::new(svc))
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "APNS init failed — push notifications disabled");
-                    None
+        use tron::server::platform::apns::{PushConfig, load_push_config};
+
+        match load_push_config() {
+            PushConfig::Direct(config) => {
+                match tron::server::platform::apns::ApnsService::new(config) {
+                    Ok(svc) => {
+                        tracing::info!("Push: direct APNs (local .p8 key)");
+                        Some(PushService::Direct(Arc::new(svc)))
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Direct APNs init failed — checking relay...");
+                        // Fall through to relay if direct fails
+                        init_push_relay()
+                    }
                 }
             }
-        });
-        if svc.is_none() {
-            tracing::info!("No APNS config — push notifications disabled");
+            PushConfig::Relay(config) => {
+                tracing::info!(
+                    relay_url = %config.relay_url,
+                    environment = %config.environment,
+                    "Push: relay mode"
+                );
+                Some(PushService::Relay(Arc::new(
+                    tron::server::platform::apns::relay::RelayClient::new(config),
+                )))
+            }
+            PushConfig::Disabled => {
+                tracing::info!("Push: disabled (no APNs config or relay)");
+                None
+            }
         }
-        svc
     }
     #[cfg(not(feature = "apns"))]
     {
+        None
+    }
+}
+
+/// Try relay as fallback when direct APNs init fails.
+#[cfg(feature = "apns")]
+fn init_push_relay() -> PushServiceOption {
+    if let Some(config) = tron::server::platform::apns::load_relay_config() {
+        tracing::info!(
+            relay_url = %config.relay_url,
+            environment = %config.environment,
+            "Push: falling back to relay mode"
+        );
+        Some(PushService::Relay(Arc::new(
+            tron::server::platform::apns::relay::RelayClient::new(config),
+        )))
+    } else {
+        tracing::info!("Push: disabled (direct failed, no relay configured)");
         None
     }
 }
@@ -329,7 +385,7 @@ async fn init_services(
     settings: &tron::settings::TronSettings,
     origin: &str,
     max_sessions: usize,
-    apns_service: ApnsServiceOption,
+    push_service: PushServiceOption,
     mcp: McpState,
 ) -> ServiceState {
     let session_manager =
@@ -371,7 +427,7 @@ async fn init_services(
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         brave_api_key,
-        apns_service,
+        push_service,
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
@@ -552,9 +608,9 @@ fn init_cron(services: &ServiceState, origin: &str) -> CronState {
         push_notifier: {
             #[cfg(feature = "apns")]
             {
-                services.tool_config.apns_service.as_ref().map(|apns| {
+                services.tool_config.push_service.as_ref().map(|ps| {
                     Arc::new(tron::cron::impls::CronPushNotifier::new(
-                        apns.clone(),
+                        ps.as_sender(),
                         services.event_store.pool().clone(),
                     )) as _
                 })
@@ -664,37 +720,49 @@ fn run_deploy_self_test(db_path: &std::path::Path, settings_path: &std::path::Pa
 /// Process deploy sentinel completion and send APNS notifications.
 fn process_deploy_sentinel(
     #[cfg_attr(not(feature = "apns"), allow(unused_variables))]
-    apns_for_deploy: &ApnsServiceOption,
+    push_for_deploy: &PushServiceOption,
     #[cfg_attr(not(feature = "apns"), allow(unused_variables))]
     pool_for_deploy: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) {
-    /// Fetch all active device tokens from the database.
+    /// Fetch all active device tokens with their environments from the database.
     #[cfg(feature = "apns")]
-    fn active_device_tokens(pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>) -> Vec<String> {
+    fn active_device_tokens(
+        pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    ) -> Vec<(String, String)> {
         pool.get()
             .ok()
             .and_then(|conn| {
-                conn.prepare("SELECT device_token FROM device_tokens WHERE is_active = 1")
-                    .ok()
-                    .and_then(|mut stmt| {
-                        stmt.query_map([], |row| row.get::<_, String>(0))
-                            .ok()
-                            .map(|rows| rows.filter_map(Result::ok).collect())
-                    })
+                conn.prepare(
+                    "SELECT device_token, environment FROM device_tokens WHERE is_active = 1",
+                )
+                .ok()
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                        .ok()
+                        .map(|rows| rows.filter_map(Result::ok).collect())
+                })
             })
             .unwrap_or_default()
     }
 
-    /// Send a push notification to all active devices.
+    /// Send a push notification to all active devices, grouped by environment.
     #[cfg(feature = "apns")]
     fn send_push(
-        apns: &Arc<tron::server::platform::apns::ApnsService>,
-        tokens: Vec<String>,
+        push: &PushService,
+        tokens_with_env: Vec<(String, String)>,
         notification: tron::server::platform::apns::ApnsNotification,
     ) {
-        let apns = apns.clone();
+        let sender = push.as_sender();
         drop(tokio::spawn(async move {
-            let _ = apns.send_to_many(&tokens, &notification).await;
+            // Group by environment
+            let mut groups: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+            for (token, env) in tokens_with_env {
+                groups.entry(env).or_default().push(token);
+            }
+            for (env, tokens) in &groups {
+                let _ = sender.send_to_many(tokens, &notification, env).await;
+            }
         }));
     }
 
@@ -713,7 +781,7 @@ fn process_deploy_sentinel(
             }
 
             #[cfg(feature = "apns")]
-            if let Some(apns) = apns_for_deploy {
+            if let Some(push) = push_for_deploy {
                 let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
                 let commit_subject =
                     tron::server::deploy::resolve_workspace_root().and_then(|root| {
@@ -739,7 +807,7 @@ fn process_deploy_sentinel(
                 };
                 let tokens = active_device_tokens(pool_for_deploy);
                 if !tokens.is_empty() {
-                    send_push(apns, tokens, tron::server::platform::apns::ApnsNotification {
+                    send_push(push, tokens, tron::server::platform::apns::ApnsNotification {
                         title: "Deploy Complete".into(),
                         body,
                         data: std::collections::HashMap::from([
@@ -762,7 +830,7 @@ fn process_deploy_sentinel(
     let pending_path = deploy_dir.join("deploy-notification-pending.json");
     if pending_path.exists() {
         #[cfg(feature = "apns")]
-        if let Some(apns) = apns_for_deploy
+        if let Some(push) = push_for_deploy
             && let Ok(content) = std::fs::read_to_string(&pending_path)
             && let Ok(data) = serde_json::from_str::<serde_json::Value>(&content)
         {
@@ -770,7 +838,7 @@ fn process_deploy_sentinel(
             if !tokens.is_empty() {
                 let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
                 let reason = data["reason"].as_str().unwrap_or("unknown");
-                send_push(apns, tokens, tron::server::platform::apns::ApnsNotification {
+                send_push(push, tokens, tron::server::platform::apns::ApnsNotification {
                     title: "Deploy Rolled Back".into(),
                     body: format!("Tron restored: {reason}"),
                     data: std::collections::HashMap::from([
@@ -893,8 +961,8 @@ async fn main() -> Result<()> {
     let event_store = Arc::new(EventStore::new(pool));
 
     // Phase 3: Core services (orchestrator, providers, tools, subagents)
-    let apns_service = init_apns();
-    let apns_for_deploy = apns_service.clone();
+    let push_service = init_push();
+    let push_for_deploy = push_service.clone();
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
     let max_sessions = args
@@ -905,7 +973,7 @@ async fn main() -> Result<()> {
         &settings,
         &origin,
         max_sessions,
-        apns_service,
+        push_service,
         mcp,
     )
     .await;
@@ -986,7 +1054,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    process_deploy_sentinel(&apns_for_deploy, &pool_for_deploy);
+    process_deploy_sentinel(&push_for_deploy, &pool_for_deploy);
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c()

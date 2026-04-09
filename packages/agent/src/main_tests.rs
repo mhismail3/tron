@@ -421,7 +421,7 @@ fn make_tool_config() -> ToolRegistryConfig {
     ToolRegistryConfig {
         event_store,
         brave_api_key: None,
-        apns_service: None,
+        push_service: None,
         http_client: reqwest::Client::new(),
         sandbox_settings: tron::settings::BashSandboxSettings::default(),
         computer_use_settings: tron::settings::ComputerUseSettings::default(),

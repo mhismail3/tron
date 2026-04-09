@@ -16,7 +16,7 @@ use crate::cron::types::{CronJob, CronRun};
 #[cfg(feature = "apns")]
 use crate::events::ConnectionPool;
 #[cfg(feature = "apns")]
-use crate::server::platform::apns::{ApnsNotification, ApnsService};
+use crate::server::platform::apns::ApnsNotification;
 use crate::server::rpc::types::RpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
 // ── Agent Turn Execution ──────────────────────────────────────────────
@@ -305,29 +305,27 @@ impl Drop for SessionGuard {
 
 // ── Push Notifications ──────────────────────────────────────────────
 
-/// Sends APNS push notifications for cron job results.
+/// Sends push notifications for cron job results via any [`PushSender`] transport.
 #[cfg(feature = "apns")]
 pub struct CronPushNotifier {
-    apns: Arc<ApnsService>,
+    sender: Arc<dyn crate::server::platform::apns::PushSender>,
     pool: ConnectionPool,
 }
 
 #[cfg(feature = "apns")]
 impl CronPushNotifier {
-    /// Create a new notifier with APNS service and DB pool for device tokens.
-    pub fn new(apns: Arc<ApnsService>, pool: ConnectionPool) -> Self {
-        Self { apns, pool }
+    /// Create a new notifier with a push sender and DB pool for device tokens.
+    pub fn new(sender: Arc<dyn crate::server::platform::apns::PushSender>, pool: ConnectionPool) -> Self {
+        Self { sender, pool }
     }
 
-    fn active_tokens(&self) -> Result<Vec<String>, CronError> {
+    fn active_tokens(&self) -> Result<Vec<crate::events::sqlite::row_types::DeviceTokenRow>, CronError> {
         let conn = self
             .pool
             .get()
             .map_err(|e| CronError::Execution(format!("DB connection: {e}")))?;
-        let tokens =
-            crate::events::sqlite::repositories::device_token::DeviceTokenRepo::get_all_active(&conn)
-                .map_err(|e| CronError::Execution(format!("query device tokens: {e}")))?;
-        Ok(tokens.into_iter().map(|t| t.device_token).collect())
+        crate::events::sqlite::repositories::device_token::DeviceTokenRepo::get_all_active(&conn)
+            .map_err(|e| CronError::Execution(format!("query device tokens: {e}")))
     }
 }
 
@@ -335,8 +333,8 @@ impl CronPushNotifier {
 #[async_trait]
 impl crate::cron::executor::PushNotifier for CronPushNotifier {
     async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {
-        let tokens = self.active_tokens()?;
-        if tokens.is_empty() {
+        let rows = self.active_tokens()?;
+        if rows.is_empty() {
             tracing::debug!("cron push: no active device tokens");
             return Ok(());
         }
@@ -351,12 +349,23 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
             thread_id: Some("cron".to_owned()),
         };
 
-        let results = self.apns.send_to_many(&tokens, &notification).await;
-        let failed = results.iter().filter(|r| !r.success).count();
-        if failed > 0 {
+        // Group by environment and send per-group
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        for row in &rows {
+            groups.entry(row.environment.clone()).or_default().push(row.device_token.clone());
+        }
+
+        let mut total_failed = 0;
+        let mut total_sent = 0;
+        for (env, tokens) in &groups {
+            let results = self.sender.send_to_many(tokens, &notification, env).await;
+            total_sent += results.len();
+            total_failed += results.iter().filter(|r| !r.success).count();
+        }
+        if total_failed > 0 {
             tracing::warn!(
-                total = results.len(),
-                failed,
+                total = total_sent,
+                failed = total_failed,
                 "cron push: some notifications failed"
             );
         }

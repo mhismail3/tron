@@ -4,23 +4,18 @@
 //! Maps the tool-level [`Notification`] to platform-level [`ApnsNotification`],
 //! queries active device tokens from `SQLite`, and marks 410-expired tokens.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::debug;
 use crate::events::ConnectionPool;
-use crate::events::sqlite::repositories::device_token::DeviceTokenRepo;
-use crate::server::platform::apns::{ApnsNotification, ApnsService};
+use crate::server::platform::apns::{ApnsService, PushSender};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyDelegate, NotifyResult};
 
-/// Return the first 8 bytes of a token for logging (UTF-8–safe).
-fn token_prefix(token: &str) -> &str {
-    crate::core::text::truncate_str(token, 8)
-}
+use super::push_helpers;
 
-/// Real APNS notification delegate.
+/// Real APNS notification delegate (direct .p8 signing + HTTP/2 to APNs).
 pub struct ApnsNotifyDelegate {
     apns: Arc<ApnsService>,
     pool: ConnectionPool,
@@ -31,46 +26,6 @@ impl ApnsNotifyDelegate {
     pub fn new(apns: Arc<ApnsService>, pool: ConnectionPool) -> Self {
         Self { apns, pool }
     }
-
-    /// Query active device tokens from the database.
-    fn active_tokens(&self) -> Result<Vec<String>, ToolError> {
-        let conn = self
-            .pool
-            .get()
-            .map_err(|e| ToolError::internal(format!("Failed to get DB connection: {e}")))?;
-        let tokens = DeviceTokenRepo::get_all_active(&conn)
-            .map_err(|e| ToolError::internal(format!("Failed to query device tokens: {e}")))?;
-        Ok(tokens.into_iter().map(|t| t.device_token).collect())
-    }
-
-    /// Convert a tool-level [`Notification`] to a platform-level [`ApnsNotification`].
-    fn to_apns_notification(notification: &Notification) -> ApnsNotification {
-        let mut data = HashMap::new();
-
-        // Forward custom data (convert Value map to String map)
-        if let Some(ref extra) = notification.data
-            && let Some(obj) = extra.as_object()
-        {
-            for (k, v) in obj {
-                let s = if let Some(s) = v.as_str() {
-                    s.to_string()
-                } else {
-                    v.to_string()
-                };
-                let _ = data.insert(k.clone(), s);
-            }
-        }
-
-        ApnsNotification {
-            title: notification.title.clone(),
-            body: notification.body.clone(),
-            data,
-            priority: notification.priority.clone(),
-            sound: Some("default".to_string()),
-            badge: notification.badge,
-            thread_id: None,
-        }
-    }
 }
 
 #[async_trait]
@@ -79,9 +34,9 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         &self,
         notification: &Notification,
     ) -> Result<NotifyResult, ToolError> {
-        let token_strings = self.active_tokens()?;
+        let device_tokens = push_helpers::active_tokens(&self.pool)?;
 
-        if token_strings.is_empty() {
+        if device_tokens.is_empty() {
             debug!("No active device tokens — skipping APNS send");
             return Ok(NotifyResult {
                 success: true,
@@ -89,86 +44,31 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             });
         }
 
-        let apns_notif = Self::to_apns_notification(notification);
-        let total = token_strings.len();
+        let apns_notif = push_helpers::to_apns_notification(notification);
+        let total = device_tokens.len();
+        let groups = push_helpers::group_by_environment(&device_tokens);
 
         debug!(
             device_count = total,
+            environments = ?groups.keys().collect::<Vec<_>>(),
             title = %notification.title,
-            tokens = ?token_strings.iter().map(|t| format!("{}...({})", token_prefix(t), t.len())).collect::<Vec<_>>(),
             "Sending APNS notification"
         );
 
-        let results = self.apns.send_to_many(&token_strings, &apns_notif).await;
-
-        // Mark 410 (Unregistered) tokens as invalid
-        let mut success_count = 0;
-        let mut errors = Vec::new();
-
-        for result in &results {
-            debug!(
-                token_prefix = token_prefix(&result.device_token),
-                token_len = result.device_token.len(),
-                success = result.success,
-                status = ?result.status_code,
-                reason = ?result.reason,
-                error = ?result.error,
-                apns_id = ?result.apns_id,
-                "APNS per-device result"
-            );
-
-            if result.success {
-                success_count += 1;
-            } else {
-                if result.status_code == Some(410) {
-                    debug!(
-                        device_token = token_prefix(&result.device_token),
-                        "Marking expired token as invalid"
-                    );
-                    if let Ok(conn) = self.pool.get() {
-                        let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
-                    }
-                }
-                if let Some(ref err) = result.error {
-                    errors.push(format!(
-                        "{}...(len={}): {}",
-                        token_prefix(&result.device_token),
-                        result.device_token.len(),
-                        err
-                    ));
-                }
-            }
+        let mut all_results = Vec::with_capacity(total);
+        for (env, tokens) in &groups {
+            let owned: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
+            let results = self.apns.send_to_many(&owned, &apns_notif, env).await;
+            all_results.extend(results);
         }
-
-        let message = if errors.is_empty() {
-            format!("Sent to {success_count} of {total} devices.")
-        } else {
-            format!(
-                "Sent to {success_count} of {total} devices. Errors: {}",
-                errors.join("; ")
-            )
-        };
-
-        debug!(
-            success_count,
-            error_count = errors.len(),
-            total,
-            message = %message,
-            "APNS delivery summary"
-        );
-
-        Ok(NotifyResult {
-            success: success_count > 0,
-            message: Some(message),
-        })
+        Ok(push_helpers::process_send_results(&all_results, &self.pool))
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::tools::traits::Notification;
+    use crate::server::platform::apns::push_helpers::to_apns_notification;
 
     #[test]
     fn maps_notification_fields() {
@@ -181,7 +81,7 @@ mod tests {
             sheet_content: None,
         };
 
-        let apns = ApnsNotifyDelegate::to_apns_notification(&notification);
+        let apns = to_apns_notification(&notification);
         assert_eq!(apns.title, "Task Done");
         assert_eq!(apns.body, "Your build completed");
         assert_eq!(apns.priority, "high");
@@ -201,7 +101,7 @@ mod tests {
             sheet_content: None,
         };
 
-        let apns = ApnsNotifyDelegate::to_apns_notification(&notification);
+        let apns = to_apns_notification(&notification);
         assert_eq!(apns.title, "T");
         assert_eq!(apns.body, "B");
         assert!(apns.data.is_empty());
@@ -219,7 +119,7 @@ mod tests {
             sheet_content: None,
         };
 
-        let apns = ApnsNotifyDelegate::to_apns_notification(&notification);
+        let apns = to_apns_notification(&notification);
         assert_eq!(apns.data.get("count").unwrap(), "42");
         assert_eq!(apns.data.get("flag").unwrap(), "true");
     }

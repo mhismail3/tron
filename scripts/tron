@@ -116,12 +116,31 @@ ensure_prod_binary() {
 
 build_rust() {
     print_status "Building Rust workspace (release)..."
+    # Load relay credentials from auth.json for push notification relay.
+    # These are baked into the binary at compile time via option_env!().
+    local auth_file="$TRON_HOME/system/auth.json"
+    if [[ -f "$auth_file" ]]; then
+        local relay_url relay_secret
+        relay_url=$(python3 -c "import json; d=json.load(open('$auth_file')); print(d.get('relay',{}).get('url',''))" 2>/dev/null)
+        relay_secret=$(python3 -c "import json; d=json.load(open('$auth_file')); print(d.get('relay',{}).get('secret',''))" 2>/dev/null)
+        [[ -n "$relay_url" ]] && export TRON_RELAY_URL="$relay_url"
+        [[ -n "$relay_secret" ]] && export TRON_RELAY_SECRET="$relay_secret"
+    fi
     (cd "$RUST_WORKSPACE" && cargo build --release) || { print_error "Build failed"; exit 1; }
     print_success "Build complete"
 }
 
 build_rust_dev() {
     print_status "Building Rust workspace (dev-server)..."
+    # Load relay credentials from auth.json (same as release builds).
+    local auth_file="$TRON_HOME/system/auth.json"
+    if [[ -f "$auth_file" ]]; then
+        local relay_url relay_secret
+        relay_url=$(python3 -c "import json; d=json.load(open('$auth_file')); print(d.get('relay',{}).get('url',''))" 2>/dev/null)
+        relay_secret=$(python3 -c "import json; d=json.load(open('$auth_file')); print(d.get('relay',{}).get('secret',''))" 2>/dev/null)
+        [[ -n "$relay_url" ]] && export TRON_RELAY_URL="$relay_url"
+        [[ -n "$relay_secret" ]] && export TRON_RELAY_SECRET="$relay_secret"
+    fi
     (cd "$RUST_WORKSPACE" && cargo build --profile dev-server) || { print_error "Build failed"; exit 1; }
     print_success "Build complete"
 }

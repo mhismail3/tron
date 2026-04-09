@@ -1,43 +1,64 @@
-# Push Notifications (APNS)
+# Push Notifications (APNs)
 
 Push notifications allow the agent to alert the iOS app when tasks complete or need attention.
 
 ## Architecture
 
+Two delivery modes, selected at server startup:
+
 ```
-iOS App                          Server
-   │                               │
-   ├─► Register device token ─────►│ Store in device_tokens table
-   │                               │
-   │   Agent calls NotifyApp ◄─────┤
-   │                               │
-   │◄── APNS push notification ◄───┤ HTTP/2 to api.push.apple.com
-   │                               │
+Direct mode (developer machine with .p8 key):
+  iOS App ──► Tron Server ──► api.push.apple.com
+
+Relay mode (distributed builds, no .p8 needed):
+  iOS App ──► Tron Server ──► Cloudflare Worker relay ──► api.push.apple.com
+                               (holds .p8 key)
 ```
 
-## Apple Developer Setup
+Selection priority: direct (.p8 on disk) > relay (build-time env vars) > disabled.
 
-### 1. Create App ID with Push Capability
+## Relay Mode (Default for Distributed Builds)
 
-1. Go to [developer.apple.com/account](https://developer.apple.com/account) → Certificates, Identifiers & Profiles
-2. Identifiers → Click **+** → App IDs → App
-3. Bundle ID: `com.yourteam.TronMobile` (must match Xcode)
-4. Enable **Push Notifications** capability
-5. Register
+Users who install the Tron server get push notifications automatically — no credential setup required. The relay URL and HMAC secret are compiled into release builds via:
 
-### 2. Create APNS Key
+```bash
+TRON_RELAY_URL="https://relay.tron.dev" \
+TRON_RELAY_SECRET="<secret>" \
+cargo build --release
+```
 
-1. Go to **Keys** → Click **+**
-2. Name: `TronAPNS`
-3. Enable **Apple Push Notifications service (APNs)**
-4. Download the `.p8` file (one-time download!)
-5. Note the **Key ID** (e.g., `ABC123DEFG`)
+The relay is a Cloudflare Worker at `packages/relay/` that holds the `.p8` key in Wrangler secrets and forwards notifications to APNs.
 
-### 3. Get Team ID
+### Deploying the Relay
 
-- Membership Details → Copy **Team ID**
+```bash
+cd packages/relay
+npm install
+wrangler secret put APNS_KEY_P8     # paste .p8 file contents
+wrangler secret put APNS_KEY_ID     # 10-char key ID
+wrangler secret put APNS_TEAM_ID    # 10-char team ID
+wrangler secret put TRON_RELAY_SECRET  # shared HMAC secret
+wrangler deploy
+```
 
-### 4. Store Credentials on Server
+### Environment Override
+
+By default, relay mode uses production APNs. For sandbox:
+
+```bash
+TRON_RELAY_ENVIRONMENT=sandbox cargo run
+```
+
+## Direct Mode (Developer Setup)
+
+For local development with direct APNs access (bypasses relay):
+
+### Apple Developer Setup
+
+1. [developer.apple.com/account](https://developer.apple.com/account) → Keys → Create APNs key → download `.p8`
+2. Note the **Key ID** and **Team ID**
+
+### Store Credentials
 
 ```bash
 mkdir -p ~/.tron/system/mods/apns
@@ -48,17 +69,15 @@ cat > ~/.tron/system/mods/apns/config.json << 'EOF'
 {
   "keyId": "ABC123DEFG",
   "teamId": "XYZ789TEAM",
-  "bundleId": "com.yourteam.TronMobile",
+  "bundleId": "com.tron.mobile",
   "environment": "sandbox"
 }
 EOF
 ```
 
-### 5. Xcode Setup
+### Xcode Setup
 
-1. Open `TronMobile.xcodeproj`
-2. Target → Signing & Capabilities → **+ Capability** → **Push Notifications**
-3. Xcode regenerates provisioning profile automatically
+1. Target → Signing & Capabilities → **+ Capability** → **Push Notifications**
 
 ## iOS App Implementation
 
@@ -102,6 +121,8 @@ func application(_ application: UIApplication,
 
 ## Configuration Reference
 
+### Direct Mode (`~/.tron/system/mods/apns/config.json`)
+
 | Field | Description |
 |-------|-------------|
 | `keyId` | From Apple Developer Keys page |
@@ -109,13 +130,21 @@ func application(_ application: UIApplication,
 | `bundleId` | Must match Xcode target |
 | `environment` | `sandbox` for dev, `production` for App Store |
 
+### Relay Mode (Environment Variables)
+
+| Variable | When Set | Description |
+|----------|----------|-------------|
+| `TRON_RELAY_URL` | Build time | Relay worker URL |
+| `TRON_RELAY_SECRET` | Build time | HMAC shared secret |
+| `TRON_RELAY_ENVIRONMENT` | Runtime (optional) | Override APNs environment (default: `production`) |
+
 ## Production Release
 
 When releasing to App Store:
 
-1. Change `config.json`: `"environment": "production"`
-2. Build with Release-Prod configuration
-3. Ensure production entitlements are set
+1. Ensure relay is deployed with production APNs credentials
+2. Build with `TRON_RELAY_URL` and `TRON_RELAY_SECRET` set
+3. Direct mode: change `config.json` to `"environment": "production"`
 
 ## Troubleshooting
 
@@ -125,39 +154,19 @@ When releasing to App Store:
 | `InvalidProviderToken` | Wrong credentials | Verify keyId, teamId, bundleId |
 | `no valid aps-environment` | Missing entitlements | Add Push Notifications capability in Xcode |
 | `Unregistered` | Token expired | App re-registers automatically on reconnect |
+| `relay: invalid signature` | HMAC mismatch | Verify `TRON_RELAY_SECRET` matches Worker secret |
+| `relay timeout` | Worker unreachable | Check Cloudflare Worker status |
 
 ### Debug Checklist
 
-1. **Token not registering**
-   - Check notification permissions granted
-   - Verify Push Notifications capability in Xcode
-   - Check console for registration errors
-
-2. **Notifications not received**
-   - Verify server has valid APNS credentials
-   - Check environment matches (sandbox vs production)
-   - Verify device token was sent to server
-
-3. **Deep link not working**
-   - Check notification payload includes sessionId
-   - Verify DeepLinkRouter handles payload correctly
+1. **Token not registering** — Check notification permissions, Push Notifications capability
+2. **Notifications not received** — Verify environment matches, device token sent to server
+3. **Relay mode not activating** — Check `TRON_RELAY_URL` is compiled in (`strings tron | grep relay`)
+4. **Deep link not working** — Check notification payload includes sessionId
 
 ## Testing
 
-### Simulator Limitations
-
-Push notifications don't work on Simulator. Use a physical device.
-
-### Manual Testing
-
-```bash
-# On server, trigger notification
-sqlite3 ~/.tron/system/database/log.db "SELECT token FROM device_tokens LIMIT 1"
-
-# Use curl to test APNS directly (requires JWT generation)
-```
-
-### In-App Testing
+Push notifications don't work on Simulator — use a physical device.
 
 1. Background the app
 2. Trigger NotifyApp tool from agent

@@ -27,6 +27,10 @@ Thumbs.db
 # Tron user data
 .tron/auth.json
 
+# Node (relay worker)
+node_modules/
+package-lock.json
+
 # Python (utility scripts)
 __pycache__/
 .venv/

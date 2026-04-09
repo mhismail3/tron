@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tron::events::EventStore;
 use tron::tools::registry::ToolRegistry;
 
-use crate::ApnsServiceOption;
+use crate::PushServiceOption;
 
 /// Configuration for tool registry creation.
 ///
@@ -18,7 +18,7 @@ pub(crate) struct ToolRegistryConfig {
     pub event_store: Arc<EventStore>,
     pub brave_api_key: Option<String>,
     #[cfg_attr(not(feature = "apns"), allow(dead_code))]
-    pub apns_service: ApnsServiceOption,
+    pub push_service: PushServiceOption,
     /// Shared HTTP client (connection pool reused across tools).
     pub http_client: reqwest::Client,
     /// Sandbox settings for the Bash tool.
@@ -87,16 +87,23 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
         tron::tools::ui::get_confirmation::GetConfirmationTool::new(),
     ));
 
-    // 9: NotifyApp — real APNS when available, stub fallback
+    // 9: NotifyApp — direct APNS, relay, or stub fallback
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
-        if let Some(ref apns) = config.apns_service {
-            Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
-                apns.clone(),
-                config.event_store.pool().clone(),
-            ))
-        } else {
-            Arc::new(StubNotifyDelegate)
+        match config.push_service {
+            Some(crate::PushService::Direct(ref apns)) => {
+                Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
+                    apns.clone(),
+                    config.event_store.pool().clone(),
+                ))
+            }
+            Some(crate::PushService::Relay(ref relay)) => {
+                Arc::new(tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
+                    relay.clone(),
+                    config.event_store.pool().clone(),
+                ))
+            }
+            None => Arc::new(StubNotifyDelegate),
         }
         #[cfg(not(feature = "apns"))]
         { Arc::new(StubNotifyDelegate) }
