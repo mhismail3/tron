@@ -160,7 +160,7 @@ Returns (when completed within timeout):\n\
                             "sessionId": handle.session_id,
                             "success": handle.success.unwrap_or(true),
                             "totalTurns": handle.turns_executed.unwrap_or(0),
-                            "resultSummary": if output.len() > 200 { &output[..200] } else { &output },
+                            "resultSummary": crate::core::text::truncate_str(&output, 200),
                             "tokenUsage": handle.token_usage,
                         })),
                         is_error: None,
