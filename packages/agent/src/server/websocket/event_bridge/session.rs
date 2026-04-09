@@ -343,6 +343,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             token_usage,
             error,
             completed_at,
+            notify,
             ..
         } => {
             let mut data = json!({
@@ -354,6 +355,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "totalTurns": total_turns,
                 "duration": duration,
                 "completedAt": completed_at,
+                "notify": notify,
             });
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "error", error);

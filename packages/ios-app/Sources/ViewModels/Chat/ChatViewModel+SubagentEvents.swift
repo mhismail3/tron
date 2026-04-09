@@ -74,23 +74,19 @@ extension ChatViewModel {
     }
 
     func handleSubagentResultAvailableResult(_ result: SubagentResultAvailablePlugin.Result) {
-        logger.info("Subagent result available: sessionId=\(result.subagentSessionId), success=\(result.success), task=\(result.task.prefix(50))", category: .chat)
+        logger.info("Subagent result available: sessionId=\(result.subagentSessionId), success=\(result.success), notify=\(result.notify), task=\(result.task.prefix(50))", category: .chat)
 
-        // Blocking subagents deliver results directly via tool result — no notification needed.
-        if let subagent = subagentState.getSubagent(sessionId: result.subagentSessionId),
-           subagent.blocking {
-            logger.debug("Skipping notification for blocking subagent: \(result.subagentSessionId)", category: .chat)
+        // Server decides whether iOS should surface a notification. When
+        // notify=false, the parent agent is actively running and the backend
+        // delivers subagent results via system-prompt injection — no iOS
+        // action needed. When notify=true, the parent is idle and the user
+        // reviews results manually. Blocking subagents never emit this event,
+        // so no client-side blocking check is needed.
+        guard result.notify else {
+            logger.debug("Server says no notification needed for subagent: \(result.subagentSessionId)", category: .chat)
             return
         }
 
-        // Agent is active — backend delivers results via system prompt injection,
-        // so no iOS-side action needed. Just skip the notification.
-        if agentPhase != .idle {
-            logger.info("Subagent completed during active turn, backend handles delivery: \(result.subagentSessionId)", category: .chat)
-            return
-        }
-
-        // Agent is idle — show notification for manual review
         subagentState.markResultsPending(subagentSessionId: result.subagentSessionId)
         logger.debug("Marked subagent results as pending: \(result.subagentSessionId)", category: .chat)
 

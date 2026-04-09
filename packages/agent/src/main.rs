@@ -446,6 +446,9 @@ async fn init_services(
         None,
     ));
     subagent_manager.set_self_ref();
+    // Wire run-state probe so D4 notification routing can query parent
+    // run state server-side (replaces iOS-side agentPhase check).
+    subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
 
     // Unified job manager (processes + subagents)
     let subagent_ops: Arc<dyn tron::tools::traits::SubagentOps> = subagent_manager.clone();

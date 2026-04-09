@@ -913,6 +913,10 @@ tron_events! {
         error: Option<String>,
         #[serde(rename = "completedAt")]
         completed_at: String,
+        /// Whether iOS should surface a user-facing notification for this
+        /// completion. `false` when the parent session is actively running
+        /// (backend delivers results via system-prompt injection instead).
+        notify: bool,
     } => "subagent_result_available",
 
     // -- Worktree isolation --
@@ -1884,6 +1888,7 @@ mod tests {
                 token_usage: None,
                 error: None,
                 completed_at: "2024-01-01T00:00:00Z".into(),
+                notify: true,
             },
             TronEvent::WorktreeAcquired {
                 base: base.clone(),

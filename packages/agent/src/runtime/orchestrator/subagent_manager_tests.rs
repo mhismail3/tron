@@ -829,3 +829,151 @@ async fn spawn_end_session_flushes_persisted_events() {
         "expected message.assistant events after end_session flush"
     );
 }
+
+// ── D4: notify field on SubagentResultAvailable ──
+//
+// These tests verify that the server-side `notify` field is computed from the
+// parent session's run state: notify=true when idle, notify=false when active.
+// When no probe is set, the safe default is notify=true.
+
+/// Stub probe that reports a fixed "has_active_run" value for any session.
+struct StubProbe {
+    active: bool,
+}
+
+impl crate::runtime::orchestrator::orchestrator::RunStateProbe for StubProbe {
+    fn has_active_run(&self, _session_id: &str) -> bool {
+        self.active
+    }
+}
+
+#[tokio::test]
+async fn notify_true_when_probe_reports_parent_idle() {
+    let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+    let parent_sid = session_mgr
+        .create_session("mock-model", "/tmp", None)
+        .unwrap();
+
+    // Install a probe that reports parent as idle (has_active_run = false)
+    let probe: Arc<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe> =
+        Arc::new(StubProbe { active: false });
+    manager.set_run_state_probe(Arc::downgrade(&probe));
+
+    let mut config = make_config("idle task");
+    config.parent_session_id = Some(parent_sid.clone());
+    config.blocking_timeout_ms = None; // non-blocking
+    let handle = manager.spawn(config).await.unwrap();
+
+    let _ = manager
+        .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+        .await
+        .unwrap();
+
+    let events = store
+        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+    assert_eq!(
+        payload["notify"], true,
+        "notify should be true when parent is idle"
+    );
+}
+
+#[tokio::test]
+async fn notify_false_when_probe_reports_parent_active() {
+    let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+    let parent_sid = session_mgr
+        .create_session("mock-model", "/tmp", None)
+        .unwrap();
+
+    // Install a probe that reports parent as active (has_active_run = true)
+    let probe: Arc<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe> =
+        Arc::new(StubProbe { active: true });
+    manager.set_run_state_probe(Arc::downgrade(&probe));
+
+    let mut config = make_config("active task");
+    config.parent_session_id = Some(parent_sid.clone());
+    config.blocking_timeout_ms = None;
+    let handle = manager.spawn(config).await.unwrap();
+
+    let _ = manager
+        .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+        .await
+        .unwrap();
+
+    let events = store
+        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+    assert_eq!(
+        payload["notify"], false,
+        "notify should be false when parent is active"
+    );
+}
+
+#[tokio::test]
+async fn notify_defaults_true_when_probe_not_set() {
+    // No probe installed → safe default (notify=true, user sees completion).
+    let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+    let parent_sid = session_mgr
+        .create_session("mock-model", "/tmp", None)
+        .unwrap();
+
+    let mut config = make_config("unprobed task");
+    config.parent_session_id = Some(parent_sid.clone());
+    config.blocking_timeout_ms = None;
+    let handle = manager.spawn(config).await.unwrap();
+
+    let _ = manager
+        .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+        .await
+        .unwrap();
+
+    let events = store
+        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+    assert_eq!(
+        payload["notify"], true,
+        "notify should default to true without a probe"
+    );
+}
+
+#[tokio::test]
+async fn notify_defaults_true_when_probe_weak_expired() {
+    let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+    let parent_sid = session_mgr
+        .create_session("mock-model", "/tmp", None)
+        .unwrap();
+
+    // Install probe, then drop the strong Arc so the Weak expires.
+    {
+        let probe: Arc<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe> =
+            Arc::new(StubProbe { active: true });
+        manager.set_run_state_probe(Arc::downgrade(&probe));
+        // probe dropped here — the Weak stored in manager is now dangling
+    }
+
+    let mut config = make_config("dangling probe task");
+    config.parent_session_id = Some(parent_sid.clone());
+    config.blocking_timeout_ms = None;
+    let handle = manager.spawn(config).await.unwrap();
+
+    let _ = manager
+        .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+        .await
+        .unwrap();
+
+    let events = store
+        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+    assert_eq!(
+        payload["notify"], true,
+        "notify should default to true when Weak probe is expired"
+    );
+}

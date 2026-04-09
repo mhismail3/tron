@@ -66,6 +66,14 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) cancel: CancellationToken,
     pub(super) tools: ToolRegistry,
     pub(super) denied_tools: Vec<String>,
+    /// Optional weak probe to query whether the parent session has an active
+    /// agent run. Used to compute the `notify` field on
+    /// `SubagentResultAvailable` (notify=true when parent is idle).
+    pub(super) run_state_probe: Option<
+        std::sync::Weak<
+            dyn crate::runtime::orchestrator::orchestrator::RunStateProbe,
+        >,
+    >,
 }
 
 pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
@@ -450,6 +458,18 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
     };
 
     if params.blocking_timeout_ms.is_none() && !params.tracker.parent_session_id.is_empty() {
+        // Compute `notify`: iOS should show a user-facing notification only
+        // when the parent session is idle. If the parent is currently running
+        // an agent turn, the backend delivers results via system-prompt
+        // injection, so no iOS notification is needed. Defaults to `true`
+        // (safe — user sees completion) if the probe is unavailable.
+        let parent_active = params
+            .run_state_probe
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+            .is_some_and(|p| p.has_active_run(&params.tracker.parent_session_id));
+        let notify = !parent_active;
+
         let payload = json!({
             "parentSessionId": params.tracker.parent_session_id,
             "subagentSessionId": params.child_session_id,
@@ -461,6 +481,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             "tokenUsage": token_usage.clone().unwrap_or(json!({})),
             "completedAt": chrono::Utc::now().to_rfc3339(),
             "output": truncate(&result_output, 4000),
+            "notify": notify,
         });
         let _ = params.event_store.append(&AppendOptions {
             session_id: &params.tracker.parent_session_id,
@@ -486,6 +507,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                 Some(result_output.clone())
             },
             completed_at: chrono::Utc::now().to_rfc3339(),
+            notify,
         });
     }
 

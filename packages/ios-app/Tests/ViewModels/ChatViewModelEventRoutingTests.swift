@@ -669,7 +669,10 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         )
     }
 
-    private func makeResultAvailable(sessionId: String = "sub-nb") -> SubagentResultAvailablePlugin.Result {
+    private func makeResultAvailable(
+        sessionId: String = "sub-nb",
+        notify: Bool = true
+    ) -> SubagentResultAvailablePlugin.Result {
         SubagentResultAvailablePlugin.Result(
             parentSessionId: "test-session",
             subagentSessionId: sessionId,
@@ -680,84 +683,70 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             duration: 500,
             tokenUsage: nil,
             error: nil,
-            completedAt: "2026-01-01T00:00:00Z"
+            completedAt: "2026-01-01T00:00:00Z",
+            notify: notify
         )
     }
 
-    func test_subagentResultAvailable_duringProcessing_skipsNotification() {
-        // Given - agent is processing (backend handles delivery via system prompt)
+    func test_subagentResultAvailable_notifyFalse_skipsNotification() {
+        // Given — server decided no notification (parent is actively running)
         spawnNonBlockingSubagent()
-        viewModel.agentPhase = .processing
         let initialCount = viewModel.messages.count
 
         // When
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
+        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(notify: false))
 
-        // Then - no notification, status unchanged (backend delivers results)
+        // Then — no notification, status unchanged (backend delivers results)
         XCTAssertEqual(viewModel.messages.count, initialCount)
         XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .notApplicable)
     }
 
-    func test_subagentResultAvailable_duringPostProcessing_skipsNotification() {
-        // Given
+    func test_subagentResultAvailable_notifyTrue_showsNotification() {
+        // Given — server decided to notify (parent is idle)
         spawnNonBlockingSubagent()
-        viewModel.agentPhase = .postProcessing
         let initialCount = viewModel.messages.count
 
         // When
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
+        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(notify: true))
 
-        // Then - no notification, backend handles delivery
-        XCTAssertEqual(viewModel.messages.count, initialCount)
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .notApplicable)
-    }
-
-    func test_subagentResultAvailable_whenIdle_showsNotification() {
-        // Given
-        spawnNonBlockingSubagent()
-        viewModel.agentPhase = .idle
-        let initialCount = viewModel.messages.count
-
-        // When
-        viewModel.handleSubagentResultAvailableResult(makeResultAvailable())
-
-        // Then - notification message added, status is pending
+        // Then — notification message added, status is pending
         XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .pending)
         XCTAssertGreaterThan(viewModel.messages.count, initialCount)
     }
 
-    func test_subagentResultAvailable_blockingSubagent_skipsRegardlessOfPhase() {
-        // Given - blocking subagent
-        let spawnResult = SubagentSpawnedPlugin.Result(
-            subagentSessionId: "sub-block",
-            task: "Blocking task",
-            model: "claude-sonnet-4-6",
-            workingDirectory: nil,
-            toolCallId: "tc-block",
-            blocking: true
-        )
-        viewModel.handleSubagentSpawnedResult(spawnResult)
-        viewModel.agentPhase = .idle
+    func test_subagentResultAvailable_notifyIgnoresAgentPhase() {
+        // Regression test: iOS no longer makes routing decisions based on
+        // agentPhase. The server-provided `notify` field is authoritative,
+        // even if the local agentPhase has drifted (e.g., during rapid
+        // transitions or reconstruction races).
+        spawnNonBlockingSubagent()
+        viewModel.agentPhase = .processing // would have suppressed under old logic
         let initialCount = viewModel.messages.count
 
-        // When
-        let result = SubagentResultAvailablePlugin.Result(
-            parentSessionId: "test-session",
-            subagentSessionId: "sub-block",
-            task: "Blocking task",
-            resultSummary: "Done",
-            success: true,
-            totalTurns: 1,
-            duration: 100,
-            tokenUsage: nil,
-            error: nil,
-            completedAt: "2026-01-01T00:00:00Z"
-        )
-        viewModel.handleSubagentResultAvailableResult(result)
+        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(notify: true))
 
-        // Then - no notification, status unchanged
-        XCTAssertEqual(viewModel.subagentState.subagents["sub-block"]?.resultDeliveryStatus, .notApplicable)
-        XCTAssertEqual(viewModel.messages.count, initialCount)
+        // Server said notify=true — we show the notification regardless of phase.
+        XCTAssertGreaterThan(viewModel.messages.count, initialCount)
+        XCTAssertEqual(viewModel.subagentState.subagents["sub-nb"]?.resultDeliveryStatus, .pending)
+    }
+
+    func test_subagentResultAvailable_consolidatesMultipleNotifyTrue() {
+        // Given — two non-blocking subagents spawn
+        spawnNonBlockingSubagent(sessionId: "sub-nb")
+        spawnNonBlockingSubagent(sessionId: "sub-nb2")
+        let initialCount = viewModel.messages.count
+
+        // When — both complete with notify=true
+        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(sessionId: "sub-nb", notify: true))
+        viewModel.handleSubagentResultAvailableResult(makeResultAvailable(sessionId: "sub-nb2", notify: true))
+
+        // Then — single consolidated notification message with both entries
+        let resultsReadyCount = viewModel.messages.filter { msg in
+            if case .systemEvent(.subagentResultsReady) = msg.content { return true }
+            return false
+        }.count
+        XCTAssertEqual(resultsReadyCount, 1, "expected one consolidated notification")
+        XCTAssertEqual(viewModel.messages.count, initialCount + 1)
     }
 
     // MARK: - Agent Ready (no auto-inject)

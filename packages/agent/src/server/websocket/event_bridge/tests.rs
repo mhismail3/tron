@@ -1064,6 +1064,7 @@ fn all_event_types_have_wire_mapping() {
             token_usage: None,
             error: None,
             completed_at: "2024-01-01T00:00:00Z".into(),
+            notify: true,
         },
     ];
     for event in &events {
@@ -1472,6 +1473,7 @@ fn converts_subagent_result_available() {
         token_usage: Some(serde_json::json!({"input": 50})),
         error: None,
         completed_at: "2024-01-01T00:00:00Z".into(),
+        notify: true,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.subagent_result_available");
@@ -1485,7 +1487,29 @@ fn converts_subagent_result_available() {
     assert_eq!(data["duration"], 3000);
     assert_eq!(data["completedAt"], "2024-01-01T00:00:00Z");
     assert_eq!(data["tokenUsage"]["input"], 50);
+    assert_eq!(data["notify"], true);
     assert!(data.get("error").is_none());
+}
+
+#[test]
+fn subagent_result_available_bridges_notify_false() {
+    let event = TronEvent::SubagentResultAvailable {
+        base: BaseEvent::now("s1"),
+        parent_session_id: "parent-1".into(),
+        subagent_session_id: "sub-1".into(),
+        task: "t".into(),
+        result_summary: "done".into(),
+        success: true,
+        total_turns: 1,
+        duration: 100,
+        token_usage: None,
+        error: None,
+        completed_at: "2024-01-01T00:00:00Z".into(),
+        notify: false,
+    };
+    let rpc = tron_event_to_rpc(&event);
+    let data = rpc.data.unwrap();
+    assert_eq!(data["notify"], false);
 }
 
 // ── Turn accumulator integration tests ──

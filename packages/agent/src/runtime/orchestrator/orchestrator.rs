@@ -20,6 +20,25 @@ use crate::runtime::orchestrator::session_manager::{SessionFilter, SessionManage
 use crate::runtime::orchestrator::tool_call_tracker::ToolCallTracker;
 use crate::runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
 
+/// Read-only probe for querying active run state.
+///
+/// Exists to break an Arc cycle between `Orchestrator` and `SubagentManager`:
+/// `SubagentManager` needs to know whether a parent session has an active run
+/// to decide whether iOS should show a subagent-completion notification, but
+/// it cannot hold an `Arc<Orchestrator>` because `Orchestrator` transitively
+/// holds `SubagentManager`. Instead, `SubagentManager` stores a
+/// `Weak<dyn RunStateProbe>`, obtained from [`Orchestrator::run_state_probe`].
+pub trait RunStateProbe: Send + Sync {
+    /// Return `true` if the session currently has an active agent run.
+    fn has_active_run(&self, session_id: &str) -> bool;
+}
+
+impl RunStateProbe for Orchestrator {
+    fn has_active_run(&self, session_id: &str) -> bool {
+        Orchestrator::has_active_run(self, session_id)
+    }
+}
+
 /// Tracks an active agent run within a session.
 struct ActiveRun {
     run_id: String,
@@ -267,6 +286,17 @@ impl Orchestrator {
             .active_runs
             .lock()
             .contains_key(session_id)
+    }
+
+    /// Read-only probe for run state.
+    ///
+    /// Allows `SubagentManager` to query whether a parent session has an active
+    /// run without holding a strong `Arc<Orchestrator>` (which would create a
+    /// cycle: Orchestrator → SubagentManager → Orchestrator). `SubagentManager`
+    /// stores this as `Weak<dyn RunStateProbe>`.
+    pub fn run_state_probe(self: &Arc<Self>) -> std::sync::Weak<dyn RunStateProbe> {
+        let strong: Arc<dyn RunStateProbe> = self.clone();
+        Arc::downgrade(&strong)
     }
 
     /// Number of active runs.

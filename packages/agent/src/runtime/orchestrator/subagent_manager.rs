@@ -132,6 +132,12 @@ pub struct SubagentManager {
     worktree_coordinator: std::sync::OnceLock<Arc<crate::worktree::WorktreeCoordinator>>,
     /// Self-reference for passing to child agents (set after wrapping in Arc).
     self_ref: std::sync::OnceLock<std::sync::Weak<Self>>,
+    /// Weak probe for querying parent-session run state without creating an
+    /// Arc cycle with `Orchestrator`. Used to decide whether non-blocking
+    /// subagent completion should surface a notification on iOS.
+    run_state_probe: std::sync::OnceLock<
+        std::sync::Weak<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe>,
+    >,
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
 }
@@ -156,8 +162,28 @@ impl SubagentManager {
             hooks,
             worktree_coordinator: std::sync::OnceLock::new(),
             self_ref: std::sync::OnceLock::new(),
+            run_state_probe: std::sync::OnceLock::new(),
             subagents: DashMap::new(),
         }
+    }
+
+    /// Store a weak reference to the `RunStateProbe` (typically the
+    /// orchestrator). Must be called once after both `SubagentManager` and
+    /// `Orchestrator` are wrapped in Arcs. Without this, notification routing
+    /// defaults to `notify=true` (safe — user sees every completion).
+    pub fn set_run_state_probe(
+        &self,
+        probe: std::sync::Weak<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe>,
+    ) {
+        let _ = self.run_state_probe.set(probe);
+    }
+
+    /// Clone the run-state probe for passing into execution tasks.
+    fn probe_clone(
+        &self,
+    ) -> Option<std::sync::Weak<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe>>
+    {
+        self.run_state_probe.get().cloned()
     }
 
     /// Store a weak self-reference so child agents can receive `Arc<SubagentManager>`.
@@ -432,6 +458,7 @@ impl SubagentSpawner for SubagentManager {
             cancel,
             tools: tool_factory(),
             denied_tools: config.denied_tools.clone(),
+            run_state_probe: self.probe_clone(),
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {

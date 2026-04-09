@@ -25,6 +25,32 @@ enum SubagentResultAvailablePlugin: DispatchableEventPlugin {
             let tokenUsage: TokenUsage?
             let error: String?
             let completedAt: String
+            /// Server-provided routing hint: true if iOS should surface a
+            /// notification, false if the parent agent is actively running
+            /// (backend delivers results via system-prompt injection).
+            /// Defaults to `true` for backward compatibility with historical
+            /// events that predate this field.
+            let notify: Bool
+
+            private enum CodingKeys: String, CodingKey {
+                case parentSessionId, subagentSessionId, task, resultSummary,
+                     success, totalTurns, duration, tokenUsage, error, completedAt, notify
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                parentSessionId = try c.decode(String.self, forKey: .parentSessionId)
+                subagentSessionId = try c.decode(String.self, forKey: .subagentSessionId)
+                task = try c.decode(String.self, forKey: .task)
+                resultSummary = try c.decode(String.self, forKey: .resultSummary)
+                success = try c.decode(Bool.self, forKey: .success)
+                totalTurns = try c.decode(Int.self, forKey: .totalTurns)
+                duration = try c.decode(Int.self, forKey: .duration)
+                tokenUsage = try c.decodeIfPresent(TokenUsage.self, forKey: .tokenUsage)
+                error = try c.decodeIfPresent(String.self, forKey: .error)
+                completedAt = try c.decode(String.self, forKey: .completedAt)
+                notify = try c.decodeIfPresent(Bool.self, forKey: .notify) ?? true
+            }
         }
     }
 
@@ -41,6 +67,7 @@ enum SubagentResultAvailablePlugin: DispatchableEventPlugin {
         let tokenUsage: TokenUsage?
         let error: String?
         let completedAt: String
+        let notify: Bool
     }
 
     // MARK: - Protocol Implementation
@@ -56,7 +83,8 @@ enum SubagentResultAvailablePlugin: DispatchableEventPlugin {
             duration: event.data.duration,
             tokenUsage: event.data.tokenUsage,
             error: event.data.error,
-            completedAt: event.data.completedAt
+            completedAt: event.data.completedAt,
+            notify: event.data.notify
         )
     }
 
