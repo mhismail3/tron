@@ -96,15 +96,17 @@ final class SubagentEventFormatterTests: XCTestCase {
     // MARK: - formatWriteResult
 
     func testFormatWriteResult_success() {
-        XCTAssertEqual(SubagentEventFormatter.formatWriteResult("File written successfully"), "✓ File saved")
+        XCTAssertEqual(
+            SubagentEventFormatter.formatWriteResult("anything at all", success: true),
+            "✓ File saved"
+        )
     }
 
-    func testFormatWriteResult_successVariant() {
-        XCTAssertEqual(SubagentEventFormatter.formatWriteResult("Success: created file.txt"), "✓ File saved")
-    }
-
-    func testFormatWriteResult_other() {
-        XCTAssertEqual(SubagentEventFormatter.formatWriteResult("Some other result"), "Some other result")
+    func testFormatWriteResult_failurePreservesMessage() {
+        XCTAssertEqual(
+            SubagentEventFormatter.formatWriteResult("disk full", success: false),
+            "disk full"
+        )
     }
 
     // MARK: - formatToolResult
@@ -119,38 +121,31 @@ final class SubagentEventFormatterTests: XCTestCase {
         XCTAssertEqual(result, "hello\nworld")
     }
 
-    // MARK: - cleanResult
-
-    func testCleanResult_normalString() {
-        XCTAssertEqual(SubagentEventFormatter.cleanResult("hello world"), "hello world")
+    func testFormatToolResult_writeUsesSuccessFlag() {
+        let r = SubagentEventFormatter.formatToolResult(
+            toolName: "Write",
+            result: "File at /tmp/x.txt updated",
+            success: true
+        )
+        XCTAssertEqual(r, "✓ File saved")
     }
 
-    func testCleanResult_jsonWrapped() {
-        let json = #"{"content":"actual content","extra":"ignored"}"#
-        XCTAssertEqual(SubagentEventFormatter.cleanResult(json), "actual content")
+    func testFormatToolResult_writeFailureShowsError() {
+        let r = SubagentEventFormatter.formatToolResult(
+            toolName: "Write",
+            result: "permission denied",
+            success: false
+        )
+        XCTAssertEqual(r, "permission denied")
     }
 
-    func testCleanResult_emptyString() {
-        XCTAssertEqual(SubagentEventFormatter.cleanResult(""), "")
-    }
-
-    func testCleanResult_escapedNewlines() {
-        XCTAssertEqual(SubagentEventFormatter.cleanResult("line1\\nline2"), "line1\nline2")
-    }
-
-    func testCleanResult_escapedTabs() {
-        XCTAssertEqual(SubagentEventFormatter.cleanResult("col1\\tcol2"), "col1\tcol2")
-    }
-
-    func testCleanResult_escapedQuotes() {
-        // Input has literal backslash-quote sequences: \"
-        let input = "he said \\\"hello\\\""
-        let expected = "he said \"hello\""
-        XCTAssertEqual(SubagentEventFormatter.cleanResult(input), expected)
-    }
-
-    func testCleanResult_whitespaceOnly() {
-        XCTAssertEqual(SubagentEventFormatter.cleanResult("   \n\t  "), "")
+    func testFormatToolResult_trimsWhitespace() {
+        let r = SubagentEventFormatter.formatToolResult(
+            toolName: "Read",
+            result: "   \nline1\nline2\n   ",
+            success: true
+        )
+        XCTAssertEqual(r, "line1\nline2")
     }
 
     // MARK: - formatAccumulatedOutput

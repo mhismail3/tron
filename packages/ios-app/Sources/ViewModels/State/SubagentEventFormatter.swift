@@ -19,46 +19,32 @@ enum SubagentEventFormatter {
     }
 
     /// Format a tool result for display, with tool-specific formatting.
+    ///
+    /// Takes the server-provided `success` flag to drive write/edit
+    /// formatting — no text scanning. The subagent event bridge (see
+    /// `packages/agent/src/runtime/orchestrator/subagent_manager/execution.rs::forwarded_subagent_event`)
+    /// always emits plain text tool results, so no JSON unwrap or escape
+    /// fixups are needed here.
     static func formatToolResult(toolName: String?, result: String, success: Bool) -> String {
-        let cleaned = cleanResult(result)
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !success {
-            return String(cleaned.prefix(150))
+            return String(trimmed.prefix(150))
         }
 
         let kind = toolName.map { ToolKind(toolName: $0) }
         switch kind {
         case .bash:
-            return formatBashResult(cleaned)
+            return formatBashResult(trimmed)
         case .read:
-            return formatReadResult(cleaned)
+            return formatReadResult(trimmed)
         case .search:
-            return formatSearchResult(cleaned)
+            return formatSearchResult(trimmed)
         case .write, .edit:
-            return formatWriteResult(cleaned)
+            return formatWriteResult(trimmed, success: success)
         default:
-            return String(cleaned.prefix(150))
+            return String(trimmed.prefix(150))
         }
-    }
-
-    /// Remove JSON wrappers and unescape common escape sequences.
-    static func cleanResult(_ result: String) -> String {
-        var cleaned = result
-
-        if cleaned.hasPrefix("{\"") && cleaned.contains("\"content\":") {
-            if let data = cleaned.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let content = json["content"] as? String {
-                cleaned = content
-            }
-        }
-
-        cleaned = cleaned
-            .replacingOccurrences(of: "\\n", with: "\n")
-            .replacingOccurrences(of: "\\t", with: "\t")
-            .replacingOccurrences(of: "\\\"", with: "\"")
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Format bash output: show first 2 lines + count if long.
@@ -92,9 +78,12 @@ enum SubagentEventFormatter {
         return "\(lines.count) matches found"
     }
 
-    /// Format write/edit output: detect success.
-    static func formatWriteResult(_ result: String) -> String {
-        if result.lowercased().contains("success") || result.lowercased().contains("written") {
+    /// Format write/edit output.
+    ///
+    /// Uses the server-provided `success` flag rather than scanning the
+    /// result text for keywords.
+    static func formatWriteResult(_ result: String, success: Bool) -> String {
+        if success {
             return "✓ File saved"
         }
         return String(result.prefix(100))
