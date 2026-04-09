@@ -642,8 +642,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
 |   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
-|   +-- deployment/               Deploy state: tron-cli, tron-lib.sh, deployed-commit, last-deployment.json, ...
-|   +-- mods/                     Optional modules (e.g. apns/ — APNS p8 key + config.json)
+|   +-- deployment/               Deploy state: tron-cli, tron-lib.sh, deployed-commit, ...; optional apns.json + AuthKey_*.p8 for direct APNs
 |   +-- transcription/            Speech-to-text sidecar
 |       +-- worker.py             parakeet-mlx Python worker (stdin/stdout JSON-line protocol)
 |       +-- requirements.txt      Pip deps for the venv
@@ -665,7 +664,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 
 Notes:
 - `~/.tron/user/` is reserved (`paths::user_dir()`) but not currently populated.
-- Credentials for external CLIs (Google Workspace, Twitter, etc.) live in `workspace/vault/`, not in `system/mods/`. See the relevant skills for the materialization pattern.
+- Credentials for external CLIs (Google Workspace, Twitter, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
 
 ### Service (launchd)
 

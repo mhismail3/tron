@@ -1,7 +1,7 @@
 ---
 name: "Twitter"
 description: "Agentic X/Twitter research — multi-round search, thread analysis, synthesis — plus engagement tools"
-version: "2.0.0"
+version: "3.0.0"
 tags: [twitter, social-media, research, x]
 subagent: ask
 ---
@@ -17,7 +17,7 @@ You are an autonomous research analyst specializing in X/Twitter discourse. For 
 Run at the start of any twitter session:
 
 ```bash
-# 1. Is tron-twitter installed?
+# 1. Is tron-twitter installed (v0.6.0+ required — stateless env-driven CLI)?
 which tron-twitter || brew install mhismail3/tools/tron-twitter
 
 # 2. Is it up to date?
@@ -28,28 +28,25 @@ brew outdated mhismail3/tools/tron-twitter && brew upgrade mhismail3/tools/tron-
   || { echo "twitter-cookies missing in vault — see Cold start"; exit 1; }
 ~/.tron/skills/vault/scripts/vault.sh list 2>/dev/null | grep -q '"name": "twitter-state"' \
   || { echo "twitter-state missing in vault — see Cold start"; exit 1; }
-```
 
-If credentials are present but `tron-twitter auth status` (run after materialization — see "Per-call materialization" below) reports invalid, the cookies have rotated — do the Cold start flow to refresh them.
+# 4. Are the cookies still valid?
+TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+  tron-twitter auth status | jq -e '.valid' >/dev/null \
+  || { echo "Cookies invalid — cookies have rotated, see Cold start to refresh"; exit 1; }
+```
 
 ### Cold start (first time on a machine, or when cookies have rotated)
 
-The `tron-twitter` CLI does not support programmatic login. Cookies must be harvested from a real browser session where the user is already signed into x.com.
+`tron-twitter` has no programmatic login. Cookies must be harvested from a real browser session where the user is already signed into x.com.
 
 1. **Tell the user** to do the browser step (the agent cannot):
    > Open https://x.com in your browser. Open DevTools → Application (Chrome/Edge) or Storage (Firefox/Safari) → Cookies → `https://x.com`. Find `auth_token` and `ct0`. Copy both values and paste them to me.
 
-2. Once the user provides the values, construct `cookies.json` in a tempfile (never on the command line):
+2. Once the user provides the values, store them in the vault. **Never put cookie values on the command line** — stage them via `mktemp` + `--field-file`:
    ```bash
-   TMP=$(mktemp) && trap 'rm -f "$TMP"' EXIT && chmod 600 "$TMP"
-   # Use AskUserQuestion or a heredoc fed from the user's pasted values:
+   TMP=$(mktemp) && chmod 600 "$TMP" && trap 'rm -f "$TMP"' EXIT
    python3 -c 'import json,sys; json.dump({"auth_token": sys.argv[1], "ct0": sys.argv[2]}, sys.stdout)' \
      "$AUTH_TOKEN" "$CT0" > "$TMP"
-   # Or write the JSON directly if the values are already in env vars.
-   ```
-
-3. Store in the vault:
-   ```bash
    ~/.tron/skills/vault/scripts/vault.sh set twitter-cookies \
      --type secret \
      --desc "X/Twitter session cookies (auth_token, ct0) for tron-twitter CLI" \
@@ -57,60 +54,75 @@ The `tron-twitter` CLI does not support programmatic login. Cookies must be harv
      --field-file value="$TMP"
    ```
 
-4. If this is a truly fresh setup (no `twitter-state` entry yet), seed the state bookmark:
+3. If this is a truly fresh setup (no `twitter-state` entry yet), seed an empty state bookmark:
    ```bash
-   TMP2=$(mktemp) && chmod 600 "$TMP2"
-   echo '{"last_mention_id": null}' > "$TMP2"
+   TMP2=$(mktemp) && chmod 600 "$TMP2" && trap 'rm -f "$TMP2"' EXIT
+   echo '{"last_mention_ts": 0, "last_dm_ts": "0"}' > "$TMP2"
    ~/.tron/skills/vault/scripts/vault.sh set twitter-state \
      --type secret \
-     --desc "X/Twitter state (last_mention_id bookmark) for tron-twitter check-mentions" \
+     --desc "X/Twitter state bookmarks for tron-twitter check-mentions / check-dms" \
      --tags "twitter,x,state" \
      --field-file value="$TMP2"
-   rm -f "$TMP2"
    ```
 
-5. Verify: run a read-only call using the materialization pattern below (e.g. `tron-twitter --format text user <your_username>`) and confirm it returns data without an auth error.
+4. Verify with a read-only call (see "Invoking tron-twitter" below).
 
-### Per-call materialization
+### Invoking tron-twitter
 
-`tron-twitter` reads from **hardcoded paths** (`~/.tron/system/mods/twitter/{cookies,state}.json`) with no env var or CLI flag override. Every call must materialize credentials from the vault to those paths, run the command, clean up, and (for state-mutating commands) push updated state back to the vault.
+`tron-twitter` is **stateless**: credentials and state come from environment variables, and the CLI writes nothing to disk. Two env vars drive everything:
 
-**Read-only commands** (`search`, `trending`, `timeline`, `user`, `tweet`, `notifications`, `dms`, `dm-history`, `check-mentions --peek`, `check-dms --peek`, and all write commands `post`/`reply`/`like`/`retweet`/`follow`/`dm`):
+- `TRON_TWITTER_COOKIES` — required for every command. JSON: `{"auth_token": "...", "ct0": "..."}`.
+- `TRON_TWITTER_STATE` — only needed for `check-mentions` and `check-dms`. JSON state envelope.
+
+Always use **inline** env overrides (`VAR=... tron-twitter ...`), never `export`. Inline scoping keeps the cookies out of the surrounding shell and any sibling tools.
+
+**Read-only commands** (`search`, `trending`, `timeline`, `user`, `tweet`, `notifications`, `dms`, `dm-history`, `auth status`, and all write commands — everything except the stateful checks):
 
 ```bash
-mkdir -p ~/.tron/system/mods/twitter
-~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value \
-  > ~/.tron/system/mods/twitter/cookies.json
-chmod 600 ~/.tron/system/mods/twitter/cookies.json
-trap 'rm -f ~/.tron/system/mods/twitter/cookies.json' EXIT
-
-tron-twitter search "AI agents" --count 20 --product Top
+TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+  tron-twitter search "AI agents" --count 20 --product Top
 ```
 
-For a sequence of calls, materialize once at the top and let the `trap` clean up at the end.
-
-**State-mutating commands** (`check-mentions` / `check-dms` without `--peek`):
+For a sequence of calls, capture cookies in a shell-local variable at the top of your script (not exported, so it doesn't leak):
 
 ```bash
-mkdir -p ~/.tron/system/mods/twitter
-~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value \
-  > ~/.tron/system/mods/twitter/cookies.json
-~/.tron/skills/vault/scripts/vault.sh get twitter-state --field value \
-  > ~/.tron/system/mods/twitter/state.json
-chmod 600 ~/.tron/system/mods/twitter/cookies.json ~/.tron/system/mods/twitter/state.json
-trap 'rm -f ~/.tron/system/mods/twitter/cookies.json ~/.tron/system/mods/twitter/state.json' EXIT
+COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value)
+TRON_TWITTER_COOKIES="$COOKIES" tron-twitter search "RAG" --count 20
+TRON_TWITTER_COOKIES="$COOKIES" tron-twitter timeline karpathy --count 10
+unset COOKIES
+```
 
-tron-twitter check-mentions
+**Stateful commands** (`check-mentions` / `check-dms` without `--peek`) — pass state in, persist new state out:
 
-# Push the updated state bookmark back to the vault
+```bash
+OUT=$(
+  TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+  TRON_TWITTER_STATE=$(~/.tron/skills/vault/scripts/vault.sh get twitter-state --field value) \
+  tron-twitter check-mentions
+)
+
+# Items: the new mentions since the last bookmark
+echo "$OUT" | jq '.items'
+
+# REQUIRED: push the updated state bookmark back to the vault
+TMP=$(mktemp) && chmod 600 "$TMP" && trap 'rm -f "$TMP"' EXIT
+echo "$OUT" | jq -c '.state' > "$TMP"
 ~/.tron/skills/vault/scripts/vault.sh set twitter-state \
   --type secret \
-  --desc "X/Twitter state (last_mention_id bookmark) for tron-twitter check-mentions" \
+  --desc "X/Twitter state bookmarks for tron-twitter check-mentions / check-dms" \
   --tags "twitter,x,state" \
-  --field-file value=~/.tron/system/mods/twitter/state.json
+  --field-file value="$TMP"
 ```
 
-**Why no env var override**: `tron-twitter`'s `config.py` hardcodes `~/.tron/system/mods/twitter/` — no `TRON_TWITTER_COOKIES_FILE`, no `--cookies`, no `--data-dir`. If that ever changes upstream, switch to inline env var overrides like the `google-workspace` skill uses.
+With `--peek`, the `state` field is unchanged — you can skip the write-back:
+
+```bash
+TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+TRON_TWITTER_STATE=$(~/.tron/skills/vault/scripts/vault.sh get twitter-state --field value) \
+  tron-twitter check-mentions --peek | jq '.items'
+```
+
+**Why this pattern**: no tempfiles, no `trap` to clean up stray cookie files, no hardcoded paths, no chance of leaving plaintext credentials on disk between calls. The vault is the single source of truth.
 
 ## Routing Table
 
@@ -127,6 +139,8 @@ For **quick lookups** (single search, scan results, answer directly), the CLI re
 
 ## CLI Quick Reference
 
+All commands require `TRON_TWITTER_COOKIES` inline. Only `check-mentions` / `check-dms` additionally require `TRON_TWITTER_STATE`.
+
 ### Read Operations
 
 | Command | Usage |
@@ -139,6 +153,7 @@ For **quick lookups** (single search, scan results, answer directly), the CLI re
 | Notifications | `tron-twitter notifications [--type All\|Verified\|Mentions] [--count 20]` |
 | DM inbox | `tron-twitter dms` |
 | DM history | `tron-twitter dm-history USERNAME --count 20` |
+| Auth status | `tron-twitter auth status` |
 
 ### Write Operations
 
@@ -161,7 +176,7 @@ For **quick lookups** (single search, scan results, answer directly), the CLI re
 | New DMs | `tron-twitter check-dms` |
 | Peek DMs | `tron-twitter check-dms --peek` |
 
-State is stored in the vault as `twitter-state` and materialized per-call to `~/.tron/system/mods/twitter/state.json` — see "Per-call materialization" above. First run returns all; subsequent runs return only new. Non-peek commands require a vault write-back after the call or the bookmark regresses.
+Stateful commands emit a `{"items": [...], "state": {...}}` envelope as JSON (regardless of `--format`). Non-peek calls advance the bookmark in `state` — push that back to the `twitter-state` vault entry or the next call re-reports the same items as "new".
 
 ### Critical Syntax Notes
 
@@ -169,6 +184,7 @@ State is stored in the vault as `twitter-state` and materialized per-call to `~/
 - `post`, `reply`, `dm` use **positional arguments** — do NOT use `--text` flags
 - Products for search: `Top` (default), `Latest`, `Media`
 - Trending categories: `trending` (default), `for-you`, `news`, `sports`, `entertainment`
+- `check-mentions` / `check-dms` always output JSON envelopes — `--format text` is ignored for those
 
 ## Common Search Operators
 
@@ -189,8 +205,11 @@ Build precise queries by combining operators directly in the search string. For 
 Use `tron-twitter trending` as a research entry point:
 
 ```bash
-tron-twitter --format text trending --category trending --count 20
-tron-twitter --format text trending --category news --count 10
+TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+  tron-twitter --format text trending --category trending --count 20
+
+TRON_TWITTER_COOKIES=$(~/.tron/skills/vault/scripts/vault.sh get twitter-cookies --field value) \
+  tron-twitter --format text trending --category news --count 10
 ```
 
 For tracking a specific user's output, use `tron-twitter timeline USERNAME --count 20`.
@@ -213,10 +232,10 @@ For tracking a specific user's output, use `tron-twitter timeline USERNAME --cou
 
 ## Gotchas
 
-- **Hardcoded paths, no env var override.** `tron-twitter`'s `config.py` reads from `~/.tron/system/mods/twitter/{cookies,state}.json` with no `TRON_TWITTER_COOKIES_FILE`, no `--cookies` flag, no `--data-dir`. Every call must materialize cookies to that exact path — unlike `gws`, you can't point it at a temp file via env var.
-- **Always clean up `cookies.json` via `trap`.** Never leave it on disk between sessions — the whole point of the vault store is that there's no long-lived plaintext copy. `trap 'rm -f ~/.tron/system/mods/twitter/cookies.json' EXIT` is not optional.
-- **State-mutating commands need a write-back.** `check-mentions` / `check-dms` without `--peek` rewrite `state.json` locally; if you don't push that file back to the `twitter-state` vault entry, the next run materializes the old bookmark and re-reports the same items as "new".
-- **Cookies rotate.** `auth_token` is long-lived (weeks to months) but `ct0` (the CSRF token) can rotate within a session. If `tron-twitter auth status` starts returning invalid after it worked yesterday, re-do the cold start flow to harvest fresh cookies.
-- **No programmatic login.** Cold-start cookies must come from a real browser session the user is already signed into. Trying to log into x.com via `agent-browser` or any automation almost always trips bot detection. Ask the user to do the browser step and paste the values.
+- **Inline env overrides only.** Use `TRON_TWITTER_COOKIES=... tron-twitter ...` — never `export TRON_TWITTER_COOKIES=...`. Exporting leaks the cookies into any sibling tool you run in the same shell, defeating the whole point of sourcing from the vault per-call.
+- **State envelope write-back.** Non-peek `check-mentions` / `check-dms` mutate the bookmark in the returned `state` field. If you don't push that updated `state` back to `twitter-state` in the vault, the next run re-materializes the old bookmark and re-reports the same items as "new".
+- **Peek vs non-peek.** `--peek` reads state but does not advance it. Don't interleave a peek and a non-peek call and expect deterministic bookmark behavior — pick one mode per workflow.
+- **Cookies rotate.** `auth_token` is long-lived (weeks to months) but `ct0` (the CSRF token) can rotate within a session. If `tron-twitter auth status` starts returning `{"valid": false}` after it worked yesterday, redo the Cold start flow to harvest fresh cookies.
+- **No programmatic login.** Cold-start cookies must come from a real browser session the user is already signed into. Automated login via `agent-browser` almost always trips bot detection. Ask the user to do the browser step and paste the values.
 - **The x.com / twitter.com domain switch** can put cookies under either hostname in DevTools. Check both `https://x.com` and `https://twitter.com` in the Cookies panel if the first is empty.
 - **Never put cookie values on the command line.** Always stage them to a `mktemp` file with `chmod 600` and use `vault.sh set --field-file`. `--field key=value` would leak the secret into process args and shell history.

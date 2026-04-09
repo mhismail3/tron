@@ -109,7 +109,7 @@ Never drop loose files in `~/.tron/` or `~/`. If you're not sure where something
 **Off-limits for writing** (enforced by guardrails):
 - System paths: /System, /Library, /usr, /bin, /sbin, /etc, /var, /opt, /Applications, /Volumes
 - Dotfiles: ~/.ssh, ~/.aws, ~/.config, ~/.gitconfig, etc. (you can read these, not write)
-- Synology Drive, ~/.tron/system/ (database, auth, settings, deployment, mods)
+- Synology Drive, ~/.tron/system/ (database, auth, settings, deployment)
 
 ## PATH REFERENCE
 
@@ -133,8 +133,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | SETTINGS | `~/.tron/system/settings.json` | Server configuration |
 | AUTH | `~/.tron/system/auth.json` | API keys and OAuth tokens |
 | VAULT | `~/.tron/workspace/vault/` | Encrypted credential store |
-| DEPLOYMENT | `~/.tron/system/deployment/` | Deploy scripts, `tron-cli`, rollback state |
-| MODS | `~/.tron/system/mods/` | Optional modules (e.g. `apns/`) |
+| DEPLOYMENT | `~/.tron/system/deployment/` | Deploy scripts, `tron-cli`, rollback state, optional APNs key + `apns.json` |
 | TRANSCRIPTION | `~/.tron/system/transcription/` | Speech-to-text sidecar: `worker.py`, `venv/`, `models/hf/` |
 | BINARY | `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary |
 

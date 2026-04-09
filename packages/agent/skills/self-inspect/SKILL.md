@@ -1,6 +1,6 @@
 ---
 name: "Self Inspect"
-description: "Inspect Tron database, settings, auth, skills, mods, deployment, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
+description: "Inspect Tron database, settings, auth, skills, deployment, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
 version: "3.2.0"
 allowedTools:
   - Bash
@@ -10,7 +10,7 @@ tags:
   - debugging
 ---
 
-Comprehensive self-introspection for the Tron installation. Use this skill to investigate sessions, analyze token usage, debug cron jobs, check server health, inspect settings/auth/skills/mods, or understand any aspect of `~/.tron/` state.
+Comprehensive self-introspection for the Tron installation. Use this skill to investigate sessions, analyze token usage, debug cron jobs, check server health, inspect settings/auth/skills, or understand any aspect of `~/.tron/` state.
 
 All inspection is done via direct `sqlite3` queries and file reads — no wrapper scripts needed.
 
@@ -52,8 +52,6 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 │   │   ├── restart-sentinel.json  # Restart state tracking
 │   │   ├── workspace-path         # Path to tron workspace
 │   │   └── auth.lock              # Auth serialization lock
-│   ├── mods/                      # Optional modules
-│   │   └── apns/                  # Push notifications (config.json, AuthKey)
 │   └── transcription/             # Speech-to-text sidecar (worker.py, venv/, models/hf/)
 ├── skills/                        # Installed skills (SKILL.md per skill)
 ├── memory/                        # Agent memory and working state

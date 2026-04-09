@@ -324,8 +324,6 @@ create_launchd_plist() {
         <string>$RUST_WORKSPACE</string>
         <key>RUST_LOG</key>
         <string>info</string>
-        <key>GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE</key>
-        <string>$TRON_HOME/system/mods/google/credentials.json</string>
     </dict>
 
     <key>SoftResourceLimits</key>

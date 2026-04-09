@@ -107,7 +107,6 @@ Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** t
 | `~/.tron/settings.json` | `~/.tron/system/settings.json` (SETTINGS) |
 | `~/.tron/auth.json` | `~/.tron/system/auth.json` (AUTH) |
 | `~/.tron/tron` (binary) | `~/.tron/system/Tron.app/Contents/MacOS/tron` (BINARY) |
-| `~/.tron/mods/` | `~/.tron/system/mods/` (MODS) |
 | `~/.tron/artifacts/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
 | `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
 | `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` (KNOWLEDGE) |
@@ -193,7 +192,7 @@ If the skill requires authentication:
 
 **C. Directory / file structure**
 
-If the skill writes state to disk (e.g., `~/.tron/system/mods/<name>/`), it must `mkdir -p` that path before first use.
+If the skill writes state to disk (e.g., under `~/.tron/workspace/scratch/<name>/`), it must `mkdir -p` that path before first use.
 
 **D. Idempotency**
 

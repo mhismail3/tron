@@ -1,4 +1,4 @@
-//! APNS configuration loading from `~/.tron/system/mods/apns/`.
+//! APNS configuration loading from `~/.tron/system/deployment/`.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -37,10 +37,8 @@ impl ApnsConfig {
             };
             return expanded;
         }
-        // Default: ~/.tron/system/mods/apns/AuthKey_{keyId}.p8
-        crate::core::paths::mods_dir()
-            .join("apns")
-            .join(format!("AuthKey_{}.p8", self.key_id))
+        // Default: ~/.tron/system/deployment/AuthKey_{keyId}.p8
+        crate::core::paths::deploy_dir().join(format!("AuthKey_{}.p8", self.key_id))
     }
 
     /// APNS server hostname based on environment.
@@ -53,7 +51,7 @@ impl ApnsConfig {
     }
 }
 
-/// Load APNS config from `~/.tron/system/mods/apns/config.json`.
+/// Load APNS config from `~/.tron/system/deployment/apns.json`.
 ///
 /// Returns `None` if config doesn't exist or is invalid (not an error —
 /// APNS is optional).
@@ -64,11 +62,9 @@ pub fn load_apns_config() -> Option<ApnsConfig> {
 /// Load APNS config from a specific base directory (for testing).
 pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
     let config_path = if let Some(base) = base {
-        base.join("config.json")
+        base.join("apns.json")
     } else {
-        crate::core::paths::mods_dir()
-            .join("apns")
-            .join("config.json")
+        crate::core::paths::deploy_dir().join("apns.json")
     };
 
     if !config_path.exists() {
@@ -224,7 +220,7 @@ mod tests {
         };
         let path = config.resolved_key_path();
         assert!(path.to_string_lossy().contains("AuthKey_ABC123.p8"));
-        assert!(path.to_string_lossy().contains(".tron/system/mods/apns"));
+        assert!(path.to_string_lossy().contains(".tron/system/deployment"));
     }
 
     #[test]
@@ -275,7 +271,7 @@ mod tests {
     #[test]
     fn load_from_invalid_json_returns_none() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.json"), "not json").unwrap();
+        std::fs::write(dir.path().join("apns.json"), "not json").unwrap();
         let result = load_from_path(Some(dir.path()));
         assert!(result.is_none());
     }
@@ -284,7 +280,7 @@ mod tests {
     fn load_missing_required_fields_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("config.json"),
+            dir.path().join("apns.json"),
             r#"{"keyId": "", "teamId": "X", "bundleId": "Y"}"#,
         )
         .unwrap();
@@ -296,7 +292,7 @@ mod tests {
     fn load_valid_config_without_key_file_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("config.json"),
+            dir.path().join("apns.json"),
             r#"{"keyId": "ABC", "teamId": "XYZ", "bundleId": "com.test"}"#,
         )
         .unwrap();
@@ -309,7 +305,7 @@ mod tests {
     fn load_valid_config_with_key_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("config.json"),
+            dir.path().join("apns.json"),
             serde_json::json!({
                 "keyId": "ABC",
                 "teamId": "XYZ",

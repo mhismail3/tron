@@ -43,8 +43,6 @@ pub mod dirs {
     pub const JOURNALS: &str = "journals";
     /// Deployment artifacts and rollback state.
     pub const DEPLOYMENT: &str = "deployment";
-    /// Optional extension modules (APNS, etc.).
-    pub const MODS: &str = "mods";
     /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
     pub const TRANSCRIPTION: &str = "transcription";
 
@@ -149,11 +147,6 @@ pub fn journals_dir() -> PathBuf {
 /// `~/.tron/system/deployment/`
 pub fn deploy_dir() -> PathBuf {
     system_dir().join(dirs::DEPLOYMENT)
-}
-
-/// `~/.tron/system/mods/`
-pub fn mods_dir() -> PathBuf {
-    system_dir().join(dirs::MODS)
 }
 
 // ── Transcription sidecar ──────────────────────────────────────────────

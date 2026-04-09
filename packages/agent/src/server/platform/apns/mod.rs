@@ -15,7 +15,7 @@
 //!
 //! ## Transport selection (in `main.rs`)
 //!
-//! 1. Direct: `~/.tron/system/mods/apns/config.json` + `.p8` key on disk
+//! 1. Direct: `~/.tron/system/deployment/apns.json` + `.p8` key on disk
 //! 2. Relay: `TRON_RELAY_URL` + `TRON_RELAY_SECRET` (build-time or runtime env)
 //! 3. Disabled: neither configured → `StubNotifyDelegate`
 

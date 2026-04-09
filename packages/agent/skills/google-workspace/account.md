@@ -92,7 +92,7 @@ For a sequence of calls, materialize once at the top of your script and clean up
 - Set `trap 'rm -f "$TMP"' EXIT` so the file is removed even on failure.
 - Override `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` per-command (inline, not via `export`) so it doesn't leak into other tools running in the same shell.
 
-The launchd plist sets a default `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` pointing at a stale path that no longer exists. It is intentionally ignored — every gws call overrides it inline.
+The launchd plist sets no default for `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` — every `gws` call must supply the path inline.
 
 ## Re-authentication
 
@@ -218,5 +218,5 @@ Clears `gws`'s local credentials and token cache. **This does not touch the vaul
 - API enablement is per-project. A `PERMISSION_DENIED` from a service usually means that service's API isn't enabled yet — turn it on in the GCP console.
 - Consent screen `Testing` mode tokens expire every 7 days. For long-running headless setups, publish the OAuth app (consent screen → "Publish app").
 - Always materialize the credentials to a temp file (`mktemp`) for the duration of a single command and clean up via `trap`. Never write them to a known long-lived path.
-- The launchd plist's default `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` points at a stale path that no longer exists. Per-call inline overrides are required; don't try to "fix" the env var by recreating the file.
+- The launchd plist sets no default for `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` — every call must supply the path inline.
 - Use inline env var overrides (`GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=... gws ...`) rather than `export`, so the path doesn't leak into other tools in the same shell session.

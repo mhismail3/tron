@@ -46,7 +46,7 @@ npm install
 npx wrangler login
 npx wrangler deploy
 # Set secrets (one-time):
-cat ~/.tron/system/mods/apns/AuthKey_*.p8 | npx wrangler secret put APNS_KEY_P8
+cat ~/.tron/system/deployment/AuthKey_*.p8 | npx wrangler secret put APNS_KEY_P8
 npx wrangler secret put APNS_KEY_ID       # 10-char key ID
 npx wrangler secret put APNS_TEAM_ID      # 10-char team ID
 npx wrangler secret put TRON_RELAY_SECRET  # same secret as in auth.json
@@ -68,11 +68,10 @@ For local development with direct APNs access (bypasses relay):
 ### Store Credentials
 
 ```bash
-mkdir -p ~/.tron/system/mods/apns
-mv ~/Downloads/AuthKey_ABC123DEFG.p8 ~/.tron/system/mods/apns/
-chmod 600 ~/.tron/system/mods/apns/AuthKey_*.p8
+mv ~/Downloads/AuthKey_ABC123DEFG.p8 ~/.tron/system/deployment/
+chmod 600 ~/.tron/system/deployment/AuthKey_*.p8
 
-cat > ~/.tron/system/mods/apns/config.json << 'EOF'
+cat > ~/.tron/system/deployment/apns.json << 'EOF'
 {
   "keyId": "ABC123DEFG",
   "teamId": "XYZ789TEAM",
@@ -128,7 +127,7 @@ func application(_ application: UIApplication,
 
 ## Configuration Reference
 
-### Direct Mode (`~/.tron/system/mods/apns/config.json`)
+### Direct Mode (`~/.tron/system/deployment/apns.json`)
 
 | Field | Description |
 |-------|-------------|
@@ -151,7 +150,7 @@ When releasing to App Store:
 
 1. Ensure relay is deployed with production APNs credentials
 2. Build with `TRON_RELAY_URL` and `TRON_RELAY_SECRET` set
-3. Direct mode: change `config.json` to `"environment": "production"`
+3. Direct mode: change `apns.json` to `"environment": "production"`
 
 ## Troubleshooting
 
