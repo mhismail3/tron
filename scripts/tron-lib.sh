@@ -18,7 +18,7 @@ BIN_DIR="$HOME/.local/bin"
 TRON_BUNDLE_ID="com.tron.agent"
 INSTALLED_BUNDLE="$TRON_HOME/system/Tron.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
-DEV_BUNDLE="$TRON_HOME/system/dev/Tron.app"
+DEV_BUNDLE="$TRON_HOME/system/deployment/Tron-Dev.app"
 DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 
 # Service configuration
