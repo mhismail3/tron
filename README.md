@@ -21,7 +21,6 @@ This README is the single, canonical reference for the project. The Rust codebas
 - [Settings](#settings)
 - [Authentication](#authentication)
 - [Context and Compaction](#context-and-compaction)
-- [Semantic Memory](#semantic-memory)
 - [Database Schema](#database-schema)
 - [iOS App](#ios-app)
 - [Deployment](#deployment)
@@ -50,7 +49,7 @@ This README is the single, canonical reference for the project. The Rust codebas
 |  |  Anthropic  |  | read/write|  |  loader    |  |  Session lifecycle     | |
 |  |  OpenAI     |  | edit/bash |  |  compaction|  |  Turn management       | |
 |  |  Google     |  | search/web|  |  skills    |  |  Event routing         | |
-|  |  MiniMax    |  | subagents |  |  memory    |  |  Subagent coordination | |
+|  |  MiniMax    |  | subagents |  |  rules     |  |  Subagent coordination | |
 |  +-------------+  +-----------+  +------------+  +------------------------+ |
 +------------------------------------+----------------------------------------+
                                      |
@@ -59,7 +58,7 @@ This README is the single, canonical reference for the project. The Rust codebas
 |                         Event Store (SQLite)                                |
 |   - Immutable event log with tree structure (fork/rewind)                   |
 |   - Session state reconstruction via ancestor traversal                     |
-|   - Full-text search (FTS5), task management (PARA), vector embeddings      |
+|   - Full-text search (FTS5), task management (PARA)                         |
 +-----------------------------------------------------------------------------+
 ```
 
@@ -78,11 +77,13 @@ This README is the single, canonical reference for the project. The Rust codebas
 ```
 tron/
 +-- packages/
-|   +-- agent/              Rust agent server (Cargo workspace, 12 crates)
+|   +-- agent/              Rust agent server (single `tron` crate, modular layout)
 |   +-- ios-app/            SwiftUI iOS application
 +-- scripts/
 |   +-- tron                CLI for build, deploy, service management
-|   +-- artifacts/          Benchmark outputs (gitignored)
+|   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
+|   +-- tron-cli            Runtime CLI deployed alongside the server
+|   +-- auto-deploy         Background auto-deploy worker
 +-- .claude/
     +-- CLAUDE.md           AI agent project instructions
     +-- rules/              Path-scoped AI navigation rules
@@ -90,45 +91,49 @@ tron/
 
 ---
 
-## Rust Crates
+## Rust Modules
 
-The server is a Cargo workspace of 12 crates. Dependencies flow top-down; no cycles.
+The agent is a single `tron` crate (see `packages/agent/Cargo.toml`). What used to be a multi-crate workspace was consolidated into one compilation unit; the modules below sit inside `packages/agent/src/` and are wired up in `lib.rs`. Dependencies flow top-down; no cycles.
 
 ```
-tron-core             Foundation types, errors, branded IDs, message model
+core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
-  +-- tron-settings         Settings schema, layered loading, global singleton
-  +-- tron-llm              Provider trait, model registry, SSE streaming, auth
-  |     +-- anthropic/        Claude (OAuth + API key, cache pruning)
-  |     +-- openai/           GPT/o-series (OAuth + API key)
-  |     +-- google/           Gemini (Cloud Code Assist + Antigravity OAuth)
-  |     +-- minimax/          MiniMax (API key only)
-  +-- tron-events           SQLite event store, migrations, reconstruction
-  +-- tron-tools            Tool trait, registry, 18 tool implementations
-  +-- tron-skills           SKILL.md parser, registry, context injection
-  +-- tron-embeddings       ONNX embeddings (Qwen3-0.6B-q4), vector search
-  +-- tron-transcription    Native transcription (parakeet-tdt-0.6b via ONNX)
+  +-- settings         Settings schema, layered loading, global singleton
+  +-- skills           SKILL.md parser, registry, context injection
+  +-- transcription    Speech-to-text via parakeet-mlx Python sidecar (MLX backend)
   |
-  +-- tron-runtime          Aggregation: agent loop, context, hooks, orchestrator, tasks
+  +-- events           SQLite event store, migrations, reconstruction
+  +-- llm              Provider trait, model registry, SSE streaming, auth
+  |     +-- anthropic/   Claude (OAuth + API key, cache pruning)
+  |     +-- openai/      GPT/o-series (OAuth + API key)
+  |     +-- google/      Gemini (Cloud Code Assist + Antigravity OAuth)
+  |     +-- minimax/     MiniMax (API key only)
+  +-- mcp              Model Context Protocol client/server bridge
+  +-- tools            Tool trait, registry, tool implementations
+  +-- cron             Scheduled job runner (automations)
+  +-- worktree         Git worktree management for isolated subagent runs
   |
-  +-- tron-server           Axum HTTP/WS, 101 RPC handlers, event bridge, APNS
+  +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
-  +-- tron-agent            Binary entry point (main.rs), DB policy, CLI subcommands
+  +-- server           Axum HTTP/WS, RPC handlers, event bridge, APNS
+  |
+  +-- main.rs          Binary entry point: DB policy, CLI subcommands, startup
 ```
 
-| Crate | Purpose | Key Types |
-|-------|---------|-----------|
-| `tron-core` | Shared vocabulary for all crates | `Message`, `TronError`, `StreamEvent`, `TronEvent`, `SessionId` |
-| `tron-settings` | Layered config (defaults + file + env) | `TronSettings`, `get_settings()`, `reload_settings_from_path()` |
-| `tron-llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
-| `tron-events` | Event sourcing + SQLite | `EventStore`, `EventType` (60 variants), `SessionEvent` |
-| `tron-tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
-| `tron-skills` | Skill loading + injection | `SkillRegistry`, `process_prompt_for_skills()` |
-| `tron-embeddings` | Semantic vector search | `EmbeddingController`, `VectorRepository`, `OnnxEmbeddingService` |
-| `tron-transcription` | Speech-to-text | `TranscriptionEngine` |
-| `tron-runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `tron-server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
-| `tron-agent` | Binary wiring + startup | `main()`, `DefaultProviderFactory`, `db_path_policy` |
+| Module | Purpose | Key Types |
+|--------|---------|-----------|
+| `core` | Shared vocabulary, paths, errors, message model | `Message`, `TronError`, `StreamEvent`, `TronEvent`, `SessionId`, `paths::*` |
+| `settings` | Layered config (defaults + file + env) | `TronSettings`, `get_settings()`, `reload_settings_from_path()` |
+| `skills` | Skill loading + injection | `SkillRegistry`, `process_prompt_for_skills()` |
+| `transcription` | Speech-to-text via MLX sidecar | `MlxEngine`, `TranscriptionResult`, `TranscriptionError` |
+| `events` | Event sourcing + SQLite | `EventStore`, `EventType`, `SessionEvent` |
+| `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
+| `mcp` | Model Context Protocol integration | MCP client/server types |
+| `tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
+| `cron` | Automation scheduler | Cron job runner, schedule parser |
+| `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
+| `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
+| `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
 
 ---
 
@@ -571,33 +576,6 @@ Async lifecycle hooks execute before/after tool calls:
 
 ---
 
-## Semantic Memory
-
-The memory system uses ONNX-based embeddings for cross-session knowledge retrieval.
-
-| Component | Detail |
-|-----------|--------|
-| **Model** | Qwen3-Embedding-0.6B-ONNX |
-| **Quantization** | q4 (4-bit weights, fp32 activations) |
-| **Dimensions** | 1024 full output, truncated to 512 via Matryoshka |
-| **Pooling** | Last-token |
-| **Normalization** | L2 re-normalization after truncation |
-| **Storage** | SQLite BLOB columns (no sqlite-vec virtual tables) |
-| **Search** | Brute-force KNN with cosine similarity |
-| **Model cache** | `~/.tron/system/mods/models/` |
-
-### Memory Sources
-
-- **Ledger entries**: Session summaries written after compaction
-- **Remember tool**: Explicit memory storage by the agent
-- **Backfill**: `tron backfill-ledger` imports external LEDGER.jsonl entries
-
-### Auto-Injection
-
-When enabled, the top-k most relevant memories (default 5) are injected into the context at each turn. Workspace-scoped memories get priority; cross-project memories fill remaining budget.
-
----
-
 ## Database Schema
 
 All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5s busy timeout for concurrent access.
@@ -726,29 +704,43 @@ The deploy process:
 
 ### Install Directory
 
+All paths in the tree below are resolved through helpers in `packages/agent/src/core/foundation/paths.rs`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically.
+
 ```
 ~/.tron/
-+-- app/                  Server binary + production dependencies
-+-- settings.json         User settings (deep-merged over defaults)
-+-- auth.json             OAuth tokens + API keys (mode 600)
-+-- skills/               Global skills (SKILL.md files)
-+-- memory/
-|   +-- sessions/         Session compaction summaries
-|   +-- knowledge/        Knowledge base (notes, research)
-|   +-- rules/            Global rules
-|   +-- cron/             Cron job working directories
-|   +-- canvases/         Generated artifacts
-|   +-- scratch/          Downloads, temp files, experiments
++-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- system/
-|   +-- db/
-|   |   +-- log.db        Single SQLite file (events, tasks, logs, vectors)
-|   +-- deployment/       Deploy state files
-|   +-- mods/
-|       +-- apns/         APNS credentials (p8 key + config)
-|       +-- models/       Cached ONNX models (embeddings, transcription)
-+-- user/
-    +-- voice/            Voice notes
+|   +-- Tron.app/                 macOS app bundle (Contents/MacOS/tron is the server binary)
+|   +-- settings.json             User settings (deep-merged over defaults)
+|   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
+|   +-- defaults/                 Seed copies of settings.json and auth.json (used on first install)
+|   +-- database/                 SQLite event store
+|   |   +-- log.db                Events, sessions, tasks, journals, cron state
+|   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
+|   +-- deployment/               Deploy state: tron-cli, tron-lib.sh, deployed-commit, last-deployment.json, ...
+|   +-- mods/                     Optional modules (e.g. apns/ — APNS p8 key + config.json)
+|   +-- transcription/            Speech-to-text sidecar
+|       +-- worker.py             parakeet-mlx Python worker (stdin/stdout JSON-line protocol)
+|       +-- requirements.txt      Pip deps for the venv
+|       +-- venv/                 Auto-created on first transcription request
+|       +-- models/hf/            HuggingFace model cache (HF_HOME)
++-- workspace/                    User working area (mounted into agent context)
+    +-- vault/                    AES-256-CBC encrypted credential store (entries/, index.json, .master-key)
+    +-- knowledge/                Long-term notes and research
+    +-- sessions/                 Auto-generated session compaction summaries
+    +-- reports/                  Analysis and investigation reports
+    +-- automations/              Cron job working directories + automations.json
+    +-- rules/                    Global rules (SYSTEM.md, CLAUDE.md, AGENTS.md)
+    +-- scratch/                  Downloads, temp files, experiments
+    +-- screenshots/              Saved screenshots from the computer-use tool
+    +-- plans/                    Plan files written during plan mode
+    +-- renders/                  Generated artifacts (PDFs, images, ...)
+    +-- voice notes/              Voice note recordings
 ```
+
+Notes:
+- `~/.tron/user/` is reserved (`paths::user_dir()`) but not currently populated.
+- Credentials for external CLIs (Google Workspace, Twitter, etc.) live in `workspace/vault/`, not in `system/mods/`. See the relevant skills for the materialization pattern.
 
 ### Service (launchd)
 
