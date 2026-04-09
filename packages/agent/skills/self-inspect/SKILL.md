@@ -52,11 +52,9 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 │   │   ├── restart-sentinel.json  # Restart state tracking
 │   │   ├── workspace-path         # Path to tron workspace
 │   │   └── auth.lock              # Auth serialization lock
-│   └── mods/                      # Optional modules
-│       ├── apns/                  # Push notifications (config.json, AuthKey)
-│       ├── google/                # Google OAuth (credentials.json)
-│       ├── transcribe/            # Speech-to-text (worker.py, models/, venv/)
-│       └── twitter/               # Twitter/X (cookies.json, state.json)
+│   ├── mods/                      # Optional modules
+│   │   └── apns/                  # Push notifications (config.json, AuthKey)
+│   └── transcription/             # Speech-to-text sidecar (worker.py, venv/, models/hf/)
 ├── skills/                        # Installed skills (SKILL.md per skill)
 ├── memory/                        # Agent memory and working state
 │   ├── rules/SYSTEM.md            # System identity and operational rules

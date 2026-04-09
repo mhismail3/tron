@@ -6,7 +6,7 @@ import json, sys, os, time
 def main():
     print(json.dumps({"status": "loading"}), flush=True)
     os.environ.setdefault(
-        "HF_HOME", os.path.expanduser("~/.tron/system/mods/transcribe/models/hf")
+        "HF_HOME", os.path.expanduser("~/.tron/system/transcription/models/hf")
     )
 
     from parakeet_mlx import from_pretrained

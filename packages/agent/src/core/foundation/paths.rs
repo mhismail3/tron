@@ -45,6 +45,8 @@ pub mod dirs {
     pub const DEPLOYMENT: &str = "deployment";
     /// Optional extension modules (APNS, etc.).
     pub const MODS: &str = "mods";
+    /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
+    pub const TRANSCRIPTION: &str = "transcription";
 
     // ── Under workspace/ ──
 
@@ -152,6 +154,38 @@ pub fn deploy_dir() -> PathBuf {
 /// `~/.tron/system/mods/`
 pub fn mods_dir() -> PathBuf {
     system_dir().join(dirs::MODS)
+}
+
+// ── Transcription sidecar ──────────────────────────────────────────────
+//
+// The transcription sidecar is a Python venv + parakeet-mlx worker that
+// lives entirely under one directory, with a HuggingFace model cache
+// inside it. All references to these paths across the Rust agent, the
+// Python worker, and `scripts/tron` should go through the helpers below.
+
+/// `~/.tron/system/transcription/` — parent dir for venv, worker, model cache.
+pub fn transcription_dir() -> PathBuf {
+    system_dir().join(dirs::TRANSCRIPTION)
+}
+
+/// `~/.tron/system/transcription/venv/`
+pub fn transcription_venv_dir() -> PathBuf {
+    transcription_dir().join("venv")
+}
+
+/// `~/.tron/system/transcription/worker.py`
+pub fn transcription_worker_script() -> PathBuf {
+    transcription_dir().join("worker.py")
+}
+
+/// `~/.tron/system/transcription/requirements.txt`
+pub fn transcription_requirements_path() -> PathBuf {
+    transcription_dir().join("requirements.txt")
+}
+
+/// `~/.tron/system/transcription/models/hf/` — `HuggingFace` model cache (`HF_HOME`).
+pub fn transcription_hf_cache_dir() -> PathBuf {
+    transcription_dir().join("models").join("hf")
 }
 
 // ── Workspace subdirectory helpers ─────────────────────────────────────
@@ -348,6 +382,46 @@ mod tests {
     fn containers_path_correct() {
         let p = containers_path();
         assert!(p.ends_with(format!("{}/{}", dirs::SYSTEM, files::CONTAINERS_JSON)));
+    }
+
+    // ── Transcription sidecar ──────────────────────────────────────
+
+    #[test]
+    fn transcription_dir_under_system() {
+        let p = transcription_dir();
+        assert!(p.ends_with(format!("{}/{}", dirs::SYSTEM, dirs::TRANSCRIPTION)));
+    }
+
+    #[test]
+    fn transcription_venv_dir_correct() {
+        let p = transcription_venv_dir();
+        assert!(p.ends_with(format!("{}/{}/venv", dirs::SYSTEM, dirs::TRANSCRIPTION)));
+    }
+
+    #[test]
+    fn transcription_worker_script_correct() {
+        let p = transcription_worker_script();
+        assert!(p.ends_with(format!("{}/{}/worker.py", dirs::SYSTEM, dirs::TRANSCRIPTION)));
+    }
+
+    #[test]
+    fn transcription_requirements_path_correct() {
+        let p = transcription_requirements_path();
+        assert!(p.ends_with(format!(
+            "{}/{}/requirements.txt",
+            dirs::SYSTEM,
+            dirs::TRANSCRIPTION
+        )));
+    }
+
+    #[test]
+    fn transcription_hf_cache_dir_correct() {
+        let p = transcription_hf_cache_dir();
+        assert!(p.ends_with(format!(
+            "{}/{}/models/hf",
+            dirs::SYSTEM,
+            dirs::TRANSCRIPTION
+        )));
     }
 
     // ── Consistency guards ─────────────────────────────────────────

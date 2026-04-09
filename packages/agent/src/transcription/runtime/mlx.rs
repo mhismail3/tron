@@ -11,6 +11,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::core::paths;
 use crate::transcription::types::{TranscriptionError, TranscriptionResult};
 use crate::transcription::venv;
 
@@ -44,7 +45,7 @@ impl MlxEngine {
     /// The worker prints `{"status":"loading"}` then `{"status":"ready"}` on startup.
     pub async fn new() -> Result<Arc<Self>, TranscriptionError> {
         let python_path = venv::ensure_venv().await?;
-        let worker_script = venv::worker_script();
+        let worker_script = paths::transcription_worker_script();
 
         if !worker_script.exists() {
             return Err(TranscriptionError::Setup(format!(
@@ -67,8 +68,7 @@ impl MlxEngine {
     async fn spawn_worker(&self) -> Result<(), TranscriptionError> {
         info!("spawning transcription worker");
 
-        let hf_home = venv::sidecar_dir()
-            .join("models/hf")
+        let hf_home = paths::transcription_hf_cache_dir()
             .to_string_lossy()
             .to_string();
 

@@ -1,7 +1,8 @@
 //! Python venv management for the parakeet-mlx transcription sidecar.
 //!
 //! Handles Python discovery, venv creation, and package installation.
-//! All state lives under `~/.tron/system/mods/transcribe/`.
+//! All sidecar paths (`~/.tron/system/transcription/...`) are resolved
+//! through [`crate::core::paths`] — do not hardcode them here.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -9,18 +10,8 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, info};
 
+use crate::core::paths;
 use crate::transcription::types::TranscriptionError;
-
-/// Base directory for the transcription sidecar.
-pub fn sidecar_dir() -> PathBuf {
-    let home = crate::core::paths::home_dir();
-    PathBuf::from(format!("{home}/.tron/system/mods/transcribe"))
-}
-
-/// Path to the worker script.
-pub fn worker_script() -> PathBuf {
-    sidecar_dir().join("worker.py")
-}
 
 /// Find a system Python 3 binary. Tries versioned names first for determinism.
 ///
@@ -78,8 +69,7 @@ pub fn find_system_python() -> Result<PathBuf, TranscriptionError> {
 /// Returns the path to the venv's python binary.
 /// Creates venv + runs pip install if missing or if `parakeet_mlx` isn't importable.
 pub async fn ensure_venv() -> Result<PathBuf, TranscriptionError> {
-    let dir = sidecar_dir();
-    let venv_dir = dir.join("venv");
+    let venv_dir = paths::transcription_venv_dir();
     let venv_python = venv_dir.join("bin/python3");
 
     // Fast path: venv exists and parakeet_mlx is importable
@@ -93,7 +83,7 @@ pub async fn ensure_venv() -> Result<PathBuf, TranscriptionError> {
     // Create venv if it doesn't exist
     if !venv_dir.exists() {
         info!("creating transcription venv at {}", venv_dir.display());
-        std::fs::create_dir_all(&dir).map_err(TranscriptionError::Io)?;
+        std::fs::create_dir_all(paths::transcription_dir()).map_err(TranscriptionError::Io)?;
 
         let output = Command::new(&system_python)
             .args(["-m", "venv", &venv_dir.to_string_lossy()])
@@ -111,7 +101,7 @@ pub async fn ensure_venv() -> Result<PathBuf, TranscriptionError> {
 
     // Install parakeet-mlx
     if !check_package_installed(&venv_python).await {
-        let requirements = dir.join("requirements.txt");
+        let requirements = paths::transcription_requirements_path();
         if !requirements.exists() {
             return Err(TranscriptionError::Setup(format!(
                 "requirements.txt not found at {}",
@@ -161,19 +151,6 @@ async fn check_package_installed(python: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sidecar_dir_under_tron() {
-        let dir = sidecar_dir();
-        let s = dir.to_string_lossy();
-        assert!(s.contains(".tron/system/mods/transcribe"), "Got: {s}");
-    }
-
-    #[test]
-    fn worker_script_path() {
-        let path = worker_script();
-        assert!(path.to_string_lossy().ends_with("worker.py"));
-    }
 
     #[test]
     fn find_system_python_finds_something() {

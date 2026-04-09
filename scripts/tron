@@ -183,6 +183,17 @@ run_coverage() {
     print_success "Coverage report: $RUST_WORKSPACE/target/coverage/tarpaulin-report.html"
 }
 
+deploy_transcription_sidecar() {
+    # Copies worker.py and requirements.txt from the repo into the canonical
+    # sidecar directory. The Rust agent (see src/core/foundation/paths.rs —
+    # transcription_dir()) reads from the same path. Keep these in sync.
+    local dst="$HOME/.tron/system/transcription"
+    local src="$PROJECT_DIR/packages/agent/src/transcription/sidecar"
+    mkdir -p "$dst"
+    cp "$src/worker.py" "$dst/"
+    cp "$src/requirements.txt" "$dst/"
+}
+
 sync_managed_skills() {
     local src_dir="$PROJECT_DIR/packages/agent/skills"
     local dst_dir="$HOME/.tron/skills"
@@ -390,9 +401,7 @@ cmd_dev() {
     done
 
     # Ensure transcription sidecar files are deployed
-    mkdir -p "$HOME/.tron/system/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/" 2>/dev/null || true
+    deploy_transcription_sidecar 2>/dev/null || true
 
     # Sync managed skills from repo
     sync_managed_skills
@@ -749,9 +758,7 @@ cmd_deploy() {
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
-    mkdir -p "$HOME/.tron/system/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
+    deploy_transcription_sidecar
 
     # Sync managed skills from repo
     print_status "Syncing managed skills..."
@@ -873,9 +880,7 @@ cmd_install() {
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
-    mkdir -p "$HOME/.tron/system/mods/transcribe"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/worker.py" "$HOME/.tron/system/mods/transcribe/"
-    cp "$PROJECT_DIR/packages/agent/src/transcription/sidecar/requirements.txt" "$HOME/.tron/system/mods/transcribe/"
+    deploy_transcription_sidecar
     print_success "Deployed transcription sidecar"
 
     # Sync managed skills from repo
