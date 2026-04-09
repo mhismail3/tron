@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Vault: Encrypted credential manager for Tron
-# Storage: ~/.tron/system/vault/ with AES-256-CBC + PBKDF2 encryption
+# Storage: ~/.tron/workspace/vault/ with AES-256-CBC + PBKDF2 encryption
 
-VAULT_DIR="${VAULT_DIR:-$HOME/.tron/system/vault}"
+VAULT_DIR="${VAULT_DIR:-$HOME/.tron/workspace/vault}"
 ENTRIES_DIR="$VAULT_DIR/entries"
 KEY_FILE="$VAULT_DIR/.master-key"
 INDEX_FILE="$VAULT_DIR/index.json"

@@ -32,7 +32,7 @@ To run the full validation suite:
 ## Storage
 
 ```
-~/.tron/system/vault/
+~/.tron/workspace/vault/
   .master-key      # Auto-generated 256-bit key (0600)
   index.json       # Metadata only — names, types, tags (0600). NO secret values.
   entries/         # One encrypted file per credential (0700)

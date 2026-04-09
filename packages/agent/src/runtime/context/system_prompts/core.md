@@ -130,7 +130,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | DATABASE | `~/.tron/system/database/` | `log.db` — SQLite event store, sessions, cron state |
 | SETTINGS | `~/.tron/system/settings.json` | Server configuration |
 | AUTH | `~/.tron/system/auth.json` | API keys and OAuth tokens |
-| VAULT | `~/.tron/system/vault/` | Encrypted credential store |
+| VAULT | `~/.tron/workspace/vault/` | Encrypted credential store |
 | DEPLOYMENT | `~/.tron/system/deployment/` | Deploy scripts, `tron-cli`, rollback state |
 | MODS | `~/.tron/system/mods/` | Optional modules: `google/`, `twitter/`, `transcribe/` |
 | BINARY | `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary |
