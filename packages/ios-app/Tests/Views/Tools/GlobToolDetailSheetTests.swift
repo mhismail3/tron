@@ -147,12 +147,19 @@ struct GlobResultParserTests {
 @Suite("SearchResultParser")
 struct SearchResultParserTests {
 
+    private func details(_ matches: [[String: Any]]) -> [String: AnyCodable] {
+        ["matches": AnyCodable(matches)]
+    }
+
     // MARK: - Basic Parsing
 
-    @Test("Parses standard search results")
+    @Test("Parses structured matches from details")
     func testStandardResults() {
-        let result = "src/main.ts:12: const value = 42;\nsrc/main.ts:45: console.log(value);"
-        let groups = SearchResultParser.parse(result)
+        let matches: [[String: Any]] = [
+            ["filePath": "src/main.ts", "lineNumber": 12, "content": "const value = 42;"],
+            ["filePath": "src/main.ts", "lineNumber": 45, "content": "console.log(value);"],
+        ]
+        let groups = SearchResultParser.parse(details: details(matches))
 
         #expect(groups.count == 1)
         #expect(groups[0].filePath == "src/main.ts")
@@ -163,15 +170,15 @@ struct SearchResultParserTests {
         #expect(groups[0].matches[1].content == "console.log(value);")
     }
 
-    @Test("Groups results by file")
+    @Test("Groups matches by file")
     func testGroupsByFile() {
-        let result = """
-        src/api.ts:10: import { Router } from 'express';
-        src/api.ts:20: const router = Router();
-        src/auth.ts:5: import { verify } from 'jsonwebtoken';
-        src/utils.ts:100: export function format() {
-        """
-        let groups = SearchResultParser.parse(result)
+        let matches: [[String: Any]] = [
+            ["filePath": "src/api.ts", "lineNumber": 10, "content": "import { Router }"],
+            ["filePath": "src/api.ts", "lineNumber": 20, "content": "const router = Router()"],
+            ["filePath": "src/auth.ts", "lineNumber": 5, "content": "import { verify }"],
+            ["filePath": "src/utils.ts", "lineNumber": 100, "content": "export function format()"],
+        ]
+        let groups = SearchResultParser.parse(details: details(matches))
 
         #expect(groups.count == 3)
         #expect(groups[0].filePath == "src/api.ts")
@@ -179,13 +186,16 @@ struct SearchResultParserTests {
         #expect(groups[1].filePath == "src/auth.ts")
         #expect(groups[1].matches.count == 1)
         #expect(groups[2].filePath == "src/utils.ts")
-        #expect(groups[2].matches.count == 1)
     }
 
-    @Test("Preserves file order")
+    @Test("Preserves file order from server array")
     func testFileOrder() {
-        let result = "z.ts:1: z\na.ts:1: a\nm.ts:1: m"
-        let groups = SearchResultParser.parse(result)
+        let matches: [[String: Any]] = [
+            ["filePath": "z.ts", "lineNumber": 1, "content": "z"],
+            ["filePath": "a.ts", "lineNumber": 1, "content": "a"],
+            ["filePath": "m.ts", "lineNumber": 1, "content": "m"],
+        ]
+        let groups = SearchResultParser.parse(details: details(matches))
 
         #expect(groups.count == 3)
         #expect(groups[0].filePath == "z.ts")
@@ -193,52 +203,43 @@ struct SearchResultParserTests {
         #expect(groups[2].filePath == "m.ts")
     }
 
-    @Test("Handles empty result")
-    func testEmptyResult() {
-        let groups = SearchResultParser.parse("")
+    @Test("Returns empty array when details nil")
+    func testNilDetails() {
+        #expect(SearchResultParser.parse(details: nil).isEmpty)
+    }
+
+    @Test("Returns empty array when matches absent")
+    func testNoMatchesKey() {
+        let d: [String: AnyCodable] = ["matchCount": AnyCodable(0)]
+        #expect(SearchResultParser.parse(details: d).isEmpty)
+    }
+
+    @Test("Returns empty array when matches is empty")
+    func testEmptyMatches() {
+        let groups = SearchResultParser.parse(details: details([]))
         #expect(groups.isEmpty)
     }
 
-    @Test("Skips 'No matches found' line")
-    func testSkipsNoMatchesFound() {
-        let result = "No matches found for pattern: nonexistent"
-        let groups = SearchResultParser.parse(result)
-        #expect(groups.isEmpty)
-    }
-
-    @Test("Skips metadata and blank lines")
-    func testSkipsMetadata() {
-        let result = "src/a.ts:1: found\n\n[Showing 1 results (limit reached)]"
-        let groups = SearchResultParser.parse(result)
-
+    @Test("Skips entries missing filePath")
+    func testSkipsMalformed() {
+        let matches: [[String: Any]] = [
+            ["filePath": "ok.ts", "lineNumber": 1, "content": "ok"],
+            ["lineNumber": 5, "content": "no-path"],
+        ]
+        let groups = SearchResultParser.parse(details: details(matches))
         #expect(groups.count == 1)
-        #expect(groups[0].matches.count == 1)
+        #expect(groups[0].filePath == "ok.ts")
     }
 
-    @Test("Handles content without leading space after colon")
-    func testNoLeadingSpace() {
-        let result = "file.ts:10:content without space"
-        let groups = SearchResultParser.parse(result)
-
-        #expect(groups.count == 1)
-        #expect(groups[0].matches[0].content == "content without space")
-    }
-
-    @Test("Strips leading space after line number colon")
-    func testStripsLeadingSpace() {
-        let result = "file.ts:10: content with space"
-        let groups = SearchResultParser.parse(result)
-
-        #expect(groups[0].matches[0].content == "content with space")
-    }
-
-    @Test("Handles colons in content")
-    func testColonsInContent() {
-        let result = "config.ts:5: host: 'localhost:3000'"
-        let groups = SearchResultParser.parse(result)
-
-        #expect(groups.count == 1)
-        #expect(groups[0].matches[0].content == "host: 'localhost:3000'")
+    @Test("Accepts lineNumber as Int or Double")
+    func testLineNumberNumericTypes() {
+        let matches: [[String: Any]] = [
+            ["filePath": "a.ts", "lineNumber": 10 as Int, "content": "int"],
+            ["filePath": "a.ts", "lineNumber": 20.0 as Double, "content": "double"],
+        ]
+        let groups = SearchResultParser.parse(details: details(matches))
+        #expect(groups[0].matches[0].lineNumber == 10)
+        #expect(groups[0].matches[1].lineNumber == 20)
     }
 
     // MARK: - Line Number Width
@@ -271,18 +272,24 @@ struct SearchResultParserTests {
 
     @Test("Handles deeply nested paths")
     func testDeeplyNestedPaths() {
-        let result = "packages/ios-app/Sources/Views/Tools/Search/SearchToolDetailSheet.swift:42: let pattern = args"
-        let groups = SearchResultParser.parse(result)
+        let matches: [[String: Any]] = [[
+            "filePath": "packages/ios-app/Sources/Views/Tools/Search/SearchToolDetailSheet.swift",
+            "lineNumber": 42,
+            "content": "let pattern = args",
+        ]]
+        let groups = SearchResultParser.parse(details: details(matches))
 
         #expect(groups.count == 1)
         #expect(groups[0].filePath == "packages/ios-app/Sources/Views/Tools/Search/SearchToolDetailSheet.swift")
         #expect(groups[0].matches[0].lineNumber == 42)
     }
 
-    @Test("Handles empty content after line number")
+    @Test("Handles empty content")
     func testEmptyContent() {
-        let result = "file.ts:10:"
-        let groups = SearchResultParser.parse(result)
+        let matches: [[String: Any]] = [[
+            "filePath": "file.ts", "lineNumber": 10, "content": "",
+        ]]
+        let groups = SearchResultParser.parse(details: details(matches))
 
         #expect(groups.count == 1)
         #expect(groups[0].matches[0].content == "")

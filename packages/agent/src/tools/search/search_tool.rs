@@ -155,9 +155,10 @@ Examples:\n\
                 )]),
                 details: Some(json!({
                     "mode": "ast",
-                    "matches": result.matches,
+                    "matchCount": result.match_count,
                     "totalMatches": result.total_matches,
                     "truncated": result.truncated,
+                    "matches": result.matches_json,
                 })),
                 is_error: None,
                 stop_turn: None,
@@ -178,9 +179,10 @@ Examples:\n\
                     ]),
                     details: Some(json!({
                         "mode": "text",
-                        "matches": r.matches,
+                        "matchCount": r.match_count,
                         "filesSearched": r.files_searched,
                         "truncated": r.truncated,
+                        "matches": r.matches_json,
                     })),
                     is_error: None,
                     stop_turn: None,
@@ -300,7 +302,12 @@ mod tests {
         let r = tool.execute(json!({"pattern": "fn "}), &ctx).await.unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["mode"], "text");
-        assert!(details["matches"].as_u64().unwrap() >= 2);
+        assert!(details["matchCount"].as_u64().unwrap() >= 2);
+        let matches = details["matches"].as_array().expect("matches array");
+        assert!(matches.len() >= 2);
+        assert_eq!(matches[0]["filePath"], "file.rs");
+        assert!(matches[0]["lineNumber"].as_u64().unwrap() >= 1);
+        assert!(matches[0]["content"].as_str().unwrap().contains("fn"));
     }
 
     #[tokio::test]
@@ -352,6 +359,55 @@ mod tests {
             .await
             .unwrap();
         let details = r.details.unwrap();
-        assert_eq!(details["matches"], 3);
+        assert_eq!(details["matchCount"], 3);
+        assert_eq!(details["matches"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn text_search_structured_matches_grouped_per_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "hit one\nmiss\nhit two\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "hit three\n").unwrap();
+        let tool = SearchTool::new(ast_runner());
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "hit"}), &ctx).await.unwrap();
+        let details = r.details.unwrap();
+        let matches = details["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 3);
+        // Each match carries all three required fields.
+        for m in matches {
+            assert!(m.get("filePath").is_some());
+            assert!(m.get("lineNumber").is_some());
+            assert!(m.get("content").is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn text_search_no_matches_emits_empty_array() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "hello world").unwrap();
+        let tool = SearchTool::new(ast_runner());
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "nonexistent_xyz"}), &ctx).await.unwrap();
+        let details = r.details.unwrap();
+        assert_eq!(details["matchCount"], 0);
+        assert_eq!(details["matches"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn ast_search_emits_structured_matches() {
+        let tool = SearchTool::new(ast_runner());
+        let ctx = make_ctx("/tmp");
+        let r = tool
+            .execute(json!({"pattern": "fn $NAME()", "type": "ast"}), &ctx)
+            .await
+            .unwrap();
+        let details = r.details.unwrap();
+        assert_eq!(details["mode"], "ast");
+        let matches = details["matches"].as_array().expect("matches array");
+        assert!(!matches.is_empty());
+        assert_eq!(matches[0]["filePath"], "src/main.rs");
+        assert_eq!(matches[0]["lineNumber"], 1);
+        assert!(matches[0]["content"].as_str().unwrap().contains("fn"));
     }
 }

@@ -37,11 +37,14 @@ pub struct TextSearchResult {
     /// Formatted output text.
     pub output: String,
     /// Number of matches found.
-    pub matches: usize,
+    pub match_count: usize,
     /// Number of files searched.
     pub files_searched: usize,
     /// Whether output was truncated.
     pub truncated: bool,
+    /// Structured match data: `[{filePath, lineNumber, content}]`.
+    /// Emitted via `tool.details.matches` so iOS renders without regex.
+    pub matches_json: Vec<serde_json::Value>,
 }
 
 /// Run a text search across files under `search_root`.
@@ -138,9 +141,10 @@ pub fn text_search(
     if matches.is_empty() {
         return Ok(TextSearchResult {
             output: format!("No matches found for pattern: {pattern}"),
-            matches: 0,
+            match_count: 0,
             files_searched,
             truncated: false,
+            matches_json: Vec::new(),
         });
     }
 
@@ -148,8 +152,14 @@ pub fn text_search(
     let match_count = matches.len();
 
     let mut output = String::new();
+    let mut matches_json: Vec<serde_json::Value> = Vec::with_capacity(match_count);
     for m in &matches {
         let _ = writeln!(output, "{}:{}: {}", m.file, m.line, m.content);
+        matches_json.push(serde_json::json!({
+            "filePath": m.file,
+            "lineNumber": m.line,
+            "content": m.content,
+        }));
     }
 
     if hit_limit {
@@ -167,9 +177,10 @@ pub fn text_search(
 
     Ok(TextSearchResult {
         output,
-        matches: match_count,
+        match_count,
         files_searched,
         truncated,
+        matches_json,
     })
 }
 
@@ -208,7 +219,7 @@ mod tests {
     fn regex_matches_in_single_file() {
         let dir = setup_test_dir();
         let r = text_search(dir.path(), "println", None, None, None).unwrap();
-        assert!(r.matches >= 2);
+        assert!(r.match_count >= 2);
         assert!(r.output.contains("println"));
     }
 
@@ -216,7 +227,7 @@ mod tests {
     fn case_insensitive_matching() {
         let dir = setup_test_dir();
         let r = text_search(dir.path(), "PRINTLN", None, None, None).unwrap();
-        assert!(r.matches >= 2);
+        assert!(r.match_count >= 2);
     }
 
     #[test]
@@ -258,7 +269,7 @@ mod tests {
     fn no_matches_returns_message() {
         let dir = setup_test_dir();
         let r = text_search(dir.path(), "zzzznonexistent", None, None, None).unwrap();
-        assert_eq!(r.matches, 0);
+        assert_eq!(r.match_count, 0);
         assert!(r.output.contains("No matches found"));
     }
 
@@ -277,7 +288,7 @@ mod tests {
         std::fs::write(dir.path().join("many.txt"), lines.join("\n")).unwrap();
 
         let r = text_search(dir.path(), "match", None, Some(5), None).unwrap();
-        assert_eq!(r.matches, 5);
+        assert_eq!(r.match_count, 5);
         assert!(r.output.contains("limit reached"));
     }
 
@@ -291,7 +302,7 @@ mod tests {
         std::fs::write(dir.path().join("text.txt"), "match this text").unwrap();
 
         let r = text_search(dir.path(), "match", None, None, None).unwrap();
-        assert_eq!(r.matches, 1);
+        assert_eq!(r.match_count, 1);
         assert!(r.output.contains("text.txt"));
         assert!(!r.output.contains("binary.bin"));
     }
@@ -320,7 +331,7 @@ mod tests {
     fn empty_directory_no_matches() {
         let dir = TempDir::new().unwrap();
         let r = text_search(dir.path(), "anything", None, None, None).unwrap();
-        assert_eq!(r.matches, 0);
+        assert_eq!(r.match_count, 0);
         assert_eq!(r.files_searched, 0);
     }
 }

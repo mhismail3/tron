@@ -19,11 +19,14 @@ pub struct AstSearchResult {
     /// Formatted output text.
     pub output: String,
     /// Number of matches shown.
-    pub matches: usize,
+    pub match_count: usize,
     /// Total matches found by `ast-grep`.
     pub total_matches: usize,
     /// Whether results were truncated.
     pub truncated: bool,
+    /// Structured match data: `[{filePath, lineNumber, content}]`.
+    /// Emitted via `tool.details.matches` so iOS renders without regex.
+    pub matches_json: Vec<Value>,
 }
 
 /// Run an AST search using `ast-grep` (`sg` binary).
@@ -64,9 +67,10 @@ pub async fn ast_search(
         if stderr.contains("not found") || stderr.contains("command not found") {
             return Ok(AstSearchResult {
                 output: "ast-grep is not installed. Install it with: brew install ast-grep".into(),
-                matches: 0,
+                match_count: 0,
                 total_matches: 0,
                 truncated: false,
+                matches_json: Vec::new(),
             });
         }
 
@@ -74,9 +78,10 @@ pub async fn ast_search(
         if output.exit_code == 1 && output.stdout.trim().is_empty() {
             return Ok(AstSearchResult {
                 output: format!("No AST matches found for pattern: {pattern}"),
-                matches: 0,
+                match_count: 0,
                 total_matches: 0,
                 truncated: false,
+                matches_json: Vec::new(),
             });
         }
     }
@@ -96,15 +101,17 @@ pub async fn ast_search(
     if total_matches == 0 {
         return Ok(AstSearchResult {
             output: format!("No AST matches found for pattern: {pattern}"),
-            matches: 0,
+            match_count: 0,
             total_matches: 0,
             truncated: false,
+            matches_json: Vec::new(),
         });
     }
 
     let shown = results.iter().take(max_results);
     let mut formatted = String::new();
     let mut match_count = 0;
+    let mut matches_json: Vec<Value> = Vec::with_capacity(max_results.min(total_matches));
 
     for m in shown {
         let file = m.get("file").and_then(Value::as_str).unwrap_or("");
@@ -116,6 +123,11 @@ pub async fn ast_search(
             .unwrap_or("");
 
         let _ = writeln!(formatted, "{file}:{line}: {code}");
+        matches_json.push(serde_json::json!({
+            "filePath": file,
+            "lineNumber": line,
+            "content": code,
+        }));
         match_count += 1;
     }
 
@@ -129,9 +141,10 @@ pub async fn ast_search(
 
     Ok(AstSearchResult {
         output: formatted,
-        matches: match_count,
+        match_count,
         total_matches,
         truncated,
+        matches_json,
     })
 }
 
@@ -179,7 +192,7 @@ mod tests {
         let r = ast_search(&runner, ".", "$FN() {}", None, None, "/tmp")
             .await
             .unwrap();
-        assert_eq!(r.matches, 2);
+        assert_eq!(r.match_count, 2);
         assert!(r.output.contains("src/main.rs:5:"));
         assert!(r.output.contains("fn main()"));
     }
@@ -220,7 +233,7 @@ mod tests {
         let r = ast_search(&runner, ".", "$X", None, None, "/tmp")
             .await
             .unwrap();
-        assert_eq!(r.matches, 0);
+        assert_eq!(r.match_count, 0);
         assert!(r.output.contains("No AST matches"));
     }
 
@@ -270,7 +283,7 @@ mod tests {
         let r = ast_search(&runner, ".", "$X", None, Some(5), "/tmp")
             .await
             .unwrap();
-        assert_eq!(r.matches, 5);
+        assert_eq!(r.match_count, 5);
         assert_eq!(r.total_matches, 20);
         assert!(r.truncated);
         assert!(r.output.contains("Showing 5 of 20"));
@@ -292,7 +305,7 @@ mod tests {
         let r = ast_search(&runner, ".", "$X", None, None, "/tmp")
             .await
             .unwrap();
-        assert_eq!(r.matches, 0);
+        assert_eq!(r.match_count, 0);
         assert!(r.output.contains("No AST matches"));
     }
 }

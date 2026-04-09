@@ -34,23 +34,24 @@ struct SearchToolDetailSheet: View {
     }
 
     private var parsedResults: [SearchFileGroup] {
-        SearchResultParser.parse(data.result ?? data.streamingOutput ?? "")
+        SearchResultParser.parse(details: data.details)
     }
 
     private var totalMatchCount: Int {
-        parsedResults.reduce(0) { $0 + $1.matches.count }
+        if let count = data.details?["matchCount"]?.value as? Int { return count }
+        if let count = data.details?["matchCount"]?.value as? Double { return Int(count) }
+        return parsedResults.reduce(0) { $0 + $1.matches.count }
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated || (data.result?.contains("[Output truncated") == true)
+        data.isResultTruncated
+            || (data.details?["truncated"]?.value as? Bool == true)
     }
 
-    private var isLimitReached: Bool {
-        data.result?.contains("[Showing") == true
-    }
+    private var isLimitReached: Bool { isTruncated }
 
     private var isNoResults: Bool {
-        data.result?.contains("No matches found") == true
+        totalMatchCount == 0
     }
 
     var body: some View {
@@ -181,16 +182,9 @@ struct SearchToolDetailSheet: View {
 
     @ViewBuilder
     private var runningSection: some View {
-        if let output = data.streamingOutput, !output.isEmpty {
-            let streaming = SearchResultParser.parse(output)
-            if !streaming.isEmpty {
-                SearchStreamingMatchesSection(groups: streaming, tint: tint)
-            } else {
-                ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
-            }
-        } else {
-            ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
-        }
+        // Structured matches only arrive in tool.details on completion; show
+        // a spinner until the tool finishes.
+        ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
     }
 }
 
