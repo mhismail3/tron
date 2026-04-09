@@ -12,6 +12,8 @@ You have full access to Google Workspace services via the `gws` CLI. Run `gws au
 
 ## Setup
 
+**First time on this machine?** Read `account.md` first — there's a cold-start checklist (GCP project, enabled APIs, consent screen, OAuth client) that has to happen before `gws auth login` will work. Credentials are stored in the Tron vault (entry name: `google-workspace-cli`) and materialized to a temp file per call — see `account.md` for the pattern.
+
 Run these checks before doing anything else:
 
 ```bash
@@ -26,7 +28,7 @@ brew outdated googleworkspace-cli && brew upgrade googleworkspace-cli
 gws auth status
 ```
 
-If auth is expired or missing, tell the user to run `gws auth login` manually — it requires an interactive browser flow.
+If auth is expired or missing, tell the user to run `gws auth login` manually — it requires an interactive browser flow. After re-login, refresh the vault entry per `account.md`.
 
 ## Routing table
 
