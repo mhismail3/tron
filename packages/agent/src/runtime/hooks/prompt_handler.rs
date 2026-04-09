@@ -68,6 +68,7 @@ pub struct PromptHookHandler {
 const TITLE_REGEN_INTERVAL: usize = 6;
 
 impl PromptHookHandler {
+    /// Construct a new `PromptHookHandler` from its configuration parameters.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -339,7 +340,7 @@ impl HookHandler for PromptHookHandler {
                                 }
                             }
                             debug!(title = %title, "LLM hook generated session title");
-                            emitter.emit(crate::core::events::TronEvent::SessionUpdated {
+                            let _ = emitter.emit(crate::core::events::TronEvent::SessionUpdated {
                                 base: BaseEvent::now(&session_id),
                                 title: Some(title),
                                 model: None,
@@ -432,7 +433,7 @@ impl HookHandler for PromptHookHandler {
                     }
 
                     // Broadcast to real-time subscribers (WebSocket/iOS)
-                    emitter.emit(crate::core::events::TronEvent::LlmHookResult {
+                    let _ = emitter.emit(crate::core::events::TronEvent::LlmHookResult {
                         base: BaseEvent::now(&session_id),
                         hook_name,
                         hook_id,
@@ -480,7 +481,7 @@ impl HookHandler for PromptHookHandler {
                         }
                     }
 
-                    emitter.emit(crate::core::events::TronEvent::LlmHookResult {
+                    let _ = emitter.emit(crate::core::events::TronEvent::LlmHookResult {
                         base: BaseEvent::now(&session_id),
                         hook_name,
                         hook_id,

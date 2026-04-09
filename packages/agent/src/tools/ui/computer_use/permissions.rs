@@ -1,13 +1,20 @@
-use super::*;
-
 // MARK: - Startup Permission Check
 
 /// Result of probing a single macOS TCC permission.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PermissionStatus {
+    /// The permission has been granted and the capability is available.
     Granted,
-    Denied { guidance: String },
-    Unknown { reason: String },
+    /// The permission was explicitly denied; `guidance` is the System Settings path to fix it.
+    Denied {
+        /// The System Settings path the user should visit to grant this permission.
+        guidance: String,
+    },
+    /// The permission state could not be determined; `reason` describes the failure.
+    Unknown {
+        /// Description of why the permission state could not be determined.
+        reason: String,
+    },
 }
 
 // ─── Pure parsing functions (no I/O — fully unit-testable) ───

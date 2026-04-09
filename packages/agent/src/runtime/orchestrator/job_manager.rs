@@ -285,7 +285,7 @@ impl JobManager {
             let pid = pid.to_owned();
             let tx = result_tx.clone();
             let remaining_ms = remaining.as_millis() as u64;
-            tokio::spawn(async move {
+            let _handle = tokio::spawn(async move {
                 if let Ok(result) = pm.wait_for_process(&pid, remaining_ms).await {
                     let _ = tx.send(Self::process_result_to_job(&result)).await;
                 }
@@ -299,7 +299,7 @@ impl JobManager {
                 agent_ids.iter().map(|s| s.to_string()).collect();
             let tx = result_tx.clone();
             let remaining_ms = remaining.as_millis() as u64;
-            tokio::spawn(async move {
+            let _handle = tokio::spawn(async move {
                 if let Ok(agent_results) = sm
                     .wait_for_agents(&agent_id_strings, WaitMode::Any, remaining_ms)
                     .await

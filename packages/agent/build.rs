@@ -1,3 +1,5 @@
+//! Build script: re-runs when relay environment variables change.
+
 fn main() {
     // Recompile when relay env vars change so option_env!() picks up new values.
     println!("cargo:rerun-if-env-changed=TRON_RELAY_URL");

@@ -129,9 +129,13 @@ pub fn register_builtins(
 
 /// Metadata about a built-in hook (for iOS settings display).
 pub struct BuiltinHookInfo {
+    /// Stable identifier matching the hook's registration id.
     pub id: &'static str,
+    /// Short human-readable name shown in the settings UI.
     pub label: &'static str,
+    /// One-sentence explanation of what the hook does.
     pub description: &'static str,
+    /// Lifecycle event this hook fires on.
     pub hook_type: HookType,
 }
 

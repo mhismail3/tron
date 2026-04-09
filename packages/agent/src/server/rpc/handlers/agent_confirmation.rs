@@ -80,7 +80,7 @@ impl MethodHandler for SubmitConfirmationHandler {
                 // Session is busy — queue the prompt
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
-                ctx.run_blocking("agent.submitConfirmation.queue", move || {
+                let _ = ctx.run_blocking("agent.submitConfirmation.queue", move || {
                     crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
                         &event_store, &sid, &prompt,
                     )
@@ -105,8 +105,6 @@ pub struct SubmitAnswersHandler;
 
 #[derive(Deserialize)]
 struct AnswerSubmission {
-    #[serde(default)]
-    id: String,
     question: String,
     #[serde(default)]
     #[serde(rename = "selectedValues")]
@@ -197,7 +195,7 @@ impl MethodHandler for SubmitAnswersHandler {
             Err(_) => {
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
-                ctx.run_blocking("agent.submitAnswers.queue", move || {
+                let _ = ctx.run_blocking("agent.submitAnswers.queue", move || {
                     crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
                         &event_store, &sid, &prompt,
                     )

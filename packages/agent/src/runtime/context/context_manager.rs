@@ -377,6 +377,8 @@ impl ContextManager {
         ))
     }
 
+    #[must_use]
+    /// Estimate token count for all loaded rules (static + dynamic).
     pub fn estimate_rules_tokens(&self) -> u64 {
         let static_rules = u64::from(token_estimator::estimate_rules_tokens(
             self.rules_content.as_deref(),

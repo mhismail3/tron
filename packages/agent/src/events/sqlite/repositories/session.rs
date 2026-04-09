@@ -122,17 +122,24 @@ fn extract_text_from_payload(payload_str: &str) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummaryLine {
+    /// Discriminator for the line type (e.g. `"user"`, `"assistant"`, `"tool_use"`, `"subagent"`).
     pub kind: String,
+    /// Plain-text excerpt, present for `user` and `assistant` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Tool identifier, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// Tool input arguments, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_args: Option<Value>,
+    /// Tool execution time in milliseconds, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
+    /// Whether the tool call produced an error, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
+    /// Number of agent turns, present for `subagent` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turns: Option<i64>,
 }
@@ -582,7 +589,7 @@ impl SessionRepo {
                         let is_error =
                             payload.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
                         let duration = payload.get("duration").and_then(|v| v.as_i64());
-                        tool_results.insert(tcid.to_string(), (is_error, duration));
+                        let _ = tool_results.insert(tcid.to_string(), (is_error, duration));
                     }
                 }
             }
@@ -596,7 +603,7 @@ impl SessionRepo {
                     if let Some(sub_id) =
                         payload.get("subagentSessionId").and_then(|v| v.as_str())
                     {
-                        hook_subagent_ids.insert(sub_id.to_string());
+                        let _ = hook_subagent_ids.insert(sub_id.to_string());
                     }
                 }
             }

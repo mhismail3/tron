@@ -36,7 +36,7 @@ impl MethodHandler for ActivateHandler {
         let skill_name = require_string_param(params.as_ref(), "skillName")?;
 
         // Verify session exists
-        ctx.session_manager
+        let _ = ctx.session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -139,7 +139,7 @@ impl MethodHandler for DeactivateHandler {
         let skill_name = require_string_param(params.as_ref(), "skillName")?;
 
         // Verify session exists
-        ctx.session_manager
+        let _ = ctx.session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -224,7 +224,7 @@ impl MethodHandler for CastSpellHandler {
         let spell_name = require_string_param(params.as_ref(), "spellName")?;
 
         // Verify session exists
-        ctx.session_manager
+        let _ = ctx.session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -279,7 +279,7 @@ impl MethodHandler for ActiveHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
         // Verify session exists
-        ctx.session_manager
+        let _ = ctx.session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),

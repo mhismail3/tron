@@ -59,11 +59,11 @@ impl SkillFingerprint {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                entries.insert(dir.to_string_lossy().into_owned(), secs);
+                let _ = entries.insert(dir.to_string_lossy().into_owned(), secs);
             }
         } else {
             // Directory doesn't exist — record absence so creation is detected
-            entries.insert(dir.to_string_lossy().into_owned(), 0);
+            let _ = entries.insert(dir.to_string_lossy().into_owned(), 0);
             return;
         }
 
@@ -86,7 +86,7 @@ impl SkillFingerprint {
                         .as_secs()
                 })
                 .unwrap_or(0);
-            entries.insert(skill_md.to_string_lossy().into_owned(), mtime);
+            let _ = entries.insert(skill_md.to_string_lossy().into_owned(), mtime);
         }
     }
 }

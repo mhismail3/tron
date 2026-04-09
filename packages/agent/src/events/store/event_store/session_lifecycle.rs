@@ -314,7 +314,7 @@ impl EventStore {
         let conn = self.conn()?;
         let mut result = HashMap::new();
         for &sid in session_ids {
-            result.insert(
+            let _ = result.insert(
                 sid.to_string(),
                 SessionRepo::get_activity_summaries(&conn, sid)?,
             );

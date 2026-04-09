@@ -50,10 +50,6 @@ impl CoordinatorState {
         self.active_by_session.get(session_id).cloned()
     }
 
-    fn active_ids(&self) -> HashSet<String> {
-        self.active_by_session.keys().cloned().collect()
-    }
-
     fn repo_session_count(&self, repo_root: &std::path::Path) -> usize {
         self.sessions_by_repo.get(repo_root).map_or(0, HashSet::len)
     }

@@ -556,7 +556,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     // Refresh skill registry before building context (ensures updated SKILL.md files are loaded)
     {
         let mut registry = skill_registry.write();
-        registry.refresh_if_stale(&working_dir);
+        let _ = registry.refresh_if_stale(&working_dir);
     }
 
     // Build skill context from server-owned session state
@@ -937,7 +937,7 @@ fn drain_prompt_queue(
         },
     };
 
-    tokio::spawn(async move {
+    let _handle = tokio::spawn(async move {
         execute_prompt_run(plan).await;
     });
 }

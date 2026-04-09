@@ -284,7 +284,7 @@ fn parse_yaml_fields(content: &str) -> std::collections::HashMap<String, String>
             let key = line[..pos].trim().to_string();
             let value = line[pos + 1..].trim().to_string();
             if !key.is_empty() {
-                fields.insert(key, value);
+                let _ = fields.insert(key, value);
             }
         }
     }

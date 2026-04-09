@@ -4,8 +4,6 @@
 //! a matching `message.dequeued`. No mutable in-memory state; the event log is the
 //! single source of truth.
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -51,7 +49,7 @@ impl PromptQueueService {
             match event.event_type.as_str() {
                 "message.dequeued" => {
                     if let Some(queue_id) = payload.get("queueId").and_then(|v| v.as_str()) {
-                        dequeued_ids.insert(queue_id.to_string());
+                        let _ = dequeued_ids.insert(queue_id.to_string());
                     }
                 }
                 "message.queued" => {
@@ -157,7 +155,7 @@ impl PromptQueueService {
             "reason": reason,
         });
 
-        event_store
+        let _ = event_store
             .append(&AppendOptions {
                 session_id,
                 event_type: EventType::MessageDequeued,
@@ -187,10 +185,11 @@ impl PromptQueueService {
         Ok(count)
     }
 
+}
+
+#[cfg(test)]
+impl PromptQueueService {
     /// Peek at the next pending message without dequeuing it.
-    ///
-    /// Used by auto-drain to check the queue before committing to a run.
-    /// The caller must call `dequeue()` after confirming the run started.
     pub fn peek_next(
         event_store: &EventStore,
         session_id: &str,
@@ -200,12 +199,8 @@ impl PromptQueueService {
     }
 
     /// Drain the next pending message: dequeue it as "processed" and return its text.
-    ///
-    /// Convenience that combines peek + dequeue. Only safe when the caller
-    /// guarantees execution (e.g., in tests). For production auto-drain, use
-    /// `peek_next()` + `dequeue()` with `begin_run()` between them.
     pub fn drain_next(
-        event_store: &Arc<EventStore>,
+        event_store: &std::sync::Arc<EventStore>,
         session_id: &str,
     ) -> Result<Option<String>, RpcError> {
         let first = match Self::peek_next(event_store, session_id)? {
@@ -222,6 +217,7 @@ impl PromptQueueService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::events::{self, ConnectionConfig, EventStore};
 
     fn make_store_and_session() -> (Arc<EventStore>, String) {

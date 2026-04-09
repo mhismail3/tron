@@ -52,7 +52,7 @@ impl MethodHandler for ListSkillsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let working_dir = resolve_working_dir(params.as_ref(), ctx);
         let mut registry = ctx.skill_registry.write();
-        registry.refresh_if_stale(&working_dir);
+        let _ = registry.refresh_if_stale(&working_dir);
         let skills = registry.list(None);
         Ok(serde_json::json!({ "skills": skills }))
     }
@@ -69,7 +69,7 @@ impl MethodHandler for GetSkillHandler {
         let working_dir = resolve_working_dir(params.as_ref(), ctx);
 
         let mut registry = ctx.skill_registry.write();
-        registry.refresh_if_stale(&working_dir);
+        let _ = registry.refresh_if_stale(&working_dir);
 
         let skill = registry.get(&name).ok_or_else(|| RpcError::NotFound {
             code: errors::NOT_FOUND.into(),

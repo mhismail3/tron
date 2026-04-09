@@ -114,7 +114,7 @@ impl MethodHandler for DeliverSubagentResultsHandler {
         // Session is busy or agent deps not available — queue the formatted prompt
         let event_store = ctx.event_store.clone();
         let sid_for_queue = session_id.clone();
-        ctx.run_blocking("agent.deliverSubagentResults.queue", move || {
+        let _ = ctx.run_blocking("agent.deliverSubagentResults.queue", move || {
             crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
                 &event_store,
                 &sid_for_queue,
