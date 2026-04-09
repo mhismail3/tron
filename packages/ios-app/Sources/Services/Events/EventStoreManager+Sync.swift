@@ -56,62 +56,6 @@ extension EventStoreManager {
         }
     }
 
-    /// Full sync: fetch all sessions and their events from server.
-    /// This is origin-aware: only syncs sessions that belong to the current server.
-    func fullSync() async {
-        guard !isSyncing else { return }
-
-        setIsSyncing(true)
-        clearLastSyncError()
-        logger.info("Starting full sync...", category: .session)
-
-        do {
-            let serverOrigin = rpcClient.serverOrigin
-
-            // Fetch session list from server
-            let serverSessions = try await sessionSynchronizer.fetchServerSessions()
-            logger.info("Fetched \(serverSessions.count) sessions from server (origin: \(serverOrigin))", category: .session)
-
-            var syncedCount = 0
-            var skippedCount = 0
-
-            for serverSession in serverSessions {
-                let sessionId = serverSession.sessionId
-
-                // Check for cross-origin session corruption
-                if try sessionSynchronizer.sessionHasDifferentOrigin(sessionId, expectedOrigin: serverOrigin) {
-                    logger.warning("[SYNC] Skipping session \(sessionId) - exists locally with different origin", category: .session)
-                    skippedCount += 1
-                    continue
-                }
-
-                // Merge or create session
-                let cachedSession: CachedSession
-                if try eventDB.sessions.exists(sessionId), let existingSession = try eventDB.sessions.get(sessionId) {
-                    cachedSession = mergeSessionData(existing: existingSession, serverInfo: serverSession, serverOrigin: serverOrigin)
-                } else {
-                    cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
-                }
-                try eventDB.sessions.insert(cachedSession)
-                syncedCount += 1
-
-                // Sync events for this session
-                try await syncSessionEvents(sessionId: sessionId)
-            }
-
-            loadSessions()
-            seedProcessingStateFromSessions()
-            logger.info("Full sync completed: synced \(syncedCount), skipped \(skippedCount) cross-origin, showing \(self.sessions.count) sessions", category: .session)
-
-        } catch {
-            setLastSyncError(error.localizedDescription)
-            logger.error("Full sync failed: \(error.localizedDescription)", category: .session)
-            ErrorHandler.shared.handle(error, context: "Session sync")
-        }
-
-        setIsSyncing(false)
-    }
-
     /// Sync events for a specific session.
     /// Delegates to SessionSynchronizer and handles pagination.
     func syncSessionEvents(sessionId: String) async throws {

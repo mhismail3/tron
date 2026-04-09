@@ -168,8 +168,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         }
         // Then: calledInTurn is set
         XCTAssertTrue(mockContext.askUserQuestionCalledInTurn)
-        // Then: Message window is updated
-        XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
     func testToolStartUpdatesDuplicateFromGenerating() async throws {
@@ -202,8 +200,6 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.currentToolMessages.count, 1)
         // Then: currentTurnToolCalls arguments are updated
         XCTAssertTrue(mockContext.currentTurnToolCalls[0].arguments.contains("file_path"))
-        // Then: Message window is updated
-        XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
     func testToolEndUpdatesGeneratingChip() async throws {
@@ -667,8 +663,6 @@ final class MockToolEventContext: ToolEventContext {
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
     var visibleToolCallIds: Set<String> = []
-    var appendedToMessageWindow: [ChatMessage] = []
-    var updatedInMessageWindow: [ChatMessage] = []
     var enqueuedToolStarts: [UIUpdateQueue.ToolStartData] = []
     var enqueuedToolEnds: [UIUpdateQueue.ToolEndData] = []
     var askUserQuestionSheetOpened = false
@@ -688,14 +682,6 @@ final class MockToolEventContext: ToolEventContext {
 
     func makeToolVisible(_ toolCallId: String) {
         visibleToolCallIds.insert(toolCallId)
-    }
-
-    func appendToMessageWindow(_ message: ChatMessage) {
-        appendedToMessageWindow.append(message)
-    }
-
-    func updateInMessageWindow(_ message: ChatMessage) {
-        updatedInMessageWindow.append(message)
     }
 
     func enqueueToolStart(_ data: UIUpdateQueue.ToolStartData) {

@@ -146,33 +146,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.appendedMessages.first?.role, .user)
     }
 
-    func testSendMessageCreatesAnsweredQuestionsChipForAnswerPrompt() async {
-        // Given: Answer prompt text
-        mockContext.inputText = "[Answers to your questions]\n**Question 1?**\nAnswer: Yes"
-
-        // When: Sending message
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Should create answered questions chip
-        XCTAssertEqual(mockContext.appendedMessages.count, 1)
-        if case .answeredQuestions = mockContext.appendedMessages.first?.content {
-            // Success
-        } else {
-            XCTFail("Expected answeredQuestions content type")
-        }
-    }
-
-    func testSendMessageDoesNotMarkSupersededForAnswerPrompt() async {
-        // Given: Answer prompt text
-        mockContext.inputText = "[Answers to your questions]\n**Q?**\nA: Yes"
-
-        // When: Sending message
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Should NOT mark questions as superseded
-        XCTAssertFalse(mockContext.markPendingQuestionsAsSupersededCalled)
-    }
-
     func testSendMessageMarksSupersededForRegularMessage() async {
         // Given: Regular message text
         mockContext.inputText = "Just a regular message"

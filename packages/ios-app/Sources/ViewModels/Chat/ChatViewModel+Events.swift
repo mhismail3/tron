@@ -61,11 +61,9 @@ extension ChatViewModel {
                 // Streaming message already exists (adaptive thinking sent text first)
                 // Insert thinking BEFORE it so thinking appears above text visually
                 insertInMessages(thinkingMessage, at: streamingIndex)
-                messageWindowManager.insertMessage(thinkingMessage, before: streamingId)
-                logger.debug("Inserted thinking message before streaming: \(thinkingMessage.id)", category: .events)
+                logger.debug("Inserted thinking message before streaming: \(thinkingMessage.id) (before \(streamingId))", category: .events)
             } else {
                 appendToMessages(thinkingMessage)
-                messageWindowManager.appendMessage(thinkingMessage)
                 logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
             }
             thinkingMessageId = thinkingMessage.id
@@ -96,7 +94,6 @@ extension ChatViewModel {
             let (truncated, _) = ResultTruncation.truncate(accumulated)
             tool.streamingOutput = truncated
             messages[index].content = .toolUse(tool)
-            messageWindowManager.updateMessage(messages[index])
         }
     }
 
@@ -350,21 +347,6 @@ extension ChatViewModel {
         // so user can see what was happening before the error (cleared on next turn)
     }
 
-    /// Sync session events from server after turn completes
-    func syncSessionEventsFromServer() async {
-        guard let manager = eventStoreManager else {
-            logger.warning("No EventStoreManager available for sync", category: .events)
-            return
-        }
-
-        do {
-            try await manager.syncSessionEvents(sessionId: sessionId)
-            logger.info("Synced session events from server for session \(sessionId)", category: .events)
-        } catch {
-            logger.error("Failed to sync session events: \(error.localizedDescription)", category: .events)
-        }
-    }
-
     // MARK: - Plugin Result Handlers
     // These handlers accept plugin Result types directly, bridging the plugin system
     // to the existing event handler infrastructure.
@@ -397,71 +379,5 @@ extension ChatViewModel {
         currentTurn += 1
         logger.info("Queued message sent as user prompt: \"\(result.text.prefix(50))...\"", category: .events)
     }
-
-    func handleAgentTurn(_ result: AgentTurnPlugin.Result) {
-        logger.info("Agent turn received: \(result.messages.count) messages, \(result.toolUses.count) tool uses, \(result.toolResults.count) tool results", category: .events)
-
-        guard let manager = eventStoreManager else {
-            logger.warning("No EventStoreManager to cache agent turn content", category: .events)
-            return
-        }
-
-        // Convert AgentTurnPlugin messages to cacheable format
-        var turnMessages: [[String: Any]] = []
-        for msg in result.messages {
-            var messageDict: [String: Any] = ["role": msg.role]
-
-            switch msg.content {
-            case .text(let text):
-                messageDict["content"] = text
-            case .blocks(let blocks):
-                var contentBlocks: [[String: Any]] = []
-                for block in blocks {
-                    switch block {
-                    case .text(let text):
-                        contentBlocks.append(["type": "text", "text": text])
-                    case .toolUse(let id, let name, let input):
-                        var inputDict: [String: Any] = [:]
-                        for (key, value) in input {
-                            inputDict[key] = value.value
-                        }
-                        contentBlocks.append([
-                            "type": "tool_use",
-                            "id": id,
-                            "name": name,
-                            "input": inputDict
-                        ])
-                    case .toolResult(let toolUseId, let content, let isError):
-                        contentBlocks.append([
-                            "type": "tool_result",
-                            "tool_use_id": toolUseId,
-                            "content": content,
-                            "is_error": isError
-                        ])
-                    case .thinking(let text):
-                        contentBlocks.append(["type": "thinking", "thinking": text])
-                    case .unknown:
-                        break
-                    }
-                }
-                messageDict["content"] = contentBlocks
-            }
-            turnMessages.append(messageDict)
-        }
-
-        // Cache the turn content for merging with server events
-        manager.turnContentCache.store(
-            sessionId: sessionId,
-            turnNumber: result.turnNumber,
-            messages: turnMessages
-        )
-
-        // Trigger sync AFTER caching content
-        logger.info("Triggering sync after caching agent turn content", category: .events)
-        launchBackground { [weak self] in
-            await self?.syncSessionEventsFromServer()
-        }
-    }
-
 
 }

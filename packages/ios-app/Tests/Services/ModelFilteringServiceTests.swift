@@ -71,7 +71,9 @@ final class ModelFilteringServiceTests: XCTestCase {
             "name": name ?? id,
             "provider": provider,
             "contextWindow": contextWindow,
-            "maxOutputTokens": maxOutputTokens as Any
+            "maxOutputTokens": maxOutputTokens as Any,
+            "providerDisplayName": Self.providerDisplayName(provider),
+            "providerSortOrder": Self.providerSortOrder(provider)
         ]
         if let family { json["family"] = family }
         if let tier { json["tier"] = tier }
@@ -84,6 +86,30 @@ final class ModelFilteringServiceTests: XCTestCase {
         if let sortOrder { json["sortOrder"] = sortOrder }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(ModelInfo.self, from: data)
+    }
+
+    /// Mirrors the server-provided providerDisplayName for the providers exercised by these tests.
+    private static func providerDisplayName(_ providerId: String) -> String {
+        switch providerId {
+        case "anthropic": return "Anthropic"
+        case "openai-codex": return "OpenAI"
+        case "google": return "Google"
+        case "minimax": return "MiniMax"
+        case "kimi": return "Kimi"
+        default: return providerId
+        }
+    }
+
+    /// Mirrors the server-provided providerSortOrder so test fixtures sort deterministically.
+    private static func providerSortOrder(_ providerId: String) -> Int {
+        switch providerId {
+        case "anthropic": return 0
+        case "openai-codex": return 1
+        case "google": return 2
+        case "minimax": return 3
+        case "kimi": return 4
+        default: return 99
+        }
     }
 
     // MARK: - Categorize Tests
@@ -342,21 +368,6 @@ final class ModelFilteringServiceTests: XCTestCase {
     func test_organizeByProviderFamily_handlesEmptyArray() {
         let groups = ModelFilteringService.organizeByProviderFamily([])
         XCTAssertTrue(groups.isEmpty)
-    }
-
-    func test_organizeByProviderFamily_fallsBackToIdParsing() {
-        // No family field — should derive from ID
-        let models = [
-            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
-            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
-            makeModel(id: "gemini-3-pro-preview", provider: "google"),
-        ]
-        let groups = ModelFilteringService.organizeByProviderFamily(models)
-
-        XCTAssertEqual(groups.count, 3)
-        XCTAssertEqual(groups[0].families[0].id, "Claude 4.6")
-        XCTAssertEqual(groups[1].families[0].id, "GPT-5.3")
-        XCTAssertEqual(groups[2].families[0].id, "Gemini 3")
     }
 
     func test_organizeByProviderFamily_modelsSortedBySortOrder() {

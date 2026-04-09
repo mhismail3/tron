@@ -1,7 +1,7 @@
 import Foundation
 
 /// Handles synchronization of session events with the server.
-/// Responsible for fetching, enriching, and storing events.
+/// Responsible for fetching and storing events.
 @MainActor
 final class SessionSynchronizer {
 
@@ -9,7 +9,6 @@ final class SessionSynchronizer {
 
     private var rpcClient: RPCClient
     private let eventDB: EventDatabase
-    private let cache: TurnContentCache
 
     // MARK: - Types
 
@@ -20,10 +19,9 @@ final class SessionSynchronizer {
 
     // MARK: - Initialization
 
-    init(rpcClient: RPCClient, eventDB: EventDatabase, cache: TurnContentCache) {
+    init(rpcClient: RPCClient, eventDB: EventDatabase) {
         self.rpcClient = rpcClient
         self.eventDB = eventDB
-        self.cache = cache
     }
 
     /// Update the RPC client reference when server settings change.
@@ -51,15 +49,12 @@ final class SessionSynchronizer {
 
         if !result.events.isEmpty {
             // Convert server events
-            var events = result.events.map { rawEventToSessionEvent($0) }
+            let events = result.events.map { rawEventToSessionEvent($0) }
 
             // Fetch missing ancestors for fork boundaries
             try await fetchMissingAncestors(for: events)
 
-            // Enrich events with cached tool content from agent.turn
-            events = cache.enrichEvents(events, sessionId: sessionId)
-
-            // Insert enriched events
+            // Insert events
             try eventDB.events.insertBatch(events)
 
             // Update sync state

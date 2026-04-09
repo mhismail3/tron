@@ -4,16 +4,15 @@
 //! connected clients over WebSocket. [`EventEnvelope`] wraps an event with
 //! metadata for transport.
 //!
-//! These types match the TypeScript wire format exactly — iOS and chat-web
-//! depend on the string values.
+//! iOS and chat-web depend on the string values.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Event types broadcast to WebSocket clients.
 ///
-/// Each variant serializes to a dot-separated string matching the TypeScript
-/// `BroadcastEventType` constant object.
+/// Each variant serializes to a dot-separated string. iOS and chat-web depend
+/// on these values; renaming a variant is a wire-format break.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BroadcastEventType {
     // ── Session ──────────────────────────────────────────────────────
@@ -31,9 +30,6 @@ pub enum BroadcastEventType {
     SessionRewound,
 
     // ── Agent ────────────────────────────────────────────────────────
-    /// A complete agent turn (request → response → tool results).
-    #[serde(rename = "agent.turn")]
-    AgentTurn,
     /// A message was deleted from the session.
     #[serde(rename = "agent.message_deleted")]
     AgentMessageDeleted,
@@ -68,7 +64,6 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
     BroadcastEventType::SessionEnded,
     BroadcastEventType::SessionForked,
     BroadcastEventType::SessionRewound,
-    BroadcastEventType::AgentTurn,
     BroadcastEventType::AgentMessageDeleted,
     BroadcastEventType::AgentContextCleared,
     BroadcastEventType::AgentCompaction,
@@ -81,7 +76,7 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
 
 /// Envelope wrapping an event for WebSocket broadcast.
 ///
-/// Matches the TypeScript `EventEnvelope` interface exactly:
+/// Wire format:
 /// ```json
 /// { "type": "event.new", "sessionId": "sess_...", "timestamp": "2025-...", "data": {...} }
 /// ```
@@ -141,7 +136,7 @@ mod tests {
 
     #[test]
     fn all_broadcast_types_count() {
-        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 13);
+        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 12);
     }
 
     #[test]
@@ -160,7 +155,6 @@ mod tests {
             (BroadcastEventType::SessionEnded, "session.ended"),
             (BroadcastEventType::SessionForked, "session.forked"),
             (BroadcastEventType::SessionRewound, "session.rewound"),
-            (BroadcastEventType::AgentTurn, "agent.turn"),
             (
                 BroadcastEventType::AgentMessageDeleted,
                 "agent.message_deleted",

@@ -685,7 +685,8 @@ final class EventDatabaseTests: XCTestCase {
     }
 
     func testConsolidatedAnalyticsCacheTokens() {
-        // Test that cache tokens are properly tracked and affect cost calculation
+        // Cache tokens are tracked from message.assistant events; cost is server-provided
+        // via stream.turn_end (no client-side fallback calculation post-thin-client migration).
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
@@ -694,7 +695,7 @@ final class EventDatabaseTests: XCTestCase {
             ]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
-                // No cost provided - should be calculated from tokens
+                "cost": AnyCodable(0.01665),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10000, outputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 1000, turn: 1))
             ])
         ]
@@ -704,40 +705,27 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(analytics.totalTurns, 1)
         let turn = analytics.turns[0]
 
-        // Verify cache tokens are tracked
         XCTAssertEqual(turn.cacheReadTokens, 8000)
         XCTAssertEqual(turn.cacheCreationTokens, 1000)
-
-        // Cost should be calculated with cache pricing:
-        // Base input: (10000 - 8000 - 1000) = 1000 tokens @ $3/M = $0.003
-        // Cache creation: 1000 tokens @ $3/M * 1.25 = $0.00375
-        // Cache read: 8000 tokens @ $3/M * 0.1 = $0.0024
-        // Output: 500 tokens @ $15/M = $0.0075
-        // Total: $0.003 + $0.00375 + $0.0024 + $0.0075 = $0.01665
         XCTAssertEqual(turn.cost, 0.01665, accuracy: 0.001)
     }
 
-    func testConsolidatedAnalyticsCostFallback() {
-        // Test that cost is calculated from tokens when not provided in event
+    func testConsolidatedAnalyticsServerCost() {
+        // Cost is read from the server-provided `cost` field on stream.turn_end.
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1))
             ]),
-            // No cost in stream.turn_end - should calculate from tokens
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
+                "cost": AnyCodable(4.5),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1))
             ])
         ]
 
         let analytics = ConsolidatedAnalytics(from: events)
-
-        // Cost should be calculated:
-        // Input: 1M tokens @ $3/M = $3.00
-        // Output: 100K tokens @ $15/M = $1.50
-        // Total: $4.50
         XCTAssertEqual(analytics.totalCost, 4.50, accuracy: 0.01)
     }
 

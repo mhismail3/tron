@@ -18,7 +18,6 @@ extension ChatViewModel: ProcessEventHandler {
             details["processId"] = AnyCodable(result.processId)
             tool.details = details
             messages[index].content = .toolUse(tool)
-            messageWindowManager.updateMessage(messages[index])
         }
 
         logDebug("Process spawned: \(result.processId) [\(result.label)]")

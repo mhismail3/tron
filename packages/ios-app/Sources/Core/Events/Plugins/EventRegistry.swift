@@ -110,9 +110,6 @@ final class EventRegistry: @unchecked Sendable {
         register(SubagentEventPlugin.self)
         register(SubagentResultAvailablePlugin.self)
 
-        // Agent turn events
-        register(AgentTurnPlugin.self)
-
         // Server events
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)

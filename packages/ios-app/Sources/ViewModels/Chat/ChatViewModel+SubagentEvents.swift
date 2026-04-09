@@ -113,7 +113,6 @@ extension ChatViewModel {
             if case .systemEvent(.subagentResultsReady(var results)) = messages[existingIdx].content {
                 results.append(entry)
                 messages[existingIdx].content = .systemEvent(.subagentResultsReady(results: results))
-                messageWindowManager.updateMessage(messages[existingIdx])
                 logger.info("Updated consolidated notification: \(results.count) results", category: .chat)
             }
         } else {
@@ -122,7 +121,6 @@ extension ChatViewModel {
                 content: .systemEvent(.subagentResultsReady(results: [entry]))
             )
             appendToMessages(notification)
-            messageWindowManager.appendMessage(notification)
             logger.info("Created subagent result notification: \(result.subagentSessionId)", category: .chat)
         }
     }
@@ -137,7 +135,6 @@ extension ChatViewModel {
 
         if let index = MessageFinder.indexOfSpawnSubagentTool(toolCallId: toolCallId, in: messages) {
             messages[index].content = .subagent(data)
-            messageWindowManager.updateMessage(messages[index])
             logger.debug("Converted tool message to subagent chip for \(subagentSessionId)", category: .chat)
         }
     }
@@ -149,7 +146,6 @@ extension ChatViewModel {
 
         if let index = MessageFinder.indexBySubagentSessionId(subagentSessionId, in: messages) {
             messages[index].content = .subagent(data)
-            messageWindowManager.updateMessage(messages[index])
         }
     }
 

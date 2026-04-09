@@ -156,7 +156,6 @@ final class ToolEventCoordinator {
                     tool.arguments = pluginResult.formattedArguments
                     context.messages[existingIndex].content = .toolUse(tool)
                     context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
-                    context.updateInMessageWindow(context.messages[existingIndex])
                 }
 
                 // Update tracked tool call arguments
@@ -194,9 +193,6 @@ final class ToolEventCoordinator {
 
         // Make tool immediately visible for rendering
         context.makeToolVisible(pluginResult.toolCallId)
-
-        // Sync to MessageWindowManager for virtual scrolling
-        context.appendToMessageWindow(message)
 
         // Track tool call for persistence
         let record = ToolCallRecord(
@@ -293,7 +289,6 @@ final class ToolEventCoordinator {
         context.currentToolMessages[message.id] = message
         context.runningToolCount += 1
         context.makeToolVisible(toolCallId)
-        context.appendToMessageWindow(message)
 
         let record = ToolCallRecord(
             toolCallId: toolCallId,
@@ -326,7 +321,6 @@ final class ToolEventCoordinator {
                 }
                 context.messages[existingIndex].content = .getConfirmation(toolData)
                 context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
-                context.updateInMessageWindow(context.messages[existingIndex])
             }
 
             if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
@@ -392,7 +386,6 @@ final class ToolEventCoordinator {
                 }
                 context.messages[existingIndex].content = .askUserQuestion(toolData)
                 context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
-                context.updateInMessageWindow(context.messages[existingIndex])
             }
 
             // Update tracked tool call arguments

@@ -30,8 +30,6 @@ final class EventStoreManager {
     // MARK: - Observable State
 
     private(set) var sessions: [CachedSession] = []
-    private(set) var isSyncing = false
-    private(set) var lastSyncError: String?
     private(set) var activeSessionId: String? {
         didSet {
             if activeSessionId != oldValue {
@@ -51,15 +49,10 @@ final class EventStoreManager {
         rpcClient.serverOrigin
     }
 
-    // MARK: - Turn Content Cache
-
-    /// TTL-based cache for turn content used to enrich server events
-    let turnContentCache = TurnContentCache()
-
     /// Handles synchronization of session events with the server
     @ObservationIgnored
     private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
-        SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB, cache: turnContentCache)
+        SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB)
     }()
 
     /// Manages live streaming buffers for dashboard session cards
@@ -399,18 +392,6 @@ final class EventStoreManager {
 
     // MARK: - State Setters (for extensions)
 
-    func setIsSyncing(_ value: Bool) {
-        isSyncing = value
-    }
-
-    func setLastSyncError(_ value: String?) {
-        lastSyncError = value
-    }
-
-    func clearLastSyncError() {
-        lastSyncError = nil
-    }
-
     func clearSessions() {
         sessions = []
     }
@@ -543,51 +524,6 @@ final class EventStoreManager {
         sessions.contains { $0.id == sessionId }
     }
 
-    // MARK: - State Reconstruction (Unified Transformer)
-
-    /// Load all events needed to reconstruct a session.
-    /// Uses getBySession (single SQL query) instead of getAncestors (N+1 parent-chain walk)
-    /// so that broken parent chains from sync gaps don't silently truncate history.
-    /// For forked sessions, also fetches ancestor events from the parent session.
-    func getSessionEvents(sessionId: String) throws -> (events: [SessionEvent], presorted: Bool) {
-        guard let session = try eventDB.sessions.get(sessionId) else {
-            return ([], false)
-        }
-
-        // Filter out locally-persisted stream.thinking_complete events.
-        // ThinkingState persists these (seq 0, parentId nil) for the thinking history sheet.
-        // They must not participate in reconstruction — thinking content is already embedded
-        // in message.assistant content blocks via InterleavedContentProcessor.
-        let sessionEvents = try eventDB.events.getBySession(sessionId)
-            .filter { $0.type != "stream.thinking_complete" }
-        guard !sessionEvents.isEmpty else { return ([], false) }
-
-        // For forked sessions, fetch parent chain events and prepend them
-        guard session.isFork == true,
-              let firstEvent = sessionEvents.first,
-              let parentId = firstEvent.parentId,
-              !sessionEvents.contains(where: { $0.id == parentId }) else {
-            return (sessionEvents, false)
-        }
-
-        let parentEvents = try eventDB.events.getAncestors(parentId)
-        let combined = parentEvents + sessionEvents
-        return (combined, true)
-    }
-
-    /// Get full reconstructed session state using the unified transformer.
-    func getReconstructedState(sessionId: String) throws -> ReconstructedState {
-        let (events, presorted) = try getSessionEvents(sessionId: sessionId)
-        guard !events.isEmpty else {
-            logger.warning("[RECONSTRUCT] No events for session: \(sessionId)", category: .session)
-            return ReconstructedState()
-        }
-
-        logger.info("[RECONSTRUCT] Loading state for session \(sessionId), \(events.count) events, presorted=\(presorted)", category: .session)
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events, presorted: presorted)
-        logger.info("[RECONSTRUCT] Transformed to \(state.messages.count) messages", category: .session)
-        return state
-    }
 }
 
 // MARK: - Event Store Error

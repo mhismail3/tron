@@ -12,13 +12,13 @@ extension ChatViewModel {
         logger.info("[RECONSTRUCT] Processing: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), hasMore=\(result.hasMoreEvents), inFlight=\(result.inFlight != nil)", category: .session)
 
         // 1. Reconstruct full session state (messages + config + subagent state)
-        //    Uses reconstructSessionState() as single source of truth — same path as DB fallback.
+        //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
         applyReconstructedConfig(state)
 
         // 2. Replace displayed messages, then convert subagent tools using lifecycle events.
         //    Order matters: restoreSubagentState modifies allReconstructedMessages in-place,
-        //    so it must run AFTER the array is set (matches loadPersistedMessagesAsync ordering).
+        //    so it must run AFTER the array is set.
         allReconstructedMessages = state.messages
         restoreSubagentState(from: state)
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)

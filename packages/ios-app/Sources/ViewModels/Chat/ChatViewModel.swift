@@ -170,8 +170,6 @@ final class ChatViewModel {
     let animationCoordinator = AnimationCoordinator()
     /// Ensures tool calls appear in order and batches UI updates for 60fps
     let uiUpdateQueue = UIUpdateQueue()
-    /// Manages virtual scrolling with lazy loading and memory-bounded message window
-    let messageWindowManager = MessageWindowManager()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
     /// Coordinates tool event handling (start/end) for tool messages and UI updates
@@ -343,7 +341,6 @@ final class ChatViewModel {
             guard let self = self else { return UUID() }
             let message = ChatMessage.streaming()
             self.appendToMessages(message)
-            self.messageWindowManager.appendMessage(message)
             return message.id
         }
 
@@ -352,15 +349,12 @@ final class ChatViewModel {
             if let index = self.messageIndex.index(for: messageId) {
                 if finalText.isEmpty {
                     self.removeFromMessages(at: index)
-                    self.messageWindowManager.removeMessage(id: messageId)
                 } else {
                     self.messages[index].content = .text(finalText)
                     self.messages[index].isStreaming = false
-                    self.messageWindowManager.updateMessage(self.messages[index])
                 }
             }
         }
-
     }
 
     /// Set up UIUpdateQueue callback for processing batched, ordered updates
@@ -409,7 +403,6 @@ final class ChatViewModel {
                 tool.streamingOutput = nil
                 messages[index].content = .toolUse(tool)
                 messageIndex.didUpdate(messages[index], at: index)
-                messageWindowManager.updateMessage(messages[index])
 
                 // Decrement running tool counter (clamp to 0 for catch-up scenarios)
                 runningToolCount = max(0, runningToolCount - 1)
@@ -484,15 +477,6 @@ final class ChatViewModel {
         eventDispatchCoordinator.dispatch(type: type, transform: transform, context: self)
     }
 
-    // MARK: - Windowed Messages (for virtual scrolling)
-
-    /// Use windowed messages for large sessions (150 message memory cap)
-    /// Falls back to regular messages array if window manager not initialized
-    var windowedMessages: [ChatMessage] {
-        let windowed = messageWindowManager.windowedMessages
-        return windowed.isEmpty ? messages : windowed
-    }
-
     // MARK: - Message Updates
 
     func finalizeStreamingMessage() {
@@ -510,7 +494,6 @@ final class ChatViewModel {
         }
 
         messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
-        messageWindowManager.updateMessage(messages[index])
         thinkingState.markStreamingComplete()
     }
 

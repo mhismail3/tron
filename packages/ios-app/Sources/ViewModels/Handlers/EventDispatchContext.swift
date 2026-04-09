@@ -17,7 +17,6 @@ import Foundation
 @MainActor protocol TurnLifecycleEventHandler: AnyObject {
     func handleTurnStart(_ result: TurnStartPlugin.Result)
     func handleTurnEnd(_ result: TurnEndPlugin.Result)
-    func handleAgentTurn(_ result: AgentTurnPlugin.Result)
     func handleComplete()
     func handleAgentReady()
     func handleAgentError(_ message: String)

@@ -119,13 +119,6 @@ final class CompactionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testCompactionDrainsMessageQueue() {
-        let result = makeCompactionResult(tokensBefore: 10000, tokensAfter: 5000)
-        coordinator.handleCompaction(result, context: mockContext)
-
-        XCTAssertTrue(mockContext.drainMessageQueueCalled)
-    }
-
     func testCompactionRefreshesContextInBackground() {
         let result = makeCompactionResult(tokensBefore: 10000, tokensAfter: 5000)
         coordinator.handleCompaction(result, context: mockContext)
@@ -166,7 +159,6 @@ final class MockCompactionContext: CompactionContext {
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
     var resetStreamingManagerCalled = false
-    var drainMessageQueueCalled = false
     var refreshContextInBackgroundCalled = false
 
     func flushPendingTextUpdates() {
@@ -183,10 +175,6 @@ final class MockCompactionContext: CompactionContext {
 
     func refreshContextInBackground() {
         refreshContextInBackgroundCalled = true
-    }
-
-    func drainMessageQueue() {
-        drainMessageQueueCalled = true
     }
 
     // MARK: - LoggingContext

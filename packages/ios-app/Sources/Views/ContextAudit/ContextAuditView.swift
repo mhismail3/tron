@@ -407,8 +407,13 @@ struct ContextAuditView: View {
         isLoading = true
 
         do {
-            // Load detailed context snapshot and events in parallel
+            // Snapshot RPC and event sync run in parallel; both must complete before
+            // analytics can render. Sync is incremental (cursor-based) so it's cheap
+            // on repeated opens. The chat reconstruction flow does not write to the
+            // local events DB, so the Context sheet is responsible for pulling fresh
+            // events itself before reading them.
             async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
+            try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask
@@ -424,6 +429,7 @@ struct ContextAuditView: View {
     private func reloadContextInBackground() async {
         do {
             async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
+            try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask

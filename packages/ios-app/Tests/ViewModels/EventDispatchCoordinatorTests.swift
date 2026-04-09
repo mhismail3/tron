@@ -140,21 +140,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleTurnEndCalledWith?.turnNumber, 1)
     }
 
-    func testDispatch_agentTurn_callsHandleAgentTurn() {
-        // Given: An agent turn result
-        let result = AgentTurnPlugin.Result(messages: [], turnNumber: 2)
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: AgentTurnPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleAgentTurnCalledWith?.turnNumber, 2)
-    }
-
     func testDispatch_complete_callsHandleComplete() {
         // Given: A complete result
         let result = CompletePlugin.Result(success: true, totalTokens: nil, totalTurns: nil)
@@ -474,7 +459,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Turn Lifecycle
     var handleTurnStartCalledWith: TurnStartPlugin.Result?
     var handleTurnEndCalledWith: TurnEndPlugin.Result?
-    var handleAgentTurnCalledWith: AgentTurnPlugin.Result?
     var handleCompleteCalled = false
     var handleAgentErrorCalledWith: String?
     var handleProviderErrorCalledWith: ErrorPlugin.Result?
@@ -527,10 +511,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleTurnEnd(_ result: TurnEndPlugin.Result) {
         handleTurnEndCalledWith = result
-    }
-
-    func handleAgentTurn(_ result: AgentTurnPlugin.Result) {
-        handleAgentTurnCalledWith = result
     }
 
     func handleComplete() {

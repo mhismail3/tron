@@ -188,20 +188,6 @@ final class LiveSessionPruningTests: XCTestCase {
         XCTAssertNotNil(toolIndex)
     }
 
-    func test_pruneSyncsMessageWindowManager() {
-        // Given
-        populateMessages(count: 250)
-
-        // When
-        viewModel.pruneOldMessagesIfNeeded()
-
-        // Then: window manager has the same messages
-        XCTAssertEqual(
-            viewModel.messageWindowManager.totalCount,
-            viewModel.messages.count
-        )
-    }
-
     func test_pruneIncrementsPrunedVersion() {
         // Given
         populateMessages(count: 250)

@@ -31,12 +31,6 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking, MessageMutating {
     /// Make a tool visible for animation
     func makeToolVisible(_ toolCallId: String)
 
-    /// Append a message to the MessageWindowManager
-    func appendToMessageWindow(_ message: ChatMessage)
-
-    /// Update an existing message in the MessageWindowManager
-    func updateInMessageWindow(_ message: ChatMessage)
-
     /// Enqueue a tool start for ordered processing
     func enqueueToolStart(_ data: UIUpdateQueue.ToolStartData)
 
