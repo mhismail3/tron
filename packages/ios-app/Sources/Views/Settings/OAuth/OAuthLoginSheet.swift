@@ -5,10 +5,11 @@ import SwiftUI
 struct OAuthProvider: Identifiable {
     let id: String
     let displayName: String
+    let assetIcon: String
     let accentColor: Color
 
-    static let anthropic = OAuthProvider(id: "anthropic", displayName: "Anthropic", accentColor: .tronCoral)
-    static let openai = OAuthProvider(id: "openai-codex", displayName: "OpenAI", accentColor: .tronSlate)
+    static let anthropic = OAuthProvider(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", accentColor: .tronCoral)
+    static let openai = OAuthProvider(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", accentColor: .tronSlate)
 
     static func from(_ providerId: String) -> OAuthProvider? {
         switch providerId {
@@ -67,8 +68,8 @@ struct OAuthLoginSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Sign in to \(provider.displayName)")
-                        .font(TronTypography.button)
+                    Text(provider.displayName)
+                        .font(TronTypography.buttonSM)
                         .foregroundStyle(provider.accentColor)
                 }
                 ToolbarItem(placement: .topBarLeading) {
@@ -76,6 +77,19 @@ struct OAuthLoginSheet: View {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+                if case .label = flowState {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            flowState = .loading
+                            Task { await beginOAuthFlow() }
+                        } label: {
+                            Text("Continue")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(provider.accentColor)
+                        }
+                        .disabled(accountLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 if case .webView = flowState {
@@ -93,40 +107,44 @@ struct OAuthLoginSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.large])
+        .presentationDragIndicator(.hidden)
     }
 
     // MARK: - Subviews
 
     private var labelView: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: TronSpacing.section) {
+            Image(provider.assetIcon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(provider.accentColor)
+                .frame(width: 36, height: 36)
 
-            Text("Account label")
-                .font(TronTypography.subheadline)
+            Text("Label this account for easy identification")
+                .font(TronTypography.body)
                 .foregroundStyle(.tronTextSecondary)
-
-            TextField("e.g. moose@iphone", text: $accountLabel)
-                .font(TronTypography.codeCaption)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 48)
+                .padding(.horizontal, TronSpacing.large)
 
-            Button {
-                flowState = .loading
-                Task { await beginOAuthFlow() }
-            } label: {
-                Text("Continue")
-                    .font(TronTypography.button)
-                    .frame(minWidth: 120)
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                TextField("e.g. moose@iphone", text: $accountLabel)
+                    .textFieldStyle(.plain)
+                    .font(TronTypography.input)
+                    .foregroundStyle(.tronTextPrimary)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .multilineTextAlignment(.center)
+                    .tronInputPadding()
+                    .background {
+                        glassFieldBackground
+                    }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(provider.accentColor)
-            .disabled(accountLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal, TronSpacing.large)
 
             Spacer()
         }
+        .padding(.top, TronSpacing.large)
     }
 
     private func loadingView(_ text: String) -> some View {
@@ -152,9 +170,7 @@ struct OAuthLoginSheet: View {
     }
 
     private var manualEntryView: some View {
-        VStack(spacing: 20) {
-            Spacer()
-
+        VStack(spacing: TronSpacing.section) {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 36))
                 .foregroundStyle(.tronTextSecondary)
@@ -163,14 +179,19 @@ struct OAuthLoginSheet: View {
                 .font(TronTypography.body)
                 .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .padding(.horizontal, TronSpacing.large)
 
             TextField("Paste authorization code", text: $manualCode)
-                .font(TronTypography.codeCaption)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(TronTypography.input)
+                .foregroundStyle(.tronTextPrimary)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .padding(.horizontal, 32)
+                .tronInputPadding()
+                .background {
+                    glassFieldBackground
+                }
+                .padding(.horizontal, TronSpacing.large)
 
             HStack(spacing: 12) {
                 Button {
@@ -196,6 +217,7 @@ struct OAuthLoginSheet: View {
 
             Spacer()
         }
+        .padding(.top, TronSpacing.large)
     }
 
     private func errorView(_ message: String) -> some View {
@@ -218,6 +240,22 @@ struct OAuthLoginSheet: View {
             .tint(provider.accentColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var glassFieldBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
+        if #available(iOS 26.0, *) {
+            shape
+                .fill(.clear)
+                .glassEffect(
+                    .regular.tint(provider.accentColor.opacity(0.12)),
+                    in: shape
+                )
+        } else {
+            shape
+                .fill(provider.accentColor.opacity(0.12))
+        }
     }
 
     // MARK: - Flow Logic
