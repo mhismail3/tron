@@ -135,7 +135,14 @@ impl SessionReconstructService {
         let oldest_sequence = events.first().map(|e| e.sequence);
 
         // 4. Convert events to wire format
-        let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+
+        // 4a. Enrich interactive tool.call events (GetConfirmation,
+        // AskUserQuestion) with server-parsed status so iOS can render
+        // them without scanning event history.
+        crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
+            &mut wire_events,
+        );
 
         debug!(
             session_id,

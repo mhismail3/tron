@@ -2,36 +2,22 @@ import Foundation
 
 /// Transformer for AskUserQuestion tool_use content blocks.
 ///
-/// Converts AskUserQuestion tool calls into interactive question chips
-/// that show questions and track answer status.
+/// Reads server-enriched status fields from the tool.call payload
+/// (`toolStatus`, `parsedAnswers`) injected by `session.reconstruct`
+/// enrichment. For live WebSocket events (where the tool.call hasn't been
+/// enriched yet), status defaults to `.generating`.
 enum AskUserQuestionTransformer {
 
     /// Transform an AskUserQuestion tool_use content block into a ChatMessage.
-    ///
-    /// This generic implementation works with any `EventTransformable` type,
-    /// eliminating duplication between RawEvent and SessionEvent.
-    ///
-    /// - Parameters:
-    ///   - toolUseId: The tool use ID from the content block
-    ///   - toolCall: Optional tool call payload with full arguments
-    ///   - contentBlock: The tool_use content block from message.assistant
-    ///   - timestamp: Event timestamp
-    ///   - tokenRecord: Optional token record (not used for tool messages)
-    ///   - model: Optional model name
-    ///   - turn: Turn number
-    ///   - allEvents: Optional array of all events for status detection
-    /// - Returns: ChatMessage with .askUserQuestion content, or nil if parsing fails
-    static func transform<E: EventTransformable>(
+    static func transform(
         toolUseId: String,
         toolCall: ToolCallPayload?,
         contentBlock: [String: Any],
         timestamp: Date,
         tokenRecord: TokenRecord?,
         model: String?,
-        turn: Int,
-        allEvents: [E]?
+        turn: Int
     ) -> ChatMessage? {
-        // Parse the params from arguments
         guard let argumentsJson = ToolArgumentExtractor.extractArguments(
             toolCall: toolCall,
             contentBlock: contentBlock
@@ -46,31 +32,23 @@ enum AskUserQuestionTransformer {
             return nil
         }
 
-        // Determine status and parse answers from subsequent events
-        let detection: AskUserQuestionDetectionResult
-        if let events = allEvents {
-            detection = AskUserQuestionDetector.detectStatus(toolUseId: toolUseId, params: params, events: events)
-        } else {
-            detection = AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
-        }
+        // Read enriched fields from the server-provided tool.call payload.
+        let payload = toolCall?.rawPayload ?? [:]
+        let (status, answers) = decodeEnrichment(from: payload)
 
-        // Build result if answered
-        let result: AskUserQuestionResult?
-        if detection.status == .answered && !detection.answers.isEmpty {
-            result = AskUserQuestionResult(
-                answers: Array(detection.answers.values),
+        let result: AskUserQuestionResult? = (status == .answered && !answers.isEmpty)
+            ? AskUserQuestionResult(
+                answers: Array(answers.values),
                 complete: true,
-                submittedAt: ""  // Not available from persisted data
+                submittedAt: ""
             )
-        } else {
-            result = nil
-        }
+            : nil
 
         let toolData = AskUserQuestionToolData(
             toolCallId: toolUseId,
             params: params,
-            answers: detection.answers,
-            status: detection.status,
+            answers: answers,
+            status: status,
             result: result
         )
 
@@ -82,5 +60,39 @@ enum AskUserQuestionTransformer {
             model: model,
             turnNumber: turn
         )
+    }
+
+    /// Decode `toolStatus` / `parsedAnswers` fields injected by server-side
+    /// enrichment.
+    private static func decodeEnrichment(
+        from payload: [String: AnyCodable]
+    ) -> (status: AskUserQuestionStatus, answers: [String: AskUserQuestionAnswer]) {
+        guard let statusStr = payload.string("toolStatus") else {
+            return (.generating, [:])
+        }
+
+        let status: AskUserQuestionStatus = switch statusStr {
+        case "pending": .pending
+        case "answered": .answered
+        case "superseded": .superseded
+        default: .pending
+        }
+
+        var answers: [String: AskUserQuestionAnswer] = [:]
+        if let parsedValue = payload["parsedAnswers"],
+           let parsedArray = parsedValue.value as? [[String: Any]] {
+            for entry in parsedArray {
+                guard let questionId = entry["questionId"] as? String else { continue }
+                let selectedValues = (entry["selectedValues"] as? [String]) ?? []
+                let otherValue = entry["otherValue"] as? String
+                answers[questionId] = AskUserQuestionAnswer(
+                    questionId: questionId,
+                    selectedValues: selectedValues,
+                    otherValue: otherValue
+                )
+            }
+        }
+
+        return (status, answers)
     }
 }

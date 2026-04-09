@@ -9,6 +9,11 @@ struct ToolCallPayload {
     let name: String
     let arguments: String  // JSON string for display
     let turn: Int
+    /// Full payload dict preserved so transformers can access
+    /// server-enriched fields (e.g. interactive tool status from
+    /// `session.reconstruct` enrichment: `toolStatus`,
+    /// `confirmationDecision`, `confirmationNote`, `parsedAnswers`).
+    let rawPayload: [String: AnyCodable]
 
     init?(from payload: [String: AnyCodable]) {
         // toolCallId can be "toolCallId" or "id"
@@ -20,6 +25,7 @@ struct ToolCallPayload {
         self.toolCallId = id
         self.name = name
         self.turn = payload.int("turn") ?? 1
+        self.rawPayload = payload
 
         // Arguments can be dict or string
         if let argsDict = payload.dict("arguments"),

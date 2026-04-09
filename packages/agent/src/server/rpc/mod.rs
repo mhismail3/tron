@@ -22,6 +22,7 @@ pub mod errors;
 pub(crate) mod filesystem_service;
 pub(crate) mod git_service;
 pub mod handlers;
+pub(crate) mod interactive_tool_enrichment;
 pub(crate) mod notification_inbox;
 pub mod registry;
 pub(crate) mod sandbox_service;

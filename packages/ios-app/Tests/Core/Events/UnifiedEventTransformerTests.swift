@@ -1007,7 +1007,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testAskUserQuestionPendingStatus() {
-        // AskUserQuestion with no subsequent events should have pending status
+        // Server enrichment sets toolStatus=pending when no user response
+        // follows the tool call.
         let toolCallId = "auq-\(UUID().uuidString)"
         // JSON must match AskUserQuestionParams exactly: id, question, options, mode (single/multi)
         let questionsJson = """
@@ -1018,7 +1019,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "name": AnyCodable("AskUserQuestion"),
                 "toolCallId": AnyCodable(toolCallId),
                 "arguments": AnyCodable(questionsJson),
-                "turn": AnyCodable(1)
+                "turn": AnyCodable(1),
+                "toolStatus": AnyCodable("pending")
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1046,9 +1048,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testAskUserQuestionAnsweredStatus() {
-        // AskUserQuestion followed by answer message should have answered status
-        // NOTE: Status detection requires reconstructSessionState (not transformPersistedEvents)
-        // because it needs the full event array to detect subsequent user messages
+        // Server enrichment injects toolStatus + parsedAnswers into the
+        // tool.call payload. iOS reads them directly — no event scanning.
         let toolCallId = "auq-\(UUID().uuidString)"
         let questionsJson = """
         {"questions":[{"id":"q1","question":"What is your name?","options":[{"label":"Alice","description":"First option"},{"label":"Bob","description":"Second option"}],"mode":"single"}]}
@@ -1058,7 +1059,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "name": AnyCodable("AskUserQuestion"),
                 "toolCallId": AnyCodable(toolCallId),
                 "arguments": AnyCodable(questionsJson),
-                "turn": AnyCodable(1)
+                "turn": AnyCodable(1),
+                "toolStatus": AnyCodable("answered"),
+                "parsedAnswers": AnyCodable([
+                    ["questionId": "q1", "selectedValues": ["Alice"], "otherValue": NSNull()]
+                ])
             ], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1075,21 +1080,20 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(2), sequence: 3)
         ]
 
-        // Use reconstructSessionState which passes allEvents to status detection
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
-        // Should have AskUserQuestion (answered) + AnsweredQuestions chip
         XCTAssertGreaterThanOrEqual(state.messages.count, 1)
         if case .askUserQuestion(let data) = state.messages[0].content {
             XCTAssertEqual(data.status, .answered)
+            XCTAssertEqual(data.answers["q1"]?.selectedValues, ["Alice"])
         } else {
             XCTFail("Expected askUserQuestion content with answered status")
         }
     }
 
     func testAskUserQuestionSupersededStatus() {
-        // AskUserQuestion followed by different user message should have superseded status
-        // NOTE: Status detection requires reconstructSessionState (not transformPersistedEvents)
+        // Server enrichment sets toolStatus=superseded when the user sent a
+        // non-matching message after the tool call.
         let toolCallId = "auq-\(UUID().uuidString)"
         let questionsJson = """
         {"questions":[{"id":"q1","question":"Pick one?","options":[{"label":"A"},{"label":"B"}],"mode":"single"}]}
@@ -1099,7 +1103,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "name": AnyCodable("AskUserQuestion"),
                 "toolCallId": AnyCodable(toolCallId),
                 "arguments": AnyCodable(questionsJson),
-                "turn": AnyCodable(1)
+                "turn": AnyCodable(1),
+                "toolStatus": AnyCodable("superseded")
             ], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1111,13 +1116,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 ]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
-            // User sends different message instead of answering
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("Never mind, let's do something else")
             ], timestamp: timestamp(2), sequence: 3)
         ]
 
-        // Use reconstructSessionState which passes allEvents to status detection
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
         XCTAssertGreaterThanOrEqual(state.messages.count, 1)
@@ -1125,6 +1128,148 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTAssertEqual(data.status, .superseded)
         } else {
             XCTFail("Expected askUserQuestion content with superseded status")
+        }
+    }
+
+    func testAskUserQuestionMissingEnrichmentDefaultsToGenerating() {
+        // Live WebSocket events arrive without server enrichment — status
+        // should default to .generating, not .pending.
+        let toolCallId = "auq-\(UUID().uuidString)"
+        let questionsJson = """
+        {"questions":[{"id":"q1","question":"?","options":[{"label":"A"}],"mode":"single"}]}
+        """
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("AskUserQuestion"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(questionsJson),
+                "turn": AnyCodable(1)
+                // NOTE: No toolStatus — simulating a live (un-enriched) event
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                        "questions": [
+                            ["id": "q1", "question": "?", "options": [["label": "A"]], "mode": "single"]
+                        ]
+                    ]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .askUserQuestion(let data) = messages[0].content {
+            XCTAssertEqual(data.status, .generating)
+        } else {
+            XCTFail("Expected askUserQuestion content")
+        }
+    }
+
+    func testGetConfirmationApprovedFromEnrichment() {
+        // Server enrichment injects toolStatus=approved, decision, note.
+        let toolCallId = "gc-\(UUID().uuidString)"
+        let argsJson = """
+        {"action":"delete file","reason":"cleanup","riskLevel":"low"}
+        """
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("GetConfirmation"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(argsJson),
+                "turn": AnyCodable(1),
+                "toolStatus": AnyCodable("approved"),
+                "confirmationDecision": AnyCodable("Approved"),
+                "confirmationNote": AnyCodable("go ahead")
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "GetConfirmation",
+                     "input": ["action": "delete file", "reason": "cleanup", "riskLevel": "low"]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .getConfirmation(let data) = messages[0].content {
+            XCTAssertEqual(data.status, .approved)
+            XCTAssertEqual(data.decision, .approved)
+            XCTAssertEqual(data.note, "go ahead")
+        } else {
+            XCTFail("Expected getConfirmation content with approved status")
+        }
+    }
+
+    func testGetConfirmationDeniedFromEnrichment() {
+        let toolCallId = "gc-\(UUID().uuidString)"
+        let argsJson = """
+        {"action":"x","reason":"y","riskLevel":"high"}
+        """
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("GetConfirmation"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(argsJson),
+                "turn": AnyCodable(1),
+                "toolStatus": AnyCodable("denied"),
+                "confirmationDecision": AnyCodable("Denied")
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "GetConfirmation",
+                     "input": ["action": "x", "reason": "y", "riskLevel": "high"]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .getConfirmation(let data) = messages[0].content {
+            XCTAssertEqual(data.status, .denied)
+            XCTAssertEqual(data.decision, .denied)
+            XCTAssertNil(data.note)
+        } else {
+            XCTFail("Expected getConfirmation content with denied status")
+        }
+    }
+
+    func testGetConfirmationMissingEnrichmentDefaultsToGenerating() {
+        let toolCallId = "gc-\(UUID().uuidString)"
+        let argsJson = """
+        {"action":"x","reason":"y","riskLevel":"low"}
+        """
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("GetConfirmation"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(argsJson),
+                "turn": AnyCodable(1)
+                // NOTE: No toolStatus
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "GetConfirmation",
+                     "input": ["action": "x", "reason": "y", "riskLevel": "low"]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .getConfirmation(let data) = messages[0].content {
+            XCTAssertEqual(data.status, .generating)
+            XCTAssertNil(data.decision)
+        } else {
+            XCTFail("Expected getConfirmation content")
         }
     }
 

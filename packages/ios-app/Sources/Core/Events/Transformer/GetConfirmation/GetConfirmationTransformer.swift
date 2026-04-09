@@ -2,29 +2,20 @@ import Foundation
 
 /// Transformer for GetConfirmation tool_use content blocks.
 ///
-/// Converts GetConfirmation tool calls into interactive confirmation chips
-/// that show the action, reason, risk level, and track approval status.
+/// Reads server-enriched status fields from the tool.call payload
+/// (`toolStatus`, `confirmationDecision`, `confirmationNote`) injected by
+/// `session.reconstruct` enrichment. For live WebSocket events (where the
+/// tool.call hasn't been enriched yet), status defaults to `.generating`.
 enum GetConfirmationTransformer {
 
     /// Transform a GetConfirmation tool_use content block into a ChatMessage.
-    ///
-    /// - Parameters:
-    ///   - toolUseId: The tool use ID from the content block
-    ///   - toolCall: Optional tool call payload with full arguments
-    ///   - contentBlock: The tool_use content block from message.assistant
-    ///   - timestamp: Event timestamp
-    ///   - turn: Turn number
-    ///   - allEvents: Optional array of all events for status detection
-    /// - Returns: ChatMessage with .getConfirmation content, or nil if parsing fails
-    static func transform<E: EventTransformable>(
+    static func transform(
         toolUseId: String,
         toolCall: ToolCallPayload?,
         contentBlock: [String: Any],
         timestamp: Date,
-        turn: Int,
-        allEvents: [E]?
+        turn: Int
     ) -> ChatMessage? {
-        // Parse the params from arguments
         guard let argumentsJson = ToolArgumentExtractor.extractArguments(
             toolCall: toolCall,
             contentBlock: contentBlock
@@ -39,32 +30,25 @@ enum GetConfirmationTransformer {
             return nil
         }
 
-        // Determine status from subsequent events
-        let detection: GetConfirmationDetectionResult
-        if let events = allEvents {
-            detection = GetConfirmationDetector.detectStatus(toolUseId: toolUseId, events: events)
-        } else {
-            detection = GetConfirmationDetectionResult(status: .pending, decision: nil, note: nil)
-        }
+        // Read enriched fields from the server-provided tool.call payload.
+        // Live events don't have these yet — default to .generating.
+        let payload = toolCall?.rawPayload ?? [:]
+        let (status, decision, note) = decodeEnrichment(from: payload)
 
-        // Build result if decided
-        let result: GetConfirmationResult?
-        if let decision = detection.decision {
-            result = GetConfirmationResult(
+        let result: GetConfirmationResult? = decision.map { decision in
+            GetConfirmationResult(
                 decision: decision,
-                note: detection.note,
+                note: note,
                 submittedAt: ""  // Not available from persisted data
             )
-        } else {
-            result = nil
         }
 
         let toolData = GetConfirmationToolData(
             toolCallId: toolUseId,
             params: params,
-            status: detection.status,
-            decision: detection.decision,
-            note: detection.note,
+            status: status,
+            decision: decision,
+            note: note,
             result: result
         )
 
@@ -74,5 +58,30 @@ enum GetConfirmationTransformer {
             timestamp: timestamp,
             turnNumber: turn
         )
+    }
+
+    /// Decode `toolStatus` / `confirmationDecision` / `confirmationNote`
+    /// fields injected by server-side enrichment.
+    private static func decodeEnrichment(
+        from payload: [String: AnyCodable]
+    ) -> (status: GetConfirmationStatus, decision: ConfirmationDecision?, note: String?) {
+        guard let statusStr = payload.string("toolStatus") else {
+            // Live event — no enrichment yet.
+            return (.generating, nil, nil)
+        }
+
+        let status: GetConfirmationStatus = switch statusStr {
+        case "pending": .pending
+        case "approved": .approved
+        case "denied": .denied
+        case "superseded": .superseded
+        default: .pending
+        }
+
+        let decision: ConfirmationDecision? = payload.string("confirmationDecision")
+            .flatMap(ConfirmationDecision.init(rawValue:))
+        let note = payload.string("confirmationNote")
+
+        return (status, decision, note)
     }
 }

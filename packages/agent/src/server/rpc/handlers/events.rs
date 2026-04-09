@@ -141,7 +141,14 @@ impl MethodHandler for GetHistoryHandler {
         // Include oldestEventId for cursor-based pagination
         let oldest_event_id = events.first().map(|e| e.id.clone());
 
-        let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+
+        // Enrich GetConfirmation/AskUserQuestion tool.call events with
+        // server-parsed status so iOS can render them without scanning
+        // event history. Same pass used by session.reconstruct.
+        crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
+            &mut wire_events,
+        );
 
         Ok(serde_json::json!({
             "sessionId": session_id,

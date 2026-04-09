@@ -94,8 +94,7 @@ struct UnifiedEventTransformer {
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults,
-                    allEvents: sorted  // Pass sorted events for AskUserQuestion status detection
+                    toolResults: toolResults
                 )
                 messages.append(contentsOf: interleaved)
             } else {
@@ -320,8 +319,7 @@ extension UnifiedEventTransformer {
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults,
-                    allEvents: sorted  // Pass events for AskUserQuestion status detection
+                    toolResults: toolResults
                 )
                 if !interleaved.isEmpty {
                     interleaved[0].eventId = event.id

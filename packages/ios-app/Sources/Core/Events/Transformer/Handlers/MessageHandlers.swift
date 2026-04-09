@@ -35,12 +35,22 @@ enum MessageHandlers {
             )
         }
 
-        // GetConfirmation response prompts - render as a chip instead of full text
+        // GetConfirmation response prompts - render as a chip instead of full text.
+        // Format (case-sensitive, matches server agent_confirmation.rs):
+        //   [Confirmation response]
+        //
+        //   Action: ...
+        //   Decision: Approved|Denied
+        //   Note: ...
         if parsed.content.contains("[Confirmation response]") {
-            let parsedResponse = GetConfirmationDetector.parseConfirmationResponse(from: parsed.content)
+            let approved = parsed.content
+                .components(separatedBy: "\n")
+                .contains { line in
+                    line.trimmingCharacters(in: .whitespaces) == "Decision: Approved"
+                }
             return ChatMessage(
                 role: .user,
-                content: .confirmedAction(approved: parsedResponse.decision == .approved),
+                content: .confirmedAction(approved: approved),
                 timestamp: timestamp
             )
         }

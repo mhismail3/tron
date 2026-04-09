@@ -23,28 +23,24 @@ import Foundation
 ///
 /// ## Interactive Tool Handling
 /// `AskUserQuestion` and `GetConfirmation` tools are transformed via dedicated
-/// transformers for proper status detection. The server's stream processor drains
-/// content after these tools, so no trailing text blocks arrive.
+/// transformers that read server-enriched status fields directly from the
+/// tool.call payload. The server's stream processor drains content after
+/// these tools, so no trailing text blocks arrive.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.
-    ///
-    /// This generic implementation works with any `EventTransformable` type,
-    /// enabling unified processing of both `RawEvent` and `SessionEvent` arrays.
     ///
     /// - Parameters:
     ///   - payload: The message.assistant event payload
     ///   - timestamp: Event timestamp
     ///   - toolCalls: Map of toolCallId -> ToolCallPayload for tool details
     ///   - toolResults: Map of toolCallId -> ToolResultPayload for results
-    ///   - allEvents: Optional array of all events for AskUserQuestion status detection
     /// - Returns: Array of ChatMessages in content block order
-    static func transform<E: EventTransformable>(
+    static func transform(
         payload: [String: AnyCodable],
         timestamp: Date,
         toolCalls: [String: ToolCallPayload],
-        toolResults: [String: ToolResultPayload],
-        allEvents: [E]? = nil
+        toolResults: [String: ToolResultPayload]
     ) -> [ChatMessage] {
         let parsed = AssistantMessagePayload(from: payload)
         guard let blocks = parsed.contentBlocks else { return [] }
@@ -93,8 +89,7 @@ enum InterleavedContentProcessor {
                         timestamp: timestamp,
                         tokenRecord: nil,  // Stats only shown on text messages
                         model: nil,
-                        turn: parsed.turn,
-                        allEvents: allEvents
+                        turn: parsed.turn
                     ) {
                         messages.append(askUserMessage)
                     }
@@ -108,8 +103,7 @@ enum InterleavedContentProcessor {
                         toolCall: toolCall,
                         contentBlock: block,
                         timestamp: timestamp,
-                        turn: parsed.turn,
-                        allEvents: allEvents
+                        turn: parsed.turn
                     ) {
                         messages.append(confirmMessage)
                     }
