@@ -41,6 +41,8 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             return Ok(NotifyResult {
                 success: true,
                 message: None,
+                success_count: 0,
+                total_count: 0,
             });
         }
 

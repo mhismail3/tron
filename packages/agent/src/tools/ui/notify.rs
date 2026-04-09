@@ -130,6 +130,9 @@ impl TronTool for NotifyAppTool {
                         "body": body,
                         "priority": priority,
                         "success": result.success,
+                        "successCount": result.success_count,
+                        "totalCount": result.total_count,
+                        "failureCount": result.total_count.saturating_sub(result.success_count),
                     })),
                     is_error: None,
                     stop_turn: None,
@@ -159,6 +162,20 @@ mod tests {
                 result: NotifyResult {
                     success: true,
                     message: None,
+                    success_count: 1,
+                    total_count: 1,
+                },
+                last_notification: Mutex::new(None),
+            }
+        }
+
+        fn with_counts(success_count: u32, total_count: u32) -> Self {
+            Self {
+                result: NotifyResult {
+                    success: success_count > 0,
+                    message: None,
+                    success_count,
+                    total_count,
                 },
                 last_notification: Mutex::new(None),
             }
@@ -334,5 +351,61 @@ mod tests {
         assert_eq!(obj.len(), 2);
         assert!(obj.contains_key("sessionId"));
         assert!(obj.contains_key("toolCallId"));
+    }
+
+    #[tokio::test]
+    async fn details_include_success_count_and_total_count() {
+        let mock = Arc::new(MockNotify::with_counts(3, 5));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["successCount"], 3);
+        assert_eq!(d["totalCount"], 5);
+        assert_eq!(d["failureCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn details_zero_counts_when_no_devices() {
+        let mock = Arc::new(MockNotify::with_counts(0, 0));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["successCount"], 0);
+        assert_eq!(d["totalCount"], 0);
+        assert_eq!(d["failureCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn details_all_failures() {
+        let mock = Arc::new(MockNotify::with_counts(0, 3));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["successCount"], 0);
+        assert_eq!(d["failureCount"], 3);
+        assert_eq!(d["totalCount"], 3);
+    }
+
+    #[tokio::test]
+    async fn details_partial_success() {
+        let mock = Arc::new(MockNotify::with_counts(7, 10));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["successCount"], 7);
+        assert_eq!(d["failureCount"], 3);
+        assert_eq!(d["totalCount"], 10);
     }
 }

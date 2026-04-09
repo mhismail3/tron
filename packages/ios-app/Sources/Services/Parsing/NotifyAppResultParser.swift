@@ -40,19 +40,10 @@ enum NotifyAppResultParser {
         var failureCount: Int?
         var errorMessage: String?
 
-        // Prefer structured details from server
-        if let details = tool.details,
-           let sc = details["successCount"]?.value as? Int {
-            successCount = sc
-            failureCount = (details["failureCount"]?.value as? Int) ?? 0
-        } else if let result = tool.result {
-            // Fallback: regex on freetext result
-            if let match = result.firstMatch(of: /to\s+(\d+)\s+device/) {
-                successCount = Int(match.1)
-            }
-            if let match = result.firstMatch(of: /failed\s+for\s+(\d+)/) {
-                failureCount = Int(match.1)
-            }
+        // Server provides structured counts in tool.details.
+        if let details = tool.details {
+            successCount = details["successCount"]?.value as? Int
+            failureCount = details["failureCount"]?.value as? Int
         }
 
         if status == .failed, let result = tool.result {

@@ -149,8 +149,10 @@ struct ToolResultParserNotifyAppTests {
         #expect(chipData?.failureCount == 0)
     }
 
-    @Test("Success tool extracts successCount from regex fallback")
-    func successExtractsCountFromRegex() {
+    @Test("Success tool with missing details has nil counts")
+    func successMissingDetailsHasNilCounts() {
+        // Server always provides structured details; if details is absent
+        // (e.g., historical events), counts are nil — no regex fallback.
         let tool = ToolUseData(
             toolName: "NotifyApp",
             toolCallId: "call_10",
@@ -160,7 +162,48 @@ struct ToolResultParserNotifyAppTests {
         )
 
         let chipData = ToolResultParser.parseNotifyApp(from: tool)
-        #expect(chipData?.successCount == 3)
+        #expect(chipData?.successCount == nil)
+        #expect(chipData?.failureCount == nil)
+    }
+
+    @Test("Success tool with zero counts in details")
+    func successZeroCountsInDetails() {
+        let tool = ToolUseData(
+            toolName: "NotifyApp",
+            toolCallId: "call_zero",
+            arguments: "{\"title\":\"Done\",\"body\":\"OK\"}",
+            status: .success,
+            result: "No devices",
+            details: [
+                "successCount": AnyCodable(0),
+                "failureCount": AnyCodable(0),
+                "totalCount": AnyCodable(0)
+            ]
+        )
+
+        let chipData = ToolResultParser.parseNotifyApp(from: tool)
+        #expect(chipData?.successCount == 0)
+        #expect(chipData?.failureCount == 0)
+    }
+
+    @Test("Success tool with partial failure counts")
+    func successPartialFailureCounts() {
+        let tool = ToolUseData(
+            toolName: "NotifyApp",
+            toolCallId: "call_partial",
+            arguments: "{\"title\":\"Done\",\"body\":\"OK\"}",
+            status: .success,
+            result: "Sent to 2 of 3 devices",
+            details: [
+                "successCount": AnyCodable(2),
+                "failureCount": AnyCodable(1),
+                "totalCount": AnyCodable(3)
+            ]
+        )
+
+        let chipData = ToolResultParser.parseNotifyApp(from: tool)
+        #expect(chipData?.successCount == 2)
+        #expect(chipData?.failureCount == 1)
     }
 
     @Test("Tool with sheetContent preserves it")

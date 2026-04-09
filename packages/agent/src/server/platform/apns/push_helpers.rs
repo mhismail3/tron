@@ -140,9 +140,12 @@ pub(crate) fn process_send_results(
         "push delivery summary"
     );
 
+    #[allow(clippy::cast_possible_truncation)]
     NotifyResult {
         success: success_count > 0,
         message: Some(message),
+        success_count: u32::try_from(success_count).unwrap_or(u32::MAX),
+        total_count: u32::try_from(total).unwrap_or(u32::MAX),
     }
 }
 
@@ -234,6 +237,8 @@ mod tests {
         let result = process_send_results(&results, &pool);
         assert!(result.success);
         assert!(result.message.as_ref().unwrap().contains("2 of 2"));
+        assert_eq!(result.success_count, 2);
+        assert_eq!(result.total_count, 2);
     }
 
     #[test]
@@ -254,6 +259,8 @@ mod tests {
         assert!(!result.success);
         assert!(result.message.as_ref().unwrap().contains("0 of 1"));
         assert!(result.message.as_ref().unwrap().contains("bad token"));
+        assert_eq!(result.success_count, 0);
+        assert_eq!(result.total_count, 1);
     }
 
     #[test]
@@ -283,5 +290,7 @@ mod tests {
         let result = process_send_results(&results, &pool);
         assert!(result.success); // at least one succeeded
         assert!(result.message.as_ref().unwrap().contains("1 of 2"));
+        assert_eq!(result.success_count, 1);
+        assert_eq!(result.total_count, 2);
     }
 }
