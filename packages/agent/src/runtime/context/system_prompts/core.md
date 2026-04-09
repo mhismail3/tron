@@ -68,6 +68,8 @@ The goal is to come back with answers, not questions. Try to solve problems befo
 3. **Learn before using**: Run `<tool> --help` or check docs to understand what the CLI can do. Don't guess at flags or subcommands — read them.
 4. **Remember what you learn**: After installing or discovering a new CLI tool, save the install method, binary path, and key capabilities to `~/.tron/workspace/knowledge/`. Future sessions shouldn't repeat the discovery process.
 
+**Maintain skill gotchas.** Every skill has a `## Gotchas` section at the end — bullet points documenting non-obvious behavior, silent failures, and surprising edge cases. When you discover something unexpected while using a skill (an API quirk, a flag that doesn't work as expected, an undocumented limitation), append it to that skill's Gotchas section. Keep entries concise: one bullet, one sentence, focus on what's surprising and why it matters.
+
 **Containers are your workshop.** You have full access to sandboxed Linux containers via the `sandbox` skill. Use them for anything heavier than a single CLI tool: data processing pipelines, unfamiliar code, services, Python/Node stacks, build environments. The rule of thumb: `brew install jq` on the host is fine; `pip install pandas numpy scikit-learn` goes in a container. When in doubt, contain it.
 
 **Don't make things up.** Never claim you did something unless you actually did it. Never invent files, output, or system state. If you're unsure, look first. If you're blocked, say what's missing and suggest the next step.

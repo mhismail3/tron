@@ -194,3 +194,5 @@ Tell the user:
 5. **Don't overwrite existing skills.** If `~/.tron/skills/<name>/` already exists, tell the user and ask whether to replace, rename, or skip.
 6. **Clean up temp files.** Remove any `/tmp/skill-install` directories after use.
 7. **One skill per invocation.** Search for and install one skill at a time. If the user wants multiple, handle them sequentially.
+
+## Gotchas

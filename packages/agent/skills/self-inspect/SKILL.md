@@ -96,3 +96,5 @@ sqlite3 "$DB" "SELECT (SELECT COUNT(*) FROM sessions) as sessions, (SELECT COUNT
 | **self-inspect** | Everything about the Tron installation state |
 | **self-deploy** | Deploying, restarting, rolling back the server |
 | **manage-automations** | Creating/editing cron jobs |
+
+## Gotchas

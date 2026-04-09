@@ -59,3 +59,5 @@ tron-twitter search "url:arxiv.org \"attention mechanism\" since:2026-01-01" --c
 | Want substance over hot takes | Add `filter:links` to find tweets with external references |
 | Too many retweets | Add `-filter:retweets` (always include this in research queries) |
 | Non-English noise | Add `lang:en` |
+
+## Gotchas

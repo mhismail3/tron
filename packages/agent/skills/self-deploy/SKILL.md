@@ -179,3 +179,5 @@ Dev mode takes over port **9847** from production. It stops the launchd service,
 8. **Post-reconnect.** After deploy, verify with `curl localhost:9847/health/deep | jq .`.
 9. **Rollback uses `tron-cli`.** Only `~/.tron/system/deployment/tron-cli rollback --yes` (via nohup) needs detached execution since it uses launchctl directly.
 10. **No deploy during dev takeover.** `tron deploy` aborts if dev is active. Stop dev first.
+
+## Gotchas

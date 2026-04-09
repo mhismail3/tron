@@ -168,3 +168,5 @@ When done:
 2. Clean up any scratch files used during drafting
 3. Present the final artifact path and a brief summary
 4. Return the path so downstream agents or the user can reference it
+
+## Gotchas

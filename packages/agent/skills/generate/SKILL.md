@@ -209,6 +209,7 @@ Render files persist at `~/.tron/workspace/renders/<name>/` across sessions.
 
 ## Toolchain Setup
 
+
 If the toolchain files are missing from this skill directory, recreate them:
 
 **`~/.tron/skills/generate/package.json`:**
@@ -231,3 +232,5 @@ If the toolchain files are missing from this skill directory, recreate them:
 Then install: `cd ~/.tron/skills/generate && npm install`
 
 The `render.mjs` and `prompt.mjs` scripts should also be present in this directory. If missing, they need to be recreated — see the source files alongside this SKILL.md.
+
+## Gotchas

@@ -75,3 +75,5 @@ gws auth logout
 ```
 
 Clears saved credentials and token cache.
+
+## Gotchas

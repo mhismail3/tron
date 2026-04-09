@@ -360,3 +360,5 @@ After all phases complete:
 4. **Abort rebase on doubt.** If you are not confident in a conflict resolution, abort and ask.
 5. **Do not skip phases.** Each phase depends on the previous one succeeding.
 6. **Report after every phase.** The user should always know what happened and what is next.
+
+## Gotchas

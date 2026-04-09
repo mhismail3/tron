@@ -310,3 +310,5 @@ When you're done with browser automation:
    ```
 
 Always clean up, even if errors occurred. If you used multiple sessions, close each one.
+
+## Gotchas

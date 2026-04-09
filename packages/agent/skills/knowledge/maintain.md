@@ -164,3 +164,5 @@ After any maintenance operation, commit:
 ```bash
 cd WIKI_ROOT && git add -A && git commit -m "wiki: maintain — {description}"
 ```
+
+## Gotchas

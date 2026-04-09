@@ -198,3 +198,5 @@ Reuse existing tags before inventing new ones. If a genuinely new topic comes up
 8. Headings use sentence case, not Title Case
 9. File path matches the naming convention exactly
 10. The draft has been explicitly approved by the user before committing
+
+## Gotchas

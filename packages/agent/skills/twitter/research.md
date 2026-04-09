@@ -47,3 +47,5 @@ For contested or complex topics:
 ## Saturation Signal
 
 Stop when new searches return already-seen tweets and you've actively searched for counterarguments. At this point, move to synthesis — read `report.md` for the report format.
+
+## Gotchas

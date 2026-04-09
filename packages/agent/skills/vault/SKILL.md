@@ -190,3 +190,5 @@ Proactively offer to store credentials when:
 | Index corrupted | Run `selftest` to diagnose. Worst case: rebuild by decrypting each `.enc` file |
 | Master key missing | Existing entries are unrecoverable. Warn user, back up `entries/`, then re-init |
 | Duplicate name | Use `update` to modify existing entries, not `set` |
+
+## Gotchas

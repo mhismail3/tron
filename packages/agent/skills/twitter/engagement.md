@@ -47,3 +47,5 @@ tron-twitter check-dms                      # Returns only NEW DMs since last ch
 ```
 
 State stored in `~/.tron/system/mods/twitter/state.json`. First run returns all; subsequent runs return only new.
+
+## Gotchas

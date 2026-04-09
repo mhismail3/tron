@@ -197,3 +197,5 @@ This applies to all modes:
 2. If found: read the note, integrate new content with Edit, bump `updated`
 3. If not found: create a new note with Write
 4. Never create duplicates — one source note per URL, one wiki page per concept
+
+## Gotchas

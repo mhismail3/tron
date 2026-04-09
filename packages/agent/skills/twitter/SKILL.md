@@ -127,3 +127,5 @@ For tracking a specific user's output, use `tron-twitter timeline USERNAME --cou
 ~/.tron/skills/twitter/report.md
 ~/.tron/skills/twitter/engagement.md
 ```
+
+## Gotchas

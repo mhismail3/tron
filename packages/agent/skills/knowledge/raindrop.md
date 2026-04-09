@@ -139,3 +139,5 @@ Collection `0` = Unsorted. All requests need `Authorization: Bearer <token>` hea
 | WebFetch failure | Skip the bookmark, log the error, continue. Don't tag it as ingested. |
 | Network failure | Stop the run, preserve state. Next run picks up. |
 | Vault token missing | Write error to output file and exit. Don't ask for input (cron runs unattended). |
+
+## Gotchas

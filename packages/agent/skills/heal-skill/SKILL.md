@@ -146,7 +146,24 @@ For single-file skills:
 - Content should be self-contained
 - Clear sections with headers
 
-### 9. Preflight & Self-Sufficiency Check
+### 9. Validate Gotchas Section
+
+Every skill file (SKILL.md and sub-files with procedural content) must have a `## Gotchas` section as its **final** `##`-level section. Router-only SKILL.md files (those that just direct to sub-files) and pure reference tables are exempt.
+
+**Check:** `grep -c '## Gotchas' <file>`
+
+**If missing:**
+1. Scan the file for inline warnings, edge case tables, "Critical"/"Important" notes.
+2. Extract 2-5 non-obvious behaviors as bullet points.
+3. Append a `## Gotchas` section at the end of the file with those bullets.
+4. If nothing extractable: `- No known gotchas yet. Update this section as edge cases are discovered.`
+
+**If present:**
+- Verify it contains at least one bullet point (not empty).
+- Verify it is the last `##`-level section in the file.
+- If not last, move it to the end.
+
+### 10. Preflight & Self-Sufficiency Check
 
 Every skill should be able to set itself up from scratch without asking the user. Check for and add the following if missing:
 
@@ -190,7 +207,7 @@ If the skill is missing a preflight section, add one. Model it on the vault skil
 3. For anything requiring user input (first-time credentials), guide Tron to collect and vault them, then continue.
 4. Output clear pass/fail status so future runs can confirm the environment is ready.
 
-### 11. Import-Specific Conversions
+### 12. Import-Specific Conversions
 
 **From Claude Code plugins:**
 - `~/.claude/` paths → `~/.tron/` equivalents
@@ -207,7 +224,7 @@ If the skill is missing a preflight section, add one. Model it on the vault skil
 - Identify tool dependencies and add to `allowedTools`
 - If complex, restructure into routing table + sub-files
 
-### 12. Apply Fixes
+### 13. Apply Fixes
 
 After analysis, rewrite the skill files:
 1. Fix frontmatter (add missing fields, rename invalid keys, fix values)
@@ -216,8 +233,9 @@ After analysis, rewrite the skill files:
 4. Remove references to non-existent tables/files
 5. Fix SQL queries
 6. Clean up content structure
+7. Add or fix `## Gotchas` section (must be last `##`-level section)
 
-### 13. Verify
+### 14. Verify
 
 After healing, re-read and confirm:
 - Frontmatter parses correctly (all recognized keys present)
@@ -225,6 +243,7 @@ After healing, re-read and confirm:
 - No invalid tool names remain
 - All referenced files exist
 - SQL queries target correct DB and valid tables
+- `## Gotchas` section present and is last `##`-level section
 
 ## Example Report Format
 
@@ -260,6 +279,15 @@ Preflight:
   [WARN] Auth required but no vault integration → added vault lookup for "twitter-account"
   [PASS] State directory created with mkdir -p
 
+Gotchas:
+  [PASS] ## Gotchas present (5 bullets), last section
+  -- or --
+  [FAIL] No ## Gotchas section → added with 3 extracted bullets
+  [WARN] ## Gotchas is empty → added placeholder bullet
+  [WARN] ## Gotchas is not the last section → moved to end
+
 Fixes applied: 4
 Warnings: 2
 ```
+
+## Gotchas

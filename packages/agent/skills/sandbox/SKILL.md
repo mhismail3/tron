@@ -263,3 +263,5 @@ container exec my-sandbox sh -c "flask run --host 0.0.0.0 --port 3000"
 - Don't expose privileged ports (< 1024) without the user asking
 - Remove the registry entry when deleting a container
 - Use `--volume` to share files rather than copying
+
+## Gotchas

@@ -136,3 +136,5 @@ Technical debt, unusual patterns, areas of note.
 When done:
 1. Write the report to `~/.tron/workspace/explore/<timestamp>-<slug>/report.md`
 2. Return a summary: report path, project name, languages, architecture pattern, 1-2 sentence key insight
+
+## Gotchas

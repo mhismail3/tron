@@ -346,3 +346,5 @@ Create a one-shot job with `at` set to the current time (or a few seconds in the
 - Prefer cron expressions with timezones for time-of-day schedules; use interval for polling-style jobs
 - Default to the user's local timezone, not UTC
 - **All job I/O goes in `AUTOMATIONS/<job-slug>/`** — never scatter output to tmp dirs, home dir, or ad-hoc paths. Create the directory structure as part of job setup.
+
+## Gotchas

@@ -130,3 +130,5 @@ Update WIKI_INDEX, append to WIKI_LOG, git commit. Log operation type: `research
 3. Wiki pages created/updated
 4. Key findings summary
 5. Open questions / gaps
+
+## Gotchas
