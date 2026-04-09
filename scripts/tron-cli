@@ -78,6 +78,7 @@ case "${1:-help}" in
 esac
 
 ensure_tron_home
+ensure_default_configs
 
 case "$1" in
     # Runtime (handled directly)

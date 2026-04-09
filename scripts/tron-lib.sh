@@ -94,6 +94,41 @@ ensure_tron_home() {
     mkdir -p "$TRON_HOME/workspace/voice notes"
 }
 
+ensure_default_configs() {
+    if [ ! -f "$TRON_HOME/system/settings.json" ]; then
+        cat > "$TRON_HOME/system/settings.json" << 'EOF'
+{
+  "server": {
+    "defaultModel": "claude-sonnet-4-20250514",
+    "defaultProvider": "anthropic",
+    "port": 9847,
+    "maxConcurrentSessions": 10
+  },
+  "logging": {
+    "dbLogLevel": "info"
+  },
+  "tools": {
+    "bash": { "defaultTimeoutMs": 120000 },
+    "read": { "defaultLimitLines": 2000 }
+  }
+}
+EOF
+        print_success "Created settings.json"
+    fi
+
+    if [ ! -f "$TRON_HOME/system/auth.json" ]; then
+        cat > "$TRON_HOME/system/auth.json" << 'EOF'
+{
+  "version": 1,
+  "providers": {},
+  "lastUpdated": ""
+}
+EOF
+        chmod 600 "$TRON_HOME/system/auth.json"
+        print_success "Created auth.json"
+    fi
+}
+
 wait_for_port_free() {
     local port=$1
     local max_wait=${2:-10}

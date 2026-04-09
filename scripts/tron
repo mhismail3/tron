@@ -857,6 +857,9 @@ cmd_install() {
     mkdir -p "$TRON_HOME/system/deployment"
     mkdir -p "$HOME/Library/LaunchAgents"
 
+    # Create default config files if missing
+    ensure_default_configs
+
     # Build if needed
     if [ ! -f "$RELEASE_BINARY" ]; then
         build_rust
@@ -1008,43 +1011,7 @@ cmd_setup() {
 
     # Create default config files
     print_status "Creating configuration files..."
-
-    if [ ! -f "$TRON_HOME/system/settings.json" ]; then
-        cat > "$TRON_HOME/system/settings.json" << 'EOF'
-{
-  "server": {
-    "defaultModel": "claude-sonnet-4-20250514",
-    "defaultProvider": "anthropic",
-    "port": 9847,
-    "maxConcurrentSessions": 10
-  },
-  "logging": {
-    "dbLogLevel": "info"
-  },
-  "tools": {
-    "bash": { "defaultTimeoutMs": 120000 },
-    "read": { "defaultLimitLines": 2000 }
-  }
-}
-EOF
-        print_success "Created settings.json"
-    else
-        print_warning "settings.json already exists, skipping"
-    fi
-
-    if [ ! -f "$TRON_HOME/system/auth.json" ]; then
-        cat > "$TRON_HOME/system/auth.json" << 'EOF'
-{
-  "version": 1,
-  "providers": {},
-  "lastUpdated": ""
-}
-EOF
-        chmod 600 "$TRON_HOME/system/auth.json"
-        print_success "Created auth.json"
-    else
-        print_warning "auth.json already exists, skipping"
-    fi
+    ensure_default_configs
 
     # Build
     build_rust
