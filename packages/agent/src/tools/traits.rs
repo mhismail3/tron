@@ -280,10 +280,8 @@ pub struct NotifyResult {
     #[serde(default)]
     pub message: Option<String>,
     /// Number of devices that received the notification successfully.
-    #[serde(default)]
     pub success_count: u32,
     /// Total number of devices the notification was sent to.
-    #[serde(default)]
     pub total_count: u32,
 }
 
