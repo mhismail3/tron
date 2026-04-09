@@ -17,6 +17,8 @@ enum WorktreeCommitPlugin: DispatchableEventPlugin {
             let filesChanged: [String]?
             let insertions: Int?
             let deletions: Int?
+            let totalCommitCount: Int?
+            let hasUncommittedChanges: Bool?
         }
     }
 
@@ -26,6 +28,8 @@ enum WorktreeCommitPlugin: DispatchableEventPlugin {
         let filesChanged: [String]
         let insertions: Int
         let deletions: Int
+        let totalCommitCount: Int
+        let hasUncommittedChanges: Bool
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
@@ -35,7 +39,9 @@ enum WorktreeCommitPlugin: DispatchableEventPlugin {
             message: data.message ?? "",
             filesChanged: data.filesChanged ?? [],
             insertions: data.insertions ?? 0,
-            deletions: data.deletions ?? 0
+            deletions: data.deletions ?? 0,
+            totalCommitCount: data.totalCommitCount ?? 0,
+            hasUncommittedChanges: data.hasUncommittedChanges ?? false
         )
     }
 

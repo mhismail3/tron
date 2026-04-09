@@ -384,6 +384,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             files_changed,
             insertions,
             deletions,
+            total_commit_count,
+            has_uncommitted_changes,
             ..
         } => Some(session_scoped(
             event,
@@ -394,6 +396,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "filesChanged": files_changed,
                 "insertions": insertions,
                 "deletions": deletions,
+                "totalCommitCount": total_commit_count,
+                "hasUncommittedChanges": has_uncommitted_changes,
             })),
         )),
         TronEvent::WorktreeMerged {

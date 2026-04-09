@@ -11,8 +11,9 @@ enum ToolResultParser {
         SubagentResultParser.parseSpawnSubagent(from: tool)
     }
 
+    /// WaitForSubagent uses the same parser — same data shape.
     static func parseWaitForSubagent(from tool: ToolUseData) -> SubagentToolData? {
-        SubagentResultParser.parseWaitForSubagent(from: tool)
+        SubagentResultParser.parseSpawnSubagent(from: tool)
     }
 
     // MARK: - NotifyApp

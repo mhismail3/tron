@@ -1574,6 +1574,8 @@ fn converts_worktree_commit() {
         files_changed: vec!["file.txt".into(), "other.rs".into()],
         insertions: 10,
         deletions: 2,
+        total_commit_count: 3,
+        has_uncommitted_changes: false,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "worktree.commit");
@@ -1583,6 +1585,8 @@ fn converts_worktree_commit() {
     assert_eq!(data["filesChanged"].as_array().unwrap().len(), 2);
     assert_eq!(data["insertions"], 10);
     assert_eq!(data["deletions"], 2);
+    assert_eq!(data["totalCommitCount"], 3);
+    assert_eq!(data["hasUncommittedChanges"], false);
 }
 
 #[test]

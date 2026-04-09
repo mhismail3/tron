@@ -158,6 +158,9 @@ Returns (when completed within timeout):\n\
                         ]),
                         details: Some(json!({
                             "sessionId": handle.session_id,
+                            "success": handle.success.unwrap_or(true),
+                            "totalTurns": handle.turns_executed.unwrap_or(0),
+                            "resultSummary": if output.len() > 200 { &output[..200] } else { &output },
                             "tokenUsage": handle.token_usage,
                         })),
                         is_error: None,
@@ -224,6 +227,16 @@ mod tests {
                 },
                 token_usage: if config.blocking_timeout_ms.is_some() {
                     Some(json!({"input": 100, "output": 50}))
+                } else {
+                    None
+                },
+                turns_executed: if config.blocking_timeout_ms.is_some() {
+                    Some(3)
+                } else {
+                    None
+                },
+                success: if config.blocking_timeout_ms.is_some() {
+                    Some(true)
                 } else {
                     None
                 },
@@ -467,6 +480,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocking_details_include_all_structured_fields() {
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
+        let r = tool
+            .execute(json!({"task": "do something"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["sessionId"], "sub-1");
+        assert_eq!(d["success"], true);
+        assert_eq!(d["totalTurns"], 3);
+        assert!(d["resultSummary"].is_string());
+        assert!(d["tokenUsage"].is_object());
+    }
+
+    #[tokio::test]
+    async fn nonblocking_details_minimal() {
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
+        let r = tool
+            .execute(json!({"task": "do something", "timeout": 0}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["sessionId"], "sub-1");
+        // Non-blocking should NOT have these fields
+        assert!(d.get("success").is_none());
+        assert!(d.get("totalTurns").is_none());
+    }
+
+    #[tokio::test]
     async fn token_usage_in_blocking_result() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
@@ -506,6 +548,16 @@ mod tests {
                     None
                 },
                 token_usage: None,
+                turns_executed: if config.blocking_timeout_ms.is_some() {
+                    Some(1)
+                } else {
+                    None
+                },
+                success: if config.blocking_timeout_ms.is_some() {
+                    Some(true)
+                } else {
+                    None
+                },
             })
         }
         async fn wait_for_agents(

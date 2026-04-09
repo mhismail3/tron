@@ -46,12 +46,16 @@ struct RulesFile: Identifiable, Codable, Equatable {
     /// Depth from project root (-1 for global)
     let depth: Int
 
+    /// Display path formatted for UI (server-provided)
+    let displayPath: String
+
     /// File size in bytes (optional for display)
     let sizeBytes: Int?
 
-    init(path: String, relativePath: String, level: RulesLevel, depth: Int, sizeBytes: Int? = nil) {
+    init(path: String, relativePath: String, displayPath: String, level: RulesLevel, depth: Int, sizeBytes: Int? = nil) {
         self.path = path
         self.relativePath = relativePath
+        self.displayPath = displayPath
         self.level = level
         self.depth = depth
         self.sizeBytes = sizeBytes
@@ -65,24 +69,12 @@ struct RulesFile: Identifiable, Codable, Equatable {
     /// Label for this file's level (convenience accessor)
     var label: String { level.label }
 
-    /// Display path formatted for UI - shows ~/.tron/<file> for global rules
-    var displayPath: String {
-        switch level {
-        case .global:
-            // Extract filename from path and show as ~/.tron/<filename>
-            let filename = (path as NSString).lastPathComponent
-            return "~/.tron/\(filename)"
-        case .project, .directory:
-            // Use relativePath for project/directory level
-            return relativePath
-        }
-    }
-
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
         case path
         case relativePath
+        case displayPath
         case level
         case depth
         case sizeBytes
@@ -92,6 +84,7 @@ struct RulesFile: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         path = try container.decode(String.self, forKey: .path)
         relativePath = try container.decode(String.self, forKey: .relativePath)
+        displayPath = try container.decode(String.self, forKey: .displayPath)
         depth = try container.decode(Int.self, forKey: .depth)
         sizeBytes = try container.decodeIfPresent(Int.self, forKey: .sizeBytes)
 
@@ -104,6 +97,7 @@ struct RulesFile: Identifiable, Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(path, forKey: .path)
         try container.encode(relativePath, forKey: .relativePath)
+        try container.encode(displayPath, forKey: .displayPath)
         try container.encode(level.rawValue, forKey: .level)
         try container.encode(depth, forKey: .depth)
         try container.encodeIfPresent(sizeBytes, forKey: .sizeBytes)
@@ -175,6 +169,7 @@ struct RulesLoadedPayload {
             for fileDict in filesArray {
                 guard let path = fileDict["path"] as? String,
                       let relativePath = fileDict["relativePath"] as? String,
+                      let displayPath = fileDict["displayPath"] as? String,
                       let levelStr = fileDict["level"] as? String,
                       let depth = fileDict["depth"] as? Int else {
                     continue
@@ -184,6 +179,7 @@ struct RulesLoadedPayload {
                 parsedFiles.append(RulesFile(
                     path: path,
                     relativePath: relativePath,
+                    displayPath: displayPath,
                     level: level,
                     depth: depth,
                     sizeBytes: sizeBytes

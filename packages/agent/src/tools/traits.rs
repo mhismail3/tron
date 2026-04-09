@@ -204,6 +204,12 @@ pub struct SubagentHandle {
     /// Token usage (only present if blocking).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<Value>,
+    /// Number of turns executed (only present if blocking completed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns_executed: Option<u32>,
+    /// Whether the subagent completed successfully (only present if blocking completed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
 }
 
 /// Wait mode for job and subagent waiting.
@@ -231,6 +237,8 @@ pub struct SubagentResult {
     pub duration_ms: u64,
     /// Completion status.
     pub status: String,
+    /// Number of turns executed.
+    pub turns_executed: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

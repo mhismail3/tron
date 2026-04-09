@@ -440,16 +440,21 @@ impl SubagentSpawner for SubagentManager {
                 .wait_for_tracker_result(&tracker, effective_timeout)
                 .await?
             {
+                let success = result.status == "completed";
                 Ok(SubagentHandle {
                     session_id: child_session_id,
                     output: Some(result.output),
                     token_usage: result.token_usage,
+                    turns_executed: Some(result.turns_executed),
+                    success: Some(success),
                 })
             } else {
                 Ok(SubagentHandle {
                     session_id: child_session_id,
                     output: None,
                     token_usage: None,
+                    turns_executed: None,
+                    success: None,
                 })
             }
         } else {
@@ -457,6 +462,8 @@ impl SubagentSpawner for SubagentManager {
                 session_id: child_session_id,
                 output: None,
                 token_usage: None,
+                turns_executed: None,
+                success: None,
             })
         }
     }

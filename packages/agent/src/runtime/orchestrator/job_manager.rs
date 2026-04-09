@@ -708,6 +708,7 @@ mod tests {
                 token_usage: Some(serde_json::json!({"input": 100, "output": 50})),
                 duration_ms: 5000,
                 status: "completed".into(),
+                turns_executed: 3,
             },
         );
         let jm = JobManager::new(pm, sm);
@@ -739,6 +740,7 @@ mod tests {
                 token_usage: None,
                 duration_ms: 3000,
                 status: "completed".into(),
+                turns_executed: 2,
             },
         );
         let jm = JobManager::new(pm, sm);

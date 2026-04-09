@@ -936,6 +936,12 @@ tron_events! {
         files_changed: Vec<String>,
         insertions: usize,
         deletions: usize,
+        /// Total commits since worktree base commit (server-authoritative).
+        #[serde(rename = "totalCommitCount")]
+        total_commit_count: u64,
+        /// Whether uncommitted changes remain after this commit.
+        #[serde(rename = "hasUncommittedChanges")]
+        has_uncommitted_changes: bool,
     } => "worktree.commit",
 
     /// Session branch merged into target.
@@ -1893,6 +1899,8 @@ mod tests {
                 files_changed: vec!["file.txt".into()],
                 insertions: 10,
                 deletions: 2,
+                total_commit_count: 3,
+                has_uncommitted_changes: false,
             },
             TronEvent::WorktreeMerged {
                 base: base.clone(),

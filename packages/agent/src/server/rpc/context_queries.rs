@@ -443,6 +443,15 @@ fn build_rules_info(
             } else {
                 file.relative_path.clone()
             };
+            let display_path = if file.level == RuleFileLevel::Global {
+                let filename = Path::new(&*file.path.to_string_lossy())
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file.relative_path.clone());
+                format!("~/.tron/{filename}")
+            } else {
+                file.relative_path.clone()
+            };
             let depth = if file.level == RuleFileLevel::Global {
                 -1_i64
             } else {
@@ -454,6 +463,7 @@ fn build_rules_info(
             json!({
                 "path": file.path.to_string_lossy(),
                 "relativePath": relative_path,
+                "displayPath": display_path,
                 "level": file.level.as_str(),
                 "depth": depth,
             })
@@ -475,6 +485,7 @@ fn build_rules_info(
             files.push(json!({
                 "path": abs.to_string_lossy(),
                 "relativePath": relative_path,
+                "displayPath": relative_path,
                 "level": "directory",
                 "depth": relative_path.matches('/').count(),
             }));

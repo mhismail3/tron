@@ -380,6 +380,19 @@ impl WorktreeCoordinator {
                 .unwrap_or((0, 0))
         };
 
+        // Query server-authoritative post-commit state
+        #[allow(clippy::cast_possible_truncation)]
+        let total_commit_count = self
+            .git
+            .commit_count_since(&info.worktree_path, &info.base_commit)
+            .await
+            .unwrap_or(0) as u64;
+        let has_uncommitted_changes = self
+            .git
+            .has_changes(&info.worktree_path)
+            .await
+            .unwrap_or(false);
+
         let _ = self.event_store.append(&AppendOptions {
             session_id,
             event_type: EventType::WorktreeCommit,
@@ -388,7 +401,9 @@ impl WorktreeCoordinator {
                 "message": message,
                 "filesChanged": files_changed,
                 "insertions": insertions,
-                "deletions": deletions
+                "deletions": deletions,
+                "totalCommitCount": total_commit_count,
+                "hasUncommittedChanges": has_uncommitted_changes,
             }),
             parent_id: None,
             sequence: None,
@@ -402,6 +417,8 @@ impl WorktreeCoordinator {
             files_changed: files_changed.clone(),
             insertions,
             deletions,
+            total_commit_count,
+            has_uncommitted_changes,
         });
 
         debug!(session_id, commit = %sha, files = files_changed.len(), "committed in worktree");

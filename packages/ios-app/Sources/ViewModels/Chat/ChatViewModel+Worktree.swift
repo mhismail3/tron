@@ -84,9 +84,8 @@ extension ChatViewModel {
     }
 
     func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result) {
-        // Increment commit count and clear uncommitted flag
+        // Use server-authoritative commit count and dirty flag
         if let info = worktreeState.status?.worktree {
-            let newCount = (info.commitCount ?? 0) + 1
             worktreeState.status = WorktreeGetStatusResult(
                 hasWorktree: true,
                 worktree: WorktreeInfo(
@@ -96,8 +95,8 @@ extension ChatViewModel {
                     path: info.path,
                     baseBranch: info.baseBranch,
                     repoRoot: info.repoRoot,
-                    hasUncommittedChanges: false,
-                    commitCount: newCount,
+                    hasUncommittedChanges: result.hasUncommittedChanges,
+                    commitCount: result.totalCommitCount,
                     isMerged: false
                 )
             )

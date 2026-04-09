@@ -218,6 +218,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             token_usage,
             duration_ms,
             status: "failed".into(),
+            turns_executed: result.turns_executed,
         }
     } else {
         let _ = params.broadcast.emit(TronEvent::SubagentCompleted {
@@ -237,6 +238,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             token_usage,
             duration_ms,
             status: "completed".into(),
+            turns_executed: result.turns_executed,
         }
     };
 
@@ -411,6 +413,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             token_usage: token_usage.clone(),
             duration_ms,
             status: "completed".into(),
+            turns_executed: result.turns_executed,
         }
     } else {
         let error = result.error.unwrap_or_else(|| "Unknown error".into());
@@ -442,6 +445,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             token_usage: token_usage.clone(),
             duration_ms,
             status: "failed".into(),
+            turns_executed: result.turns_executed,
         }
     };
 
@@ -714,6 +718,7 @@ async fn complete_failure(
             token_usage: None,
             duration_ms: elapsed_ms(&tracker.started_at),
             status: "failed".into(),
+            turns_executed: 0,
         },
     )
     .await;

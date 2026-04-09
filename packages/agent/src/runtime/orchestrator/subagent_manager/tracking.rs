@@ -224,5 +224,6 @@ fn tracker_result_or_unknown(tracker: &TrackedSubagent, session_id: &str) -> Sub
             token_usage: None,
             duration_ms: 0,
             status: "unknown".into(),
+            turns_executed: 0,
         })
 }
