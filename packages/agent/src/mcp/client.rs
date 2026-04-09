@@ -83,6 +83,12 @@ impl From<McpError> for String {
 /// Timeout for graceful shutdown notification before hard kill (ms).
 const GRACEFUL_SHUTDOWN_TIMEOUT_MS: u64 = 2_000;
 
+/// Timeout for the MCP initialization handshake (ms).
+///
+/// Intentionally longer than typical tool timeouts because it includes
+/// process startup overhead (shell init, PATH resolution, etc.).
+const INIT_TIMEOUT_MS: u64 = 30_000;
+
 /// MCP client connected to a single server.
 ///
 /// `Debug` is implemented manually because `Transport` holds non-Debug process handles.
@@ -242,7 +248,6 @@ impl McpClient {
         })?;
 
         let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(config.tool_timeout_ms))
             .build()
             .map_err(|e| McpError {
                 server: config.name.clone(),
@@ -272,14 +277,14 @@ impl McpClient {
     async fn initialize(&self) -> Result<(), McpError> {
         let preferred_version = SUPPORTED_PROTOCOL_VERSIONS[0];
 
-        let result = self.send_request("initialize", Some(json!({
+        let result = self.send_request_with_timeout("initialize", Some(json!({
             "protocolVersion": preferred_version,
             "capabilities": {},
             "clientInfo": {
                 "name": "tron-agent",
                 "version": "1.0"
             }
-        }))).await?;
+        })), INIT_TIMEOUT_MS).await?;
 
         // Validate protocol version from server response
         let server_version = result
@@ -377,6 +382,16 @@ impl McpClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<Value, McpError> {
+        self.send_request_with_timeout(method, params, self.tool_timeout_ms).await
+    }
+
+    /// Send a JSON-RPC request with an explicit timeout.
+    async fn send_request_with_timeout(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        timeout_ms: u64,
+    ) -> Result<Value, McpError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = JsonRpcRequest::new(id, method, params);
 
@@ -421,7 +436,7 @@ impl McpClient {
                 }
 
                 // Read response with timeout, skipping JSON-RPC notifications
-                let timeout = std::time::Duration::from_millis(self.tool_timeout_ms);
+                let timeout = std::time::Duration::from_millis(timeout_ms);
                 let deadline = tokio::time::Instant::now() + timeout;
                 loop {
                     let mut line = String::new();
@@ -432,7 +447,7 @@ impl McpClient {
                             kind: McpErrorKind::Timeout,
                             message: format!(
                                 "MCP server '{}' timed out after {}ms",
-                                self.name, self.tool_timeout_ms
+                                self.name, timeout_ms
                             ),
                         });
                     }
@@ -444,7 +459,7 @@ impl McpClient {
                             kind: McpErrorKind::Timeout,
                             message: format!(
                                 "MCP server '{}' timed out after {}ms",
-                                self.name, self.tool_timeout_ms
+                                self.name, timeout_ms
                             ),
                         })?
                         .map_err(|e| McpError {
@@ -496,6 +511,7 @@ impl McpClient {
             Transport::Http { url, client } => {
                 let resp = client
                     .post(url.as_str())
+                    .timeout(std::time::Duration::from_millis(timeout_ms))
                     .json(&request)
                     .send()
                     .await

@@ -38,8 +38,9 @@ CALL_RESULT='{call_result_json}'
 PROTO_VERSION='{protocol_version}'
 
 while IFS= read -r line; do
-    method=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('method',''))" 2>/dev/null || echo "")
-    id=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','null'))" 2>/dev/null || echo "null")
+    method=$(echo "$line" | grep -o '"method":"[^"]*"' | head -1 | sed 's/"method":"//;s/"//')
+    id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
+    [ -z "$id" ] && id=null
 
     case "$method" in
         initialize)
@@ -180,7 +181,8 @@ done
         // Use a server that exits immediately after init
         let script = r#"
 read -r line
-id=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','null'))" 2>/dev/null)
+id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
+[ -z "$id" ] && id=null
 echo '{"jsonrpc":"2.0","id":'$id',"result":{"protocolVersion":"2024-11-05","capabilities":{}}}'
 read -r line
 exit 1
@@ -206,7 +208,8 @@ exit 1
         // Server that never responds after init
         let script = r#"
 read -r line
-id=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','null'))" 2>/dev/null)
+id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
+[ -z "$id" ] && id=null
 echo '{"jsonrpc":"2.0","id":'$id',"result":{"protocolVersion":"2024-11-05","capabilities":{}}}'
 read -r line
 # Read notification - do nothing
@@ -530,8 +533,9 @@ while true; do read -r line 2>/dev/null || exit 0; done
         // Server that sends a notification before the actual response
         let script = r#"
 while IFS= read -r line; do
-    method=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('method',''))" 2>/dev/null || echo "")
-    id=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','null'))" 2>/dev/null || echo "null")
+    method=$(echo "$line" | grep -o '"method":"[^"]*"' | head -1 | sed 's/"method":"//;s/"//')
+    id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
+    [ -z "$id" ] && id=null
 
     case "$method" in
         initialize)
