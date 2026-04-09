@@ -159,44 +159,66 @@ extension AnyCodable: ExpressibleByDictionaryLiteral {
 // MARK: - Payload Dictionary Extensions
 
 /// Convenience extensions for [String: AnyCodable] payloads.
-/// Simplifies the common pattern: payload["key"]?.value as? Type
+///
+/// Numeric accessors (`int`, `double`) widen across Int/Double because the
+/// server's JSON encoder may emit either form for the same logical value
+/// (e.g. `5` vs `5.0`). The widened `int()` guards against NaN, Infinity,
+/// and Int-overflow so a bad server-side metric cannot crash the app.
 extension Dictionary where Key == String, Value == AnyCodable {
-    /// Get string value for key
+    /// Get string value for key.
     func string(_ key: String) -> String? {
         self[key]?.stringValue
     }
 
-    /// Get int value for key
+    /// Get int value for key. Widens from Double (truncating toward zero)
+    /// and rejects NaN, ±Infinity, and out-of-range values. Uses
+    /// `Int(exactly:)` after truncation to dodge the `Double(Int.max)`
+    /// rounding trap (`Int.max` is not exactly representable as Double).
     func int(_ key: String) -> Int? {
-        self[key]?.intValue
+        guard let raw = self[key]?.value else { return nil }
+        if let i = raw as? Int { return i }
+        if let d = raw as? Double {
+            return Int(exactly: d.rounded(.towardZero))
+        }
+        return nil
     }
 
-    /// Get double value for key
+    /// Get double value for key. Widens from Int.
     func double(_ key: String) -> Double? {
-        self[key]?.doubleValue
+        guard let raw = self[key]?.value else { return nil }
+        if let d = raw as? Double { return d }
+        if let i = raw as? Int { return Double(i) }
+        return nil
     }
 
-    /// Get bool value for key
+    /// Get bool value for key. Does not coerce from strings or numbers.
     func bool(_ key: String) -> Bool? {
         self[key]?.boolValue
     }
 
-    /// Get nested dictionary for key
+    /// Get nested dictionary for key.
     func dict(_ key: String) -> [String: Any]? {
         self[key]?.dictionaryValue
     }
 
-    /// Get array for key
+    /// Get array for key.
     func array(_ key: String) -> [Any]? {
         self[key]?.arrayValue
     }
 
-    /// Get string array for key
+    /// Get string array for key. Non-string elements are silently dropped.
     func stringArray(_ key: String) -> [String]? {
         self[key]?.arrayValue?.compactMap { $0 as? String }
     }
 
-    /// Get nested AnyCodable dictionary for key
+    /// Get an array of nested dictionaries for key. Used by tools that
+    /// emit structured per-item records (e.g. `Wait.details.jobs`,
+    /// `Search.details.matches`).
+    func dictArray(_ key: String) -> [[String: Any]]? {
+        self[key]?.arrayValue?.compactMap { $0 as? [String: Any] }
+    }
+
+    /// Get nested AnyCodable dictionary for key.
     func anyCodableDict(_ key: String) -> [String: AnyCodable]? {
         if let dict = self[key]?.dictionaryValue {
             return dict.mapValues { AnyCodable($0) }
