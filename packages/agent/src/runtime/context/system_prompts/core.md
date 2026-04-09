@@ -132,7 +132,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | AUTH | `~/.tron/system/auth.json` | API keys and OAuth tokens |
 | VAULT | `~/.tron/system/vault/` | Encrypted credential store |
 | DEPLOYMENT | `~/.tron/system/deployment/` | Deploy scripts, `tron-cli`, rollback state |
-| MODS | `~/.tron/system/mods/` | Optional modules: `apns/`, `google/`, `twitter/`, `transcribe/` |
+| MODS | `~/.tron/system/mods/` | Optional modules: `google/`, `twitter/`, `transcribe/` |
 | BINARY | `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary |
 
 **Workspace (your working area):**
