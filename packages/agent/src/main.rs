@@ -193,7 +193,7 @@ fn init_directories() {
     ] {
         let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(subdir));
     }
-    let _ = std::fs::create_dir_all(tron_home.join(dirs::USER).join(dirs::VOICE));
+    let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::VOICE_NOTES));
     let _ = std::fs::create_dir_all(tron_home.join(dirs::SKILLS));
     let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::RULES));
 }

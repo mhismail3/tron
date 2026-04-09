@@ -63,10 +63,10 @@ pub mod dirs {
     /// Global rules files (SYSTEM.md, CLAUDE.md, AGENTS.md).
     pub const RULES: &str = "rules";
 
-    // ── Under user/ ──
+    // ── Under workspace/ ──
 
-    /// Voice profile data.
-    pub const VOICE: &str = "voice";
+    /// Voice notes storage.
+    pub const VOICE_NOTES: &str = "voice notes";
 
     /// Relative agent dir for rules discovery: `.tron/<WORKSPACE>/rules`.
     ///
@@ -191,11 +191,11 @@ pub fn rules_dir() -> PathBuf {
     workspace_dir().join(dirs::RULES)
 }
 
-// ── User subdirectory helpers ──────────────────────────────────────────
+// ── Voice notes ──────────────────────────────────────────────────────
 
-/// `~/.tron/user/voice/`
-pub fn voice_dir() -> PathBuf {
-    user_dir().join(dirs::VOICE)
+/// `~/.tron/workspace/voice notes/`
+pub fn voice_notes_dir() -> PathBuf {
+    workspace_dir().join(dirs::VOICE_NOTES)
 }
 
 // ── Composite file path helpers ────────────────────────────────────────

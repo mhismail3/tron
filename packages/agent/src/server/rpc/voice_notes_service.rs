@@ -1,12 +1,13 @@
-//! Voice notes service: storage and listing for `~/.tron/user/voice/`.
+//! Voice notes service: storage and listing for `~/.tron/workspace/voice notes/`.
 
 use serde_json::Value;
 
 use crate::server::rpc::errors::RpcError;
 
 pub(crate) fn notes_dir() -> String {
-    let home = crate::core::paths::home_dir();
-    format!("{home}/.tron/user/voice")
+    crate::core::paths::voice_notes_dir()
+        .to_string_lossy()
+        .into_owned()
 }
 
 pub(crate) fn ensure_notes_dir(dir: &str) -> Result<(), RpcError> {
@@ -123,8 +124,8 @@ mod tests {
     fn notes_dir_points_to_voice_notes() {
         let dir = notes_dir();
         assert!(
-            dir.ends_with(".tron/user/voice"),
-            "expected .tron/user/voice dir, got: {dir}"
+            dir.ends_with(".tron/workspace/voice notes"),
+            "expected .tron/workspace/voice notes dir, got: {dir}"
         );
     }
 

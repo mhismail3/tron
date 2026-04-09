@@ -91,7 +91,7 @@ ensure_tron_home() {
     mkdir -p "$TRON_HOME"/system/{database,deployment,mods}
     mkdir -p "$TRON_HOME"/workspace/{sessions,knowledge,automations,scratch,rules}
     mkdir -p "$TRON_HOME"/skills
-    mkdir -p "$TRON_HOME"/user/voice
+    mkdir -p "$TRON_HOME/workspace/voice notes"
 }
 
 wait_for_port_free() {

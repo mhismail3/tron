@@ -151,7 +151,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 
 | Name | Path | Contents |
 |------|------|----------|
-| VOICE | `~/.tron/user/voice/` | Voice profile data |
+| VOICE NOTES | `~/.tron/workspace/voice notes/` | Transcribed voice notes |
 
 ## HOW YOU COMMUNICATE
 
