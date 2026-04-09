@@ -856,17 +856,22 @@ fn drain_prompt_queue(
         return;
     }
 
-    // Determine prompt text based on drain mode
-    let (prompt_text, items_to_dequeue) = match drain_mode {
+    // Determine prompt text based on drain mode.
+    //
+    // Metadata (messageKind/confirmationDecision/answerCount) is only
+    // carried in Sequential mode — batched drains combine multiple user
+    // messages into a single prompt, at which point the individual
+    // message kinds no longer apply to the merged content.
+    let (prompt_text, items_to_dequeue, drained_metadata) = match drain_mode {
         QueueDrainMode::Sequential => {
             // One message per turn
             let item = &pending[0];
-            (item.text.clone(), vec![item.clone()])
+            (item.text.clone(), vec![item.clone()], item.metadata.clone())
         }
         QueueDrainMode::Batched => {
             // Combine all pending into a single prompt
             let combined = pending.iter().map(|i| i.text.as_str()).collect::<Vec<_>>().join("\n\n");
-            (combined, pending)
+            (combined, pending, None)
         }
     };
 
@@ -941,7 +946,7 @@ fn drain_prompt_queue(
             reasoning_level: None,
             images: None,
             attachments: None,
-            message_metadata: None,
+            message_metadata: drained_metadata,
         },
     };
 

@@ -90,12 +90,18 @@ impl MethodHandler for SubmitConfirmationHandler {
                 }))
             }
             Err(_) => {
-                // Session is busy — queue the prompt
+                // Session is busy — queue the prompt along with its
+                // structured metadata so the drained message still
+                // renders as a chip on iOS (see PromptQueueService).
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
+                let queued_metadata = message_metadata.clone();
                 let _ = ctx.run_blocking("agent.submitConfirmation.queue", move || {
-                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
-                        &event_store, &sid, &prompt,
+                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
+                        &event_store,
+                        &sid,
+                        &prompt,
+                        queued_metadata,
                     )
                     .map_err(|e| RpcError::Internal {
                         message: e.to_string(),
@@ -213,11 +219,17 @@ impl MethodHandler for SubmitAnswersHandler {
                 }))
             }
             Err(_) => {
+                // Session is busy — queue with structured metadata so the
+                // drained prompt renders the answered-questions chip.
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
+                let queued_metadata = message_metadata.clone();
                 let _ = ctx.run_blocking("agent.submitAnswers.queue", move || {
-                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
-                        &event_store, &sid, &prompt,
+                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
+                        &event_store,
+                        &sid,
+                        &prompt,
+                        queued_metadata,
                     )
                     .map_err(|e| RpcError::Internal {
                         message: e.to_string(),

@@ -21,6 +21,13 @@ pub struct PendingQueueItem {
     pub text: String,
     pub position: u32,
     pub timestamp: String,
+    /// Optional structured metadata that should travel with the prompt
+    /// through the queue. Used to preserve `messageKind` +
+    /// confirmation/answer fields when interactive-tool responses are
+    /// queued while the session is busy, so iOS renders the right chip
+    /// once the queued message is eventually drained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 /// Prompt queue service — all operations are event-sourced.
@@ -67,7 +74,8 @@ impl PromptQueueService {
                         .get("position")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0) as u32;
-                    queued_items.push((queue_id, text, position, event.timestamp.clone()));
+                    let metadata = payload.get("metadata").cloned();
+                    queued_items.push((queue_id, text, position, event.timestamp.clone(), metadata));
                 }
                 _ => {}
             }
@@ -76,12 +84,13 @@ impl PromptQueueService {
         // Filter to pending only (no matching dequeue)
         let mut pending: Vec<PendingQueueItem> = queued_items
             .into_iter()
-            .filter(|(qid, _, _, _)| !dequeued_ids.contains(qid))
-            .map(|(queue_id, text, position, timestamp)| PendingQueueItem {
+            .filter(|(qid, _, _, _, _)| !dequeued_ids.contains(qid))
+            .map(|(queue_id, text, position, timestamp, metadata)| PendingQueueItem {
                 queue_id,
                 text,
                 position,
                 timestamp,
+                metadata,
             })
             .collect();
 
@@ -102,6 +111,17 @@ impl PromptQueueService {
         session_id: &str,
         text: &str,
     ) -> Result<PendingQueueItem, RpcError> {
+        Self::enqueue_with_metadata(event_store, session_id, text, None)
+    }
+
+    /// Queue a prompt message with optional structured metadata that will
+    /// travel with the prompt through the queue lifecycle.
+    pub fn enqueue_with_metadata(
+        event_store: &EventStore,
+        session_id: &str,
+        text: &str,
+        metadata: Option<Value>,
+    ) -> Result<PendingQueueItem, RpcError> {
         let pending = Self::get_pending_queue(event_store, session_id)?;
 
         if pending.len() >= MAX_QUEUE_CAPACITY {
@@ -117,11 +137,14 @@ impl PromptQueueService {
         let queue_id = uuid::Uuid::now_v7().to_string();
         let position = pending.len() as u32;
 
-        let payload = json!({
+        let mut payload = json!({
             "text": text,
             "queueId": queue_id,
             "position": position,
         });
+        if let Some(ref meta) = metadata {
+            payload["metadata"] = meta.clone();
+        }
 
         let event = event_store
             .append(&AppendOptions {
@@ -140,6 +163,7 @@ impl PromptQueueService {
             text: text.to_string(),
             position,
             timestamp: event.timestamp,
+            metadata,
         })
     }
 
@@ -462,6 +486,64 @@ mod tests {
 
         let pending = PromptQueueService::get_pending_queue(&store, &sid).unwrap();
         assert!(pending.is_empty());
+    }
+
+    // ── Metadata round-trip (Phase C queue bug fix) ────────────────────
+
+    #[test]
+    fn enqueue_with_metadata_roundtrips_through_event_log() {
+        let (store, sid) = make_store_and_session();
+        let metadata = json!({
+            "messageKind": "confirmation_response",
+            "confirmationDecision": "Approved",
+            "confirmationNote": "looks good",
+        });
+        let item = PromptQueueService::enqueue_with_metadata(
+            &store,
+            &sid,
+            "[Confirmation response]\n\nDecision: Approved",
+            Some(metadata.clone()),
+        )
+        .unwrap();
+        assert_eq!(item.metadata, Some(metadata.clone()));
+
+        // Re-derive the queue from the event log — metadata must survive.
+        let pending = PromptQueueService::get_pending_queue(&store, &sid).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].metadata, Some(metadata));
+    }
+
+    #[test]
+    fn enqueue_without_metadata_leaves_field_none() {
+        let (store, sid) = make_store_and_session();
+        let item = PromptQueueService::enqueue(&store, &sid, "plain text").unwrap();
+        assert!(item.metadata.is_none());
+
+        let pending = PromptQueueService::get_pending_queue(&store, &sid).unwrap();
+        assert!(pending[0].metadata.is_none());
+    }
+
+    #[test]
+    fn mixed_metadata_queue_preserves_each_item() {
+        let (store, sid) = make_store_and_session();
+        PromptQueueService::enqueue(&store, &sid, "plain").unwrap();
+        PromptQueueService::enqueue_with_metadata(
+            &store,
+            &sid,
+            "[Confirmation response]\n\nDecision: Denied",
+            Some(json!({
+                "messageKind": "confirmation_response",
+                "confirmationDecision": "Denied",
+            })),
+        )
+        .unwrap();
+
+        let pending = PromptQueueService::get_pending_queue(&store, &sid).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending[0].metadata.is_none());
+        let meta = pending[1].metadata.as_ref().unwrap();
+        assert_eq!(meta["messageKind"], "confirmation_response");
+        assert_eq!(meta["confirmationDecision"], "Denied");
     }
 
     #[test]
