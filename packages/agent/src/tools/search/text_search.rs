@@ -42,6 +42,11 @@ pub struct TextSearchResult {
     pub files_searched: usize,
     /// Whether output was truncated.
     pub truncated: bool,
+    /// Number of files encountered but not read due to I/O errors
+    /// (permission denied, dangling symlinks, EIO, etc). Surfaced so the
+    /// caller can distinguish "no matches" from "couldn't look" and the
+    /// agent doesn't silently miss data.
+    pub skipped_unreadable: usize,
     /// Structured match data: `[{filePath, lineNumber, content}]`.
     /// Emitted via `tool.details.matches` so iOS renders without regex.
     pub matches_json: Vec<serde_json::Value>,
@@ -75,6 +80,7 @@ pub fn text_search(
 
     let mut matches = Vec::new();
     let mut files_searched = 0;
+    let mut skipped_unreadable = 0usize;
 
     let walker = walkdir::WalkDir::new(search_root);
     for entry in walker.into_iter().filter_entry(|e| {
@@ -89,7 +95,17 @@ pub fn text_search(
         }
         true
     }) {
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                skipped_unreadable += 1;
+                tracing::debug!(
+                    error = %err,
+                    "text_search: walkdir entry error (skipping)"
+                );
+                continue;
+            }
+        };
         if entry.file_type().is_dir() {
             continue;
         }
@@ -107,9 +123,19 @@ pub fn text_search(
             }
         }
 
-        // Read file, skip binary
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
+        // Read file, skip on I/O error (permission denied, dangling symlink,
+        // EIO). Count and log so the skip is visible to operators.
+        let bytes = match std::fs::read(entry.path()) {
+            Ok(b) => b,
+            Err(err) => {
+                skipped_unreadable += 1;
+                tracing::debug!(
+                    path = %entry.path().display(),
+                    error = %err,
+                    "text_search: skipping unreadable file"
+                );
+                continue;
+            }
         };
         let check_len = bytes.len().min(8192);
         if bytes[..check_len].contains(&0) {
@@ -144,6 +170,7 @@ pub fn text_search(
             match_count: 0,
             files_searched,
             truncated: false,
+            skipped_unreadable,
             matches_json: Vec::new(),
         });
     }
@@ -180,6 +207,7 @@ pub fn text_search(
         match_count,
         files_searched,
         truncated,
+        skipped_unreadable,
         matches_json,
     })
 }
@@ -333,5 +361,34 @@ mod tests {
         let r = text_search(dir.path(), "anything", None, None, None).unwrap();
         assert_eq!(r.match_count, 0);
         assert_eq!(r.files_searched, 0);
+        assert_eq!(r.skipped_unreadable, 0);
+    }
+
+    #[test]
+    fn skipped_unreadable_zero_for_normal_search() {
+        let dir = setup_test_dir();
+        let r = text_search(dir.path(), "println", None, None, None).unwrap();
+        assert_eq!(r.skipped_unreadable, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_counted_as_skipped_unreadable() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("real.txt"), "match this").unwrap();
+        // Symlink whose target does not exist — std::fs::read fails with
+        // ENOENT after walkdir yields the entry.
+        symlink("/does/not/exist/anywhere", dir.path().join("broken.lnk")).unwrap();
+
+        let r = text_search(dir.path(), "match", None, None, None).unwrap();
+        // The real file is still searched and matched.
+        assert_eq!(r.match_count, 1);
+        // The dangling symlink was counted, not silently dropped.
+        assert!(
+            r.skipped_unreadable >= 1,
+            "expected ≥1 skipped, got {}",
+            r.skipped_unreadable
+        );
     }
 }

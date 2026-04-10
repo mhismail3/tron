@@ -181,6 +181,7 @@ Examples:\n\
                         "mode": "text",
                         "matchCount": r.match_count,
                         "filesSearched": r.files_searched,
+                        "skippedUnreadable": r.skipped_unreadable,
                         "truncated": r.truncated,
                         "matches": r.matches_json,
                     })),

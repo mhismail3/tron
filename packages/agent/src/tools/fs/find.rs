@@ -129,7 +129,16 @@ fn collect_entries(
         }
         true
     }) {
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(
+                    error = %err,
+                    "find: walkdir entry error (skipping)"
+                );
+                continue;
+            }
+        };
 
         let is_dir = entry.file_type().is_dir();
         match p.type_filter {
