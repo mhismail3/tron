@@ -12,7 +12,8 @@ extension ChatViewModel {
             subagentSessionId: result.subagentSessionId,
             task: result.task,
             model: result.model,
-            blocking: result.blocking
+            blocking: result.blocking,
+            spawnType: SubagentSpawnType(from: result.spawnType)
         )
 
         updateToolMessageToSubagentChip(

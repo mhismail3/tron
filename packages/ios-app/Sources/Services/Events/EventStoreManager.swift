@@ -193,7 +193,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentSpawnedPlugin.Result {
                 dashboardStreamManager.handleEvent(
-                    .subagentSpawned(task: result.task, toolCallId: result.toolCallId, subagentSessionId: result.subagentSessionId),
+                    .subagentSpawned(task: result.task, toolCallId: result.toolCallId, subagentSessionId: result.subagentSessionId, spawnType: result.spawnType),
                     sessionId: sessionId)
             }
 
@@ -201,7 +201,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentCompletedPlugin.Result {
                 dashboardStreamManager.handleEvent(
-                    .subagentCompleted(turns: result.totalTurns, durationMs: result.duration, subagentSessionId: result.subagentSessionId),
+                    .subagentCompleted(turns: result.totalTurns, durationMs: result.duration, subagentSessionId: result.subagentSessionId, spawnType: nil),
                     sessionId: sessionId)
             }
 
@@ -209,7 +209,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentFailedPlugin.Result {
                 dashboardStreamManager.handleEvent(
-                    .subagentFailed(error: result.error, subagentSessionId: result.subagentSessionId),
+                    .subagentFailed(error: result.error, subagentSessionId: result.subagentSessionId, spawnType: nil),
                     sessionId: sessionId)
             }
 

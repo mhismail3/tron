@@ -1023,6 +1023,7 @@ fn all_event_types_have_wire_mapping() {
             tool_call_id: None,
             blocking_timeout_ms: Some(300_000),
             working_directory: None,
+            spawn_type: None,
         },
         TronEvent::SubagentStatusUpdate {
             base: base.clone(),
@@ -1040,12 +1041,14 @@ fn all_event_types_have_wire_mapping() {
             result_summary: None,
             token_usage: None,
             model: None,
+            spawn_type: None,
         },
         TronEvent::SubagentFailed {
             base: base.clone(),
             subagent_session_id: "sub-1".into(),
             error: "e".into(),
             duration: 1000,
+            spawn_type: None,
         },
         TronEvent::SubagentEvent {
             base: base.clone(),
@@ -1391,6 +1394,7 @@ fn converts_subagent_spawned_with_new_fields() {
         tool_call_id: Some("tc_42".into()),
         blocking_timeout_ms: None,
         working_directory: Some("/tmp/project".into()),
+        spawn_type: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.subagent_spawned");
@@ -1412,6 +1416,7 @@ fn converts_subagent_completed_with_new_fields() {
         result_summary: Some("Full resu...".into()),
         token_usage: Some(serde_json::json!({"input": 100})),
         model: Some("claude-sonnet-4-5-20250929".into()),
+        spawn_type: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.subagent_completed");
@@ -1432,6 +1437,7 @@ fn converts_subagent_failed_uses_duration() {
         subagent_session_id: "sub-1".into(),
         error: "provider error".into(),
         duration: 1500,
+        spawn_type: None,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.subagent_failed");

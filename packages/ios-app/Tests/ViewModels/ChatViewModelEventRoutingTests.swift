@@ -475,7 +475,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             model: "claude-3-sonnet",
             workingDirectory: "/test/dir",
             toolCallId: "toolu_spawn1",
-            blocking: false
+            blocking: false,
+            spawnType: nil
         )
         viewModel.handleSubagentSpawnedResult(result)
 
@@ -492,7 +493,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             model: "claude-3-opus",
             workingDirectory: nil,
             toolCallId: "toolu_spawn2",
-            blocking: false
+            blocking: false,
+            spawnType: nil
         )
         viewModel.handleSubagentSpawnedResult(spawnedResult)
 
@@ -655,7 +657,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             model: "claude-sonnet-4-6",
             workingDirectory: nil,
             toolCallId: "tc-\(sessionId)",
-            blocking: false
+            blocking: false,
+            spawnType: nil
         )
         viewModel.handleSubagentSpawnedResult(result)
         // Mark as completed so deliverSubagentResults() will accept it

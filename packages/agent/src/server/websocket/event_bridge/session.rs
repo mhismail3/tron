@@ -250,6 +250,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             tool_call_id,
             blocking_timeout_ms,
             working_directory,
+            spawn_type,
             ..
         } => {
             let mut data = json!({
@@ -264,6 +265,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             }
             set_opt(&mut data, "toolCallId", tool_call_id);
             set_opt(&mut data, "workingDirectory", working_directory);
+            set_opt(&mut data, "spawnType", spawn_type);
             Some(session_scoped(event, "agent.subagent_spawned", Some(data)))
         }
         TronEvent::SubagentStatusUpdate {
@@ -289,6 +291,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             result_summary,
             token_usage,
             model,
+            spawn_type,
             ..
         } => {
             let mut data = json!({
@@ -300,6 +303,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             set_opt(&mut data, "resultSummary", result_summary);
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "model", model);
+            set_opt(&mut data, "spawnType", spawn_type);
             Some(session_scoped(
                 event,
                 "agent.subagent_completed",
@@ -310,16 +314,17 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             subagent_session_id,
             error,
             duration,
+            spawn_type,
             ..
-        } => Some(session_scoped(
-            event,
-            "agent.subagent_failed",
-            Some(json!({
+        } => {
+            let mut data = json!({
                 "subagentSessionId": subagent_session_id,
                 "error": error,
                 "duration": duration,
-            })),
-        )),
+            });
+            set_opt(&mut data, "spawnType", spawn_type);
+            Some(session_scoped(event, "agent.subagent_failed", Some(data)))
+        }
         TronEvent::SubagentEvent {
             subagent_session_id,
             event: inner,

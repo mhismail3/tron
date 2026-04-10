@@ -449,6 +449,72 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertEqual(sut.subagents["sub-r"]?.task, "Reconstructed")
     }
 
+    // MARK: - Spawn Type Filtering
+
+    func testTrackSpawn_defaultSpawnType_isToolAgent() {
+        spawnDefault()
+        XCTAssertEqual(sut.subagents["sub-1"]?.spawnType, .toolAgent)
+    }
+
+    func testTrackSpawn_withHookSpawnType() {
+        sut.trackSpawn(
+            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        XCTAssertEqual(sut.subagents["sub-hook"]?.spawnType, .hook)
+    }
+
+    func testHasRunningSubagents_trueForToolAgent() {
+        spawnDefault()  // default is .toolAgent
+        XCTAssertTrue(sut.hasRunningSubagents)
+    }
+
+    func testHasRunningSubagents_falseForHookOnly() {
+        sut.trackSpawn(
+            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        XCTAssertFalse(sut.hasRunningSubagents,
+            "Hook-only subagents should not count as running subagents")
+    }
+
+    func testHasRunningSubagents_mixedTypes_hookAndCompletedTool() {
+        // Running hook + completed tool → false
+        sut.trackSpawn(
+            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        spawnDefault()
+        sut.complete(
+            subagentSessionId: "sub-1", resultSummary: "Done",
+            fullOutput: nil, totalTurns: 1, duration: 100, tokenUsage: nil, model: nil
+        )
+        XCTAssertFalse(sut.hasRunningSubagents)
+    }
+
+    func testHasRunningSubagents_mixedTypes_toolRunning() {
+        // Running tool + running hook → true (tool counts)
+        sut.trackSpawn(
+            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        spawnDefault()
+        XCTAssertTrue(sut.hasRunningSubagents)
+    }
+
+    func testComplete_hookSubagent_doesNotAffectHasRunning() {
+        sut.trackSpawn(
+            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        XCTAssertFalse(sut.hasRunningSubagents)
+        sut.complete(
+            subagentSessionId: "sub-hook", resultSummary: "Title",
+            fullOutput: nil, totalTurns: 1, duration: 200, tokenUsage: nil, model: nil
+        )
+        XCTAssertFalse(sut.hasRunningSubagents)
+    }
+
     // MARK: - Event Limit
 
     func testAddForwardedEvent_enforcesMaxEventsPerSubagent() {

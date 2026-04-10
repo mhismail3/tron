@@ -136,6 +136,58 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
 
+    // MARK: - shouldShowBreathingLine: spawn type filtering
+
+    func testBreathingLineShownDuringHookSubagent() {
+        // Hook subagents (title-gen, branch-name-gen) should NOT suppress the breathing line
+        viewModel.agentPhase = .processing
+        viewModel.subagentState.trackSpawn(
+            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        XCTAssertTrue(viewModel.shouldShowBreathingLine,
+            "Hook subagents should not suppress the breathing line")
+    }
+
+    func testBreathingLineHiddenDuringToolSubagent() {
+        // Tool-spawned subagents should still suppress the breathing line
+        viewModel.agentPhase = .processing
+        viewModel.subagentState.trackSpawn(
+            toolCallId: "tc-1", subagentSessionId: "sub-1",
+            task: "Explore code", model: nil, spawnType: .toolAgent
+        )
+        XCTAssertFalse(viewModel.shouldShowBreathingLine,
+            "Tool agent subagents should suppress the breathing line")
+    }
+
+    func testBreathingLineShownAfterHookSubagentCompletes() {
+        viewModel.agentPhase = .processing
+        viewModel.subagentState.trackSpawn(
+            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        viewModel.subagentState.complete(
+            subagentSessionId: "sub-hook-1", resultSummary: "My Title",
+            fullOutput: nil, totalTurns: 1, duration: 500, tokenUsage: nil, model: nil
+        )
+        XCTAssertTrue(viewModel.shouldShowBreathingLine)
+    }
+
+    func testBreathingLineHiddenDuringToolSubagent_withConcurrentHook() {
+        // Both a tool agent and a hook running — tool agent takes precedence
+        viewModel.agentPhase = .processing
+        viewModel.subagentState.trackSpawn(
+            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            task: "Generate title", model: nil, spawnType: .hook
+        )
+        viewModel.subagentState.trackSpawn(
+            toolCallId: "tc-1", subagentSessionId: "sub-tool-1",
+            task: "Explore code", model: nil, spawnType: .toolAgent
+        )
+        XCTAssertFalse(viewModel.shouldShowBreathingLine,
+            "Tool agent should suppress breathing line even with concurrent hook")
+    }
+
     // MARK: - Helpers
 
     private func makeToolMessage(status: ToolStatus) -> ChatMessage {

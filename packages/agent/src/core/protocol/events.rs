@@ -849,6 +849,8 @@ tron_events! {
         blocking_timeout_ms: Option<u64>,
         #[serde(rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
         working_directory: Option<String>,
+        #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
+        spawn_type: Option<String>,
     } => "subagent_spawned",
 
     /// Subagent status update (forwarded child events).
@@ -877,6 +879,8 @@ tron_events! {
         token_usage: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
+        spawn_type: Option<String>,
     } => "subagent_completed",
 
     /// Subagent failed.
@@ -885,6 +889,8 @@ tron_events! {
         subagent_session_id: String,
         error: String,
         duration: u64,
+        #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
+        spawn_type: Option<String>,
     } => "subagent_failed",
 
     /// Forwarded child event (streaming content for iOS detail sheet).
@@ -1847,6 +1853,7 @@ mod tests {
                 tool_call_id: None,
                 blocking_timeout_ms: Some(300_000),
                 working_directory: None,
+                spawn_type: None,
             },
             TronEvent::SubagentStatusUpdate {
                 base: base.clone(),
@@ -1864,12 +1871,14 @@ mod tests {
                 result_summary: None,
                 token_usage: None,
                 model: None,
+                spawn_type: None,
             },
             TronEvent::SubagentFailed {
                 base: base.clone(),
                 subagent_session_id: "sub-1".into(),
                 error: "e".into(),
                 duration: 1000,
+                spawn_type: None,
             },
             TronEvent::SubagentEvent {
                 base: base.clone(),

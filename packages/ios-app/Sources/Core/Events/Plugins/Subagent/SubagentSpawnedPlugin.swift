@@ -20,6 +20,7 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
             let workingDirectory: String?
             let toolCallId: String?
             let blocking: Bool?
+            let spawnType: String?
         }
     }
 
@@ -32,6 +33,7 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
         let workingDirectory: String?
         let toolCallId: String?
         let blocking: Bool
+        let spawnType: String?
     }
 
     // MARK: - Protocol Implementation
@@ -43,7 +45,8 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
             model: event.data.model,
             workingDirectory: event.data.workingDirectory,
             toolCallId: event.data.toolCallId,
-            blocking: event.data.blocking ?? false
+            blocking: event.data.blocking ?? false,
+            spawnType: event.data.spawnType
         )
     }
 

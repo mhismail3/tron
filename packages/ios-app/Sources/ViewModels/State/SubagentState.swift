@@ -90,7 +90,7 @@ final class SubagentState {
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
-    func trackSpawn(toolCallId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false) {
+    func trackSpawn(toolCallId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .toolAgent) {
         var data = SubagentToolData(
             toolCallId: toolCallId,
             subagentSessionId: subagentSessionId,
@@ -105,6 +105,7 @@ final class SubagentState {
             tokenUsage: nil
         )
         data.blocking = blocking
+        data.spawnType = spawnType
         subagents[subagentSessionId] = data
     }
 
@@ -439,9 +440,11 @@ final class SubagentState {
         subagents.values.first { $0.toolCallId == toolCallId }
     }
 
-    /// Check if there are any running subagents
+    /// Check if there are any running user-facing subagents (tool agents).
+    /// Hook and system subsessions don't count — they're internal and shouldn't
+    /// suppress the breathing line or other UI indicators.
     var hasRunningSubagents: Bool {
-        subagents.values.contains { $0.status == .running }
+        subagents.values.contains { $0.status == .running && $0.spawnType == .toolAgent }
     }
 
     /// Get all subagents sorted by creation (most recent first)

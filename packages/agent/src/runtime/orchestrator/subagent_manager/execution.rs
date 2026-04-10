@@ -38,6 +38,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) max_turns: u32,
     pub(super) subagent_max_depth: u32,
     pub(super) reasoning_level: Option<ReasoningLevel>,
+    pub(super) spawn_type: String,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
     pub(super) tools: ToolRegistry,
@@ -74,6 +75,7 @@ pub(super) struct ToolAgentTaskLaunch {
             dyn crate::runtime::orchestrator::orchestrator::RunStateProbe,
         >,
     >,
+    pub(super) spawn_type: String,
 }
 
 pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
@@ -218,6 +220,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             subagent_session_id: params.child_session_id.clone(),
             error: error.clone(),
             duration: duration_ms,
+            spawn_type: Some(params.spawn_type.clone()),
         });
 
         SubagentResult {
@@ -238,6 +241,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             result_summary: Some(truncate(&output, 200).to_owned()),
             token_usage: token_usage.clone(),
             model: Some(params.model.clone()),
+            spawn_type: Some(params.spawn_type.clone()),
         });
 
         SubagentResult {
@@ -395,6 +399,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             result_summary: Some(truncate(&output, 200).to_owned()),
             token_usage: token_usage.clone(),
             model: Some(params.model.clone()),
+            spawn_type: Some(params.spawn_type.clone()),
         });
 
         if !params.tracker.parent_session_id.is_empty() {
@@ -408,6 +413,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                     "fullOutput": truncate(&output, 4000),
                     "resultSummary": truncate(&output, 200),
                     "model": params.model,
+                    "spawnType": params.spawn_type,
                 }),
                 parent_id: None,
                 sequence: None,
@@ -430,6 +436,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             subagent_session_id: params.child_session_id.clone(),
             error: error.clone(),
             duration: duration_ms,
+            spawn_type: Some(params.spawn_type.clone()),
         });
 
         if !params.tracker.parent_session_id.is_empty() {
@@ -440,6 +447,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                     "subagentSessionId": params.child_session_id,
                     "error": error,
                     "duration": duration_ms,
+                    "spawnType": params.spawn_type,
                 }),
                 parent_id: None,
                 sequence: None,

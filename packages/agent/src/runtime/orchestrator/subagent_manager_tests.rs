@@ -977,3 +977,181 @@ async fn notify_defaults_true_when_probe_weak_expired() {
         "notify should default to true when Weak probe is expired"
     );
 }
+
+// ── SpawnType::Hook and spawn_type event field tests ──
+
+#[test]
+fn spawn_type_hook_variant_exists() {
+    assert_ne!(SpawnType::Hook, SpawnType::ToolAgent);
+    assert_ne!(SpawnType::Hook, SpawnType::Subsession);
+    assert_eq!(SpawnType::Hook, SpawnType::Hook);
+}
+
+#[test]
+fn spawn_type_as_str_values() {
+    assert_eq!(SpawnType::ToolAgent.as_str(), "toolAgent");
+    assert_eq!(SpawnType::Subsession.as_str(), "subsession");
+    assert_eq!(SpawnType::Hook.as_str(), "hook");
+}
+
+#[test]
+fn subsession_config_default_spawn_type_is_subsession() {
+    let config = SubsessionConfig::default();
+    assert_eq!(config.spawn_type, SpawnType::Subsession);
+}
+
+#[tokio::test]
+async fn spawn_subsession_emits_spawn_type_in_event() {
+    let (mgr, store, broadcast) = make_manager_and_store();
+    let manager = SubagentManager::new(
+        mgr.clone(),
+        store.clone(),
+        broadcast.clone(),
+        Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        None,
+        None,
+    );
+    manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+    let mut rx = broadcast.subscribe();
+    let config = make_subsession_config("test spawn type", "parent-001");
+    let _result = manager.spawn_subsession(config).await.unwrap();
+
+    let mut found_spawn_type = None;
+    while let Ok(event) = rx.try_recv() {
+        if event.event_type() == "subagent_spawned" {
+            let json = serde_json::to_value(&event).unwrap();
+            found_spawn_type = json["spawnType"].as_str().map(String::from);
+        }
+    }
+    assert_eq!(
+        found_spawn_type.as_deref(),
+        Some("subsession"),
+        "SubagentSpawned event should contain spawnType: subsession"
+    );
+}
+
+#[tokio::test]
+async fn spawn_subsession_with_hook_type_emits_hook_in_event() {
+    let (mgr, store, broadcast) = make_manager_and_store();
+    let manager = SubagentManager::new(
+        mgr.clone(),
+        store.clone(),
+        broadcast.clone(),
+        Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        None,
+        None,
+    );
+    manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+    let mut rx = broadcast.subscribe();
+    let mut config = make_subsession_config("title gen task", "parent-001");
+    config.spawn_type = SpawnType::Hook;
+    let _result = manager.spawn_subsession(config).await.unwrap();
+
+    let mut found_spawn_type = None;
+    while let Ok(event) = rx.try_recv() {
+        if event.event_type() == "subagent_spawned" {
+            let json = serde_json::to_value(&event).unwrap();
+            found_spawn_type = json["spawnType"].as_str().map(String::from);
+        }
+    }
+    assert_eq!(
+        found_spawn_type.as_deref(),
+        Some("hook"),
+        "SubagentSpawned event should contain spawnType: hook"
+    );
+}
+
+#[tokio::test]
+async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
+    let (mgr, store, broadcast) = make_manager_and_store();
+    let manager = SubagentManager::new(
+        mgr.clone(),
+        store.clone(),
+        broadcast.clone(),
+        Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        None,
+        None,
+    );
+    manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+    let mut rx = broadcast.subscribe();
+    let config = make_config("tool agent task");
+    let _handle = manager.spawn(config).await.unwrap();
+
+    let mut found_spawn_type = None;
+    while let Ok(event) = rx.try_recv() {
+        if event.event_type() == "subagent_spawned" {
+            let json = serde_json::to_value(&event).unwrap();
+            found_spawn_type = json["spawnType"].as_str().map(String::from);
+        }
+    }
+    assert_eq!(
+        found_spawn_type.as_deref(),
+        Some("toolAgent"),
+        "SubagentSpawned event should contain spawnType: toolAgent"
+    );
+}
+
+#[tokio::test]
+async fn subagent_completed_includes_spawn_type() {
+    let (mgr, store, broadcast) = make_manager_and_store();
+    let manager = SubagentManager::new(
+        mgr.clone(),
+        store.clone(),
+        broadcast.clone(),
+        Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        None,
+        None,
+    );
+    manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+    let mut rx = broadcast.subscribe();
+    let config = make_subsession_config("check completed type", "parent-001");
+    let _result = manager.spawn_subsession(config).await.unwrap();
+
+    let mut completed_spawn_type = None;
+    while let Ok(event) = rx.try_recv() {
+        if event.event_type() == "subagent_completed" {
+            let json = serde_json::to_value(&event).unwrap();
+            completed_spawn_type = json["spawnType"].as_str().map(String::from);
+        }
+    }
+    assert_eq!(
+        completed_spawn_type.as_deref(),
+        Some("subsession"),
+        "SubagentCompleted event should carry spawnType through"
+    );
+}
+
+#[tokio::test]
+async fn subagent_failed_includes_spawn_type() {
+    let (mgr, store, broadcast) = make_manager_and_store();
+    let manager = SubagentManager::new(
+        mgr.clone(),
+        store.clone(),
+        broadcast.clone(),
+        Arc::new(MockProviderFactoryFor::<ErrorProvider>::new()),
+        None,
+        None,
+    );
+    manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+    let mut rx = broadcast.subscribe();
+    let config = make_subsession_config("will fail", "parent-001");
+    let _ = manager.spawn_subsession(config).await;
+
+    let mut failed_spawn_type = None;
+    while let Ok(event) = rx.try_recv() {
+        if event.event_type() == "subagent_failed" {
+            let json = serde_json::to_value(&event).unwrap();
+            failed_spawn_type = json["spawnType"].as_str().map(String::from);
+        }
+    }
+    assert_eq!(
+        failed_spawn_type.as_deref(),
+        Some("subsession"),
+        "SubagentFailed event should carry spawnType through"
+    );
+}

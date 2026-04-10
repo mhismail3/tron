@@ -35,12 +35,25 @@ mod tracking;
 // =============================================================================
 
 /// Distinguishes tool-spawned agents from system-spawned `subsessions`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnType {
     /// Spawned by the LLM via the `SpawnSubagent` tool.
     ToolAgent,
-    /// Spawned programmatically for internal tasks (ledger, compaction, etc.).
+    /// Spawned programmatically for internal tasks (compaction, memory, etc.).
     Subsession,
+    /// Spawned by LLM hooks (title-gen, branch-name-gen, suggest-prompts).
+    Hook,
+}
+
+impl SpawnType {
+    /// Returns the wire-protocol string for this spawn type (camelCase for JSON).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ToolAgent => "toolAgent",
+            Self::Subsession => "subsession",
+            Self::Hook => "hook",
+        }
+    }
 }
 
 // =============================================================================
@@ -74,6 +87,8 @@ pub struct SubsessionConfig {
     pub denied_tools: Vec<String>,
     /// Reasoning effort level (default Some(Medium)).
     pub reasoning_level: Option<ReasoningLevel>,
+    /// Spawn type for event tagging (default `Subsession`).
+    pub spawn_type: SpawnType,
 }
 
 impl Default for SubsessionConfig {
@@ -91,6 +106,7 @@ impl Default for SubsessionConfig {
             inherit_tools: false,
             denied_tools: vec![],
             reasoning_level: Some(ReasoningLevel::Medium),
+            spawn_type: SpawnType::Subsession,
         }
     }
 }
@@ -244,11 +260,12 @@ impl SubagentManager {
                 message: format!("Failed to create subsession: {e}"),
             })?;
 
+        let spawn_type = config.spawn_type;
         let (tracker, cancel) = self.register_subagent(
             child_session_id.clone(),
             config.parent_session_id.clone(),
             task.clone(),
-            SpawnType::Subsession,
+            spawn_type,
         );
 
         // 3. Emit SubagentSpawned on broadcast
@@ -262,6 +279,7 @@ impl SubagentManager {
             tool_call_id: None,
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
+            spawn_type: Some(spawn_type.as_str().to_owned()),
         });
 
         // 4. Build tools
@@ -297,6 +315,7 @@ impl SubagentManager {
             max_turns: config.max_turns,
             subagent_max_depth: config.max_depth,
             reasoning_level: config.reasoning_level,
+            spawn_type: spawn_type.as_str().to_owned(),
             tracker: tracker.clone(),
             cancel,
             tools,
@@ -413,6 +432,7 @@ impl SubagentSpawner for SubagentManager {
             tool_call_id: config.tool_call_id.clone(),
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
+            spawn_type: Some(SpawnType::ToolAgent.as_str().to_owned()),
         });
 
         // Persist subagent.spawned to parent session (iOS reconstructs from this on resume)
@@ -429,6 +449,7 @@ impl SubagentSpawner for SubagentManager {
                     "toolCallId": config.tool_call_id,
                     "blockingTimeoutMs": config.blocking_timeout_ms,
                     "workingDirectory": config.working_directory,
+                    "spawnType": SpawnType::ToolAgent.as_str(),
                 }),
                 parent_id: None,
                 sequence: None,
@@ -459,6 +480,7 @@ impl SubagentSpawner for SubagentManager {
             tools: tool_factory(),
             denied_tools: config.denied_tools.clone(),
             run_state_probe: self.probe_clone(),
+            spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {

@@ -98,6 +98,7 @@ extension ChatViewModel {
                 tokenUsage: completion?.tokenUsage
             )
             subagentData.blocking = spawn.blocking
+            subagentData.spawnType = SubagentSpawnType(from: spawn.spawnType)
 
             if let existing = subagentState.getSubagent(sessionId: sessionId) {
                 subagentData.resultDeliveryStatus = existing.resultDeliveryStatus

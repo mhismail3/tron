@@ -454,7 +454,8 @@ extension UnifiedEventTransformer {
                 task: payload["task"]?.value as? String ?? "",
                 model: payload["model"]?.value as? String ?? "unknown",
                 toolCallId: payload["toolCallId"]?.value as? String,
-                blocking: payload["blocking"]?.value as? Bool ?? false
+                blocking: payload["blocking"]?.value as? Bool ?? false,
+                spawnType: payload["spawnType"]?.value as? String
             ))
 
         case .subagentCompleted:

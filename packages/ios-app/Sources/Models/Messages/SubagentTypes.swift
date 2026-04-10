@@ -51,6 +51,24 @@ enum SubagentResultDeliveryStatus: String, Codable, Equatable {
     case dismissed
 }
 
+/// Categorizes the origin of a subagent for UI-level decisions
+/// (e.g., whether it suppresses the breathing line or shows a chip).
+enum SubagentSpawnType: String, Codable, Equatable {
+    case toolAgent
+    case subsession
+    case hook
+    case unknown
+
+    init(from rawValue: String?) {
+        switch rawValue {
+        case "toolAgent": self = .toolAgent
+        case "subsession": self = .subsession
+        case "hook": self = .hook
+        default: self = .toolAgent  // Backward compat: treat unknown/nil as toolAgent
+        }
+    }
+}
+
 /// Data for tracking a spawned subagent (rendered as a chip in chat)
 struct SubagentToolData: Equatable {
     /// The tool call ID from SpawnSubagent
@@ -77,6 +95,8 @@ struct SubagentToolData: Equatable {
     var tokenUsage: TokenUsage?
     /// Whether this subagent was spawned in blocking mode (parent waits for result via tool result)
     var blocking: Bool = false
+    /// Origin of the subagent (tool, hook, subsession) — controls UI behavior
+    var spawnType: SubagentSpawnType = .toolAgent
     /// Tracks whether results need user action (for non-blocking subagents that complete while parent idle)
     var resultDeliveryStatus: SubagentResultDeliveryStatus = .notApplicable
 

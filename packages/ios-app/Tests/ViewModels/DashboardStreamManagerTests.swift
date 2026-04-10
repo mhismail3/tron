@@ -507,7 +507,7 @@ final class DashboardStreamManagerTests: XCTestCase {
         manager.handleTextDelta(sessionId: "s1", delta: "more")
         manager.handleToolStart(sessionId: "s1", toolName: "Edit", arguments: nil)
         manager.handleThinkingDelta(sessionId: "s1")
-        manager.handleSubagentSpawned(sessionId: "s1", task: "task", toolCallId: "tc1", subagentSessionId: "sub1")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "task", toolCallId: "tc1", subagentSessionId: "sub1", spawnType: "toolAgent")
         manager.flush()
 
         let after = manager.visibleLines(for: "s1", count: 10)
@@ -525,18 +525,18 @@ final class DashboardStreamManagerTests: XCTestCase {
         XCTAssertEqual(lines[0].text, "Edit")
     }
 
-    // MARK: - Hook Subagent Suppression
+    // MARK: - Non-Tool Subagent Suppression
 
     func testHookSubagentSuppressed() {
         let manager = DashboardStreamManager()
-        manager.handleSubagentSpawned(sessionId: "s1", task: "hook task", toolCallId: nil, subagentSessionId: "sub1")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook task", toolCallId: nil, subagentSessionId: "sub1", spawnType: "hook")
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
     }
 
     func testUserSubagentShown() {
         let manager = DashboardStreamManager()
-        manager.handleSubagentSpawned(sessionId: "s1", task: "user task", toolCallId: "tc1", subagentSessionId: "sub1")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "user task", toolCallId: "tc1", subagentSessionId: "sub1", spawnType: "toolAgent")
 
         XCTAssertTrue(manager.hasContent(for: "s1"))
         let lines = manager.visibleLines(for: "s1", count: 3)
@@ -545,16 +545,16 @@ final class DashboardStreamManagerTests: XCTestCase {
 
     func testHookSubagentCompleteSuppressed() {
         let manager = DashboardStreamManager()
-        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1")
-        manager.handleSubagentCompleted(sessionId: "s1", turns: 3, durationMs: nil, subagentSessionId: "sub1")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1", spawnType: "hook")
+        manager.handleSubagentCompleted(sessionId: "s1", turns: 3, durationMs: nil, subagentSessionId: "sub1", spawnType: nil)
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
     }
 
     func testHookSubagentFailedSuppressed() {
         let manager = DashboardStreamManager()
-        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1")
-        manager.handleSubagentFailed(sessionId: "s1", error: "timeout", subagentSessionId: "sub1")
+        manager.handleSubagentSpawned(sessionId: "s1", task: "hook", toolCallId: nil, subagentSessionId: "sub1", spawnType: "hook")
+        manager.handleSubagentFailed(sessionId: "s1", error: "timeout", subagentSessionId: "sub1", spawnType: nil)
 
         XCTAssertFalse(manager.hasContent(for: "s1"))
     }

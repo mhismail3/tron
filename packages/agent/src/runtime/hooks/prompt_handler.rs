@@ -320,6 +320,7 @@ impl HookHandler for PromptHookHandler {
                     max_turns: 1,
                     max_depth: 0,
                     reasoning_level: None,
+                    spawn_type: crate::runtime::orchestrator::subagent_manager::SpawnType::Hook,
                     ..SubsessionConfig::default()
                 })
                 .await;

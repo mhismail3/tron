@@ -296,7 +296,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             model: nil,
             workingDirectory: nil,
             toolCallId: nil,
-            blocking: false
+            blocking: false,
+            spawnType: nil
         )
 
         // When: Dispatching

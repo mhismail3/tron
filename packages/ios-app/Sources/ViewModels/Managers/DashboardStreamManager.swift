@@ -250,8 +250,9 @@ final class DashboardStreamManager {
     /// Sessions that have completed — prevents post-completion events from creating new buffers
     private var completedSessionIds: Set<String> = []
 
-    /// Subagent session IDs spawned by hooks (nil toolCallId) — suppressed from display
-    private var hookSubagentIds: Set<String> = []
+    /// Subagent session IDs from non-tool-agent spawn types — suppressed from display.
+    /// Used to filter completion/failure events whose spawn type is not carried on the event itself.
+    private var nonToolSubagentIds: Set<String> = []
 
     /// Sessions with pending text deltas that need flushing
     private var dirtySessionIds: Set<String> = []
@@ -300,12 +301,12 @@ final class DashboardStreamManager {
             handleToolStart(sessionId: sessionId, toolName: name, toolCallId: id, arguments: args)
         case .toolEnd(let name, let id, let success, let ms):
             handleToolEnd(sessionId: sessionId, toolName: name, toolCallId: id, success: success, durationMs: ms)
-        case .subagentSpawned(let task, let toolCallId, let subId):
-            handleSubagentSpawned(sessionId: sessionId, task: task, toolCallId: toolCallId, subagentSessionId: subId)
-        case .subagentCompleted(let turns, let durationMs, let subId):
-            handleSubagentCompleted(sessionId: sessionId, turns: turns, durationMs: durationMs, subagentSessionId: subId)
-        case .subagentFailed(let error, let subId):
-            handleSubagentFailed(sessionId: sessionId, error: error, subagentSessionId: subId)
+        case .subagentSpawned(let task, let toolCallId, let subId, let spawnType):
+            handleSubagentSpawned(sessionId: sessionId, task: task, toolCallId: toolCallId, subagentSessionId: subId, spawnType: spawnType)
+        case .subagentCompleted(let turns, let durationMs, let subId, let spawnType):
+            handleSubagentCompleted(sessionId: sessionId, turns: turns, durationMs: durationMs, subagentSessionId: subId, spawnType: spawnType)
+        case .subagentFailed(let error, let subId, let spawnType):
+            handleSubagentFailed(sessionId: sessionId, error: error, subagentSessionId: subId, spawnType: spawnType)
         case .turnFailed(let error):
             handleTurnFailed(sessionId: sessionId, error: error)
         case .complete:
@@ -342,9 +343,10 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String) {
-        if toolCallId == nil {
-            hookSubagentIds.insert(subagentSessionId)
+    func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String, spawnType: String?) {
+        let resolvedType = SubagentSpawnType(from: spawnType)
+        if resolvedType != .toolAgent {
+            nonToolSubagentIds.insert(subagentSessionId)
             return
         }
         guard ensurePendingBuffer(for: sessionId) else { return }
@@ -352,15 +354,15 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleSubagentCompleted(sessionId: String, turns: Int, durationMs: Int?, subagentSessionId: String) {
-        if hookSubagentIds.remove(subagentSessionId) != nil { return }
+    func handleSubagentCompleted(sessionId: String, turns: Int, durationMs: Int?, subagentSessionId: String, spawnType: String?) {
+        if nonToolSubagentIds.remove(subagentSessionId) != nil { return }
         guard ensurePendingBuffer(for: sessionId) else { return }
         pendingBuffers[sessionId]?.addSubagentComplete(turns: turns, durationMs: durationMs)
         flushSession(sessionId)
     }
 
-    func handleSubagentFailed(sessionId: String, error: String, subagentSessionId: String) {
-        if hookSubagentIds.remove(subagentSessionId) != nil { return }
+    func handleSubagentFailed(sessionId: String, error: String, subagentSessionId: String, spawnType: String?) {
+        if nonToolSubagentIds.remove(subagentSessionId) != nil { return }
         guard ensurePendingBuffer(for: sessionId) else { return }
         pendingBuffers[sessionId]?.addSubagentFailed(error: error)
         flushSession(sessionId)
@@ -418,7 +420,7 @@ final class DashboardStreamManager {
         pendingBuffers.removeAll()
         dirtySessionIds.removeAll()
         completedSessionIds.removeAll()
-        hookSubagentIds.removeAll()
+        nonToolSubagentIds.removeAll()
         renderTimer?.cancel()
         renderTimer = nil
     }
