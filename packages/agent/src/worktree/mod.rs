@@ -12,7 +12,7 @@
 //! Does NOT depend on `runtime` or `llm` — the coordinator
 //! is injected into runtime from `main.rs`.
 
-#[path = "runtime/coordinator.rs"]
+#[path = "runtime/coordinator/mod.rs"]
 pub mod coordinator;
 pub mod errors;
 #[path = "scm/git.rs"]
