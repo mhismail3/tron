@@ -247,13 +247,45 @@ Gemma 4 has built-in thinking support. The `reasoning` field in responses contai
 - In streaming mode, `reasoning` chunks arrive before `content` or `tool_calls`
 - To disable thinking, you may need to configure the model (not yet tested)
 
+## Context Window (num_ctx) — Critical
+
+Ollama defaults to a **4,096 token context window** if `num_ctx` is not specified in the request. This is far too small for Tron — system prompt + tool definitions + conversation easily exceeds 10K tokens. When the context is exceeded, Ollama **silently truncates** the prompt, dropping tool definitions and earlier messages.
+
+**Symptom**: Model responds but doesn't use tools, or says "I don't have any tools."
+
+**Fix**: The Tron Ollama provider sends `num_ctx` in every request body. For registered models, it uses the model's context window capped at 32K. For unknown models, it defaults to 16K.
+
+**Memory impact of num_ctx** (approximate, E4B with q8_0 KV cache):
+| num_ctx | KV Cache Size | Total VRAM |
+|---------|--------------|------------|
+| 4,096 (default) | ~119 MB | ~9.7 GB |
+| 16,384 | ~475 MB | ~10.1 GB |
+| 32,768 | ~950 MB | ~10.6 GB |
+
+On an M4 Pro 24GB, 32K context is comfortable. On M5 Max 36GB, even higher is fine.
+
+## Latency Profile
+
+With a typical Tron workload (system prompt + 8 tools + conversation):
+
+| Phase | Duration | Description |
+|-------|----------|-------------|
+| Prompt evaluation | ~1.5s | Processing input tokens through all 42 layers |
+| Model thinking | ~3-4s | Internal reasoning (the `reasoning` field) before producing output |
+| Generation | ~1s | Producing the actual visible response tokens |
+| **Total** | **~5-8s** | This is real model work, not a bug |
+
+Short prompts without tools are much faster (~0.3s TTFT). The latency scales with input complexity.
+
 ## Known Limitations
 
 1. **E4B is for validation only** — quality is limited for real agent work. Use 26B MoE for production.
 2. **No auth required** — Ollama runs locally with no API keys needed.
-3. **Flash attention hang** — affects 31B Dense model on Apple Silicon with prompts >500 tokens. Does NOT affect E4B or 26B MoE.
-4. **Memory pressure** — 26B MoE needs ~18GB+. On 24GB machines, this leaves limited headroom. Use 36GB+ for production.
-5. **Ollama version sensitivity** — tool calling was broken in v0.20.0, fixed in v0.20.3. Always use latest.
+3. **No streaming token usage** — Ollama doesn't report token counts in streaming mode. Cost is always $0 (local).
+4. **Flash attention hang** — affects 31B Dense model on Apple Silicon with prompts >500 tokens. Does NOT affect E4B or 26B MoE.
+5. **Memory pressure** — 26B MoE needs ~18GB+. On 24GB machines, this leaves limited headroom. Use 36GB+ for production.
+6. **Ollama version sensitivity** — tool calling was broken in v0.20.0, fixed in v0.20.3. Always use latest.
+7. **Model reload on context size change** — if `num_ctx` changes between requests, Ollama reloads the model (~3-5s). The Tron provider uses a consistent value per model to avoid this.
 
 ## Hardware Recommendations
 
@@ -275,7 +307,6 @@ ollama show <model>          # Show model details
 
 ## Next Steps
 
-- [ ] Pull and validate 26B MoE on M5 Max (system prompt limit re-test)
-- [ ] Build Tron Ollama provider (Phase 2 — separate session)
-- [ ] Performance benchmarking (tokens/sec) on both machines
-- [ ] Test with Tron's actual system prompt and tool definitions
+- [ ] Pull and validate 26B MoE on M5 Max
+- [ ] iOS Settings UI for Ollama provider
+- [ ] Test thinking block display in iOS UI

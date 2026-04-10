@@ -15,6 +15,14 @@ pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 /// Default max output tokens for Ollama models (conservative for local inference).
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8_192;
 
+/// Default context window size to request from Ollama.
+///
+/// Ollama defaults to 4,096 tokens if not specified, which is far too small
+/// for Tron's system prompt + tool definitions + conversation. We request 16K
+/// by default — enough for typical agent interactions without excessive memory.
+/// Ollama will reload the model if the context size changes from what's loaded.
+pub const DEFAULT_NUM_CTX: u32 = 16_384;
+
 /// Ollama provider configuration.
 #[derive(Clone, Debug)]
 pub struct OllamaConfig {

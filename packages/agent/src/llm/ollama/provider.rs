@@ -17,7 +17,9 @@ use crate::llm::provider::{
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{ChatCompletionChunk, OllamaStreamState, process_chunk};
-use super::types::{DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, OllamaConfig, get_ollama_model};
+use super::types::{
+    DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_NUM_CTX, OllamaConfig, get_ollama_model,
+};
 
 /// SSE parser options — Ollama uses `[DONE]` marker, no remaining buffer processing.
 static SSE_OPTIONS: crate::llm::SseParserOptions = crate::llm::SseParserOptions {
@@ -92,10 +94,21 @@ impl OllamaProvider {
         let supports_images = self.model_supports_images();
         let messages = convert_messages(&context.messages, supports_images);
 
+        // Ollama defaults to 4K context if num_ctx is not set, which silently
+        // truncates Tron's system prompt + tool definitions. We set num_ctx to
+        // ensure the full prompt fits.
+        let num_ctx = get_ollama_model(&self.config.model)
+            .map_or(DEFAULT_NUM_CTX, |m| {
+                // Use the model's full context window, capped at a practical limit.
+                // Going beyond 32K on E4B wastes memory without benefit.
+                (m.context_window as u32).min(32_768)
+            });
+
         let mut body = json!({
             "model": self.config.model,
             "max_tokens": self.calculate_max_tokens(options),
             "stream": true,
+            "num_ctx": num_ctx,
         });
 
         // System message goes first in the messages array
@@ -394,6 +407,27 @@ mod tests {
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You are helpful.");
+    }
+
+    #[test]
+    fn request_body_includes_num_ctx() {
+        let provider = OllamaProvider::new(test_config());
+        let ctx = Context::default();
+        let options = ProviderStreamOptions::default();
+        let body = provider.build_request_body(&ctx, &options);
+        // E4B has 131K context, capped at 32K
+        assert_eq!(body["num_ctx"], 32_768);
+    }
+
+    #[test]
+    fn request_body_num_ctx_unknown_model_uses_default() {
+        let mut cfg = test_config();
+        cfg.model = "unknown-model".into();
+        let provider = OllamaProvider::new(cfg);
+        let ctx = Context::default();
+        let options = ProviderStreamOptions::default();
+        let body = provider.build_request_body(&ctx, &options);
+        assert_eq!(body["num_ctx"], DEFAULT_NUM_CTX);
     }
 
     #[test]
