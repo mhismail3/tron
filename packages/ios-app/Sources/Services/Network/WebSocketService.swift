@@ -142,13 +142,14 @@ final class WebSocketService {
         configuration.timeoutIntervalForResource = 300
         logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
 
-        urlSession = URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration)
+        urlSession = session
 
         var request = URLRequest(url: serverURL)
         request.timeoutInterval = 30
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
-        webSocketTask = urlSession!.webSocketTask(with: request)
+        webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.maximumMessageSize = 4 * 1024 * 1024  // 4MB — must exceed server's 2MB limit to handle event sync payloads with image data
         webSocketTask?.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)

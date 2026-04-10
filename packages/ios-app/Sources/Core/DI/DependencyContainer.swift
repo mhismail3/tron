@@ -130,15 +130,22 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Initialize core services that persist across server changes.
         // Falls back to temp directory if Documents is unavailable (e.g., device migration).
+        let documentsURL: URL
+        if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            documentsURL = url
+        } else {
+            TronLogger.shared.error("Documents directory unavailable, using temporary directory", category: .session)
+            documentsURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        }
+
         let db: EventDatabase
         if let primaryDB = EventDatabase() {
             db = primaryDB
         } else {
-            TronLogger.shared.error("Documents directory unavailable, using temporary database", category: .session)
             db = EventDatabase(fallbackPath: NSTemporaryDirectory() + ".tron/database/fallback.db")
         }
         eventDatabase = db
-        draftStore = DraftStore(eventDatabase: db)
+        draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         pushNotificationService = PushNotificationService()
         deepLinkRouter = DeepLinkRouter()
 

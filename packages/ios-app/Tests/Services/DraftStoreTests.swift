@@ -12,7 +12,7 @@ final class DraftStoreTests: XCTestCase {
         database = EventDatabase()
         try await database.initialize()
         try database.clearAll()
-        draftStore = DraftStore(eventDatabase: database)
+        draftStore = DraftStore(eventDatabase: database, documentsURL: FileManager.default.temporaryDirectory)
     }
 
     override func tearDown() async throws {

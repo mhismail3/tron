@@ -20,9 +20,8 @@ final class DraftStore {
     private var pendingSessionId: String?
     private var pendingInputBarState: InputBarState?
 
-    init(eventDatabase: EventDatabase) {
+    init(eventDatabase: EventDatabase, documentsURL: URL) {
         self.eventDatabase = eventDatabase
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         self.draftsRootURL = documentsURL
             .appendingPathComponent(".tron", isDirectory: true)
             .appendingPathComponent("database", isDirectory: true)

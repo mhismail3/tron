@@ -27,24 +27,19 @@ func withRetry<T>(
     policy: RPCRetryPolicy = .default,
     operation: @MainActor () async throws -> T
 ) async throws -> T {
-    var lastError: Error?
+    precondition(policy.maxRetries >= 1, "RPCRetryPolicy.maxRetries must be >= 1")
 
-    for attempt in 1...policy.maxRetries {
+    var attempt = 1
+    while true {
         do {
             return try await operation()
         } catch {
-            lastError = error
-
-            if !policy.isRetryable(error) {
+            if !policy.isRetryable(error) || attempt >= policy.maxRetries {
                 throw error
             }
-
-            if attempt < policy.maxRetries {
-                let delayMs = policy.baseDelayMs * UInt64(1 << (attempt - 1))
-                try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
-            }
+            let delayMs = policy.baseDelayMs * UInt64(1 << (attempt - 1))
+            try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+            attempt += 1
         }
     }
-
-    throw lastError!
 }

@@ -7,10 +7,7 @@ enum AppConstants {
     static var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
-    static var fallbackServerURL: URL {
-        guard let url = URL(string: "ws://\(defaultHost):\(prodPort)/ws") else {
-            fatalError("Invalid WebSocket URL from constants: ws://\(defaultHost):\(prodPort)/ws")
-        }
-        return url
-    }
+    // Force-unwrap is safe: the inputs are compile-time constants. AppConstantsTests
+    // verifies the URL parses; any edit that breaks it trips CI before ship.
+    static let fallbackServerURL = URL(string: "ws://\(defaultHost):\(prodPort)/ws")!
 }

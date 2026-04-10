@@ -217,7 +217,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         let db = EventDatabase()!
         try! await db.initialize()
         try! db.clearAll()
-        let store = DraftStore(eventDatabase: db)
+        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
         mockContext.draftStore = store
 
         // Save a draft
@@ -247,7 +247,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         let db = EventDatabase()!
         try! await db.initialize()
         try! db.clearAll()
-        let store = DraftStore(eventDatabase: db)
+        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
         mockContext.draftStore = store
 
         let draftState = InputBarState()
