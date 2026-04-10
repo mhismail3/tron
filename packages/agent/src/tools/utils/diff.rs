@@ -332,4 +332,237 @@ mod tests {
         let diff = generate_unified_diff("same\n", "same\n", 3);
         assert!(diff.is_empty());
     }
+
+    // =========================================================================
+    // generate_structured_diff — edge-case matrix
+    // =========================================================================
+
+    use serde_json::Value;
+
+    fn entry_type(v: &Value) -> &str {
+        v.get("type").and_then(Value::as_str).unwrap_or("")
+    }
+
+    fn all_types(entries: &[Value]) -> Vec<&str> {
+        entries.iter().map(entry_type).collect()
+    }
+
+    #[test]
+    fn structured_diff_identical_inputs_empty() {
+        let entries = generate_structured_diff("hello\nworld\n", "hello\nworld\n", 3);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn structured_diff_both_empty() {
+        assert!(generate_structured_diff("", "", 3).is_empty());
+    }
+
+    #[test]
+    fn structured_diff_single_line_change_has_hunk_header_and_lines() {
+        let entries = generate_structured_diff("hello world\n", "hello tron\n", 1);
+        let types = all_types(&entries);
+        assert!(types.contains(&"hunk_header"));
+        assert!(types.iter().any(|t| *t == "deletion"));
+        assert!(types.iter().any(|t| *t == "addition"));
+    }
+
+    #[test]
+    fn structured_diff_empty_old_only_additions() {
+        let entries = generate_structured_diff("", "a\nb\nc\n", 3);
+        let types = all_types(&entries);
+        assert!(types.contains(&"hunk_header"));
+        assert!(types.iter().all(|t| *t == "hunk_header" || *t == "addition"));
+        // Every addition has a newLine, never an oldLine.
+        for e in entries.iter().filter(|e| entry_type(e) == "addition") {
+            assert!(e.get("newLine").is_some(), "addition missing newLine");
+            assert!(e.get("oldLine").is_none(), "addition should not have oldLine");
+        }
+    }
+
+    #[test]
+    fn structured_diff_empty_new_only_deletions() {
+        let entries = generate_structured_diff("a\nb\nc\n", "", 3);
+        let types = all_types(&entries);
+        assert!(types.contains(&"hunk_header"));
+        assert!(types.iter().all(|t| *t == "hunk_header" || *t == "deletion"));
+        for e in entries.iter().filter(|e| entry_type(e) == "deletion") {
+            assert!(e.get("oldLine").is_some(), "deletion missing oldLine");
+            assert!(e.get("newLine").is_none(), "deletion should not have newLine");
+        }
+    }
+
+    #[test]
+    fn structured_diff_hunk_header_shape() {
+        let entries = generate_structured_diff("a\n", "b\n", 1);
+        let header = entries
+            .iter()
+            .find(|v| entry_type(v) == "hunk_header")
+            .expect("hunk header present");
+        for key in ["oldStart", "oldCount", "newStart", "newCount"] {
+            let v = header.get(key).unwrap_or_else(|| panic!("missing {key}"));
+            assert!(v.as_u64().is_some(), "{key} not u64");
+        }
+    }
+
+    #[test]
+    fn structured_diff_line_entries_have_content() {
+        let entries = generate_structured_diff("a\nb\n", "a\nc\n", 3);
+        for entry in entries.iter().filter(|e| entry_type(e) != "hunk_header") {
+            let content = entry.get("content").and_then(Value::as_str);
+            assert!(content.is_some(), "entry missing content: {entry}");
+        }
+    }
+
+    #[test]
+    fn structured_diff_context_entries_have_both_line_numbers() {
+        let entries =
+            generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 3);
+        let context_entries: Vec<&Value> = entries
+            .iter()
+            .filter(|e| entry_type(e) == "context")
+            .collect();
+        assert!(!context_entries.is_empty(), "expected context entries");
+        for e in context_entries {
+            assert!(e.get("oldLine").is_some(), "context missing oldLine");
+            assert!(e.get("newLine").is_some(), "context missing newLine");
+        }
+    }
+
+    #[test]
+    fn structured_diff_context_zero_no_context_entries() {
+        let entries =
+            generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 0);
+        assert!(
+            !entries.iter().any(|e| entry_type(e) == "context"),
+            "context_lines=0 must produce no context entries"
+        );
+        // Still emits hunk header + the changed lines.
+        assert!(entries.iter().any(|e| entry_type(e) == "hunk_header"));
+    }
+
+    #[test]
+    fn structured_diff_context_larger_than_file_does_not_panic() {
+        // context_lines larger than the entire file must clamp, not trap.
+        let entries = generate_structured_diff("a\n", "b\n", 1_000);
+        assert!(!entries.is_empty());
+        assert!(entries.iter().any(|e| entry_type(e) == "hunk_header"));
+    }
+
+    #[test]
+    fn structured_diff_multi_hunk_emits_multiple_headers() {
+        // Two distant changes separated by enough context to force two hunks.
+        let old = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\n";
+        let new = "l1\nCHANGED1\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nCHANGED15\n";
+        let entries = generate_structured_diff(old, new, 1);
+        let header_count = entries
+            .iter()
+            .filter(|e| entry_type(e) == "hunk_header")
+            .count();
+        assert!(header_count >= 2, "expected ≥2 hunks, got {header_count}");
+    }
+
+    #[test]
+    fn structured_diff_preserves_unicode() {
+        let old = "hello 🚀\n";
+        let new = "hello 日本語\n";
+        let entries = generate_structured_diff(old, new, 1);
+        let joined: String = entries
+            .iter()
+            .filter_map(|e| e.get("content").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("🚀"));
+        assert!(joined.contains("日本語"));
+    }
+
+    #[test]
+    fn structured_diff_preserves_tabs_and_long_lines() {
+        let long_old = format!("{}\n", "x".repeat(5_000));
+        let long_new = format!("{}\n", "y".repeat(5_000));
+        let entries = generate_structured_diff(&long_old, &long_new, 1);
+        let has_long = entries
+            .iter()
+            .filter_map(|e| e.get("content").and_then(Value::as_str))
+            .any(|s| s.len() == 5_000);
+        assert!(has_long, "long lines must be preserved verbatim");
+
+        let tab_entries =
+            generate_structured_diff("a\tb\n", "a\tc\n", 1);
+        assert!(tab_entries
+            .iter()
+            .filter_map(|e| e.get("content").and_then(Value::as_str))
+            .any(|s| s.contains('\t')));
+    }
+
+    #[test]
+    fn structured_diff_trailing_newline_variants() {
+        // No panic regardless of trailing newline shape.
+        let _ = generate_structured_diff("a", "b", 1);
+        let _ = generate_structured_diff("a\n", "b", 1);
+        let _ = generate_structured_diff("a", "b\n", 1);
+        let _ = generate_structured_diff("a\n", "b\n", 1);
+    }
+
+    #[test]
+    fn structured_diff_old_line_numbers_monotonic_within_hunk() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nb\nX\nY\ne\n";
+        let entries = generate_structured_diff(old, new, 3);
+        let mut prev: Option<u64> = None;
+        for entry in &entries {
+            let ty = entry_type(entry);
+            if ty == "hunk_header" {
+                prev = None; // reset per hunk
+                continue;
+            }
+            if let Some(line) = entry.get("oldLine").and_then(Value::as_u64) {
+                if let Some(p) = prev {
+                    assert!(
+                        line >= p,
+                        "oldLine not monotonic: {p} -> {line} at {entry}"
+                    );
+                }
+                prev = Some(line);
+            }
+        }
+    }
+
+    #[test]
+    fn structured_diff_new_line_numbers_monotonic_within_hunk() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nb\nX\nY\ne\n";
+        let entries = generate_structured_diff(old, new, 3);
+        let mut prev: Option<u64> = None;
+        for entry in &entries {
+            let ty = entry_type(entry);
+            if ty == "hunk_header" {
+                prev = None;
+                continue;
+            }
+            if let Some(line) = entry.get("newLine").and_then(Value::as_u64) {
+                if let Some(p) = prev {
+                    assert!(
+                        line >= p,
+                        "newLine not monotonic: {p} -> {line} at {entry}"
+                    );
+                }
+                prev = Some(line);
+            }
+        }
+    }
+
+    #[test]
+    fn structured_diff_entry_types_are_exhaustive() {
+        // No unexpected entry types slip into the wire format. iOS decoder
+        // matches on exactly these four strings.
+        let entries = generate_structured_diff("a\nb\nc\n", "a\nx\nc\n", 3);
+        for entry in &entries {
+            let ty = entry_type(entry);
+            assert!(
+                matches!(ty, "hunk_header" | "context" | "deletion" | "addition"),
+                "unexpected entry type: {ty}"
+            );
+        }
+    }
 }
