@@ -157,6 +157,19 @@ pub const MOONSHOT_V1_128K: &str = "moonshot-v1-128k";
 pub const DEFAULT_KIMI_MODEL: &str = KIMI_K2_5;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ollama (local models)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Gemma 4 E4B — 4.5B effective dense model (edge/validation).
+pub const GEMMA4_E4B: &str = "gemma4:e4b";
+
+/// Gemma 4 26B MoE — 26B total, 3.8B active per token.
+pub const GEMMA4_26B: &str = "gemma4:26b";
+
+/// Default Ollama model.
+pub const DEFAULT_OLLAMA_MODEL: &str = GEMMA4_E4B;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Role-Based Aliases
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -183,6 +196,7 @@ mod tests {
     use crate::llm::google::types::all_gemini_model_ids;
     use crate::llm::kimi::types::all_kimi_model_ids;
     use crate::llm::minimax::types::all_minimax_model_ids;
+    use crate::llm::ollama::types::all_ollama_model_ids;
     use crate::llm::openai::types::all_openai_model_ids;
 
     #[test]
@@ -277,6 +291,7 @@ mod tests {
         all.extend(all_gemini_model_ids());
         all.extend(all_minimax_model_ids());
         all.extend(all_kimi_model_ids());
+        all.extend(all_ollama_model_ids());
 
         let unique: std::collections::HashSet<&&str> = all.iter().collect();
         assert_eq!(all.len(), unique.len(), "duplicate model IDs found");
@@ -298,6 +313,24 @@ mod tests {
             assert!(
                 id.starts_with("gpt-"),
                 "OpenAI model ID should start with 'gpt-': {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn ollama_ids_not_empty() {
+        let ids = all_ollama_model_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&GEMMA4_E4B));
+        assert!(ids.contains(&GEMMA4_26B));
+    }
+
+    #[test]
+    fn ollama_id_format() {
+        for id in all_ollama_model_ids() {
+            assert!(
+                id.starts_with("gemma4:"),
+                "Ollama model ID should start with 'gemma4:': {id}"
             );
         }
     }

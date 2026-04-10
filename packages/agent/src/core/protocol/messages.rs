@@ -129,6 +129,9 @@ pub enum Provider {
     /// Kimi (Moonshot AI).
     #[serde(rename = "kimi")]
     Kimi,
+    /// Ollama (local models).
+    #[serde(rename = "ollama")]
+    Ollama,
     /// Unrecognized provider (defensive deserialization).
     #[serde(other, rename = "unknown")]
     Unknown,
@@ -145,6 +148,7 @@ impl Provider {
             Self::Google => "google",
             Self::MiniMax => "minimax",
             Self::Kimi => "kimi",
+            Self::Ollama => "ollama",
             Self::Unknown => "unknown",
         }
     }
@@ -166,6 +170,7 @@ impl std::str::FromStr for Provider {
             "google" => Ok(Self::Google),
             "minimax" => Ok(Self::MiniMax),
             "kimi" => Ok(Self::Kimi),
+            "ollama" => Ok(Self::Ollama),
             _ => Err(format!("unknown provider: {s}")),
         }
     }
@@ -855,6 +860,10 @@ mod tests {
             "\"kimi\""
         );
         assert_eq!(
+            serde_json::to_string(&Provider::Ollama).unwrap(),
+            "\"ollama\""
+        );
+        assert_eq!(
             serde_json::to_string(&Provider::Unknown).unwrap(),
             "\"unknown\""
         );
@@ -874,6 +883,7 @@ mod tests {
         assert_eq!(Provider::OpenAiCodex.to_string(), "openai-codex");
         assert_eq!(Provider::MiniMax.to_string(), "minimax");
         assert_eq!(Provider::Kimi.to_string(), "kimi");
+        assert_eq!(Provider::Ollama.to_string(), "ollama");
         assert_eq!(Provider::Unknown.to_string(), "unknown");
     }
 
@@ -891,6 +901,7 @@ mod tests {
         assert_eq!("google".parse::<Provider>().unwrap(), Provider::Google);
         assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::MiniMax);
         assert_eq!("kimi".parse::<Provider>().unwrap(), Provider::Kimi);
+        assert_eq!("ollama".parse::<Provider>().unwrap(), Provider::Ollama);
         assert!("nonexistent".parse::<Provider>().is_err());
     }
 

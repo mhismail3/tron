@@ -11,6 +11,7 @@ use crate::llm::anthropic::types::{all_claude_model_ids, get_claude_model};
 use crate::llm::google::types::{all_gemini_model_ids, get_gemini_model};
 use crate::llm::kimi::types::{all_kimi_model_ids, get_kimi_model};
 use crate::llm::minimax::types::{all_minimax_model_ids, get_minimax_model};
+use crate::llm::ollama::types::{all_ollama_model_ids, get_ollama_model};
 use crate::llm::openai::types::{all_openai_model_ids, get_openai_model};
 use crate::core::messages::Provider;
 
@@ -35,6 +36,7 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
             }
             "minimax" if get_minimax_model(bare_model).is_some() => Some(Provider::MiniMax),
             "kimi" | "moonshot" if get_kimi_model(bare_model).is_some() => Some(Provider::Kimi),
+            "ollama" if get_ollama_model(bare_model).is_some() => Some(Provider::Ollama),
             _ => None,
         };
     }
@@ -54,6 +56,9 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
     }
     if get_kimi_model(model_id).is_some() {
         return Some(Provider::Kimi);
+    }
+    if get_ollama_model(model_id).is_some() {
+        return Some(Provider::Ollama);
     }
 
     // Unknown model.
@@ -78,6 +83,7 @@ pub fn is_model_supported(model_id: &str) -> bool {
         || get_gemini_model(bare).is_some()
         || get_minimax_model(bare).is_some()
         || get_kimi_model(bare).is_some()
+        || get_ollama_model(bare).is_some()
 }
 
 /// Check if a model supports image inputs.
@@ -98,6 +104,9 @@ pub fn model_supports_images(model_id: &str) -> bool {
         return m.supports_images;
     }
     if let Some(m) = get_kimi_model(bare) {
+        return m.supports_images;
+    }
+    if let Some(m) = get_ollama_model(bare) {
         return m.supports_images;
     }
     true
@@ -128,7 +137,7 @@ pub fn model_supports_documents(model_id: &str) -> DocumentSupport {
     if get_gemini_model(bare).is_some() {
         return DocumentSupport::PdfOnly;
     }
-    // OpenAI, Kimi, MiniMax: no native document support.
+    // OpenAI, Kimi, MiniMax, Ollama: no native document support.
     DocumentSupport::None
 }
 
@@ -153,6 +162,9 @@ pub fn model_context_window(model_id: &str) -> u64 {
     if let Some(m) = get_kimi_model(bare) {
         return m.context_window;
     }
+    if let Some(m) = get_ollama_model(bare) {
+        return m.context_window;
+    }
     200_000
 }
 
@@ -163,6 +175,7 @@ pub fn all_model_ids() -> Vec<&'static str> {
     ids.extend(all_gemini_model_ids());
     ids.extend(all_minimax_model_ids());
     ids.extend(all_kimi_model_ids());
+    ids.extend(all_ollama_model_ids());
     ids
 }
 
@@ -587,6 +600,58 @@ mod tests {
         );
     }
 
+    // ── Ollama detection ──────────────────────────────────────────────────
+
+    #[test]
+    fn detect_registry_lookup_ollama_e4b() {
+        assert_eq!(
+            detect_provider_from_model(GEMMA4_E4B),
+            Some(Provider::Ollama)
+        );
+    }
+
+    #[test]
+    fn detect_registry_lookup_ollama_26b() {
+        assert_eq!(
+            detect_provider_from_model(GEMMA4_26B),
+            Some(Provider::Ollama)
+        );
+    }
+
+    #[test]
+    fn detect_explicit_prefix_ollama() {
+        assert_eq!(
+            detect_provider_from_model("ollama/gemma4:e4b"),
+            Some(Provider::Ollama)
+        );
+    }
+
+    #[test]
+    fn supported_model_ollama() {
+        assert!(is_model_supported("gemma4:e4b"));
+        assert!(is_model_supported("gemma4:26b"));
+    }
+
+    #[test]
+    fn ollama_image_support() {
+        assert!(model_supports_images("gemma4:e4b"));
+        assert!(model_supports_images("gemma4:26b"));
+    }
+
+    #[test]
+    fn ollama_no_document_support() {
+        assert_eq!(
+            model_supports_documents("gemma4:e4b"),
+            DocumentSupport::None
+        );
+    }
+
+    #[test]
+    fn context_window_ollama() {
+        assert_eq!(model_context_window(GEMMA4_E4B), 131_072);
+        assert_eq!(model_context_window(GEMMA4_26B), 262_144);
+    }
+
     #[test]
     fn prefixed_model_document_support() {
         assert_eq!(
@@ -609,7 +674,8 @@ mod tests {
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
-        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi = 41
-        assert_eq!(ids.len(), 41);
+        assert!(ids.contains(&GEMMA4_E4B));
+        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 43
+        assert_eq!(ids.len(), 43);
     }
 }

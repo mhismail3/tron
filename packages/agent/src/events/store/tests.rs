@@ -98,6 +98,46 @@ fn create_session_root_event_has_correct_fields() {
     assert_eq!(result.root_event.session_id, result.session.id);
 }
 
+#[test]
+fn create_session_detects_ollama_provider() {
+    let store = setup();
+    let result = store
+        .create_session("gemma4:e4b", "/tmp/project", None, None, None)
+        .unwrap();
+
+    let payload_str: String = result.root_event.payload;
+    let payload: serde_json::Value = serde_json::from_str(&payload_str).unwrap();
+    assert_eq!(
+        payload["provider"].as_str(),
+        Some("ollama"),
+        "gemma4:e4b should be detected as Ollama provider, not anthropic"
+    );
+}
+
+#[test]
+fn create_session_detects_anthropic_provider() {
+    let store = setup();
+    let result = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .unwrap();
+
+    let payload_str: String = result.root_event.payload;
+    let payload: serde_json::Value = serde_json::from_str(&payload_str).unwrap();
+    assert_eq!(payload["provider"].as_str(), Some("anthropic"));
+}
+
+#[test]
+fn create_session_detects_google_provider() {
+    let store = setup();
+    let result = store
+        .create_session("gemini-2.5-flash", "/tmp/project", None, None, None)
+        .unwrap();
+
+    let payload_str: String = result.root_event.payload;
+    let payload: serde_json::Value = serde_json::from_str(&payload_str).unwrap();
+    assert_eq!(payload["provider"].as_str(), Some("google"));
+}
+
 // ── Event appending ───────────────────────────────────────────────
 
 #[test]

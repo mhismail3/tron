@@ -15,6 +15,7 @@ use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model}
 use crate::llm::google::types::{all_gemini_models_api_json, get_gemini_model};
 use crate::llm::kimi::types::all_kimi_models_api_json;
 use crate::llm::minimax::types::all_minimax_models_api_json;
+use crate::llm::ollama::types::all_ollama_models_api_json;
 use crate::llm::openai::types::{all_openai_models_api_json, get_openai_model};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
@@ -30,6 +31,7 @@ fn known_models() -> Vec<Value> {
     models.extend(all_gemini_models_api_json());
     models.extend(all_minimax_models_api_json());
     models.extend(all_kimi_models_api_json());
+    models.extend(all_ollama_models_api_json());
     models
 }
 
@@ -39,6 +41,7 @@ fn is_model_supported(model_id: &str) -> bool {
         || get_gemini_model(model_id).is_some()
         || crate::llm::minimax::types::get_minimax_model(model_id).is_some()
         || crate::llm::kimi::types::get_kimi_model(model_id).is_some()
+        || crate::llm::ollama::types::get_ollama_model(model_id).is_some()
 }
 
 fn is_model_deprecated(model_id: &str) -> bool {

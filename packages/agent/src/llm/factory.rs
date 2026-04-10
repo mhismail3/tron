@@ -43,6 +43,8 @@ pub struct DefaultProviderFactory {
     minimax_base_url: Option<String>,
     /// Kimi base URL override from settings.
     kimi_base_url: Option<String>,
+    /// Ollama base URL override from settings.
+    ollama_base_url: Option<String>,
     /// Shared HTTP client — connection pool reused across all providers.
     http_client: reqwest::Client,
 }
@@ -73,6 +75,7 @@ impl DefaultProviderFactory {
             },
             minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
             kimi_base_url: settings.api.kimi.as_ref().map(|k| k.base_url.clone()),
+            ollama_base_url: settings.api.ollama.as_ref().map(|o| o.base_url.clone()),
             http_client,
         }
     }
@@ -403,6 +406,32 @@ impl DefaultProviderFactory {
             ),
         ))
     }
+
+    /// Create an Ollama provider — no auth required (local inference).
+    fn create_ollama(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+        info!("creating Ollama provider for model: {model}");
+        let config = crate::llm::ollama::types::OllamaConfig {
+            model: model.to_string(),
+            base_url: self.ollama_base_url.clone(),
+            max_tokens: None,
+            retry: Some(crate::llm::StreamRetryConfig {
+                retry: crate::core::retry::RetryConfig {
+                    max_retries: self.retry.max_retries,
+                    base_delay_ms: self.retry.base_delay_ms,
+                    max_delay_ms: self.retry.max_delay_ms,
+                    jitter_factor: self.retry.jitter_factor,
+                },
+                emit_retry_events: true,
+                cancel_token: None,
+            }),
+        };
+        Ok(Arc::new(
+            crate::llm::ollama::provider::OllamaProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
+        ))
+    }
 }
 
 impl DefaultProviderFactory {
@@ -436,6 +465,7 @@ impl DefaultProviderFactory {
             }
             ProviderKind::MiniMax => self.create_minimax(bare_model),
             ProviderKind::Kimi => self.create_kimi(bare_model),
+            ProviderKind::Ollama => self.create_ollama(bare_model),
             ProviderKind::Unknown => Err(ProviderError::UnsupportedModel {
                 model: bare_model.to_string(),
             }),
@@ -645,6 +675,58 @@ mod tests {
             err.to_string().contains("auth") || err.to_string().contains("Auth"),
             "should report auth failure: {err}"
         );
+    }
+
+    // ── Ollama (no auth required) ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn factory_creates_ollama_without_auth() {
+        let factory = no_auth_factory();
+        // Ollama doesn't need auth — should succeed (create provider, not error)
+        let result = factory.create_for_model("gemma4:e4b").await;
+        assert!(result.is_ok(), "Ollama should not require auth: {}", result.err().map_or(String::new(), |e| e.to_string()));
+        let provider = result.unwrap();
+        assert_eq!(
+            provider.provider_type(),
+            crate::core::messages::Provider::Ollama
+        );
+        assert_eq!(provider.model(), "gemma4:e4b");
+    }
+
+    #[tokio::test]
+    async fn factory_creates_ollama_with_prefix() {
+        let factory = no_auth_factory();
+        let result = factory.create_for_model("ollama/gemma4:e4b").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().model(), "gemma4:e4b");
+    }
+
+    #[tokio::test]
+    async fn factory_creates_ollama_26b() {
+        let factory = no_auth_factory();
+        let result = factory.create_for_model("gemma4:26b").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().model(), "gemma4:26b");
+    }
+
+    #[test]
+    fn factory_captures_ollama_base_url() {
+        let mut settings = crate::settings::TronSettings::default();
+        settings.api.ollama = Some(crate::settings::OllamaApiSettings {
+            base_url: "http://192.168.1.100:11434".into(),
+        });
+        let factory = DefaultProviderFactory::new(&settings);
+        assert_eq!(
+            factory.ollama_base_url.as_deref(),
+            Some("http://192.168.1.100:11434")
+        );
+    }
+
+    #[test]
+    fn factory_ollama_base_url_none_by_default() {
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings);
+        assert!(factory.ollama_base_url.is_none());
     }
 
     #[tokio::test]

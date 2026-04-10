@@ -134,6 +134,8 @@ pub fn detect_provider(model: &str) -> crate::core::messages::Provider {
         Provider::MiniMax
     } else if m.contains("kimi") || m.contains("moonshot") {
         Provider::Kimi
+    } else if m.contains("gemma4") || m.contains("ollama") {
+        Provider::Ollama
     } else {
         // Default to Anthropic
         Provider::Anthropic
@@ -243,6 +245,9 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "moonshot-v1-32k" => kimi_tier(1.00, 3.00),
         "moonshot-v1-128k" => kimi_tier(2.00, 5.00),
 
+        // Ollama — local models (free)
+        "gemma4:e4b" | "gemma4:26b" => free_tier(),
+
         _ => return None,
     })
 }
@@ -263,6 +268,17 @@ fn kimi_tier(input: f64, output: f64) -> PricingTier {
     PricingTier {
         input_per_million: input,
         output_per_million: output,
+        cache_write_5m_multiplier: 1.0,
+        cache_write_1h_multiplier: 1.0,
+        cache_read_multiplier: 1.0,
+    }
+}
+
+/// Create an Ollama pricing tier (local, free).
+fn free_tier() -> PricingTier {
+    PricingTier {
+        input_per_million: 0.0,
+        output_per_million: 0.0,
         cache_write_5m_multiplier: 1.0,
         cache_write_1h_multiplier: 1.0,
         cache_read_multiplier: 1.0,
@@ -332,6 +348,11 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
     }
     if m.contains("moonshot") {
         return Some(kimi_tier(1.00, 3.00));
+    }
+
+    // Ollama — local models (free)
+    if m.contains("gemma4") {
+        return Some(free_tier());
     }
 
     None
@@ -608,5 +629,33 @@ mod tests {
     #[test]
     fn detect_unknown_defaults_to_anthropic() {
         assert_eq!(detect_provider("some-unknown-model"), Provider::Anthropic);
+    }
+
+    // ── Ollama ──
+
+    #[test]
+    fn detect_ollama_gemma4() {
+        assert_eq!(detect_provider("gemma4:e4b"), Provider::Ollama);
+        assert_eq!(detect_provider("gemma4:26b"), Provider::Ollama);
+    }
+
+    #[test]
+    fn pricing_ollama_free() {
+        let tier = get_pricing_tier("gemma4:e4b").unwrap();
+        assert_float_eq(tier.input_per_million, 0.0);
+        assert_float_eq(tier.output_per_million, 0.0);
+    }
+
+    #[test]
+    fn cost_ollama_is_zero() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 500_000,
+            ..Default::default()
+        };
+        let cost = calculate_cost("gemma4:e4b", &usage).unwrap();
+        assert_float_eq(cost.total, 0.0);
+        assert_float_eq(cost.input_cost, 0.0);
+        assert_float_eq(cost.output_cost, 0.0);
     }
 }

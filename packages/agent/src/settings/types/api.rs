@@ -1,7 +1,8 @@
 //! API provider settings.
 //!
-//! Configuration for LLM provider authentication endpoints (Anthropic, `OpenAI`,
-//! Google). Each provider has its own OAuth URLs, client IDs, and scopes.
+//! Configuration for LLM provider endpoints. Cloud providers (Anthropic, `OpenAI`,
+//! Google) have OAuth URLs, client IDs, and scopes. Local providers (Ollama) only
+//! need a base URL.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,9 @@ pub struct ApiSettings {
     /// Kimi API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kimi: Option<KimiApiSettings>,
+    /// Ollama API settings (optional — absent if not configured).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ollama: Option<OllamaApiSettings>,
 }
 
 /// Anthropic API and OAuth settings.
@@ -206,6 +210,22 @@ impl Default for KimiApiSettings {
     }
 }
 
+/// Ollama API settings (local models via Ollama).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OllamaApiSettings {
+    /// Base URL for the Ollama API (default: `http://localhost:11434`).
+    pub base_url: String,
+}
+
+impl Default for OllamaApiSettings {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:11434".to_string(),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +350,34 @@ mod tests {
     fn kimi_defaults() {
         let k = KimiApiSettings::default();
         assert!(k.base_url.starts_with("https://api.moonshot.ai"));
+    }
+
+    #[test]
+    fn api_settings_ollama_optional() {
+        let api = ApiSettings::default();
+        assert!(api.ollama.is_none());
+    }
+
+    #[test]
+    fn api_settings_ollama_serde() {
+        let json = serde_json::json!({
+            "anthropic": {},
+            "ollama": {
+                "baseUrl": "http://192.168.1.100:11434"
+            }
+        });
+        let api: ApiSettings = serde_json::from_value(json).unwrap();
+        assert!(api.ollama.is_some());
+        assert_eq!(
+            api.ollama.unwrap().base_url,
+            "http://192.168.1.100:11434"
+        );
+    }
+
+    #[test]
+    fn ollama_defaults() {
+        let o = OllamaApiSettings::default();
+        assert_eq!(o.base_url, "http://localhost:11434");
     }
 
     #[test]

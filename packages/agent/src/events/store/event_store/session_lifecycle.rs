@@ -57,18 +57,27 @@ impl EventStore {
             let event_id = format!("evt_{}", Uuid::now_v7());
             let now = chrono::Utc::now().to_rfc3339();
             let provider = provider.unwrap_or_else(|| {
-                if model.starts_with("claude-") {
-                    "anthropic"
-                } else if model.starts_with("gpt-")
-                    || model.starts_with("o1-")
-                    || model.starts_with("o3-")
-                {
-                    "openai"
-                } else if model.starts_with("gemini-") {
-                    "google"
-                } else {
-                    "anthropic"
-                }
+                // Use the model registry for authoritative provider detection.
+                // Falls back to prefix heuristics for unknown models.
+                crate::llm::models::registry::detect_provider_from_model(model)
+                    .map_or_else(
+                        || {
+                            // Fallback for models not in the registry
+                            if model.starts_with("claude-") {
+                                "anthropic"
+                            } else if model.starts_with("gpt-")
+                                || model.starts_with("o1-")
+                                || model.starts_with("o3-")
+                            {
+                                "openai"
+                            } else if model.starts_with("gemini-") {
+                                "google"
+                            } else {
+                                "anthropic"
+                            }
+                        },
+                        |p| p.as_str(),
+                    )
             });
             let payload = serde_json::json!({
                 "workingDirectory": workspace_path,

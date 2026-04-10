@@ -38,6 +38,7 @@ pub mod google;
 #[path = "shared/health.rs"]
 pub mod health;
 pub mod kimi;
+pub mod ollama;
 #[path = "shared/id_remapping.rs"]
 pub mod id_remapping;
 pub mod minimax;
