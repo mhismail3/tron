@@ -62,6 +62,13 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Provider display order (server-authoritative, e.g. 0=Anthropic, 1=OpenAI)
     let providerSortOrder: Int?
 
+    // MARK: - Availability (local providers like Ollama)
+
+    /// Whether this model is available for use (Ollama: server running + model pulled)
+    let available: Bool?
+    /// Human-readable reason why the model is unavailable (e.g., install instructions)
+    let unavailableReason: String?
+
     enum CodingKeys: String, CodingKey {
         case id, name, provider, contextWindow, maxOutputTokens
         case supportsThinking, supportsImages, supportsDocuments, tier, isLegacy
@@ -72,6 +79,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case providerDisplayName, providerSortOrder
         case inputCostPerMillion, outputCostPerMillion
         case modelDescription = "description"
+        case available, unavailableReason
     }
 
     /// Manual init preserving backward compatibility — new metadata fields default to nil
@@ -102,7 +110,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         releaseDate: String? = nil,
         sortOrder: Int? = nil,
         providerDisplayName: String? = nil,
-        providerSortOrder: Int? = nil
+        providerSortOrder: Int? = nil,
+        available: Bool? = nil,
+        unavailableReason: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -131,6 +141,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.sortOrder = sortOrder
         self.providerDisplayName = providerDisplayName
         self.providerSortOrder = providerSortOrder
+        self.available = available
+        self.unavailableReason = unavailableReason
     }
 
     // MARK: - Formatted Display Helpers
@@ -185,6 +197,16 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Whether this model is deprecated and should not be selectable
     var isDeprecatedModel: Bool {
         isDeprecated ?? false
+    }
+
+    /// Whether this model is unavailable (local provider not running or model not pulled)
+    var isUnavailable: Bool {
+        available == false
+    }
+
+    /// Whether this model should be disabled in the picker (deprecated OR unavailable)
+    var isDisabled: Bool {
+        isDeprecatedModel || isUnavailable
     }
 
     /// Whether this is an Anthropic model

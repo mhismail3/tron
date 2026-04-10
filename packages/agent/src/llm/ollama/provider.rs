@@ -22,7 +22,7 @@
 use async_trait::async_trait;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 use crate::core::messages::Context;
 use crate::llm::compose_context_parts;

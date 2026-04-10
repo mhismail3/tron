@@ -256,7 +256,7 @@ private struct ModelCard: View {
                 // Selection circle
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(
-                        (readOnly || model.isDeprecatedModel)
+                        (readOnly || model.isDisabled)
                             ? .tronTextMuted.opacity(0.5)
                             : (isSelected ? providerColor : .tronTextMuted)
                     )
@@ -267,7 +267,7 @@ private struct ModelCard: View {
                     HStack(spacing: 6) {
                         Text(model.formattedModelName)
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(model.isDeprecatedModel ? .tronTextMuted : .tronTextPrimary)
+                            .foregroundStyle(model.isDisabled ? .tronTextMuted : .tronTextPrimary)
 
                         if model.recommended == true {
                             Text("Recommended")
@@ -286,6 +286,14 @@ private struct ModelCard: View {
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
                                 .background(Color.red.opacity(0.15))
+                                .clipShape(Capsule())
+                        } else if model.isUnavailable {
+                            Text("Unavailable")
+                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .foregroundStyle(.tronTextMuted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.tronTextMuted.opacity(0.15))
                                 .clipShape(Capsule())
                         } else if model.isPreview {
                             Text("Preview")
@@ -332,11 +340,18 @@ private struct ModelCard: View {
             }
             .padding(10)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .onTapGesture { if !readOnly && !model.isDeprecatedModel { onSelect() } }
+            .onTapGesture { if !readOnly && !model.isDisabled { onSelect() } }
 
             // Expanded details
             if isDetailExpanded {
                 VStack(alignment: .leading, spacing: 8) {
+                    // Unavailable reason (install instructions)
+                    if let reason = model.unavailableReason, model.isUnavailable {
+                        Text(reason)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronAmber)
+                    }
+
                     // Description
                     if let desc = model.modelDescription, !desc.isEmpty {
                         Text(desc)

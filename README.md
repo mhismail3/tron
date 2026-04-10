@@ -108,6 +108,8 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |     +-- openai/      GPT/o-series (OAuth + API key)
   |     +-- google/      Gemini (Cloud Code Assist + Antigravity OAuth)
   |     +-- minimax/     MiniMax (API key only)
+  |     +-- kimi/        Kimi/Moonshot (API key only)
+  |     +-- ollama/      Gemma 4 local inference (no auth, native /api/chat)
   +-- mcp              Model Context Protocol client/server bridge
   +-- tools            Tool trait, registry, tool implementations
   +-- cron             Scheduled job runner (automations)
@@ -453,6 +455,7 @@ The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection
 | Google    | `llm/google/`    | OAuth, API key            | Dual endpoint: Cloud Code Assist + Antigravity |
 | MiniMax   | `llm/minimax/`   | API key only              | — |
 | Kimi      | `llm/kimi/`      | API key only              | — |
+| Ollama    | `llm/ollama/`    | None (local)              | Requires Ollama running locally. See `docs/local-llm-setup.md` |
 
 ### Multi-Account
 

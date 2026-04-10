@@ -15,7 +15,7 @@ use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model}
 use crate::llm::google::types::{all_gemini_models_api_json, get_gemini_model};
 use crate::llm::kimi::types::all_kimi_models_api_json;
 use crate::llm::minimax::types::all_minimax_models_api_json;
-use crate::llm::ollama::types::all_ollama_models_api_json;
+use crate::llm::ollama::types::all_ollama_models_api_json_with_availability;
 use crate::llm::openai::types::{all_openai_models_api_json, get_openai_model};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
@@ -24,14 +24,15 @@ use crate::server::rpc::registry::MethodHandler;
 
 /// All known models, derived from provider registries (single source of truth).
 ///
+/// Ollama models include live availability status from the local Ollama server.
 /// Adding a new model? Update the provider's `types.rs` — it appears here automatically.
-fn known_models() -> Vec<Value> {
+async fn known_models() -> Vec<Value> {
     let mut models = all_claude_models_api_json();
     models.extend(all_openai_models_api_json());
     models.extend(all_gemini_models_api_json());
     models.extend(all_minimax_models_api_json());
     models.extend(all_kimi_models_api_json());
-    models.extend(all_ollama_models_api_json());
+    models.extend(all_ollama_models_api_json_with_availability(None).await);
     models
 }
 
@@ -62,7 +63,7 @@ pub struct ListModelsHandler;
 impl MethodHandler for ListModelsHandler {
     #[instrument(skip(self, _ctx), fields(method = "model.list"))]
     async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        Ok(serde_json::json!({ "models": known_models() }))
+        Ok(serde_json::json!({ "models": known_models().await }))
     }
 }
 

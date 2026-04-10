@@ -145,6 +145,9 @@ impl OllamaModelInfo {
 }
 
 /// All Ollama models serialized for the `model.list` API, sorted by `sort_order`.
+///
+/// This is the static (sync) version — all models are listed without availability info.
+/// Prefer [`all_ollama_models_api_json_with_availability`] when an async context is available.
 pub fn all_ollama_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);
@@ -152,6 +155,83 @@ pub fn all_ollama_models_api_json() -> Vec<serde_json::Value> {
         .into_iter()
         .map(|(id, info)| info.to_api_json(id))
         .collect()
+}
+
+/// All Ollama models with live availability status from the local Ollama server.
+///
+/// Queries `GET /api/tags` to discover which models are actually pulled.
+/// If Ollama is not running or unreachable, all models are marked unavailable
+/// with an appropriate `unavailableReason`.
+pub async fn all_ollama_models_api_json_with_availability(
+    base_url: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let base = base_url.unwrap_or(DEFAULT_BASE_URL);
+    let pulled = query_pulled_models(base).await;
+
+    let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
+    entries.sort_by_key(|(_, info)| info.sort_order);
+
+    entries
+        .into_iter()
+        .map(|(id, info)| {
+            let mut json = info.to_api_json(id);
+            match &pulled {
+                Ok(models) => {
+                    let available = models.iter().any(|m| m == id);
+                    json["available"] = serde_json::Value::Bool(available);
+                    if !available {
+                        json["unavailableReason"] = serde_json::Value::String(
+                            format!("Not installed — run: ollama pull {id}"),
+                        );
+                    }
+                }
+                Err(reason) => {
+                    json["available"] = serde_json::Value::Bool(false);
+                    json["unavailableReason"] =
+                        serde_json::Value::String(reason.clone());
+                }
+            }
+            json
+        })
+        .collect()
+}
+
+/// Query Ollama's `/api/tags` endpoint for the list of pulled model names.
+///
+/// Returns `Ok(Vec<model_name>)` on success, `Err(reason)` if Ollama is
+/// unreachable or returns an error.
+async fn query_pulled_models(base_url: &str) -> Result<Vec<String>, String> {
+    let url = format!("{base_url}/api/tags");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| "Ollama is not running — install with: brew install ollama && brew services start ollama".to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Ollama returned status {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Ollama response: {e}"))?;
+
+    let models = body["models"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["name"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

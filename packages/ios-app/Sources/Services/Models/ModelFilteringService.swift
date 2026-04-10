@@ -223,6 +223,7 @@ enum ModelFilteringService {
         case "google": return (.tronCyan, "IconGoogle")
         case "minimax": return (.tronRose, "IconMiniMax")
         case "kimi": return (.tronIndigo, "IconKimi")
+        case "ollama": return (.tronEmerald, "IconOllama")
         default: return (.secondary, "cpu")
         }
     }
