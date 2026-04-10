@@ -117,7 +117,7 @@ pub fn all_ollama_model_ids() -> Vec<&'static str> {
 impl OllamaModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
     pub fn to_api_json(&self, id: &str) -> serde_json::Value {
-        serde_json::json!({
+        let mut obj = serde_json::json!({
             "id": id,
             "name": self.name,
             "provider": "ollama",
@@ -133,11 +133,25 @@ impl OllamaModelInfo {
             "tier": "local",
             "family": self.family,
             "description": self.description,
-            "supportsReasoning": false,
+            "supportsReasoning": self.supports_thinking,
             "recommended": self.recommended,
             "isLegacy": false,
             "sortOrder": self.sort_order,
-        })
+        });
+        // Gemma 4 thinking is always-on (not level-configurable), but the iOS
+        // app needs reasoningLevels to know thinking blocks will be present.
+        if self.supports_thinking {
+            let map = obj.as_object_mut().unwrap();
+            let _ = map.insert(
+                "reasoningLevels".into(),
+                serde_json::json!(["medium"]),
+            );
+            let _ = map.insert(
+                "defaultReasoningLevel".into(),
+                serde_json::json!("medium"),
+            );
+        }
+        obj
     }
 }
 
@@ -224,6 +238,10 @@ mod tests {
         assert_eq!(j["family"], "Gemma 4");
         assert_eq!(j["isLegacy"], false);
         assert_eq!(j["sortOrder"], 0);
+        // Thinking models include reasoning levels for iOS UI
+        assert_eq!(j["supportsReasoning"], true);
+        assert!(j["reasoningLevels"].is_array());
+        assert_eq!(j["defaultReasoningLevel"], "medium");
     }
 
     #[test]
