@@ -251,9 +251,14 @@ Gemma 4 has built-in thinking support. The `reasoning` field in responses contai
 
 Ollama defaults to a **4,096 token context window** if `num_ctx` is not specified in the request. This is far too small for Tron — system prompt + tool definitions + conversation easily exceeds 10K tokens. When the context is exceeded, Ollama **silently truncates** the prompt, dropping tool definitions and earlier messages.
 
-**Symptom**: Model responds but doesn't use tools, or says "I don't have any tools."
+**Symptoms**:
+- Model responds but doesn't use tools, or says "I don't have any tools"
+- Model responds without thinking/reasoning (the `reasoning` field is absent from chunks)
+- Model gives low-quality answers (most of the context was truncated)
 
-**Fix**: The Tron Ollama provider sends `num_ctx` in every request body. For registered models, it uses the model's context window capped at 32K. For unknown models, it defaults to 16K.
+**Critical discovery**: The `/v1/chat/completions` (OpenAI-compatible) endpoint **ignores** the `num_ctx` parameter entirely — whether at the top level or inside an `options` object. The only way to set `num_ctx` is via the **native `/api/chat`** endpoint's `options.num_ctx` field.
+
+**Fix**: The Tron Ollama provider sends a lightweight warm-up request to `/api/chat` with `options.num_ctx` before the first streaming request. This forces Ollama to (re)load the model with the correct KV cache size. Subsequent requests via the OpenAI endpoint inherit this context size. For registered models, `num_ctx` is the model's context window capped at 32K. For unknown models, it defaults to 16K.
 
 **Memory impact of num_ctx** (approximate, E4B with q8_0 KV cache):
 | num_ctx | KV Cache Size | Total VRAM |
@@ -286,6 +291,7 @@ Short prompts without tools are much faster (~0.3s TTFT). The latency scales wit
 5. **Memory pressure** — 26B MoE needs ~18GB+. On 24GB machines, this leaves limited headroom. Use 36GB+ for production.
 6. **Ollama version sensitivity** — tool calling was broken in v0.20.0, fixed in v0.20.3. Always use latest.
 7. **Model reload on context size change** — if `num_ctx` changes between requests, Ollama reloads the model (~3-5s). The Tron provider uses a consistent value per model to avoid this.
+8. **`/v1/chat/completions` ignores `num_ctx`** — the OpenAI-compatible endpoint does not support context window configuration. Must use native `/api/chat` with `options.num_ctx` to set it. The Tron provider handles this automatically via a warm-up request.
 
 ## Hardware Recommendations
 

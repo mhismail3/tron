@@ -186,6 +186,16 @@ pub(super) fn add_assistant_message_to_context(
         .content
         .iter()
         .any(|c| matches!(c, crate::core::content::AssistantContent::Thinking { .. }));
+    tracing::debug!(
+        has_thinking,
+        content_block_count = stream_result.message.content.len(),
+        content_types = ?stream_result.message.content.iter().map(|c| match c {
+            crate::core::content::AssistantContent::Text { .. } => "Text",
+            crate::core::content::AssistantContent::Thinking { .. } => "Thinking",
+            crate::core::content::AssistantContent::ToolUse { .. } => "ToolUse",
+        }).collect::<Vec<_>>(),
+        "persistence: add_assistant_message_to_context"
+    );
     let thinking_text = stream_result.message.content.iter().find_map(|c| {
         if let crate::core::content::AssistantContent::Thinking { thinking, .. } = c {
             Some(thinking.clone())

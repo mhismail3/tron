@@ -117,7 +117,10 @@ pub fn all_ollama_model_ids() -> Vec<&'static str> {
 impl OllamaModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
     pub fn to_api_json(&self, id: &str) -> serde_json::Value {
-        let mut obj = serde_json::json!({
+        // supportsThinking: true → iOS displays thinking blocks when they arrive.
+        // supportsReasoning: false → no reasoning level picker (Gemma 4 thinking
+        //   is always-on, not configurable).
+        serde_json::json!({
             "id": id,
             "name": self.name,
             "provider": "ollama",
@@ -133,25 +136,11 @@ impl OllamaModelInfo {
             "tier": "local",
             "family": self.family,
             "description": self.description,
-            "supportsReasoning": self.supports_thinking,
+            "supportsReasoning": false,
             "recommended": self.recommended,
             "isLegacy": false,
             "sortOrder": self.sort_order,
-        });
-        // Gemma 4 thinking is always-on (not level-configurable), but the iOS
-        // app needs reasoningLevels to know thinking blocks will be present.
-        if self.supports_thinking {
-            let map = obj.as_object_mut().unwrap();
-            let _ = map.insert(
-                "reasoningLevels".into(),
-                serde_json::json!(["medium"]),
-            );
-            let _ = map.insert(
-                "defaultReasoningLevel".into(),
-                serde_json::json!("medium"),
-            );
-        }
-        obj
+        })
     }
 }
 
@@ -238,10 +227,9 @@ mod tests {
         assert_eq!(j["family"], "Gemma 4");
         assert_eq!(j["isLegacy"], false);
         assert_eq!(j["sortOrder"], 0);
-        // Thinking models include reasoning levels for iOS UI
-        assert_eq!(j["supportsReasoning"], true);
-        assert!(j["reasoningLevels"].is_array());
-        assert_eq!(j["defaultReasoningLevel"], "medium");
+        // Thinking is always-on but not configurable — no reasoning picker
+        assert_eq!(j["supportsReasoning"], false);
+        assert!(j.get("reasoningLevels").is_none());
     }
 
     #[test]

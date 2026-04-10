@@ -345,6 +345,7 @@ impl StreamState {
             | StreamEvent::TextEnd { .. } => {}
 
             StreamEvent::ThinkingStart => {
+                tracing::debug!(session_id, "stream_state: received ThinkingStart");
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(TronEvent::ThinkingStart {
                         base: BaseEvent::now(session_id),
@@ -369,6 +370,7 @@ impl StreamState {
                 thinking,
                 signature,
             } => {
+                tracing::debug!(session_id, thinking_len = thinking.len(), "stream_state: received ThinkingEnd");
                 self.handle_thinking_end(thinking, signature, session_id, emitter, sequence_counter);
             }
 

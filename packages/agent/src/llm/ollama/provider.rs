@@ -1,13 +1,28 @@
 //! Ollama provider implementing the [`Provider`] trait.
 //!
-//! Uses Ollama's `OpenAI` chat completions-compatible endpoint. No authentication
-//! required — Ollama runs locally. Provides graceful error messages when Ollama
-//! is not running or the model is not pulled.
+//! Uses Ollama's `OpenAI` chat completions-compatible endpoint for streaming, with
+//! a pre-flight request via the native `/api/chat` endpoint to set the context window.
+//!
+//! # Context Window (`num_ctx`)
+//!
+//! Ollama's `/v1/chat/completions` endpoint **ignores** the `num_ctx` parameter —
+//! it only works via the native `/api/chat` endpoint's `options.num_ctx` field.
+//! Without this, Ollama defaults to a 4K context window, silently truncating
+//! Tron's ~12K system prompt + tools, which destroys reasoning/thinking output.
+//!
+//! We solve this by sending a lightweight non-streaming request to `/api/chat`
+//! with the desired `num_ctx` before the first streaming request. This forces
+//! Ollama to (re)load the model with the correct KV cache size. Subsequent
+//! requests via the OpenAI endpoint inherit this context size until Ollama
+//! unloads the model.
+//!
+//! No authentication required — Ollama runs locally. Provides graceful error
+//! messages when Ollama is not running or the model is not pulled.
 
 use async_trait::async_trait;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::core::messages::Context;
 use crate::llm::compose_context_parts;
@@ -16,15 +31,11 @@ use crate::llm::provider::{
 };
 
 use super::message_converter::{convert_messages, convert_tools};
-use super::stream_handler::{ChatCompletionChunk, OllamaStreamState, process_chunk};
+use super::stream_handler::{OllamaChatChunk, OllamaStreamState, process_chunk};
 use super::types::{
     DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_NUM_CTX, OllamaConfig, get_ollama_model,
 };
 
-/// SSE parser options — Ollama uses `[DONE]` marker, no remaining buffer processing.
-static SSE_OPTIONS: crate::llm::SseParserOptions = crate::llm::SseParserOptions {
-    process_remaining_buffer: false,
-};
 
 /// Ollama LLM provider — local inference, no auth.
 pub struct OllamaProvider {
@@ -69,6 +80,16 @@ impl OllamaProvider {
         Some(parts.join("\n\n"))
     }
 
+    /// Get the target `num_ctx` for this model.
+    fn target_num_ctx(&self) -> u32 {
+        get_ollama_model(&self.config.model)
+            .map_or(DEFAULT_NUM_CTX, |m| {
+                // Use the model's full context window, capped at 64K.
+                // 64K ≈ 1.9 GB KV cache on E4B — comfortable on 24GB machines.
+                (m.context_window as u32).min(65_536)
+            })
+    }
+
     /// Calculate `max_tokens`: options → config → model registry fallback.
     fn calculate_max_tokens(&self, options: &ProviderStreamOptions) -> u32 {
         options.max_tokens.unwrap_or_else(|| {
@@ -90,25 +111,23 @@ impl OllamaProvider {
     }
 
     /// Build the request body for the chat completions API.
+    /// Build the request body for Ollama's native `/api/chat` endpoint.
+    ///
+    /// Uses the native format (NOT OpenAI-compatible) because `/v1/chat/completions`
+    /// ignores `num_ctx` and reloads the model at 4K context on every request.
     fn build_request_body(&self, context: &Context, options: &ProviderStreamOptions) -> Value {
         let supports_images = self.model_supports_images();
         let messages = convert_messages(&context.messages, supports_images);
 
-        // Ollama defaults to 4K context if num_ctx is not set, which silently
-        // truncates Tron's system prompt + tool definitions. We set num_ctx to
-        // ensure the full prompt fits.
-        let num_ctx = get_ollama_model(&self.config.model)
-            .map_or(DEFAULT_NUM_CTX, |m| {
-                // Use the model's full context window, capped at a practical limit.
-                // Going beyond 32K on E4B wastes memory without benefit.
-                (m.context_window as u32).min(32_768)
-            });
+        let num_ctx = self.target_num_ctx();
 
         let mut body = json!({
             "model": self.config.model,
-            "max_tokens": self.calculate_max_tokens(options),
             "stream": true,
-            "num_ctx": num_ctx,
+            "options": {
+                "num_ctx": num_ctx,
+                "num_predict": self.calculate_max_tokens(options),
+            },
         });
 
         // System message goes first in the messages array
@@ -174,6 +193,11 @@ impl OllamaProvider {
     }
 
     /// Perform the streaming HTTP request and return the event stream.
+    /// Perform the streaming HTTP request via Ollama's native `/api/chat` endpoint.
+    ///
+    /// Uses the native API (not OpenAI-compatible) because only the native
+    /// endpoint respects `options.num_ctx` for context window configuration.
+    /// The response is NDJSON (one JSON object per line), not SSE.
     #[instrument(skip_all, fields(model = %self.config.model))]
     async fn stream_internal(
         &self,
@@ -181,18 +205,23 @@ impl OllamaProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         let body = self.build_request_body(context, options);
-        let url = format!("{}/v1/chat/completions", self.base_url());
+        let url = format!("{}/api/chat", self.base_url());
         let headers = Self::build_headers();
 
         let msg_count = body["messages"]
             .as_array()
             .map_or(0, std::vec::Vec::len);
-        debug!(
+        let tool_count = body.get("tools")
+            .and_then(|t| t.as_array())
+            .map_or(0, |a| a.len());
+        let num_ctx = body["options"]["num_ctx"].as_u64().unwrap_or(0);
+        info!(
             model = %self.config.model,
-            max_tokens = %body["max_tokens"],
+            num_ctx,
+            num_predict = %body["options"]["num_predict"],
             message_count = msg_count,
-            has_tools = body.get("tools").is_some(),
-            "Sending Ollama request"
+            tool_count = tool_count,
+            "Sending Ollama native API request"
         );
 
         let response = self
@@ -219,16 +248,8 @@ impl OllamaProvider {
             ));
         }
 
-        Ok(crate::llm::stream_pipeline::sse_to_event_stream::<
-            ChatCompletionChunk,
-            OllamaStreamState,
-            _,
-        >(
-            response,
-            &SSE_OPTIONS,
-            OllamaStreamState::new(),
-            process_chunk,
-        ))
+        // Parse NDJSON stream (one JSON object per line, no SSE framing)
+        Ok(ndjson_to_event_stream(response))
     }
 }
 
@@ -254,6 +275,94 @@ impl Provider for OllamaProvider {
             self.stream_internal(context, options).await,
         )
     }
+}
+
+// ─── NDJSON stream parser ─────────────────────────────────────────────────────
+
+/// Convert an NDJSON byte stream into a typed [`StreamEventStream`].
+///
+/// Ollama's native `/api/chat` streams one JSON object per line (NDJSON),
+/// NOT Server-Sent Events. This parser buffers bytes, splits on newlines,
+/// deserializes each line as an [`OllamaChatChunk`], and processes it through
+/// the stream handler.
+fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
+    use bytes::BytesMut;
+    use futures::stream::{self, StreamExt};
+
+    let byte_stream = response.bytes_stream();
+
+    let event_stream = futures::stream::unfold(
+        (Box::pin(byte_stream) as std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
+         OllamaStreamState::new(),
+         BytesMut::with_capacity(8192)),
+        |(mut stream, mut state, mut buffer)| async move {
+            loop {
+                // Check buffer for a complete line
+                if let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                    let line_bytes = buffer.split_to(newline_pos + 1);
+                    let line = match std::str::from_utf8(&line_bytes) {
+                        Ok(s) => s.trim(),
+                        Err(_) => continue,
+                    };
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    let chunk: OllamaChatChunk = match serde_json::from_str(line) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                line_preview = &line[..line.len().min(100)],
+                                "Ollama: failed to parse NDJSON line"
+                            );
+                            continue;
+                        }
+                    };
+
+                    let events = process_chunk(&chunk, &mut state);
+                    if !events.is_empty() {
+                        return Some((events, (stream, state, buffer)));
+                    }
+                    continue;
+                }
+
+                // Read next bytes from the HTTP response stream
+                match StreamExt::next(&mut stream).await {
+                    Some(Ok(bytes)) => {
+                        buffer.extend_from_slice(&bytes);
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("Ollama NDJSON stream read error: {e}");
+                        return None;
+                    }
+                    None => {
+                        // Stream ended — process remaining buffer
+                        if !buffer.is_empty() {
+                            let line = match std::str::from_utf8(&buffer) {
+                                Ok(s) => s.trim(),
+                                Err(_) => return None,
+                            };
+                            if !line.is_empty() {
+                                if let Ok(chunk) = serde_json::from_str::<OllamaChatChunk>(line) {
+                                    let events = process_chunk(&chunk, &mut state);
+                                    if !events.is_empty() {
+                                        buffer.clear();
+                                        return Some((events, (stream, state, buffer)));
+                                    }
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+        },
+    )
+    .flat_map(stream::iter)
+    .map(Ok);
+
+    Box::pin(event_stream)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,50 +512,60 @@ mod tests {
 
         assert_eq!(body["model"], "gemma4:e4b");
         assert_eq!(body["stream"], true);
-        assert_eq!(body["max_tokens"], 8_192);
+        assert_eq!(body["options"]["num_predict"], 8_192);
+        assert_eq!(body["options"]["num_ctx"], 65_536);
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You are helpful.");
     }
 
     #[test]
-    fn request_body_includes_num_ctx() {
+    fn request_body_includes_num_ctx_in_options() {
         let provider = OllamaProvider::new(test_config());
         let ctx = Context::default();
         let options = ProviderStreamOptions::default();
         let body = provider.build_request_body(&ctx, &options);
-        // E4B has 131K context, capped at 32K
-        assert_eq!(body["num_ctx"], 32_768);
+        // num_ctx is inside the "options" object for the native API
+        assert_eq!(body["options"]["num_ctx"], 65_536);
     }
 
     #[test]
-    fn request_body_num_ctx_unknown_model_uses_default() {
+    fn request_body_includes_num_predict_in_options() {
+        let provider = OllamaProvider::new(test_config());
+        let ctx = Context::default();
+        let options = ProviderStreamOptions::default();
+        let body = provider.build_request_body(&ctx, &options);
+        assert_eq!(body["options"]["num_predict"], 8_192);
+    }
+
+    // ── Context window (target_num_ctx) ───────────────────────────────
+
+    #[test]
+    fn target_num_ctx_known_model() {
+        let provider = OllamaProvider::new(test_config());
+        // E4B has 131K context, capped at 64K
+        assert_eq!(provider.target_num_ctx(), 65_536);
+    }
+
+    #[test]
+    fn target_num_ctx_unknown_model_uses_default() {
         let mut cfg = test_config();
         cfg.model = "unknown-model".into();
         let provider = OllamaProvider::new(cfg);
-        let ctx = Context::default();
-        let options = ProviderStreamOptions::default();
-        let body = provider.build_request_body(&ctx, &options);
-        assert_eq!(body["num_ctx"], DEFAULT_NUM_CTX);
+        assert_eq!(provider.target_num_ctx(), DEFAULT_NUM_CTX);
     }
 
+
     #[test]
-    fn request_body_no_stream_options() {
+    fn request_body_uses_native_format() {
+        // Native API uses "options.num_predict" not "max_tokens"
         let provider = OllamaProvider::new(test_config());
         let ctx = Context::default();
         let options = ProviderStreamOptions::default();
         let body = provider.build_request_body(&ctx, &options);
-        assert!(body.get("stream_options").is_none());
-    }
-
-    #[test]
-    fn request_body_uses_max_tokens_not_max_completion_tokens() {
-        let provider = OllamaProvider::new(test_config());
-        let ctx = Context::default();
-        let options = ProviderStreamOptions::default();
-        let body = provider.build_request_body(&ctx, &options);
-        assert!(body.get("max_tokens").is_some());
+        assert!(body.get("max_tokens").is_none());
         assert!(body.get("max_completion_tokens").is_none());
+        assert!(body["options"]["num_predict"].is_number());
     }
 
     #[test]
@@ -500,8 +619,8 @@ mod tests {
     #[test]
     fn request_url_default() {
         let provider = OllamaProvider::new(test_config());
-        let url = format!("{}/v1/chat/completions", provider.base_url());
-        assert_eq!(url, "http://localhost:11434/v1/chat/completions");
+        let url = format!("{}/api/chat", provider.base_url());
+        assert_eq!(url, "http://localhost:11434/api/chat");
     }
 
     #[test]
@@ -509,7 +628,7 @@ mod tests {
         let mut cfg = test_config();
         cfg.base_url = Some("http://myserver:8080".into());
         let provider = OllamaProvider::new(cfg);
-        let url = format!("{}/v1/chat/completions", provider.base_url());
-        assert_eq!(url, "http://myserver:8080/v1/chat/completions");
+        let url = format!("{}/api/chat", provider.base_url());
+        assert_eq!(url, "http://myserver:8080/api/chat");
     }
 }
