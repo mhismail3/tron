@@ -128,6 +128,9 @@ pub struct AuthStorage {
     pub services: Option<HashMap<String, ServiceAuth>>,
     /// ISO 8601 timestamp of last update.
     pub last_updated: String,
+    /// Preserves unknown top-level keys (e.g. "relay") through load/save round-trips.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 impl AuthStorage {
@@ -138,6 +141,7 @@ impl AuthStorage {
             providers: HashMap::new(),
             services: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
+            extra: HashMap::new(),
         }
     }
 
