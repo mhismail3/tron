@@ -1025,7 +1025,7 @@ for e in entries:
 
     # 17. Empty vault list
     run_test "empty_vault_list: list on fresh vault returns []" bash -c "
-        local empty_dir='$test_dir/empty_vault'
+        empty_dir='$test_dir/empty_vault'
         VAULT_DIR=\"\$empty_dir\" bash '$SCRIPT' init >/dev/null && \
         result=\$(VAULT_DIR=\"\$empty_dir\" bash '$SCRIPT' list) && \
         echo \"\$result\" | python3 -c 'import json,sys; assert json.load(sys.stdin) == [], \"Expected empty list\"'
