@@ -449,6 +449,7 @@
 		A01888E4143551FAF00D8042 /* TokenFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 986C7B23C22D7B02D1F73712 /* TokenFormatterTests.swift */; };
 		A039C541B3E25BAF62E1C0B8 /* TranscriptionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EBDBFBEB74723CC4FA0590B /* TranscriptionCoordinator.swift */; };
 		A0EF74A9EA30A1C3D60DA723 /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC99588D580139AE1C2967AE /* AttachmentTests.swift */; };
+		A10F81C23035336622723665 /* ContentViewCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52569F3E17F2C265757FA4BD /* ContentViewCoordinatorTests.swift */; };
 		A1826887DC32160F3468F20F /* AskUserQuestionTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60C8C974432CC696B2359C0D /* AskUserQuestionTransformer.swift */; };
 		A1C42A6C3F056CB3041FB59F /* ModelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73FC1466CB50C9CEF5F84DFC /* ModelClient.swift */; };
 		A1EE33BBC91AB344579BB0CF /* FileInfoProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B390D81DB40761E6F2D1FA9 /* FileInfoProperties.swift */; };
@@ -930,6 +931,7 @@
 		50681B0022CE0DC53DBDD6EC /* SessionEvent+Summary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionEvent+Summary.swift"; sourceTree = "<group>"; };
 		50B79EAE3563FE55AD275FAF /* TokenRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenRecord.swift; sourceTree = "<group>"; };
 		51060F9D57E1DE97D507F796 /* WebFetchToolSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchToolSections.swift; sourceTree = "<group>"; };
+		52569F3E17F2C265757FA4BD /* ContentViewCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewCoordinatorTests.swift; sourceTree = "<group>"; };
 		5319DF44C4FE8EC0B10E9732 /* MockRPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockRPCClient.swift; sourceTree = "<group>"; };
 		53B7711CC73D857688322623 /* ContextAuditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAuditView.swift; sourceTree = "<group>"; };
 		53DDBD358011DF4C6F8B9E05 /* MessageRole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRole.swift; sourceTree = "<group>"; };
@@ -2464,6 +2466,7 @@
 				EF5C0D5D49C644E37207CA96 /* ChatViewModelProcessingIndicatorTests.swift */,
 				D41155E5CBD4CC2716F2202C /* CompactionCoordinatorTests.swift */,
 				54DDA0D360045D2CE657D8A2 /* ConnectionCoordinatorTests.swift */,
+				52569F3E17F2C265757FA4BD /* ContentViewCoordinatorTests.swift */,
 				99D0FBFA601E6C8A35615110 /* ContextStateTests.swift */,
 				18D4DBF97B41825EA41B0534 /* DashboardStreamManagerTests.swift */,
 				44A0EC02E02D43F26DD2872A /* DisplayStreamStateTests.swift */,
@@ -3855,6 +3858,7 @@
 				AA375C66F865224831AE7BBB /* ComputerUseToolDetailSheetTests.swift in Sources */,
 				09155186F39445CC719E31FE /* ConnectionCoordinatorTests.swift in Sources */,
 				82A4EF229FA040A968B1866B /* ContentLineParserTests.swift in Sources */,
+				A10F81C23035336622723665 /* ContentViewCoordinatorTests.swift in Sources */,
 				9F6EAC77BD05AF2D20BF6AB9 /* ContextClientTests.swift in Sources */,
 				11AFA5645D976D4D73E39CB1 /* ContextStateTests.swift in Sources */,
 				5B48CD222793C5725868305E /* CronClientTests.swift in Sources */,

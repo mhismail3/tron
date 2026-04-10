@@ -1,5 +1,9 @@
 import SwiftUI
 
+// ARCHITECTURE: ~704 lines — provider cards with OAuth flow, API key management,
+// validation UI, and multi-credential support. Each provider type has distinct UI
+// requirements. Pragmatic trigger: if a new auth method (e.g., SAML) is added.
+
 // MARK: - Provider Display Info
 
 private struct ProviderInfo: Identifiable {

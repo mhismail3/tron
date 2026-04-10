@@ -64,6 +64,8 @@ struct ThinkingDetailSheet: View {
                 }
                 .onAppear {
                     if state.isActivelyStreaming {
+                        // Deferred to next run loop: ScrollViewReader proxy requires
+                        // layout to complete before scrollTo works reliably on appear.
                         DispatchQueue.main.async {
                             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                         }
@@ -127,6 +129,8 @@ struct ThinkingDetailSheetFallback: View {
                 }
                 .onAppear {
                     if state.isActivelyStreaming {
+                        // Deferred to next run loop: ScrollViewReader proxy requires
+                        // layout to complete before scrollTo works reliably on appear.
                         DispatchQueue.main.async {
                             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                         }

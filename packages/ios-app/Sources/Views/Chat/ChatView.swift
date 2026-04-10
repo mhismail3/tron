@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+// ARCHITECTURE: ~844 lines — coordinates navigation, keyboard, sheet presentation,
+// and message rendering for the core chat interface. Complexity is inherent to the
+// feature. 7 extracted computed properties keep sections navigable. Pragmatic trigger
+// for decomposition: if it exceeds ~1,000 lines or gains a fourth coordination concern.
+
 // MARK: - Chat View
 
 @available(iOS 26.0, *)

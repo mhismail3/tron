@@ -1,5 +1,10 @@
 import SwiftUI
 
+// ARCHITECTURE: ~585 lines — server list, add/edit sheet, status polling, and
+// enable/disable/restart actions. The inline AddServerSheet struct accounts for
+// ~150 lines. Pragmatic trigger: extract AddServerSheet to its own file if the
+// page exceeds ~700 lines.
+
 struct MCPServersPage: View {
     @Environment(\.dependencies) var dependencies
 

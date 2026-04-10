@@ -2,6 +2,12 @@
 //!
 //! Covers the Responses API types (not legacy Chat Completions).
 //! The `OpenAI` provider uses the Codex endpoint with OAuth authentication.
+//!
+//! ## Size note
+//!
+//! ~50 serde structs/enums mirroring the OpenAI Responses API wire format.
+//! These are data definitions, not logic — splitting them across files would
+//! scatter a single API schema with no benefit.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

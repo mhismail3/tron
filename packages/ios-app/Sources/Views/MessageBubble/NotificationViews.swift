@@ -1,5 +1,9 @@
 import SwiftUI
 
+// ARCHITECTURE: ~609 lines — 15+ notification pill types, each with distinct layout
+// and interaction behavior. These are leaf views with no shared state beyond the common
+// NotificationPill container. Large by variety, not complexity.
+
 // MARK: - NotificationPill
 
 struct NotificationPill<Content: View>: View {

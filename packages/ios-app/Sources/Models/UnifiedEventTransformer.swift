@@ -1,5 +1,9 @@
 import Foundation
 
+// ARCHITECTURE: ~591 lines — dual-path transformer (persisted events + live streaming
+// events) producing ChatMessages. Both paths share block-building logic for text, tool
+// calls, and thinking content. Splitting would duplicate the shared content-block assembly.
+
 // =============================================================================
 // MARK: - Unified Event Transformer
 // =============================================================================

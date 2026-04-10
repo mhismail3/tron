@@ -9,6 +9,12 @@
 //!
 //! `StreamEvent` is purely in-memory (never persisted). `TronEvent` is
 //! broadcast over WebSocket and may be recorded as session events.
+//!
+//! ## Size note
+//!
+//! Two large enums (`StreamEvent` ~30 variants, `TronEvent` ~60 variants)
+//! plus their `Display` impls. These are exhaustive event catalogs that
+//! benefit from being in one place for grep-ability and match exhaustiveness.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

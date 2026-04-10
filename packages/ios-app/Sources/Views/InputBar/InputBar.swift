@@ -1,6 +1,10 @@
 import SwiftUI
 import PhotosUI
 
+// ARCHITECTURE: ~606 lines — keyboard handling, attachment picker, skill picker,
+// voice capture, and send flow. These share input state (@State variables) that
+// Swift's file-scoped `private` prevents extracting to separate files.
+
 // MARK: - Input Bar (iOS 26 Liquid Glass)
 
 @available(iOS 26.0, *)

@@ -10,6 +10,12 @@
 //!
 //! The output is a [`ReconstructionResult`] containing messages with event IDs,
 //! aggregate token usage, turn count, and config state.
+//!
+//! ## Size note
+//!
+//! Both passes share mutable state (deleted IDs, tool call maps, message
+//! accumulators). Splitting them across files would require passing 8+
+//! mutable references through function boundaries with no readability gain.
 
 use serde_json::Value;
 

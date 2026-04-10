@@ -2,6 +2,13 @@
 //!
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
+//!
+//! ## Size note
+//!
+//! Session queries are numerous because sessions are the primary dashboard
+//! entity with 15+ filter/sort/aggregate combinations. Each query is a
+//! self-contained SQL statement following the same bind-execute-map pattern.
+//! The file is large but flat — no method exceeds ~60 lines.
 
 use std::collections::{HashMap, HashSet};
 

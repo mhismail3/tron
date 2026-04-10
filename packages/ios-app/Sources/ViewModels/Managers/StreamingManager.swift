@@ -24,6 +24,12 @@ final class StreamingManager {
         static let maxCatchUpDepth: Int = 400
     }
 
+    // MARK: - Lifecycle
+
+    nonisolated deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     // MARK: - Streaming State
 
     /// Current streaming message ID

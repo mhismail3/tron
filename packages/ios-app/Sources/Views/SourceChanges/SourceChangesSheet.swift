@@ -1,5 +1,10 @@
 import SwiftUI
 
+// ARCHITECTURE: ~771 lines — two tabs (session diff + branch list), three confirmation
+// dialogs, and git operation handlers. Swift's file-scoped `private` prevents extracting
+// methods that access @State to separate files. 11 MARK sections provide navigation.
+// Pragmatic decomposition path: extract a SourceChangesViewModel if file exceeds ~900 lines.
+
 @available(iOS 26.0, *)
 struct SourceChangesSheet: View {
     let rpcClient: RPCClient

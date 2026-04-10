@@ -7,6 +7,14 @@
 //! Mode selection:
 //! - If `prompt` is provided AND method is GET AND `rawResponse` is false → summarization
 //! - Otherwise → raw HTTP mode
+//!
+//! ## Size note
+//!
+//! This file is large (~1,800 lines) because it contains two tightly coupled
+//! modes sharing the same caching, header handling, and response processing.
+//! Splitting would create circular dependencies between the cache layer and
+//! the HTTP layer. Pragmatic trigger: if a third mode is added or file exceeds
+//! ~2,500 lines.
 
 use std::collections::HashMap;
 use std::sync::Arc;

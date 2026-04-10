@@ -1,4 +1,9 @@
 //! Real process runner using `tokio::process::Command`.
+//!
+//! NOTE: `let _ =` is used throughout for I/O writes, channel sends, and
+//! child-kill calls. These are all best-effort: the receiver may have dropped
+//! (tool cancelled), the child may have already exited, or the pipe may be
+//! closed. Propagating these errors would mask the real tool result.
 
 use std::time::Instant;
 

@@ -2,6 +2,9 @@
 //!
 //! Uses callback traits for dependency injection — the binary crate provides
 //! real implementations, tests use mocks.
+//!
+//! NOTE: `let _ =` on kill/signal calls is intentional — the process may have
+//! already exited. On I/O reads, the output may be capped or the pipe closed.
 
 use std::process::Stdio;
 use std::sync::Arc;

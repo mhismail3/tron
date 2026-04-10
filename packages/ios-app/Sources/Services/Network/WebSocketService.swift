@@ -1,5 +1,10 @@
 import Foundation
 
+// ARCHITECTURE: ~634 lines — connection state machine (7 states), reconnection strategies
+// (normal + deploy-aware), heartbeat loop, message routing, and background state management.
+// These are tightly coupled transport concerns that share connection state. Pragmatic trigger:
+// if a third reconnection strategy is needed.
+
 // MARK: - Connection State
 
 enum ConnectionState: Equatable, Sendable {

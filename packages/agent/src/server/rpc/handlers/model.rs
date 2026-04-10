@@ -2,6 +2,10 @@
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
+//!
+//! NOTE: Event appends in this module use `let _ =` because they are supplementary
+//! audit-trail emissions. The RPC response has already been determined; a failed
+//! append should not change the client-visible result.
 
 use async_trait::async_trait;
 use serde_json::Value;
