@@ -622,7 +622,7 @@ The deploy process (`scripts/tron::cmd_deploy`):
 6. Acquires a deploy lock at `~/.tron/system/deployment/deploy.lock`.
 7. Backs up the current binary to `~/.tron/system/deployment/tron.bak`.
 8. Stops the launchd service.
-9. Re-creates the macOS app bundle at `~/.tron/system/Tron.app` with the new binary and re-codesigns it.
+9. Re-creates the macOS app bundle at `~/.tron/system/Tron.app` with the new binary, codesigns it with the best-available identity (Developer ID Application > Apple Development > ad-hoc), and — when signed with Developer ID and `tron-notarize` credentials exist in Keychain — submits it to Apple's notary service and staples the ticket. Notarization is non-fatal; deploy succeeds even if Apple rejects, the network fails, or credentials are missing. One-time setup: `xcrun notarytool store-credentials "tron-notarize" --apple-id <email> --team-id <TEAM_ID>`.
 10. Deploys the transcription sidecar via `deploy_transcription_sidecar` and syncs managed skills.
 11. Reloads the launchd plist and runs health checks.
 12. Auto-rollback restores `tron.bak` on failure.

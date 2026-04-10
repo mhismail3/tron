@@ -716,20 +716,41 @@ pub fn codesign_binary(path: &Path) {
     let bundle_str = bundle.to_string_lossy();
     let bundle_id = "com.tron.agent";
 
+    // Locate the entitlements file next to the deployed bundle.
+    // Expected layout: ~/.tron/system/Tron.app + ~/.tron/system/deployment/tron-agent.entitlements
+    // (bundle.parent() is ~/.tron/system/, so join deployment/tron-agent.entitlements)
+    let entitlements_path = bundle
+        .parent()
+        .map(|p| p.join("deployment").join("tron-agent.entitlements"))
+        .filter(|p| p.exists());
+
     if let Some(ref identity) = identity {
-        // Try full signing with hardened runtime
-        let result = std::process::Command::new("codesign")
-            .args([
-                "--force", "--deep", "--sign", identity,
-                "--identifier", bundle_id,
-                "--options", "runtime",
-                &bundle_str,
-            ])
-            .output();
+        // Try full signing with hardened runtime + entitlements (matches
+        // the shell-script codesign_bundle() tier 1 path).
+        let mut args: Vec<&str> = vec![
+            "--force", "--deep", "--sign", identity,
+            "--identifier", bundle_id,
+            "--options", "runtime",
+        ];
+        let entitlements_str;
+        if let Some(ref ent) = entitlements_path {
+            entitlements_str = ent.to_string_lossy().into_owned();
+            args.push("--entitlements");
+            args.push(&entitlements_str);
+        } else {
+            debug!("entitlements file not found — signing without entitlements");
+        }
+        args.push(&bundle_str);
+
+        let result = std::process::Command::new("codesign").args(&args).output();
 
         if let Ok(o) = result {
             if o.status.success() {
-                info!(identity = identity.as_str(), "signed app bundle for TCC persistence");
+                info!(
+                    identity = identity.as_str(),
+                    entitlements = entitlements_path.is_some(),
+                    "signed app bundle for TCC persistence"
+                );
                 return;
             }
         }

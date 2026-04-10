@@ -749,10 +749,12 @@ cmd_deploy() {
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     sleep 1
 
-    # Create app bundle with new binary
+    # Create app bundle with new binary, sign with Developer ID (if available),
+    # and notarize + staple so the bundle is distribution-ready and TCC
+    # permissions persist across deploys.
     print_status "Creating app bundle..."
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
-    codesign_bundle "$INSTALLED_BUNDLE"
+    sign_and_notarize "$INSTALLED_BUNDLE"
 
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
@@ -870,10 +872,10 @@ cmd_install() {
         build_rust
     fi
 
-    # Create app bundle with binary
+    # Create app bundle with binary, sign, and notarize (if credentials set up)
     print_status "Creating app bundle..."
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
-    codesign_bundle "$INSTALLED_BUNDLE"
+    sign_and_notarize "$INSTALLED_BUNDLE"
     print_success "Installed app bundle"
 
     # Deploy transcription sidecar
@@ -941,6 +943,12 @@ cmd_install() {
     echo "    tron login       # Authenticate with a provider"
     echo "    tron dev         # Start dev server"
     echo "    tron status      # Check service status"
+    echo ""
+    echo "  Code signing (one-time, only if you will deploy or distribute):"
+    echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
+    echo "      --apple-id <email> --team-id <TEAM_ID>"
+    echo ""
+    echo "  Get an app-specific password at: https://appleid.apple.com"
     echo ""
 }
 

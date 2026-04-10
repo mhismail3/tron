@@ -21,6 +21,12 @@ INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$TRON_HOME/system/deployment/Tron-Dev.app"
 DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 
+# Keychain profile name for xcrun notarytool (see notarize_bundle).
+# One-time setup per developer machine:
+#   xcrun notarytool store-credentials "tron-notarize" \
+#     --apple-id <email> --team-id <TEAM_ID>
+NOTARIZE_PROFILE="tron-notarize"
+
 # Service configuration
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
@@ -362,6 +368,142 @@ codesign_bundle() {
     fi
 
     print_status "Code signing failed — bundle will be unsigned"
+}
+
+# Notarize an app bundle via Apple's notary service and staple the ticket.
+#
+# Notarization is required for distributing signed binaries to other users
+# without Gatekeeper friction. It also preserves TCC permissions for end
+# users across updates (the stapled ticket + Developer ID identity form a
+# stable identifier that survives binary replacement).
+#
+# Non-fatal by design: every failure path returns 0. Notarization is
+# orthogonal to TCC persistence on the build machine itself (signing alone
+# handles that). Deploy should never fail because notarization failed.
+#
+# Preconditions for notarization to actually run (all must be true; otherwise
+# it skips with a clear warning):
+#   1. Bundle exists and is a directory
+#   2. Bundle is signed with a Developer ID Application cert (not ad-hoc,
+#      not Apple Development — Apple's notary service rejects those)
+#   3. `xcrun notarytool` is available (recent Xcode/Command Line Tools)
+#   4. Keychain profile $NOTARIZE_PROFILE exists (one-time user setup)
+notarize_bundle() {
+    local bundle="$1"
+    local temp_zip=""
+
+    # Cleanup fires on any return path (success, skip, or error).
+    # RETURN trap is function-scoped in bash; we clear it before returning
+    # to avoid inheriting into the caller's frame on some bash versions.
+    trap 'if [ -n "$temp_zip" ] && [ -f "$temp_zip" ]; then rm -f "$temp_zip"; fi; trap - RETURN' RETURN
+
+    # Precondition 1: bundle exists
+    if [ -z "$bundle" ] || [ ! -d "$bundle" ]; then
+        print_status "Notarization skipped: bundle not found at ${bundle:-<empty>}"
+        return 0
+    fi
+
+    # Precondition 2: bundle is signed with Developer ID Application.
+    # Ad-hoc and Apple Development certs cannot be notarized.
+    local sig_info
+    sig_info=$(codesign -dvvv "$bundle" 2>&1 || true)
+    if echo "$sig_info" | grep -q "Signature=adhoc"; then
+        print_status "Notarization skipped: bundle is ad-hoc signed (requires Developer ID)"
+        return 0
+    fi
+    if ! echo "$sig_info" | grep -q "Authority=Developer ID Application"; then
+        print_status "Notarization skipped: bundle not signed with Developer ID Application"
+        return 0
+    fi
+
+    # Precondition 3: xcrun notarytool must be available
+    if ! command -v xcrun >/dev/null 2>&1 || ! xcrun --find notarytool >/dev/null 2>&1; then
+        print_warning "Notarization skipped: xcrun notarytool not available (install Xcode Command Line Tools)"
+        return 0
+    fi
+
+    # Precondition 4: keychain profile must exist and credentials must work.
+    # We probe with `notarytool history` because there is no offline credential
+    # check. This makes a small network call (~1-2s) but gives us a clean
+    # fast-fail before zipping the bundle on misconfigured machines.
+    local history_err
+    if ! history_err=$(xcrun notarytool history --keychain-profile "$NOTARIZE_PROFILE" 2>&1); then
+        # Distinguish "credentials missing" from "network / service issue"
+        # so the hint we print is actually useful.
+        if echo "$history_err" | grep -qiE "keychain profile|no such keychain|credentials|could not find"; then
+            print_warning "Notarization skipped: keychain profile '$NOTARIZE_PROFILE' not configured"
+            echo "  One-time setup:"
+            echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
+            echo "      --apple-id <email> --team-id <TEAM_ID>"
+            echo "  Get an app-specific password at: https://appleid.apple.com"
+        else
+            print_warning "Notarization skipped: notarytool check failed (network or service issue)"
+            echo "$history_err" | tail -3 | sed 's/^/    /'
+        fi
+        return 0
+    fi
+
+    # Create temp zip. mktemp creates the file; ditto needs a non-existent
+    # target, so we remove it first.
+    temp_zip=$(mktemp -t tron-notarize.XXXXXX).zip
+    rm -f "$temp_zip"
+    print_status "Preparing bundle for notarization..."
+    if ! ditto -c -k --keepParent "$bundle" "$temp_zip" 2>/dev/null; then
+        print_warning "Notarization skipped: failed to create zip archive"
+        return 0
+    fi
+
+    # Submit and wait (up to 15 minutes — typical submission is 1-5 minutes).
+    print_status "Submitting to Apple notary service (may take a few minutes)..."
+    local notarize_output
+    if notarize_output=$(xcrun notarytool submit "$temp_zip" \
+            --keychain-profile "$NOTARIZE_PROFILE" \
+            --wait --timeout 15m 2>&1); then
+
+        if echo "$notarize_output" | grep -q "status: Accepted"; then
+            print_success "Notarization accepted"
+
+            # Staple the ticket to the bundle so it works offline.
+            # Stapling writes to Contents/CodeResources — safe even if the
+            # bundle's binary is currently running.
+            if xcrun stapler staple "$bundle" >/dev/null 2>&1; then
+                print_success "Stapled notarization ticket"
+            else
+                print_warning "Stapling failed (notarization is still valid on Apple's servers, ticket just isn't embedded)"
+            fi
+            return 0
+        fi
+
+        # Submission completed but not accepted (Invalid / Rejected)
+        print_warning "Notarization was not accepted by Apple:"
+        echo "$notarize_output" | tail -20 | sed 's/^/    /'
+
+        # Try to surface the submission ID so the user can fetch detailed logs
+        local submission_id
+        submission_id=$(echo "$notarize_output" \
+            | grep -oE 'id: [a-f0-9-]{36}' \
+            | head -1 \
+            | awk '{print $2}')
+        if [ -n "$submission_id" ]; then
+            echo "  For details:"
+            echo "    xcrun notarytool log $submission_id --keychain-profile $NOTARIZE_PROFILE"
+        fi
+        return 0
+    else
+        # Submission itself failed (network timeout, auth error, ...).
+        print_warning "Notarization submission failed (non-fatal):"
+        echo "$notarize_output" | tail -10 | sed 's/^/    /'
+        return 0
+    fi
+}
+
+# Convenience wrapper: codesign + notarize in one call.
+# Used by production flows (cmd_deploy, cmd_install). Dev flows and the
+# emergency rollback path call codesign_bundle directly to stay fast.
+sign_and_notarize() {
+    local bundle="$1"
+    codesign_bundle "$bundle"
+    notarize_bundle "$bundle"
 }
 
 #=============================================================================

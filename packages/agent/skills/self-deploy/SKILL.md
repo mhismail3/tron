@@ -154,7 +154,71 @@ Dev mode takes over port **9847** from production. It stops the launchd service,
 | `~/Workspace/tron/scripts/tron bench` | Performance benchmarks (run, compare) |
 | `~/Workspace/tron/scripts/tron uninstall` | Remove service and CLI (preserves data in `~/.tron/`) |
 
-## 9. Quick Reference
+## 9. Code Signing & Notarization
+
+Production deploys (`tron deploy`, `tron install`) sign the app bundle with the best-available identity, then notarize + staple it via Apple's notary service. This makes macOS TCC permissions (Screen Recording, Accessibility, Full Disk Access, System Audio) persist across deploys and lets distributed binaries pass Gatekeeper without warnings.
+
+**Signing tiers** (automatic, best-available):
+1. Developer ID Application cert — preferred; required for notarization and for TCC persistence across distributed updates
+2. Apple Development cert — works for TCC persistence on the local machine but cannot be notarized
+3. Ad-hoc (no cert) — dev-only fallback; TCC re-prompts on every rebuild because the signature hash changes
+
+**One-time setup per developer machine** (required for notarization). End users who only install a distributed binary never do any of this.
+
+**Step 1: Install a Developer ID Application certificate in the login Keychain.**
+
+First check if one is already there:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+If you see a line like `"Developer ID Application: NAME (TEAMID)"`, skip to Step 2 — note the `TEAMID` in parentheses, you'll need it.
+
+Otherwise, pick one of these paths:
+
+- **Option A — Import a `.p12` from another Mac that already has the cert.** On the source Mac, open Keychain Access → login → My Certificates → right-click "Developer ID Application: ..." → Export → save as `.p12` with an export password. Transfer the `.p12` over a secure channel (it contains a private key — never unencrypted email/Slack; use 1Password, an encrypted drive, or AirDrop). On the target Mac, double-click the `.p12` and enter the export password. This is the fastest path if you already have the cert somewhere.
+- **Option B — Create a fresh cert via the Apple Developer portal.** Requires a paid Apple Developer Program membership. On the target Mac: Keychain Access → Certificate Assistant → Request a Certificate From a Certificate Authority → enter your email → "Saved to disk" → generates a `.certSigningRequest` file. Upload it at https://developer.apple.com/account/resources/certificates/list → "+" → Developer ID Application → upload the CSR → download the resulting `.cer` → double-click to install. The private key stays on this Mac in its Keychain. Apple allows multiple Developer ID Application certs per team, so each dev can have their own without sharing private keys.
+
+Verify the cert is usable:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+Should now show `"Developer ID Application: <NAME> (<TEAMID>)"`. Note the `TEAMID` for Step 2.
+
+**Step 2: Generate an app-specific password** at https://appleid.apple.com → Sign-In and Security → App-Specific Passwords → "+" → label it "tron notarization". Copy the password immediately; Apple will not show it again.
+
+**Step 3: Store notarytool credentials in Keychain:**
+
+```bash
+xcrun notarytool store-credentials "tron-notarize" \
+  --apple-id <your-apple-id-email> \
+  --team-id <TEAMID>
+```
+
+It will prompt for the app-specific password from Step 2. Verify with:
+
+```bash
+xcrun notarytool history --keychain-profile tron-notarize
+```
+
+Should return without any credential error (history may be empty — that's fine).
+
+After these three steps, all future `tron deploy` and `tron install` runs on this machine will automatically sign and notarize.
+
+**Dev builds** (`tron dev`) sign but do not notarize — notarization takes 1-5 minutes per submission and would destroy iteration velocity. Dev builds aren't distributed, and TCC persistence works via signing alone.
+
+**Rollback and recovery paths** (`cmd_deploy` rollback, `ensure_prod_binary` restore) sign but do not notarize — these are emergency recovery flows that must stay fast. The next normal deploy re-notarizes.
+
+**Verify signing**: `codesign -dvvv ~/.tron/system/Tron.app` — should show `Authority=Developer ID Application: ...`, not `Signature=adhoc`.
+**Verify notarization**: `spctl --assess --type execute -vvv ~/.tron/system/Tron.app` — should show `accepted` and `source=Notarized Developer ID`.
+**Verify stapled ticket** (works offline): `xcrun stapler validate ~/.tron/system/Tron.app`.
+
+Notarization failures are **non-fatal** — deploy still succeeds, TCC still works via signing. On Apple rejection, `notarize_bundle` in `scripts/tron-lib.sh` prints the submission ID with the exact `xcrun notarytool log <id> --keychain-profile tron-notarize` command for investigation.
+
+## 10. Quick Reference
 
 | | Production | Dev Takeover |
 |---|---|---|
@@ -167,7 +231,7 @@ Dev mode takes over port **9847** from production. It stops the launchd service,
 | Managed by | launchd (`com.tron.server`) | Foreground process with EXIT trap |
 | Log | `~/.tron/system/deployment/server.log` | stdout (or `tron dev --log` tails same file) |
 
-## 10. Safety Rules
+## 11. Safety Rules
 
 1. **Always start with `~/.tron/system/deployment/tron-cli status`.** Know what's running before changing anything.
 2. **Run `~/Workspace/tron/scripts/tron preflight` before deploying.** Catches infrastructure issues early.
