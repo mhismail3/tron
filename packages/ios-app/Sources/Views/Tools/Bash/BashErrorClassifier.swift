@@ -12,7 +12,7 @@ import Foundation
 enum BashErrorClassifier {
     /// Classify a bash failure from the server-provided details payload.
     static func classify(details: [String: AnyCodable]?) -> ErrorClassification {
-        let errorClass = details?["errorClass"]?.value as? String
+        let errorClass = details?.string("errorClass")
         let exitCode = BashDetailsHelper.exitCode(from: details)
 
         switch errorClass {

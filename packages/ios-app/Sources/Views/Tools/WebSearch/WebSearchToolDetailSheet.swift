@@ -293,12 +293,12 @@ enum WebSearchDetailParser {
 
     /// Pull the server-provided error message from details.
     static func errorMessage(from details: [String: AnyCodable]?) -> String? {
-        details?["error"]?.value as? String
+        details?.string("error")
     }
 
     /// Pull the server-provided error class from details.
     static func errorClass(from details: [String: AnyCodable]?) -> String? {
-        details?["errorClass"]?.value as? String
+        details?.string("errorClass")
     }
 
     /// Build an `ErrorClassification` from structured server details.

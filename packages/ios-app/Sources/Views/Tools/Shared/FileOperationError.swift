@@ -38,9 +38,9 @@ enum FileOperationError {
         result: String?,
         operation: Operation = .write
     ) -> FileOperationError {
-        let errorClass = details?["errorClass"]?.value as? String
-        let path = (details?["path"]?.value as? String) ?? ""
-        let message = (details?["error"]?.value as? String) ?? (result ?? "")
+        let errorClass = details?.string("errorClass")
+        let path = details?.string("path") ?? ""
+        let message = details?.string("error") ?? (result ?? "")
 
         switch errorClass {
         case "not_found":
@@ -66,12 +66,7 @@ enum FileOperationError {
         case "pattern_not_found":
             return .patternNotFound(path: path)
         case "multiple_occurrences":
-            let count: Int = {
-                if let c = details?["occurrences"]?.value as? Int { return c }
-                if let c = details?["occurrences"]?.value as? Double { return Int(c) }
-                return 0
-            }()
-            return .multipleOccurrences(path: path, count: count)
+            return .multipleOccurrences(path: path, count: details?.int("occurrences") ?? 0)
         default:
             return .generic(message: message, operation: operation)
         }

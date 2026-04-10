@@ -38,14 +38,11 @@ struct SearchToolDetailSheet: View {
     }
 
     private var totalMatchCount: Int {
-        if let count = data.details?["matchCount"]?.value as? Int { return count }
-        if let count = data.details?["matchCount"]?.value as? Double { return Int(count) }
-        return parsedResults.reduce(0) { $0 + $1.matches.count }
+        data.details?.int("matchCount") ?? parsedResults.reduce(0) { $0 + $1.matches.count }
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated
-            || (data.details?["truncated"]?.value as? Bool == true)
+        data.isResultTruncated || (data.details?.bool("truncated") == true)
     }
 
     private var isLimitReached: Bool { isTruncated }

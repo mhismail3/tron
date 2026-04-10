@@ -143,8 +143,7 @@ struct ReadToolDetailSheet: View {
     // MARK: - Computed Helpers
 
     private var isTruncated: Bool {
-        data.isResultTruncated
-            || (data.details?["truncated"]?.value as? Bool == true)
+        data.isResultTruncated || (data.details?.bool("truncated") == true)
     }
 
     private var lineRangeText: String? {

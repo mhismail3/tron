@@ -9,8 +9,7 @@ import SwiftUI
 /// `details.errorClass` with `"invalid_pattern"` or `"other"`.
 enum SearchErrorClassifier {
     static func classify(details: [String: AnyCodable]?) -> ErrorClassification {
-        let cls = details?["errorClass"]?.value as? String
-        switch cls {
+        switch details?.string("errorClass") {
         case "invalid_pattern":
             return ErrorClassification(
                 icon: "exclamationmark.triangle.fill",
@@ -28,6 +27,6 @@ enum SearchErrorClassifier {
 
     /// Raw error message pulled from `details.error`.
     static func errorMessage(from details: [String: AnyCodable]?) -> String? {
-        details?["error"]?.value as? String
+        details?.string("error")
     }
 }

@@ -16,21 +16,21 @@ struct DisplayToolDetailSheet: View {
     // MARK: - Data Extraction
 
     private var displayType: String {
-        if let t = data.details?["displayType"]?.value as? String { return t }
-        return ToolArgumentParser.string("type", from: data.arguments) ?? "unknown"
+        data.details?.string("displayType")
+            ?? ToolArgumentParser.string("type", from: data.arguments)
+            ?? "unknown"
     }
 
     private var title: String? {
-        if let t = data.details?["title"]?.value as? String { return t }
-        return ToolArgumentParser.string("title", from: data.arguments)
+        data.details?.string("title") ?? ToolArgumentParser.string("title", from: data.arguments)
     }
 
     private var imageBlobId: String? {
-        data.details?["blobId"]?.value as? String
+        data.details?.string("blobId")
     }
 
     private var galleryBlobIds: [(id: String, mime: String)] {
-        guard let arr = data.details?["images"]?.value as? [[String: Any]] else { return [] }
+        guard let arr = data.details?.dictArray("images") else { return [] }
         return arr.compactMap { item in
             guard let id = item["blobId"] as? String else { return nil }
             let mime = item["mimeType"] as? String ?? "image/png"
@@ -39,17 +39,15 @@ struct DisplayToolDetailSheet: View {
     }
 
     private var conversionNote: String? {
-        data.details?["conversionNote"]?.value as? String
+        data.details?.string("conversionNote")
     }
 
     private var streamId: String? {
-        if let s = data.details?["streamId"]?.value as? String { return s }
-        return ToolArgumentParser.string("streamId", from: data.arguments)
+        data.details?.string("streamId") ?? ToolArgumentParser.string("streamId", from: data.arguments)
     }
 
     private var webviewURL: URL? {
-        guard let urlString = data.details?["url"]?.value as? String else { return nil }
-        return URL(string: urlString)
+        data.details?.string("url").flatMap(URL.init(string:))
     }
 
     private var iconForType: String {

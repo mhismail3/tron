@@ -27,14 +27,11 @@ struct GlobToolDetailSheet: View {
     }
 
     private var matchCount: Int {
-        if let c = data.details?["matchCount"]?.value as? Int { return c }
-        if let c = data.details?["matchCount"]?.value as? Double { return Int(c) }
-        return parsedFiles.count
+        data.details?.int("matchCount") ?? parsedFiles.count
     }
 
     private var isTruncated: Bool {
-        data.isResultTruncated
-            || (data.details?["truncated"]?.value as? Bool == true)
+        data.isResultTruncated || (data.details?.bool("truncated") == true)
     }
 
     private var isLimitReached: Bool { isTruncated }

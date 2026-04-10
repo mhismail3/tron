@@ -13,70 +13,57 @@ enum ComputerUseDetailsHelper {
 
     /// Extract action name from details JSON.
     static func action(from details: [String: AnyCodable]?) -> String? {
-        details?["action"]?.value as? String
+        details?.string("action")
     }
 
     /// Extract x coordinate from details.
     static func x(from details: [String: AnyCodable]?) -> Double? {
-        if let v = details?["x"]?.value as? Double { return v }
-        if let v = details?["x"]?.value as? Int { return Double(v) }
-        return nil
+        details?.double("x")
     }
 
     /// Extract y coordinate from details.
     static func y(from details: [String: AnyCodable]?) -> Double? {
-        if let v = details?["y"]?.value as? Double { return v }
-        if let v = details?["y"]?.value as? Int { return Double(v) }
-        return nil
+        details?.double("y")
     }
 
     /// Extract click count from details.
     static func clicks(from details: [String: AnyCodable]?) -> Int? {
-        if let v = details?["clicks"]?.value as? Int { return v }
-        if let v = details?["clicks"]?.value as? Double { return Int(v) }
-        return nil
+        details?.int("clicks")
     }
 
     /// Extract typed text length from details.
     static func textLength(from details: [String: AnyCodable]?) -> Int? {
-        if let v = details?["length"]?.value as? Int { return v }
-        if let v = details?["length"]?.value as? Double { return Int(v) }
-        return nil
+        details?.int("length")
     }
 
     /// Extract keys array from details.
     static func keys(from details: [String: AnyCodable]?) -> [String]? {
-        guard let arr = details?["keys"]?.value as? [Any] else { return nil }
-        return arr.compactMap { $0 as? String }
+        details?.stringArray("keys")
     }
 
     /// Extract scroll direction from details.
     static func direction(from details: [String: AnyCodable]?) -> String? {
-        details?["direction"]?.value as? String
+        details?.string("direction")
     }
 
     /// Extract scroll amount from details.
     static func amount(from details: [String: AnyCodable]?) -> Int? {
-        if let v = details?["amount"]?.value as? Int { return v }
-        if let v = details?["amount"]?.value as? Double { return Int(v) }
-        return nil
+        details?.int("amount")
     }
 
     /// Extract window name from details.
     static func window(from details: [String: AnyCodable]?) -> String? {
-        details?["window"]?.value as? String
+        details?.string("window")
     }
 
     /// Extract screenshot size in bytes from details.
     static func sizeBytes(from details: [String: AnyCodable]?) -> Int? {
-        if let v = details?["sizeBytes"]?.value as? Int { return v }
-        if let v = details?["sizeBytes"]?.value as? Double { return Int(v) }
-        return nil
+        details?.int("sizeBytes")
     }
 
     /// Whether a fallback method was used (e.g., keyboard scroll fallback).
     static func isFallback(from details: [String: AnyCodable]?) -> Bool {
-        details?["fallback"]?.value as? Bool ?? false
+        details?.bool("fallback") ?? false
     }
 
     /// Check if action is mutating.

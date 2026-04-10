@@ -8,29 +8,22 @@ enum BashDetailsHelper {
 
     /// Extract exit code from details JSON (more reliable than regex from result text).
     static func exitCode(from details: [String: AnyCodable]?) -> Int? {
-        guard let details else { return nil }
-        if let code = details["exitCode"]?.value as? Int {
-            return code
-        }
-        if let code = details["exitCode"]?.value as? Double {
-            return Int(code)
-        }
-        return nil
+        details?.int("exitCode")
     }
 
     /// Extract shell from details (only set when non-bash).
     static func shell(from details: [String: AnyCodable]?) -> String? {
-        details?["shell"]?.value as? String
+        details?.string("shell")
     }
 
     /// Extract interactive flag from details.
     static func isInteractive(from details: [String: AnyCodable]?) -> Bool {
-        details?["interactive"]?.value as? Bool ?? false
+        details?.bool("interactive") ?? false
     }
 
     /// Extract ptyInput audit log from details.
     static func ptyInput(from details: [String: AnyCodable]?) -> [[String: String]]? {
-        guard let arr = details?["ptyInput"]?.value as? [[String: Any]] else { return nil }
+        guard let arr = details?.dictArray("ptyInput") else { return nil }
         return arr.map { obj in
             var result: [String: String] = [:]
             for (k, v) in obj {
@@ -44,23 +37,23 @@ enum BashDetailsHelper {
 
     /// Extract process ID from details (present for managed/backgrounded commands).
     static func processId(from details: [String: AnyCodable]?) -> String? {
-        details?["processId"]?.value as? String
+        details?.string("processId")
     }
 
     /// Whether the server marked this command as auto-backgrounded.
     static func isBackgrounded(from details: [String: AnyCodable]?) -> Bool {
-        details?["backgrounded"]?.value as? Bool ?? false
+        details?.bool("backgrounded") ?? false
     }
 
     /// Whether the server marked this command as timed out.
     static func timedOut(from details: [String: AnyCodable]?) -> Bool {
-        details?["timedOut"]?.value as? Bool ?? false
+        details?.bool("timedOut") ?? false
     }
 
     /// Structured error class string from the server, if any.
     /// Values: "timeout", "permission_denied", "blocked", "interrupted".
     static func errorClass(from details: [String: AnyCodable]?) -> String? {
-        details?["errorClass"]?.value as? String
+        details?.string("errorClass")
     }
 
     /// Whether the command was blocked for safety (dangerous pattern).

@@ -38,12 +38,7 @@ struct EditToolDetailSheet: View {
     /// Server emits `details.replacements: u64` on a successful edit.
     private var successMessage: String? {
         guard data.status == .success else { return nil }
-        let replacements: Int? = {
-            if let i = data.details?["replacements"]?.value as? Int { return i }
-            if let d = data.details?["replacements"]?.value as? Double { return Int(d) }
-            return nil
-        }()
-        guard let count = replacements, count > 0 else { return nil }
+        guard let count = data.details?.int("replacements"), count > 0 else { return nil }
         let noun = count == 1 ? "replacement" : "replacements"
         return "Successfully made \(count) \(noun)"
     }
@@ -164,7 +159,7 @@ struct EditToolDetailSheet: View {
 enum EditDiffParser {
 
     static func parse(details: [String: AnyCodable]?) -> [EditDiffLine] {
-        guard let raw = details?["diffLines"]?.value as? [[String: Any]] else {
+        guard let raw = details?.dictArray("diffLines") else {
             return []
         }
         var lines: [EditDiffLine] = []
@@ -201,7 +196,7 @@ enum EditDiffParser {
 
     private static func readLine(_ entry: [String: Any], _ key: String) -> Int? {
         if let i = entry[key] as? Int { return i }
-        if let d = entry[key] as? Double { return Int(d) }
+        if let d = entry[key] as? Double { return Int(exactly: d.rounded(.towardZero)) }
         return nil
     }
 

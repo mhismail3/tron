@@ -51,21 +51,14 @@ struct WaitToolDetailSheet: View {
     // MARK: - Details Extraction
 
     private var completedCount: Int {
-        if let details = data.details,
-           let count = details["completed"]?.value as? Int {
-            return count
-        }
+        if let count = data.details?.int("completed") { return count }
         return jobIds.reduce(0) { count, id in
             count + (jobStatus(for: id) == .completed ? 1 : 0)
         }
     }
 
     private var failedCount: Int {
-        if let details = data.details,
-           let count = details["failed"]?.value as? Int {
-            return count
-        }
-        return 0
+        data.details?.int("failed") ?? 0
     }
 
     // MARK: - Body
@@ -274,7 +267,7 @@ struct WaitToolDetailSheet: View {
     private func parseStatusFromResult(jobId: String) -> JobStatus {
         // Server emits a structured jobs array in tool.details. Read it
         // directly — zero text scanning.
-        guard let jobs = data.details?["jobs"]?.value as? [[String: Any]] else {
+        guard let jobs = data.details?.dictArray("jobs") else {
             return .unknown
         }
         for job in jobs where (job["id"] as? String) == jobId {

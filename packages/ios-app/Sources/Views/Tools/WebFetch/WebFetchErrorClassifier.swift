@@ -12,19 +12,14 @@ enum WebFetchDetailParser {
     /// Error message pulled straight from `details.error`. Returns `nil`
     /// when the tool did not emit one.
     static func errorMessage(from details: [String: AnyCodable]?) -> String? {
-        details?["error"]?.value as? String
+        details?.string("error")
     }
 
     /// Structured classification built from `details.errorClass` +
     /// `details.httpStatus`. Returns `nil` when no error is present.
     static func classify(details: [String: AnyCodable]?) -> ErrorClassification? {
-        guard let cls = details?["errorClass"]?.value as? String else { return nil }
-        let statusInt: Int? = {
-            if let i = details?["httpStatus"]?.value as? Int { return i }
-            if let d = details?["httpStatus"]?.value as? Double { return Int(d) }
-            return nil
-        }()
-        let codeLabel = statusInt.map { "HTTP \($0)" }
+        guard let cls = details?.string("errorClass") else { return nil }
+        let codeLabel = details?.int("httpStatus").map { "HTTP \($0)" }
         switch cls {
         case "not_found":
             return ErrorClassification(
@@ -93,6 +88,6 @@ enum WebFetchDetailParser {
 
     /// Whether the response came from cache. Reads `details.fromCache`.
     static func isCached(details: [String: AnyCodable]?) -> Bool {
-        details?["fromCache"]?.value as? Bool == true
+        details?.bool("fromCache") == true
     }
 }

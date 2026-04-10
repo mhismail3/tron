@@ -13,7 +13,7 @@ enum SearchResultParser {
     /// Parse structured matches from tool details into file groups.
     /// Returns an empty array when details are missing or contain no matches.
     static func parse(details: [String: AnyCodable]?) -> [SearchFileGroup] {
-        guard let rawMatches = details?["matches"]?.value as? [[String: Any]] else {
+        guard let rawMatches = details?.dictArray("matches") else {
             return []
         }
 
@@ -22,8 +22,13 @@ enum SearchResultParser {
 
         for dict in rawMatches {
             guard let filePath = dict["filePath"] as? String else { continue }
-            let lineNumber = (dict["lineNumber"] as? Int)
-                ?? (dict["lineNumber"] as? Double).map { Int($0) }
+            let lineNumber: Int? = {
+                if let i = dict["lineNumber"] as? Int { return i }
+                if let d = dict["lineNumber"] as? Double {
+                    return Int(exactly: d.rounded(.towardZero))
+                }
+                return nil
+            }()
             let content = (dict["content"] as? String) ?? ""
             if groups[filePath] == nil {
                 order.append(filePath)
