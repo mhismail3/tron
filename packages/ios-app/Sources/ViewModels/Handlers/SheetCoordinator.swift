@@ -43,6 +43,8 @@ final class SheetCoordinator {
     /// Dismiss the current sheet
     func dismiss() {
         activeSheet = nil
+        onDismiss?()
+        onDismiss = nil
     }
 
     // MARK: - Convenience Presenters

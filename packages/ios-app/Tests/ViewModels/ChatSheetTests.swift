@@ -337,15 +337,16 @@ struct SheetCoordinatorTests {
     }
 
     @Test("Dismiss does not clear onDismiss callback")
-    func testDismissDoesNotClearOnDismissCallback() {
+    func testDismissCallsAndClearsOnDismissCallback() {
         let coordinator = SheetCoordinator()
         var callbackCalled = false
 
         coordinator.present(.settings) { callbackCalled = true }
         coordinator.dismiss()
 
-        // Callback should still be available (SwiftUI calls it)
-        #expect(coordinator.onDismiss != nil)
+        // dismiss() should call the callback and clear it
+        #expect(callbackCalled)
+        #expect(coordinator.onDismiss == nil)
     }
 
     // MARK: - Convenience Method Tests

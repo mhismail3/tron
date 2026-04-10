@@ -174,10 +174,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         isAnthropic ? (tier?.capitalized ?? name) : name
     }
 
-    /// Formatted model name for UI display
-    var formattedModelName: String {
-        isAnthropic ? "Claude \(name)" : name
-    }
+    /// Formatted model name for UI display (delegates to `displayName`)
+    var formattedModelName: String { displayName }
 
     /// Whether this is a latest generation model (server-driven via isLegacy flag)
     var isLatestGeneration: Bool {
