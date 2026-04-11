@@ -574,8 +574,13 @@ impl MethodHandler for GetDiffHandler {
                 }
                 _ => {
                     // "unstaged" (including untracked)
-                    let (diff_text, additions, deletions) =
-                        diff_for_file(&entry.path, &unstaged_diff_map);
+                    let (diff_text, additions, deletions) = if entry.status == "untracked" {
+                        // git diff doesn't include untracked files, so read the file
+                        // content and synthesize an additions-only diff
+                        synthesize_untracked_diff(&dir, &entry.path)
+                    } else {
+                        diff_for_file(&entry.path, &unstaged_diff_map)
+                    };
                     total_additions += additions;
                     total_deletions += deletions;
 
@@ -629,6 +634,46 @@ fn diff_for_file(
     } else {
         (None, 0, 0)
     }
+}
+
+/// Synthesize a unified diff for an untracked file by reading its content.
+/// Returns a diff where every line is an addition, matching the format
+/// `git diff` would produce for a new file.
+fn synthesize_untracked_diff(dir: &str, path: &str) -> (Option<String>, usize, usize) {
+    let full_path = std::path::Path::new(dir).join(path);
+    let content = match std::fs::read(&full_path) {
+        Ok(bytes) => bytes,
+        Err(_) => return (None, 0, 0),
+    };
+
+    // Check for binary content (null bytes in first 8KB)
+    let check_len = content.len().min(8192);
+    if content[..check_len].contains(&0) {
+        return (None, 0, 0);
+    }
+
+    let text = match String::from_utf8(content) {
+        Ok(s) => s,
+        Err(_) => return (None, 0, 0),
+    };
+
+    let lines: Vec<&str> = text.lines().collect();
+    let line_count = lines.len();
+    if line_count == 0 {
+        return (None, 0, 0);
+    }
+
+    let mut diff = String::new();
+    diff.push_str("--- /dev/null\n");
+    diff.push_str(&format!("+++ b/{path}\n"));
+    diff.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
+    for line in &lines {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+
+    (Some(diff), line_count, 0)
 }
 
 

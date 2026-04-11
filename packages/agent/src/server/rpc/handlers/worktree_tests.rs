@@ -641,8 +641,10 @@ async fn get_diff_with_new_file() {
     let files = result["files"].as_array().unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0]["status"], "untracked");
-    // Untracked files have no diff from git diff HEAD
-    assert!(files[0]["diff"].is_null());
+    // Untracked files get a synthesized diff with their content
+    let diff = files[0]["diff"].as_str().unwrap();
+    assert!(diff.contains("+new content"));
+    assert_eq!(files[0]["additions"], 1);
 }
 
 #[tokio::test]

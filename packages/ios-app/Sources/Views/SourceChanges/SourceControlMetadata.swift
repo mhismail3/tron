@@ -53,21 +53,19 @@ enum SourceControlMetadata {
 
     // MARK: - Content Extraction
 
-    /// Attempts to extract raw file content from an additions-only diff.
-    /// Returns nil if the diff contains deletions (mixed diff) or is empty/nil.
+    /// Extracts the "after" state of a file from its unified diff.
+    /// For additions-only diffs, returns just the added lines.
+    /// For mixed diffs, reconstructs the result by keeping context lines and
+    /// additions while skipping deletions.
     static func extractFileContent(from diff: String?) -> [String]? {
         guard let diff, !diff.isEmpty else { return nil }
 
         let allLines = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var contentLines: [String] = []
-        var hasDeletions = false
-        var hasAdditions = false
         var inHunk = false
 
         for line in allLines {
-            // Skip file-level headers
             if line.hasPrefix("---") || line.hasPrefix("+++") { continue }
-            // Detect hunk start
             if line.hasPrefix("@@") {
                 inHunk = true
                 continue
@@ -75,17 +73,17 @@ enum SourceControlMetadata {
             guard inHunk else { continue }
 
             if line.hasPrefix("-") {
-                hasDeletions = true
-                break
+                // Deletion — skip (not in the "after" state)
+                continue
             } else if line.hasPrefix("+") {
-                hasAdditions = true
                 contentLines.append(String(line.dropFirst()))
+            } else {
+                // Context line (starts with space) — part of the file
+                contentLines.append(line.hasPrefix(" ") ? String(line.dropFirst()) : line)
             }
-            // Context lines are ignored for pure-addition extraction
         }
 
-        guard hasAdditions && !hasDeletions else { return nil }
-        return contentLines
+        return contentLines.isEmpty ? nil : contentLines
     }
 }
 

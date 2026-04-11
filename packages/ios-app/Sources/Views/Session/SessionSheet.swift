@@ -116,10 +116,8 @@ struct SessionSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    if worktreeStatus?.hasWorktree == true {
-                        commitButton
-                        mergeButton
-                    }
+                    commitButton
+                    mergeButton
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Session")

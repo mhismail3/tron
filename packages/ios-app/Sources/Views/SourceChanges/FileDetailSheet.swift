@@ -41,7 +41,8 @@ struct FileDetailSheet: View {
         ToolDetailSheetContainer(
             toolName: file.fileName,
             iconName: fileIcon,
-            accent: langColor
+            accent: .tronAmber,
+            iconColor: langColor
         ) {
             VStack(spacing: 0) {
                 statusHeader
@@ -121,7 +122,7 @@ struct FileDetailSheet: View {
         case .added: ("plus.circle.fill", .tronSuccess)
         case .deleted: ("minus.circle.fill", .tronError)
         case .renamed: ("arrow.right.circle.fill", .blue)
-        case .untracked: ("plus.circle.dotted", .tronSlate)
+        case .untracked: ("questionmark.circle.fill", .tronSlate)
         case .unmerged: ("exclamationmark.triangle.fill", .yellow)
         case .copied: ("doc.on.doc.fill", .blue)
         }

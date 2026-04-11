@@ -21,6 +21,7 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
     let toolName: String
     let iconName: String
     let accent: Color
+    let iconColor: Color?
     let copyContent: String?
     @ViewBuilder let content: () -> Content
     @ViewBuilder let leadingToolbar: () -> LeadingToolbar
@@ -30,6 +31,7 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
         toolName: String,
         iconName: String,
         accent: Color,
+        iconColor: Color? = nil,
         copyContent: String? = nil,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder leadingToolbar: @escaping () -> LeadingToolbar
@@ -37,6 +39,7 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
         self.toolName = toolName
         self.iconName = iconName
         self.accent = accent
+        self.iconColor = iconColor
         self.copyContent = copyContent
         self.content = content
         self.leadingToolbar = leadingToolbar
@@ -67,7 +70,7 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
                     HStack(spacing: 6) {
                         Image(systemName: iconName)
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(accent)
+                            .foregroundStyle(iconColor ?? accent)
                         Text(toolName)
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(accent)
@@ -97,12 +100,14 @@ extension ToolDetailSheetContainer where LeadingToolbar == EmptyView {
         toolName: String,
         iconName: String,
         accent: Color,
+        iconColor: Color? = nil,
         copyContent: String? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.toolName = toolName
         self.iconName = iconName
         self.accent = accent
+        self.iconColor = iconColor
         self.copyContent = copyContent
         self.content = content
         self.leadingToolbar = { EmptyView() }
