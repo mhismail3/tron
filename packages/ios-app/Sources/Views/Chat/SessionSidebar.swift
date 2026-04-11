@@ -229,7 +229,7 @@ struct CachedSessionSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Header: title, stats, path
+            // Header: title + stats
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     if session.isFork == true {
@@ -258,12 +258,6 @@ struct CachedSessionSidebarRow: View {
                     .fixedSize()
                 }
 
-                Text(session.displayDirectory)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             // Mini-chat content — single data source for both live and persisted
@@ -276,8 +270,17 @@ struct CachedSessionSidebarRow: View {
             if session.isProcessing == true {
                 ProcessingBar()
             }
+
+            Text(session.displayDirectory)
+                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .foregroundStyle(.tronTextMuted.opacity(0.5))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
         }
-        .padding(.vertical, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
         .padding(.horizontal, 14)
         .glassEffect(
             isSelected
