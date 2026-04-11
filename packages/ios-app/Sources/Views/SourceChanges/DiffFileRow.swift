@@ -63,7 +63,7 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
         case .added: ("plus.circle.fill", .tronSuccess)
         case .deleted: ("minus.circle.fill", .tronError)
         case .renamed: ("arrow.right.circle.fill", .blue)
-        case .untracked: ("questionmark.circle.fill", .tronTextMuted)
+        case .untracked: ("plus.circle.dotted", .tronSlate)
         case .unmerged: ("exclamationmark.triangle.fill", .yellow)
         case .copied: ("doc.on.doc.fill", .blue)
         }

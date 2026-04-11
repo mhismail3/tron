@@ -81,7 +81,7 @@ struct SessionChangesSection: View {
             fileContainer(
                 title: "Staged",
                 files: stagedFiles,
-                accentColor: .tronEmerald,
+                accentColor: .tronCyan,
                 stagingArea: .staged
             )
         }
