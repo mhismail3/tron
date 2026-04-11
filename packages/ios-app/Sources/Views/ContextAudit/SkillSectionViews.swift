@@ -353,3 +353,68 @@ struct AddedSkillRow: View {
         isLoadingContent = false
     }
 }
+
+// MARK: - Added Skills Container (Collapsible, matching Rules/Skills pattern)
+
+@available(iOS 26.0, *)
+struct AddedSkillsContainer: View {
+    let skills: [AddedSkillInfo]
+    let tokens: Int
+    var onDelete: ((String) -> Void)?
+    var onFetchContent: ((String) async -> String?)?
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronCyan)
+                    .frame(width: 18)
+                Text("Added Skills")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronCyan)
+
+                Text("\(skills.count)")
+                    .font(TronTypography.pillValue)
+                    .countBadge(.tronCyan)
+
+                Spacer()
+
+                Text(TokenFormatter.format(tokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded {
+                LazyVStack(spacing: 4) {
+                    ForEach(skills) { skill in
+                        AddedSkillRow(
+                            skill: skill,
+                            onDelete: { onDelete?(skill.name) },
+                            onFetchContent: onFetchContent
+                        )
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .sectionFill(.tronCyan, compact: skills.count < 20)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}

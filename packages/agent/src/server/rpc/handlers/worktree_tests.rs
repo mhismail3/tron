@@ -364,6 +364,154 @@ fn is_binary_diff_false() {
     assert!(!is_binary_diff("@@ -1 +1 @@\n-old\n+new"));
 }
 
+// ── Staging area tests ──────────────────────────────────────────
+
+#[test]
+fn parse_porcelain_staging_area_staged_only() {
+    // X=M, Y=' ' → staged
+    let entries = parse_porcelain("M  foo.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[0].status, "modified");
+}
+
+#[test]
+fn parse_porcelain_staging_area_unstaged_only() {
+    // X=' ', Y='M' → unstaged
+    let entries = parse_porcelain(" M foo.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "modified");
+}
+
+#[test]
+fn parse_porcelain_staging_area_both() {
+    // X='M', Y='M' → both
+    let entries = parse_porcelain("MM foo.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "both");
+    assert_eq!(entries[0].status, "modified");
+}
+
+#[test]
+fn parse_porcelain_staging_area_untracked() {
+    let entries = parse_porcelain("?? newfile.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "untracked");
+}
+
+#[test]
+fn parse_porcelain_staging_area_added_staged() {
+    // X='A', Y=' ' → staged
+    let entries = parse_porcelain("A  newfile.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[0].status, "added");
+}
+
+#[test]
+fn parse_porcelain_staging_area_added_unstaged() {
+    // X=' ', Y='A' → unstaged
+    let entries = parse_porcelain(" A newfile.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "added");
+}
+
+#[test]
+fn parse_porcelain_staging_area_deleted_staged() {
+    // X='D', Y=' ' → staged
+    let entries = parse_porcelain("D  removed.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[0].status, "deleted");
+}
+
+#[test]
+fn parse_porcelain_staging_area_deleted_unstaged() {
+    // X=' ', Y='D' → unstaged
+    let entries = parse_porcelain(" D removed.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "deleted");
+}
+
+#[test]
+fn parse_porcelain_staging_area_renamed_staged() {
+    // X='R', Y=' ' → staged
+    let entries = parse_porcelain("R  old.rs -> new.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[0].status, "renamed");
+    assert_eq!(entries[0].path, "new.rs");
+}
+
+#[test]
+fn parse_porcelain_staging_area_copied_staged() {
+    // X='C', Y=' ' → staged
+    let entries = parse_porcelain("C  src.rs -> dest.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[0].status, "copied");
+}
+
+#[test]
+fn parse_porcelain_staging_area_unmerged_uu() {
+    let entries = parse_porcelain("UU conflict.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "unmerged");
+}
+
+#[test]
+fn parse_porcelain_staging_area_unmerged_aa() {
+    let entries = parse_porcelain("AA conflict.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "unmerged");
+}
+
+#[test]
+fn parse_porcelain_staging_area_unmerged_dd() {
+    let entries = parse_porcelain("DD gone.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "unstaged");
+    assert_eq!(entries[0].status, "unmerged");
+}
+
+#[test]
+fn parse_porcelain_staging_area_added_then_modified() {
+    // AM = added in index, modified in worktree → both
+    let entries = parse_porcelain("AM new_file.rs\n");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].staging_area, "both");
+    assert_eq!(entries[0].status, "added");
+}
+
+#[test]
+fn parse_porcelain_staging_area_mixed() {
+    let input = "M  staged.rs\n M unstaged.rs\nMM both.rs\n?? untracked.rs\n";
+    let entries = parse_porcelain(input);
+    assert_eq!(entries.len(), 4);
+    assert_eq!(entries[0].staging_area, "staged");
+    assert_eq!(entries[1].staging_area, "unstaged");
+    assert_eq!(entries[2].staging_area, "both");
+    assert_eq!(entries[3].staging_area, "unstaged");
+}
+
+#[test]
+fn parse_porcelain_staging_area_ignored_skipped() {
+    let entries = parse_porcelain("!! ignored.rs\n");
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn parse_porcelain_staging_area_empty() {
+    let entries = parse_porcelain("");
+    assert!(entries.is_empty());
+}
+
 // ── GetDiff handler tests ───────────────────────────────────────
 
 fn git_output(args: &[&str]) -> std::process::Output {
@@ -533,10 +681,16 @@ async fn get_diff_with_staged_and_unstaged() {
         .await
         .unwrap();
     let files = result["files"].as_array().unwrap();
-    // init.txt should show as modified with both staged + unstaged changes in diff
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0]["status"], "modified");
-    assert!(files[0]["diff"].is_string());
+    // "both" files emit TWO entries: one staged, one unstaged
+    assert_eq!(files.len(), 2);
+    let staged = files.iter().find(|f| f["stagingArea"] == "staged").unwrap();
+    let unstaged = files.iter().find(|f| f["stagingArea"] == "unstaged").unwrap();
+    assert_eq!(staged["status"], "modified");
+    assert_eq!(unstaged["status"], "modified");
+    assert!(staged["diff"].is_string());
+    assert!(unstaged["diff"].is_string());
+    // Summary should count 1 unique file
+    assert_eq!(result["summary"]["totalFiles"], 1);
 }
 
 #[tokio::test]
@@ -665,4 +819,322 @@ async fn get_diff_binary_file() {
     assert!(f["diff"].is_null());
     assert_eq!(f["additions"], 0);
     assert_eq!(f["deletions"], 0);
+}
+
+// ── GetDiff staging area integration tests ──────────────────────
+
+#[tokio::test]
+async fn get_diff_staging_area_staged_only() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("init.txt"), "staged change").unwrap();
+    run_git(&["-C", &dir, "add", "init.txt"]);
+
+    let result = GetDiffHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["stagingArea"], "staged");
+    assert_eq!(files[0]["status"], "modified");
+    assert!(files[0]["diff"].is_string());
+}
+
+#[tokio::test]
+async fn get_diff_staging_area_unstaged_only() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("init.txt"), "unstaged change").unwrap();
+
+    let result = GetDiffHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["stagingArea"], "unstaged");
+}
+
+#[tokio::test]
+async fn get_diff_staging_area_untracked() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("brand_new.txt"), "new").unwrap();
+
+    let result = GetDiffHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["stagingArea"], "unstaged");
+    assert_eq!(files[0]["status"], "untracked");
+}
+
+#[tokio::test]
+async fn get_diff_staging_area_deleted_staged() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
+    run_git(&["-C", &dir, "add", "init.txt"]);
+
+    let result = GetDiffHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["stagingArea"], "staged");
+    assert_eq!(files[0]["status"], "deleted");
+}
+
+// ── StageFiles handler tests ────────────────────────────────────
+
+#[tokio::test]
+async fn stage_files_success() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
+
+    let result = StageFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["init.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+
+    // Verify staged via git status
+    let status = git_output(&["-C", &dir, "status", "--porcelain=v1"]);
+    let status_str = String::from_utf8_lossy(&status.stdout);
+    assert!(status_str.contains("M  init.txt"), "Expected staged: {status_str}");
+}
+
+#[tokio::test]
+async fn stage_files_untracked() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
+
+    let result = StageFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["new.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+
+    let status = git_output(&["-C", &dir, "status", "--porcelain=v1"]);
+    let status_str = String::from_utf8_lossy(&status.stdout);
+    assert!(status_str.contains("A  new.txt"), "Expected staged add: {status_str}");
+}
+
+#[tokio::test]
+async fn stage_files_missing_params() {
+    let ctx = make_test_context();
+    let err = StageFilesHandler
+        .handle(Some(json!({"sessionId": "s1"})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn stage_files_empty_paths() {
+    let ctx = make_test_context();
+    let err = StageFilesHandler
+        .handle(Some(json!({"sessionId": "s1", "paths": []})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+// ── UnstageFiles handler tests ──────────────────────────────────
+
+#[tokio::test]
+async fn unstage_files_success() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
+    run_git(&["-C", &dir, "add", "init.txt"]);
+
+    let result = UnstageFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["init.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+
+    let status = git_output(&["-C", &dir, "status", "--porcelain=v1"]);
+    let status_str = String::from_utf8_lossy(&status.stdout);
+    assert!(status_str.contains(" M init.txt"), "Expected unstaged: {status_str}");
+}
+
+#[tokio::test]
+async fn unstage_files_no_commits() {
+    let ctx = make_test_context();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().to_str().unwrap().to_string();
+    run_git(&["init", &dir]);
+    run_git(&["-C", &dir, "config", "user.email", "t@t.com"]);
+    run_git(&["-C", &dir, "config", "user.name", "T"]);
+
+    std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
+    run_git(&["-C", &dir, "add", "new.txt"]);
+
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    let result = UnstageFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["new.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+
+    // File should still exist but be untracked
+    assert!(tmp.path().join("new.txt").exists());
+    let status = git_output(&["-C", &dir, "status", "--porcelain=v1"]);
+    let status_str = String::from_utf8_lossy(&status.stdout);
+    assert!(status_str.contains("?? new.txt"), "Expected untracked: {status_str}");
+}
+
+#[tokio::test]
+async fn unstage_files_missing_params() {
+    let ctx = make_test_context();
+    let err = UnstageFilesHandler
+        .handle(Some(json!({})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+// ── DiscardFiles handler tests ──────────────────────────────────
+
+#[tokio::test]
+async fn discard_files_tracked_modified() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
+
+    let result = DiscardFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["init.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+
+    // File should be restored to committed content
+    let content = std::fs::read_to_string(tmp.path().join("init.txt")).unwrap();
+    assert_eq!(content, "init");
+}
+
+#[tokio::test]
+async fn discard_files_untracked() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
+    assert!(tmp.path().join("new.txt").exists());
+
+    let result = DiscardFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["new.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+    assert!(!tmp.path().join("new.txt").exists());
+}
+
+#[tokio::test]
+async fn discard_files_path_traversal_blocked() {
+    let ctx = make_test_context();
+    let (_tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    let err = DiscardFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["../../../etc/passwd"]})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("escapes repository root") || err.to_string().contains("not found"),
+        "Expected path validation error: {}", err);
+}
+
+#[tokio::test]
+async fn discard_files_absolute_path_blocked() {
+    let ctx = make_test_context();
+    let (_tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    let err = DiscardFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["/etc/passwd"]})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn discard_files_missing_params() {
+    let ctx = make_test_context();
+    let err = DiscardFilesHandler
+        .handle(Some(json!({"sessionId": "s1"})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn discard_files_deleted_file() {
+    let ctx = make_test_context();
+    let (tmp, dir) = make_git_repo();
+    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+
+    std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
+    assert!(!tmp.path().join("init.txt").exists());
+
+    let result = DiscardFilesHandler
+        .handle(
+            Some(json!({"sessionId": sid, "paths": ["init.txt"]})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+    // File should be restored
+    assert!(tmp.path().join("init.txt").exists());
+    let content = std::fs::read_to_string(tmp.path().join("init.txt")).unwrap();
+    assert_eq!(content, "init");
 }

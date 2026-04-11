@@ -7,8 +7,16 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct FileDetailSheet: View {
     let file: FileDetailData
+    var stagingArea: StagingArea? = nil
+    var rpcClient: RPCClient? = nil
+    var sessionId: String? = nil
+    var onAction: (() -> Void)? = nil
 
     @State private var selectedTab: FileDetailTab = .diff
+    @State private var isStaging = false
+    @State private var isDiscarding = false
+    @State private var showDiscardConfirmation = false
+    @State private var actionError: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -56,6 +64,17 @@ struct FileDetailSheet: View {
                 case .contents:
                     contentsContent
                 }
+
+                // Staging action bar
+                stagingActionBar
+            }
+            .alert("Error", isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )) {
+                Button("OK") { actionError = nil }
+            } message: {
+                Text(actionError ?? "")
             }
         }
     }
@@ -244,6 +263,145 @@ struct FileDetailSheet: View {
             }
         } else {
             noContentView("File contents not available in diff data")
+        }
+    }
+
+    // MARK: - Staging Actions
+
+    @ViewBuilder
+    private var stagingActionBar: some View {
+        if let area = stagingArea, rpcClient != nil, sessionId != nil {
+            Divider()
+                .foregroundStyle(.tronTextMuted.opacity(0.15))
+            HStack(spacing: 12) {
+                switch area {
+                case .unstaged, .both:
+                    Button {
+                        Task { await stageFile() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isStaging {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else {
+                                Image(systemName: "plus.circle")
+                            }
+                            Text("Stage")
+                        }
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.tronEmerald)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .disabled(isStaging || isDiscarding)
+
+                    Button { showDiscardConfirmation = true } label: {
+                        HStack(spacing: 6) {
+                            if isDiscarding {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else {
+                                Image(systemName: "trash")
+                            }
+                            Text("Discard")
+                        }
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.tronError)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .disabled(isStaging || isDiscarding)
+                    .popover(isPresented: $showDiscardConfirmation, arrowEdge: .bottom) {
+                        GlassActionSheet(
+                            actions: [
+                                GlassAction(
+                                    title: "Discard changes to \(file.fileName)",
+                                    icon: "trash",
+                                    color: .tronError,
+                                    role: .destructive
+                                ) {
+                                    showDiscardConfirmation = false
+                                    Task { await discardFile() }
+                                },
+                                GlassAction(title: "Cancel", icon: nil, color: .tronTextMuted, role: .cancel) {
+                                    showDiscardConfirmation = false
+                                }
+                            ]
+                        )
+                        .presentationCompactAdaptation(.popover)
+                    }
+
+                case .staged:
+                    Button {
+                        Task { await unstageFile() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isStaging {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else {
+                                Image(systemName: "minus.circle")
+                            }
+                            Text("Unstage")
+                        }
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .disabled(isStaging)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private func stageFile() async {
+        guard let rpcClient, let sessionId else { return }
+        isStaging = true
+        defer { isStaging = false }
+        do {
+            let result = try await rpcClient.worktree.stageFiles(sessionId: sessionId, paths: [file.path])
+            if result.success {
+                onAction?()
+                dismiss()
+            }
+        } catch {
+            actionError = "Failed to stage: \(error.localizedDescription)"
+        }
+    }
+
+    private func unstageFile() async {
+        guard let rpcClient, let sessionId else { return }
+        isStaging = true
+        defer { isStaging = false }
+        do {
+            let result = try await rpcClient.worktree.unstageFiles(sessionId: sessionId, paths: [file.path])
+            if result.success {
+                onAction?()
+                dismiss()
+            }
+        } catch {
+            actionError = "Failed to unstage: \(error.localizedDescription)"
+        }
+    }
+
+    private func discardFile() async {
+        guard let rpcClient, let sessionId else { return }
+        isDiscarding = true
+        defer { isDiscarding = false }
+        do {
+            let result = try await rpcClient.worktree.discardFiles(sessionId: sessionId, paths: [file.path])
+            if result.success {
+                onAction?()
+                dismiss()
+            }
+        } catch {
+            actionError = "Failed to discard: \(error.localizedDescription)"
         }
     }
 

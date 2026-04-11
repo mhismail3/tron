@@ -9,21 +9,21 @@ enum ChatNotificationCoordinator {
 
     /// Handle chat menu action notification
     /// - Parameters:
-    ///   - action: The action string ("history", "context", "tasks", "settings")
-    ///   - showSessionHistory: Binding to session history sheet visibility
+    ///   - action: The action string ("session", "context", "tasks", "settings")
+    ///   - showSession: Binding to session sheet visibility
     ///   - showContextAudit: Binding to context audit sheet visibility
     ///   - showTaskSheet: Binding to task sheet visibility
     ///   - showSettings: Binding to settings sheet visibility
     static func handleChatMenuAction(
         _ action: String,
-        showSessionHistory: inout Bool,
+        showSession: inout Bool,
         showContextAudit: inout Bool,
         showTaskSheet: inout Bool,
         showSettings: inout Bool
     ) {
         switch action {
-        case "history":
-            showSessionHistory = true
+        case "session":
+            showSession = true
         case "context":
             showContextAudit = true
         case "tasks":

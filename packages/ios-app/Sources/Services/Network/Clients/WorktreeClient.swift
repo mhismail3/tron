@@ -97,4 +97,27 @@ final class WorktreeClient: RPCDomainClient {
         let params = WorktreeGetDiffParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.getDiff", params: params)
     }
+
+    // MARK: - Stage / Unstage / Discard
+
+    /// Stage files in the working directory
+    func stageFiles(sessionId: String, paths: [String]) async throws -> WorktreeFileOperationResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeStageFilesParams(sessionId: sessionId, paths: paths)
+        return try await ws.send(method: "worktree.stageFiles", params: params)
+    }
+
+    /// Unstage files from the index
+    func unstageFiles(sessionId: String, paths: [String]) async throws -> WorktreeFileOperationResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeUnstageFilesParams(sessionId: sessionId, paths: paths)
+        return try await ws.send(method: "worktree.unstageFiles", params: params)
+    }
+
+    /// Discard file changes (tracked: restore from HEAD, untracked: delete)
+    func discardFiles(sessionId: String, paths: [String]) async throws -> WorktreeFileOperationResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeDiscardFilesParams(sessionId: sessionId, paths: paths)
+        return try await ws.send(method: "worktree.discardFiles", params: params)
+    }
 }

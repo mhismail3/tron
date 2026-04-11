@@ -129,10 +129,9 @@ struct ChatView: View {
             guard let raw = notification.object as? String,
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
-            case .history: sheetCoordinator.showSessionHistory()
+            case .session: sheetCoordinator.showSession()
             case .context: sheetCoordinator.showContextAudit()
             case .settings: sheetCoordinator.showSettings()
-            case .changes: sheetCoordinator.showSourceChanges()
             case .processes: viewModel.showProcessSheet = true
             }
         }
@@ -835,7 +834,7 @@ struct ChatView: View {
 // Workaround: Post notification, handle via onReceive
 
 enum ChatMenuAction: String, CaseIterable {
-    case history, context, settings, changes, processes
+    case session, context, settings, processes
 }
 
 extension Notification.Name {

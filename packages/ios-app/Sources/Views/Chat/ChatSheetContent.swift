@@ -41,11 +41,14 @@ struct ChatSheetContent: View {
                 contextState: viewModel.contextState
             )
 
-        case .sessionHistory:
-            SessionHistorySheet(
-                sessionId: sessionId,
+        case .session:
+            SessionSheet(
                 rpcClient: rpcClient,
-                eventStoreManager: eventStoreManager
+                sessionId: sessionId,
+                onAskAgent: { message in
+                    viewModel.pendingSourceChangesPrompt = message
+                    sheetCoordinator?.dismiss()
+                }
             )
 
         case .skillDetail(let skill, let mode):
@@ -106,15 +109,6 @@ struct ChatSheetContent: View {
                 }
             )
 
-        case .sourceChanges:
-            SourceChangesSheet(
-                rpcClient: rpcClient,
-                sessionId: sessionId,
-                onAskAgent: { message in
-                    viewModel.pendingSourceChangesPrompt = message
-                    sheetCoordinator?.dismiss()
-                }
-            )
         }
     }
 

@@ -103,28 +103,10 @@ struct ContextUsageGaugeView: View {
 struct TokenBreakdownHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Auto-Loaded")
+            Text("Context Items")
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
-            Text("Context automatically loaded at session start")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextDisabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
-    }
-}
-
-// MARK: - Session Context Header
-
-@available(iOS 26.0, *)
-struct SessionContextHeader: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Session Context")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-            Text("Context added during this session")
+            Text("Items loaded into the context window")
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextDisabled)
         }

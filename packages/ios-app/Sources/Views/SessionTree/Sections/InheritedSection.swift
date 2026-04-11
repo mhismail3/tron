@@ -82,9 +82,9 @@ struct InheritedSection: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
 
-            // Fork point indicator (always visible)
-            if let forkPoint = forkPointEvent {
-                ForkPointIndicator(event: forkPoint)
+            // Fork point indicator (always visible when fork point exists)
+            if forkPointEvent != nil {
+                ForkPointIndicator()
                     .padding(.top, 12)
             }
         }

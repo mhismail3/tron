@@ -59,9 +59,9 @@ final class SheetCoordinator {
         present(.contextAudit)
     }
 
-    /// Show session history sheet
-    func showSessionHistory() {
-        present(.sessionHistory)
+    /// Show unified session sheet (changes + analytics + history)
+    func showSession() {
+        present(.session)
     }
 
     /// Show skill/spell detail sheet
@@ -136,10 +136,5 @@ final class SheetCoordinator {
     /// Show model picker sheet
     func showModelPicker() {
         present(.modelPicker)
-    }
-
-    /// Show source changes sheet
-    func showSourceChanges() {
-        present(.sourceChanges)
     }
 }

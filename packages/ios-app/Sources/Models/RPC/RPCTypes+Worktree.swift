@@ -191,3 +191,24 @@ struct PruneFailure: Decodable {
     let branch: String
     let error: String
 }
+
+// MARK: - Stage / Unstage / Discard
+
+struct WorktreeStageFilesParams: Encodable {
+    let sessionId: String
+    let paths: [String]
+}
+
+struct WorktreeUnstageFilesParams: Encodable {
+    let sessionId: String
+    let paths: [String]
+}
+
+struct WorktreeDiscardFilesParams: Encodable {
+    let sessionId: String
+    let paths: [String]
+}
+
+struct WorktreeFileOperationResult: Decodable {
+    let success: Bool
+}

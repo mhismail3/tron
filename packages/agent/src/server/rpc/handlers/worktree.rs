@@ -451,36 +451,24 @@ impl MethodHandler for GetDiffHandler {
             return Ok(serde_json::json!({ "isGitRepo": false }));
         }
 
-        // Check if repo has any commits
-        let has_commits = tokio::process::Command::new("git")
-            .args(["-C", &dir, "rev-parse", "HEAD"])
-            .output()
-            .await
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        // Run branch, status, and diff concurrently
-        let (branch_out, status_out, diff_out) = tokio::join!(
+        // Run branch, status, and both diffs concurrently.
+        // We split into staged (--cached) and unstaged (worktree vs index) diffs
+        // so the iOS client can show them in separate containers.
+        let (branch_out, status_out, staged_diff_out, unstaged_diff_out) = tokio::join!(
             tokio::process::Command::new("git")
                 .args(["-C", &dir, "branch", "--show-current"])
                 .output(),
             tokio::process::Command::new("git")
                 .args(["-C", &dir, "status", "--porcelain=v1"])
                 .output(),
-            async {
-                if has_commits {
-                    tokio::process::Command::new("git")
-                        .args(["-C", &dir, "diff", "HEAD"])
-                        .output()
-                        .await
-                } else {
-                    // No commits yet: diff --cached for staged files
-                    tokio::process::Command::new("git")
-                        .args(["-C", &dir, "diff", "--cached"])
-                        .output()
-                        .await
-                }
-            }
+            // Staged diff: index vs HEAD (or all staged if no commits)
+            tokio::process::Command::new("git")
+                .args(["-C", &dir, "diff", "--cached"])
+                .output(),
+            // Unstaged diff: worktree vs index
+            tokio::process::Command::new("git")
+                .args(["-C", &dir, "diff"])
+                .output()
         );
 
         let branch = branch_out.ok().and_then(|o| {
@@ -494,58 +482,125 @@ impl MethodHandler for GetDiffHandler {
             })
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
 
-        let diff_str = diff_out
+        let staged_diff_str = staged_diff_out
+            .map_err(|e| RpcError::Internal {
+                message: format!("git diff --cached failed: {e}"),
+            })
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
+
+        let unstaged_diff_str = unstaged_diff_out
             .map_err(|e| RpcError::Internal {
                 message: format!("git diff failed: {e}"),
             })
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
 
-        let truncated = diff_str.len() > MAX_DIFF_BYTES;
-        let diff_str = if truncated {
-            // floor_char_boundary avoids panicking on multi-byte UTF-8 boundaries
-            let safe_end = diff_str.floor_char_boundary(MAX_DIFF_BYTES);
-            diff_str[..safe_end].to_string()
+        // Truncation check on combined diff size
+        let combined_len = staged_diff_str.len() + unstaged_diff_str.len();
+        let truncated = combined_len > MAX_DIFF_BYTES;
+
+        let truncate_str = |s: String, max: usize| -> String {
+            if s.len() > max {
+                let safe_end = s.floor_char_boundary(max);
+                s[..safe_end].to_string()
+            } else {
+                s
+            }
+        };
+
+        // Give each diff half the budget if both are large
+        let half_budget = MAX_DIFF_BYTES / 2;
+        let staged_diff_str = if truncated {
+            truncate_str(staged_diff_str, half_budget)
         } else {
-            diff_str
+            staged_diff_str
+        };
+        let unstaged_diff_str = if truncated {
+            truncate_str(unstaged_diff_str, half_budget)
+        } else {
+            unstaged_diff_str
         };
 
         let file_entries = parse_porcelain(&status_str);
-        let diff_map = split_diff_by_file(&diff_str);
+        let staged_diff_map = split_diff_by_file(&staged_diff_str);
+        let unstaged_diff_map = split_diff_by_file(&unstaged_diff_str);
 
         let mut files = Vec::new();
         let mut total_additions: usize = 0;
         let mut total_deletions: usize = 0;
 
         for entry in &file_entries {
-            let (diff_text, additions, deletions) = if let Some(chunk) = diff_map.get(&entry.path) {
-                if is_binary_diff(chunk) {
-                    (None, 0, 0)
-                } else {
-                    let (a, d) = count_diff_stats(chunk);
-                    (Some(chunk.as_str()), a, d)
+            match entry.staging_area {
+                "both" => {
+                    // Partially staged: emit two entries with separate diffs
+                    let (staged_diff, s_add, s_del) =
+                        diff_for_file(&entry.path, &staged_diff_map);
+                    let (unstaged_diff, u_add, u_del) =
+                        diff_for_file(&entry.path, &unstaged_diff_map);
+
+                    total_additions += s_add + u_add;
+                    total_deletions += s_del + u_del;
+
+                    files.push(serde_json::json!({
+                        "path": entry.path,
+                        "status": entry.status,
+                        "stagingArea": "staged",
+                        "diff": staged_diff,
+                        "additions": s_add,
+                        "deletions": s_del,
+                    }));
+                    files.push(serde_json::json!({
+                        "path": entry.path,
+                        "status": entry.status,
+                        "stagingArea": "unstaged",
+                        "diff": unstaged_diff,
+                        "additions": u_add,
+                        "deletions": u_del,
+                    }));
                 }
-            } else {
-                (None, 0, 0)
-            };
+                "staged" => {
+                    let (diff_text, additions, deletions) =
+                        diff_for_file(&entry.path, &staged_diff_map);
+                    total_additions += additions;
+                    total_deletions += deletions;
 
-            total_additions += additions;
-            total_deletions += deletions;
+                    files.push(serde_json::json!({
+                        "path": entry.path,
+                        "status": entry.status,
+                        "stagingArea": "staged",
+                        "diff": diff_text,
+                        "additions": additions,
+                        "deletions": deletions,
+                    }));
+                }
+                _ => {
+                    // "unstaged" (including untracked)
+                    let (diff_text, additions, deletions) =
+                        diff_for_file(&entry.path, &unstaged_diff_map);
+                    total_additions += additions;
+                    total_deletions += deletions;
 
-            files.push(serde_json::json!({
-                "path": entry.path,
-                "status": entry.status,
-                "diff": diff_text,
-                "additions": additions,
-                "deletions": deletions,
-            }));
+                    files.push(serde_json::json!({
+                        "path": entry.path,
+                        "status": entry.status,
+                        "stagingArea": "unstaged",
+                        "diff": diff_text,
+                        "additions": additions,
+                        "deletions": deletions,
+                    }));
+                }
+            }
         }
+
+        // Summary counts unique file paths (a "both" file counts once)
+        let unique_paths: std::collections::HashSet<&str> =
+            file_entries.iter().map(|e| e.path.as_str()).collect();
 
         let mut response = serde_json::json!({
             "isGitRepo": true,
             "branch": branch,
             "files": files,
             "summary": {
-                "totalFiles": files.len(),
+                "totalFiles": unique_paths.len(),
                 "totalAdditions": total_additions,
                 "totalDeletions": total_deletions,
             },
@@ -559,9 +614,28 @@ impl MethodHandler for GetDiffHandler {
 
 // ── Parsing helpers ─────────────────────────────────────────────────
 
+/// Look up a file's diff text and stats from a diff map, handling binary detection.
+fn diff_for_file(
+    path: &str,
+    diff_map: &std::collections::HashMap<String, String>,
+) -> (Option<String>, usize, usize) {
+    if let Some(chunk) = diff_map.get(path) {
+        if is_binary_diff(chunk) {
+            (None, 0, 0)
+        } else {
+            let (a, d) = count_diff_stats(chunk);
+            (Some(chunk.clone()), a, d)
+        }
+    } else {
+        (None, 0, 0)
+    }
+}
+
+
 struct FileEntry {
     path: String,
     status: &'static str,
+    staging_area: &'static str,
 }
 
 /// Parse `git status --porcelain=v1` output into file entries.
@@ -577,27 +651,49 @@ fn parse_porcelain(output: &str) -> Vec<FileEntry> {
         // Handle quoted paths (git quotes paths with special characters)
         let path = unquote_path(raw_path);
 
-        let status = match xy {
-            "??" => "untracked",
+        let (status, staging_area) = match xy {
+            "??" => ("untracked", "unstaged"),
             "!!" => continue, // ignored files
             _ => {
                 let x = xy.as_bytes()[0];
                 let y = xy.as_bytes()[1];
-                // Check for unmerged states
-                if (x == b'U' || y == b'U') || (x == b'A' && y == b'A') || (x == b'D' && y == b'D')
+
+                // Determine staging area from XY columns:
+                // X encodes index (staged) state, Y encodes worktree (unstaged) state
+                let area = if (x == b'U' || y == b'U')
+                    || (x == b'A' && y == b'A')
+                    || (x == b'D' && y == b'D')
                 {
-                    "unmerged"
-                } else if x == b'R' || y == b'R' {
-                    "renamed"
-                } else if x == b'C' || y == b'C' {
-                    "copied"
-                } else if x == b'A' || y == b'A' {
-                    "added"
-                } else if x == b'D' || y == b'D' {
-                    "deleted"
+                    // Unmerged states are treated as unstaged
+                    "unstaged"
+                } else if x != b' ' && y != b' ' {
+                    "both"
+                } else if x != b' ' {
+                    "staged"
                 } else {
-                    "modified"
-                }
+                    "unstaged"
+                };
+
+                // Determine file status
+                let file_status =
+                    if (x == b'U' || y == b'U')
+                        || (x == b'A' && y == b'A')
+                        || (x == b'D' && y == b'D')
+                    {
+                        "unmerged"
+                    } else if x == b'R' || y == b'R' {
+                        "renamed"
+                    } else if x == b'C' || y == b'C' {
+                        "copied"
+                    } else if x == b'A' || y == b'A' {
+                        "added"
+                    } else if x == b'D' || y == b'D' {
+                        "deleted"
+                    } else {
+                        "modified"
+                    };
+
+                (file_status, area)
             }
         };
 
@@ -615,6 +711,7 @@ fn parse_porcelain(output: &str) -> Vec<FileEntry> {
         entries.push(FileEntry {
             path: final_path,
             status,
+            staging_area,
         });
     }
     entries
@@ -640,6 +737,210 @@ fn is_binary_diff(chunk: &str) -> bool {
     chunk.contains("Binary files") && chunk.contains("differ")
 }
 
+
+// ── Stage / Unstage / Discard handlers ──────────────────────────────
+
+/// Extract `sessionId` and `paths` (non-empty string array) from params.
+fn require_session_and_paths(params: Option<&Value>) -> Result<(String, Vec<String>), RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let paths = params
+        .and_then(|p| p.get("paths"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if paths.is_empty() {
+        return Err(RpcError::InvalidParams {
+            message: "Missing or empty required parameter: paths".into(),
+        });
+    }
+    Ok((session_id, paths))
+}
+
+/// Stage files: `git add -- <paths>`
+pub struct StageFilesHandler;
+
+#[async_trait]
+impl MethodHandler for StageFilesHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.stageFiles"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let (session_id, paths) = require_session_and_paths(params.as_ref())?;
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+
+        let mut args = vec!["-C".to_string(), dir, "add".to_string(), "--".to_string()];
+        args.extend(paths);
+
+        let output = tokio::process::Command::new("git")
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to run git add: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(RpcError::Internal {
+                message: format!("git add failed: {stderr}"),
+            });
+        }
+
+        Ok(serde_json::json!({ "success": true }))
+    }
+}
+
+/// Unstage files: `git restore --staged -- <paths>` (or `git rm --cached` for repos with no commits)
+pub struct UnstageFilesHandler;
+
+#[async_trait]
+impl MethodHandler for UnstageFilesHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.unstageFiles"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let (session_id, paths) = require_session_and_paths(params.as_ref())?;
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+
+        // Check if repo has commits
+        let has_commits = tokio::process::Command::new("git")
+            .args(["-C", &dir, "rev-parse", "HEAD"])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        let output = if has_commits {
+            let mut args = vec![
+                "-C".to_string(),
+                dir,
+                "restore".to_string(),
+                "--staged".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(paths);
+            tokio::process::Command::new("git")
+                .args(&args)
+                .output()
+                .await
+        } else {
+            // No commits: use git rm --cached
+            let mut args = vec![
+                "-C".to_string(),
+                dir,
+                "rm".to_string(),
+                "--cached".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(paths);
+            tokio::process::Command::new("git")
+                .args(&args)
+                .output()
+                .await
+        };
+
+        let output = output.map_err(|e| RpcError::Internal {
+            message: format!("Failed to run git unstage: {e}"),
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(RpcError::Internal {
+                message: format!("git unstage failed: {stderr}"),
+            });
+        }
+
+        Ok(serde_json::json!({ "success": true }))
+    }
+}
+
+/// Discard file changes: restores tracked files from HEAD, deletes untracked files.
+pub struct DiscardFilesHandler;
+
+#[async_trait]
+impl MethodHandler for DiscardFilesHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.discardFiles"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let (session_id, paths) = require_session_and_paths(params.as_ref())?;
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+        let repo_root = std::path::Path::new(&dir);
+
+        // Canonicalize repo root once for symlink-safe comparison (macOS /var → /private/var)
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
+
+        // Validate all paths before taking any action
+        for path in &paths {
+            // Reject absolute paths
+            if path.starts_with('/') {
+                return Err(RpcError::InvalidParams {
+                    message: format!("Path must be relative: {path}"),
+                });
+            }
+            // Reject path traversal components
+            if path.contains("..") {
+                return Err(RpcError::InvalidParams {
+                    message: format!("Path escapes repository root: {path}"),
+                });
+            }
+            // Resolve and check the path stays within repo root
+            let resolved = canonical_root.join(path);
+            let canonical = resolved
+                .canonicalize()
+                .unwrap_or_else(|_| resolved.clone());
+            if !canonical.starts_with(&canonical_root) {
+                return Err(RpcError::InvalidParams {
+                    message: format!("Path escapes repository root: {path}"),
+                });
+            }
+        }
+
+        for path in &paths {
+            // Check if file is tracked
+            let is_tracked = tokio::process::Command::new("git")
+                .args(["-C", &dir, "ls-files", "--error-unmatch", path])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if is_tracked {
+                // Tracked: restore from HEAD
+                let output = tokio::process::Command::new("git")
+                    .args(["-C", &dir, "checkout", "--", path])
+                    .output()
+                    .await
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to run git checkout: {e}"),
+                    })?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(RpcError::Internal {
+                        message: format!("git checkout failed for {path}: {stderr}"),
+                    });
+                }
+            } else {
+                // Untracked: delete from filesystem
+                let full_path = canonical_root.join(path);
+                if full_path.exists() {
+                    tokio::fs::remove_file(&full_path).await.map_err(|e| {
+                        RpcError::Internal {
+                            message: format!("Failed to delete {path}: {e}"),
+                        }
+                    })?;
+                } else {
+                    return Err(RpcError::Internal {
+                        message: format!("File not found: {path}"),
+                    });
+                }
+            }
+        }
+
+        Ok(serde_json::json!({ "success": true }))
+    }
+}
 
 #[cfg(test)]
 #[path = "worktree_tests.rs"]

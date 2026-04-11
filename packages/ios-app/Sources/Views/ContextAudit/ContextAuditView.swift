@@ -15,11 +15,8 @@ struct ContextAuditView: View {
     @Environment(\.dependencies) var dependencies
     @State private var isLoading = true
 
-    // Convenience accessor
-    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
-    @State private var sessionEvents: [SessionEvent] = []
     @State private var isClearing = false
     @State private var isCompacting = false
     @State private var isRetaining = false
@@ -29,9 +26,6 @@ struct ContextAuditView: View {
 
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
-
-    // Message pagination state
-    @State private var messagesLoadedCount: Int = 10  // Initial batch size
 
     /// Whether there are messages in context that can be cleared/compacted
     private var hasMessages: Bool {
@@ -43,22 +37,6 @@ struct ContextAuditView: View {
     private var displayedSkills: [AddedSkillInfo] {
         guard let snapshot = detailedSnapshot else { return [] }
         return snapshot.addedSkills.filter { !pendingSkillDeletions.contains($0.name) }
-    }
-
-    /// All messages from snapshot
-    private var allMessages: [DetailedMessageInfo] {
-        detailedSnapshot?.messages ?? []
-    }
-
-    /// Paginated messages - show latest messages first (reverse chronological)
-    private var paginatedMessages: [DetailedMessageInfo] {
-        let reversed = allMessages.reversed()
-        return Array(reversed.prefix(messagesLoadedCount))
-    }
-
-    /// Whether there are more messages to load
-    private var hasMoreMessages: Bool {
-        messagesLoadedCount < allMessages.count
     }
 
     /// Whether session memories exist
@@ -289,7 +267,7 @@ struct ContextAuditView: View {
                             TokenBreakdownHeader()
                                 .padding(.horizontal)
 
-                            // Auto-Loaded section containers
+                            // Context Items section containers
                             VStack(spacing: 10) {
                                 SystemPromptSection(
                                     tokens: snapshot.breakdown.systemPrompt,
@@ -332,54 +310,27 @@ struct ContextAuditView: View {
                                 if let taskCtx = snapshot.taskContext {
                                     TaskContextSection(taskContext: taskCtx)
                                 }
-                            }
-                            .padding(.horizontal)
 
-                            // Session Context — only shown when skills, session memories, or messages exist
-                            if !displayedSkills.isEmpty || hasSessionMemories || !allMessages.isEmpty {
-                                SessionContextHeader()
-                                    .padding(.horizontal)
-
-                                VStack(spacing: 10) {
-                                    if !displayedSkills.isEmpty {
-                                        AddedSkillsContainer(
-                                            skills: displayedSkills,
-                                            tokens: snapshot.breakdown.skillContext,
-                                            onDelete: readOnly ? nil : { skillName in
-                                                Task { await removeSkillFromContext(skillName: skillName) }
-                                            },
-                                            onFetchContent: { skillName in
-                                                guard let store = skillStore else { return nil }
-                                                let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
-                                                return metadata?.content
-                                            }
-                                        )
-                                    }
-
-                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
-                                        SessionMemoriesSection(memory: sessionMem)
-                                    }
-
-                                    if !allMessages.isEmpty {
-                                        MessagesContainer(
-                                            messages: paginatedMessages,
-                                            totalMessages: allMessages.count,
-                                            totalTokens: snapshot.breakdown.messages,
-                                            hasMoreMessages: hasMoreMessages,
-                                            onLoadMore: {
-                                                messagesLoadedCount += 10
-                                            }
-                                        )
-                                    }
+                                // Session-added items (skills added during session, session memories)
+                                if !displayedSkills.isEmpty {
+                                    AddedSkillsContainer(
+                                        skills: displayedSkills,
+                                        tokens: snapshot.breakdown.skillContext,
+                                        onDelete: readOnly ? nil : { skillName in
+                                            Task { await removeSkillFromContext(skillName: skillName) }
+                                        },
+                                        onFetchContent: { skillName in
+                                            guard let store = skillStore else { return nil }
+                                            let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                                            return metadata?.content
+                                        }
+                                    )
                                 }
-                                .padding(.horizontal)
-                            }
 
-                            // Analytics Section
-                            AnalyticsSection(
-                                sessionId: sessionId,
-                                events: sessionEvents
-                            )
+                                if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
+                                    SessionMemoriesSection(memory: sessionMem)
+                                }
+                            }
                             .padding(.horizontal)
                         }
                         .padding(.vertical)
@@ -407,17 +358,7 @@ struct ContextAuditView: View {
         isLoading = true
 
         do {
-            // Snapshot RPC and event sync run in parallel; both must complete before
-            // analytics can render. Sync is incremental (cursor-based) so it's cheap
-            // on repeated opens. The chat reconstruction flow does not write to the
-            // local events DB, so the Context sheet is responsible for pulling fresh
-            // events itself before reading them.
-            async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
-            try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            let events = try eventStoreManager.getSessionEvents(sessionId)
-
-            detailedSnapshot = try await snapshotTask
-            sessionEvents = events
+            detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -428,18 +369,8 @@ struct ContextAuditView: View {
     /// Background reload that doesn't show loading state (used after optimistic updates)
     private func reloadContextInBackground() async {
         do {
-            async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
-            try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            let events = try eventStoreManager.getSessionEvents(sessionId)
-
-            detailedSnapshot = try await snapshotTask
-            sessionEvents = events
-
-            // Clear any pending deletions since we now have fresh data
+            detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
             pendingSkillDeletions.removeAll()
-
-            // Reset message pagination when reloading
-            messagesLoadedCount = 10
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -12,6 +12,7 @@ struct FileDetailDataTests {
         let entry = DiffFileEntry(
             path: "src/main.swift",
             status: "modified",
+            stagingArea: nil,
             diff: "@@ -1,3 +1,3 @@\n-old\n+new",
             additions: 1,
             deletions: 1
@@ -48,8 +49,8 @@ struct FileDetailDataTests {
 
     @Test("Identifiable by path — unique IDs for different files")
     func testIdentifiableByPath() {
-        let a = FileDetailData(from: DiffFileEntry(path: "a.swift", status: "modified", diff: nil, additions: 0, deletions: 0))
-        let b = FileDetailData(from: DiffFileEntry(path: "b.swift", status: "modified", diff: nil, additions: 0, deletions: 0))
+        let a = FileDetailData(from: DiffFileEntry(path: "a.swift", status: "modified", stagingArea: nil, diff: nil, additions: 0, deletions: 0))
+        let b = FileDetailData(from: DiffFileEntry(path: "b.swift", status: "modified", stagingArea: nil, diff: nil, additions: 0, deletions: 0))
         #expect(a.id != b.id)
         #expect(a.id == "a.swift")
         #expect(b.id == "b.swift")
@@ -57,7 +58,7 @@ struct FileDetailDataTests {
 
     @Test("Handles nil diff gracefully")
     func testNilDiff() {
-        let entry = DiffFileEntry(path: "new-file.txt", status: "untracked", diff: nil, additions: 0, deletions: 0)
+        let entry = DiffFileEntry(path: "new-file.txt", status: "untracked", stagingArea: nil, diff: nil, additions: 0, deletions: 0)
         let data = FileDetailData(from: entry)
         #expect(data.diff == nil)
         #expect(data.changeStatus == .untracked)
@@ -65,7 +66,7 @@ struct FileDetailDataTests {
 
     @Test("Handles empty path")
     func testEmptyPath() {
-        let entry = DiffFileEntry(path: "", status: "modified", diff: nil, additions: 0, deletions: 0)
+        let entry = DiffFileEntry(path: "", status: "modified", stagingArea: nil, diff: nil, additions: 0, deletions: 0)
         let data = FileDetailData(from: entry)
         #expect(data.id == "")
         #expect(data.path == "")
@@ -83,7 +84,7 @@ struct FileDetailDataTests {
             ("copied", .copied),
         ]
         for (raw, expected) in statuses {
-            let entry = DiffFileEntry(path: "file.txt", status: raw, diff: nil, additions: 0, deletions: 0)
+            let entry = DiffFileEntry(path: "file.txt", status: raw, stagingArea: nil, diff: nil, additions: 0, deletions: 0)
             let data = FileDetailData(from: entry)
             #expect(data.changeStatus == expected, "Status '\(raw)' should map to \(expected)")
         }
@@ -114,14 +115,14 @@ struct FileDetailDataTests {
 
     @Test("Unknown DiffFileEntry status defaults to modified")
     func testUnknownDiffStatus() {
-        let entry = DiffFileEntry(path: "file.txt", status: "unknown", diff: nil, additions: 0, deletions: 0)
+        let entry = DiffFileEntry(path: "file.txt", status: "unknown", stagingArea: nil, diff: nil, additions: 0, deletions: 0)
         let data = FileDetailData(from: entry)
         #expect(data.changeStatus == .modified)
     }
 
     @Test("File extension extracted correctly for dotfiles")
     func testDotfile() {
-        let entry = DiffFileEntry(path: ".gitignore", status: "modified", diff: nil, additions: 1, deletions: 0)
+        let entry = DiffFileEntry(path: ".gitignore", status: "modified", stagingArea: nil, diff: nil, additions: 1, deletions: 0)
         let data = FileDetailData(from: entry)
         #expect(data.fileName == ".gitignore")
         // .gitignore has no extension
@@ -130,7 +131,7 @@ struct FileDetailDataTests {
 
     @Test("File extension extracted correctly for nested paths")
     func testNestedPath() {
-        let entry = DiffFileEntry(path: "packages/ios-app/Sources/Views/MyView.swift", status: "modified", diff: nil, additions: 5, deletions: 3)
+        let entry = DiffFileEntry(path: "packages/ios-app/Sources/Views/MyView.swift", status: "modified", stagingArea: nil, diff: nil, additions: 5, deletions: 3)
         let data = FileDetailData(from: entry)
         #expect(data.fileName == "MyView.swift")
         #expect(data.fileExtension == "swift")

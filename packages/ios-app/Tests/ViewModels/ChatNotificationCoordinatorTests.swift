@@ -9,22 +9,22 @@ struct ChatNotificationCoordinatorTests {
 
     // MARK: - Menu Action Tests
 
-    @Test("Handle menu action 'history' sets showSessionHistory")
+    @Test("Handle menu action 'history' sets showSession")
     func testHandleMenuAction_history_setsShowSessionHistory() {
-        var showSessionHistory = false
+        var showSession = false
         var showContextAudit = false
         var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
-            "history",
-            showSessionHistory: &showSessionHistory,
+            "session",
+            showSession: &showSession,
             showContextAudit: &showContextAudit,
             showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
-        #expect(showSessionHistory)
+        #expect(showSession)
         #expect(!showContextAudit)
         #expect(!showTaskSheet)
         #expect(!showSettings)
@@ -32,20 +32,20 @@ struct ChatNotificationCoordinatorTests {
 
     @Test("Handle menu action 'context' sets showContextAudit")
     func testHandleMenuAction_context_setsShowContextAudit() {
-        var showSessionHistory = false
+        var showSession = false
         var showContextAudit = false
         var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "context",
-            showSessionHistory: &showSessionHistory,
+            showSession: &showSession,
             showContextAudit: &showContextAudit,
             showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
-        #expect(!showSessionHistory)
+        #expect(!showSession)
         #expect(showContextAudit)
         #expect(!showTaskSheet)
         #expect(!showSettings)
@@ -53,20 +53,20 @@ struct ChatNotificationCoordinatorTests {
 
     @Test("Handle menu action 'tasks' sets showTaskSheet")
     func testHandleMenuAction_tasks_setsTaskSheet() {
-        var showSessionHistory = false
+        var showSession = false
         var showContextAudit = false
         var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "tasks",
-            showSessionHistory: &showSessionHistory,
+            showSession: &showSession,
             showContextAudit: &showContextAudit,
             showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
-        #expect(!showSessionHistory)
+        #expect(!showSession)
         #expect(!showContextAudit)
         #expect(showTaskSheet)
         #expect(!showSettings)
@@ -74,20 +74,20 @@ struct ChatNotificationCoordinatorTests {
 
     @Test("Handle menu action 'settings' sets showSettings")
     func testHandleMenuAction_settings_setsShowSettings() {
-        var showSessionHistory = false
+        var showSession = false
         var showContextAudit = false
         var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "settings",
-            showSessionHistory: &showSessionHistory,
+            showSession: &showSession,
             showContextAudit: &showContextAudit,
             showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
-        #expect(!showSessionHistory)
+        #expect(!showSession)
         #expect(!showContextAudit)
         #expect(!showTaskSheet)
         #expect(showSettings)
@@ -95,20 +95,20 @@ struct ChatNotificationCoordinatorTests {
 
     @Test("Handle menu action with unknown action does nothing")
     func testHandleMenuAction_unknown_doesNothing() {
-        var showSessionHistory = false
+        var showSession = false
         var showContextAudit = false
         var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "unknown_action",
-            showSessionHistory: &showSessionHistory,
+            showSession: &showSession,
             showContextAudit: &showContextAudit,
             showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
-        #expect(!showSessionHistory)
+        #expect(!showSession)
         #expect(!showContextAudit)
         #expect(!showTaskSheet)
         #expect(!showSettings)

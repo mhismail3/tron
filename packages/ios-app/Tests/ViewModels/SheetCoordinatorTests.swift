@@ -80,20 +80,14 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
 
     func testShowSessionHistory() {
         let coordinator = SheetCoordinator()
-        coordinator.showSessionHistory()
-        XCTAssertEqual(coordinator.activeSheet, .sessionHistory)
+        coordinator.showSession()
+        XCTAssertEqual(coordinator.activeSheet, .session)
     }
 
     func testShowModelPicker() {
         let coordinator = SheetCoordinator()
         coordinator.showModelPicker()
         XCTAssertEqual(coordinator.activeSheet, .modelPicker)
-    }
-
-    func testShowSourceChanges() {
-        let coordinator = SheetCoordinator()
-        coordinator.showSourceChanges()
-        XCTAssertEqual(coordinator.activeSheet, .sourceChanges)
     }
 
     func testShowAskUserQuestion() {

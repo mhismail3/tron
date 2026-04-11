@@ -23,11 +23,11 @@ struct ChatSheetTests {
         #expect(sheet.id == "contextAudit")
     }
 
-    @Test("Session history sheet has consistent id")
-    func testSessionHistorySheetId() {
-        let sheet = ChatSheet.sessionHistory
+    @Test("Session sheet has consistent id")
+    func testSessionSheetId() {
+        let sheet = ChatSheet.session
 
-        #expect(sheet.id == "sessionHistory")
+        #expect(sheet.id == "session")
     }
 
     @Test("Skill detail sheets with different skills have different ids")
@@ -174,7 +174,7 @@ struct ChatSheetTests {
         let sheets: [ChatSheet] = [
             .settings,
             .contextAudit,
-            .sessionHistory,
+            .session,
             .skillDetail(skill, .skill),
             .compactionDetail(compactionData),
             .askUserQuestion,
@@ -183,8 +183,7 @@ struct ChatSheetTests {
             .thinkingDetail("content"),
             .commandToolDetail(commandToolData),
             .providerErrorDetail(providerErrorData),
-            .modelPicker,
-            .sourceChanges
+            .modelPicker
         ]
 
         // Extract base ids (before any dynamic suffix)
@@ -369,13 +368,13 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .contextAudit)
     }
 
-    @Test("showSessionHistory creates session history sheet")
-    func testShowSessionHistoryCreatesSessionHistorySheet() {
+    @Test("showSession creates session sheet")
+    func testShowSessionCreatesSessionSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showSessionHistory()
+        coordinator.showSession()
 
-        #expect(coordinator.activeSheet == .sessionHistory)
+        #expect(coordinator.activeSheet == .session)
     }
 
     @Test("showSkillDetail creates skill detail sheet with correct data")

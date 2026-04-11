@@ -4,8 +4,6 @@ import SwiftUI
 
 /// Visual indicator showing where a session was forked from
 struct ForkPointIndicator: View {
-    let event: SessionEvent
-
     var body: some View {
         HStack(spacing: 8) {
             Rectangle()

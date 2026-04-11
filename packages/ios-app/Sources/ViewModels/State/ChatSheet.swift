@@ -44,7 +44,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
     case contextAudit
-    case sessionHistory
+    case session
 
     // Skill/Spell details
     case skillDetail(Skill, ChipMode)
@@ -68,17 +68,14 @@ enum ChatSheet: Identifiable, Equatable {
     // Model picker
     case modelPicker
 
-    // Source changes
-    case sourceChanges
-
     var id: String {
         switch self {
         case .settings:
             return "settings"
         case .contextAudit:
             return "contextAudit"
-        case .sessionHistory:
-            return "sessionHistory"
+        case .session:
+            return "session"
         case .skillDetail(let skill, _):
             return "skillDetail-\(skill.id)"
         case .compactionDetail:
@@ -103,8 +100,6 @@ enum ChatSheet: Identifiable, Equatable {
             return "providerError"
         case .modelPicker:
             return "modelPicker"
-        case .sourceChanges:
-            return "sourceChanges"
         }
     }
 
@@ -116,7 +111,7 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.contextAudit, .contextAudit):
             return true
-        case (.sessionHistory, .sessionHistory):
+        case (.session, .session):
             return true
         case (.skillDetail(let skill1, let mode1), .skillDetail(let skill2, let mode2)):
             return skill1.id == skill2.id && mode1 == mode2
@@ -141,8 +136,6 @@ enum ChatSheet: Identifiable, Equatable {
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.modelPicker, .modelPicker):
-            return true
-        case (.sourceChanges, .sourceChanges):
             return true
         default:
             return false

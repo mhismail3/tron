@@ -17,6 +17,7 @@ struct WorktreeGetDiffResult: Decodable, Equatable {
 struct DiffFileEntry: Decodable, Identifiable, Equatable {
     let path: String
     let status: String
+    let stagingArea: String?
     let diff: String?
     let additions: Int
     let deletions: Int
@@ -34,6 +35,16 @@ struct DiffFileEntry: Decodable, Identifiable, Equatable {
     var fileChangeStatus: FileChangeStatus {
         FileChangeStatus(rawValue: status) ?? .modified
     }
+
+    var fileStagingArea: StagingArea {
+        StagingArea(rawValue: stagingArea ?? "unstaged") ?? .unstaged
+    }
+}
+
+enum StagingArea: String, Decodable, Equatable {
+    case staged
+    case unstaged
+    case both
 }
 
 enum FileChangeStatus: String, Decodable {

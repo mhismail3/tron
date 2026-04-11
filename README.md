@@ -266,7 +266,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **130 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **133 methods** across three groups.
 
 ### Connection
 
@@ -311,14 +311,14 @@ All messages use JSON-RPC 2.0 framing:
 | `filesystem` | 4 | `filesystem.listDir`, `filesystem.getHome`, `filesystem.createDir`, `file.read` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
-### Platform (49)
+### Platform (52)
 
 | Group | Count | Methods |
 |-------|------:|---------|
 | `browser` | 3 | `browser.startStream`, `browser.stopStream`, `browser.getStatus` |
 | `display` | 1 | `display.stopStream` |
 | `job` | 5 | `job.background`, `job.cancel`, `job.list`, `job.subscribe`, `job.unsubscribe` |
-| `worktree` | 11 | `worktree.getStatus`, `worktree.commit`, `worktree.merge`, `worktree.list`, `worktree.getDiff`, `worktree.acquire`, `worktree.release`, `worktree.listSessionBranches`, `worktree.getCommittedDiff`, `worktree.deleteBranch`, `worktree.pruneBranches` |
+| `worktree` | 14 | `worktree.getStatus`, `worktree.commit`, `worktree.merge`, `worktree.list`, `worktree.getDiff`, `worktree.acquire`, `worktree.release`, `worktree.listSessionBranches`, `worktree.getCommittedDiff`, `worktree.deleteBranch`, `worktree.pruneBranches`, `worktree.stageFiles`, `worktree.unstageFiles`, `worktree.discardFiles` |
 | `transcribe` | 3 | `transcribe.audio`, `transcribe.listModels`, `transcribe.downloadModel` |
 | `device` | 3 | `device.register`, `device.unregister`, `device.respond` |
 | `plan` | 3 | `plan.enter`, `plan.exit`, `plan.getState` |

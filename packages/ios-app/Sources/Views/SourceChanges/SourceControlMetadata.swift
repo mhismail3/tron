@@ -102,6 +102,7 @@ struct FileDetailData: Identifiable, Equatable {
     let diff: String?
     let additions: Int
     let deletions: Int
+    let stagingArea: StagingArea?
 
     init(from file: any DiffFileDisplayable) {
         self.id = file.displayPath
@@ -112,5 +113,18 @@ struct FileDetailData: Identifiable, Equatable {
         self.diff = file.displayDiff
         self.additions = file.displayAdditions
         self.deletions = file.displayDeletions
+        self.stagingArea = (file as? DiffFileEntry)?.fileStagingArea
+    }
+
+    init(from file: any DiffFileDisplayable, stagingArea: StagingArea?) {
+        self.id = file.displayPath
+        self.path = file.displayPath
+        self.fileName = file.displayFileName
+        self.fileExtension = file.displayExtension
+        self.changeStatus = file.displayChangeStatus
+        self.diff = file.displayDiff
+        self.additions = file.displayAdditions
+        self.deletions = file.displayDeletions
+        self.stagingArea = stagingArea
     }
 }
