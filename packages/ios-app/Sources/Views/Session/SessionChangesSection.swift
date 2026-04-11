@@ -23,10 +23,22 @@ struct SessionChangesSection: View {
                 } else {
                     changesContent(diffResult: diffResult)
                 }
+            } else {
+                // Loading placeholder — prevents layout jump when diff arrives
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.tronAmberLight)
+                    Text("Loading changes...")
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
             }
 
             // View All Branches row
-            if diffResult?.isGitRepo == true {
+            if diffResult?.isGitRepo == true || diffResult == nil {
                 viewAllBranchesRow
             }
         }

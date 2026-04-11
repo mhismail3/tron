@@ -44,20 +44,20 @@ struct AllBranchesSheet: View {
                     ToolbarItem(placement: .principal) {
                         Text("All Branches")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronAmber)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronEmerald)
+                                .foregroundStyle(.tronAmber)
                         }
                     }
                 }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+        .tint(.tronAmber)
         .sheet(item: $selectedBranch, onDismiss: {
             Task { await loadBranches() }
         }) { branch in
@@ -155,7 +155,7 @@ struct AllBranchesSheet: View {
                 if branch.commitCount > 0 {
                     Text("\(branch.commitCount)")
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmber)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(.ultraThinMaterial)
