@@ -15,13 +15,13 @@ struct TurnDetailSheet: View {
     @State private var forkEventId: String?
 
     private var turnTitle: String {
-        turnGroup.turnNumber == 0 ? "Session Events" : "Turn \(turnGroup.turnNumber)"
+        "Turn \(turnGroup.turnNumber)"
     }
 
     var body: some View {
         ToolDetailSheetContainer(
             toolName: turnTitle,
-            iconName: turnGroup.turnNumber == 0 ? "gearshape" : "number.circle",
+            iconName: "number.circle",
             accent: .tronAmberLight
         ) {
             ScrollView {

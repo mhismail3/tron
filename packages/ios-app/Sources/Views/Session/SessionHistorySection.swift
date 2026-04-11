@@ -147,7 +147,7 @@ struct SessionHistorySection: View {
                 // Line 1: Turn badge + role icon + message preview
                 HStack(spacing: 8) {
                     // Turn number badge
-                    Text(turn.turnNumber == 0 ? "S" : "\(turn.turnNumber)")
+                    Text("\(turn.turnNumber)")
                         .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
                         .foregroundStyle(muted ? .tronTextMuted : .tronAmberLight)
                         .frame(width: 24, height: 24)
@@ -162,7 +162,7 @@ struct SessionHistorySection: View {
                     }
 
                     // Message preview or fallback
-                    Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Session events" : "Agent activity"))
+                    Text(turn.displayPreview ?? "Agent activity")
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                         .lineLimit(1)
