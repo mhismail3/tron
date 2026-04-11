@@ -41,24 +41,7 @@ extension CachedSession {
     }
 
     var shortModel: String {
-        let lower = latestModel.lowercased()
-        // Extract family name and version from IDs like "claude-opus-4-6-20260410"
-        let families: [(keyword: String, name: String)] = [
-            ("opus", "Opus"),
-            ("sonnet", "Sonnet"),
-            ("haiku", "Haiku"),
-        ]
-        for family in families {
-            guard lower.contains(family.keyword) else { continue }
-            // Match version digits after the family name: e.g. "opus-4-6" → "4.6"
-            if let range = lower.range(of: "\(family.keyword)-([0-9]+(?:-[0-9]+)*)", options: .regularExpression) {
-                let versionPart = lower[range].dropFirst(family.keyword.count + 1) // drop "opus-"
-                let version = versionPart.replacingOccurrences(of: "-", with: ".")
-                return "\(family.name) \(version)"
-            }
-            return family.name
-        }
-        return latestModel
+        latestModel.shortModelName
     }
 
     var displayDirectory: String {

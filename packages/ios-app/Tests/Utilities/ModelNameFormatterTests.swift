@@ -61,12 +61,49 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("claude-opus-4-6", style: .full), "Claude Opus 4.6")
     }
 
-    func testFallback_codexModel() {
-        XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex", style: .short), "GPT-5.3 Codex")
+    func testFallback_gptModels() {
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.4", style: .short), "GPT-5.4")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.4-pro", style: .short), "GPT-5.4 Pro")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.4-mini", style: .short), "GPT-5.4 Mini")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex", style: .short), "GPT-5.3")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex-spark", style: .short), "GPT-5.3 Spark")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-max", style: .short), "GPT-5.1 Max")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-mini", style: .short), "GPT-5.1 Mini")
     }
 
     func testFallback_geminiModel() {
         XCTAssertEqual(ModelNameFormatter.format("gemini-3-pro-preview", style: .short), "Gemini 3 Pro")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-3.1-pro-preview", style: .short), "Gemini 3.1 Pro")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-3-flash-preview", style: .short), "Gemini 3 Flash")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-3.1-flash-lite-preview", style: .short), "Gemini 3.1 Flash Lite")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-2.5-pro", style: .short), "Gemini 2.5 Pro")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-2.5-flash", style: .short), "Gemini 2.5 Flash")
+        XCTAssertEqual(ModelNameFormatter.format("gemini-2.5-flash-lite", style: .short), "Gemini 2.5 Flash Lite")
+    }
+
+    func testFallback_minimaxModel() {
+        XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.7", style: .short), "MiniMax M2.7")
+        XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.7-highspeed", style: .short), "MiniMax M2.7 HS")
+        XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.5", style: .short), "MiniMax M2.5")
+        XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2", style: .short), "MiniMax M2")
+    }
+
+    func testFallback_kimiModel() {
+        XCTAssertEqual(ModelNameFormatter.format("kimi-k2.5", style: .short), "Kimi K2.5")
+        XCTAssertEqual(ModelNameFormatter.format("kimi-k2-turbo-preview", style: .short), "Kimi K2 Turbo")
+        XCTAssertEqual(ModelNameFormatter.format("kimi-k2-thinking", style: .short), "Kimi K2 Think")
+        XCTAssertEqual(ModelNameFormatter.format("kimi-k2-thinking-turbo", style: .short), "Kimi K2 Think Turbo")
+        XCTAssertEqual(ModelNameFormatter.format("moonshot-v1-128k", style: .short), "Moonshot V1 128K")
+    }
+
+    func testFallback_ollamaModel() {
+        XCTAssertEqual(ModelNameFormatter.format("gemma4:e4b", style: .short), "Gemma 4 E4B")
+        XCTAssertEqual(ModelNameFormatter.format("gemma4:26b", style: .short), "Gemma 4 26B")
+    }
+
+    func testProviderPrefix_stripped() {
+        XCTAssertEqual(ModelNameFormatter.format("openai/gpt-5.4", style: .short), "GPT-5.4")
+        XCTAssertEqual(ModelNameFormatter.format("google/gemini-2.5-flash", style: .short), "Gemini 2.5 Flash")
     }
 
     // MARK: - Cache Population

@@ -43,7 +43,12 @@ enum ModelNameFormatter {
     ///   - style: The desired output format
     ///   - fallback: Optional fallback string if model can't be parsed
     /// - Returns: Formatted model name
-    static func format(_ modelId: String, style: Style, fallback: String? = nil) -> String {
+    static func format(_ rawModelId: String, style: Style, fallback: String? = nil) -> String {
+        // Strip explicit provider prefix (e.g. "openai/gpt-5.4" → "gpt-5.4")
+        let modelId = rawModelId.contains("/")
+            ? String(rawModelId.split(separator: "/", maxSplits: 1).last ?? Substring(rawModelId))
+            : rawModelId
+
         // Use server metadata when available
         if let info = lookupModel(modelId) {
             switch style {
@@ -61,14 +66,29 @@ enum ModelNameFormatter {
         // Fallback: heuristic ID parsing for models not in cache
         let lowered = modelId.lowercased()
 
-        // Check for OpenAI Codex models first
-        if lowered.contains("codex") {
-            return formatCodexModel(modelId, style: style)
+        // Check for OpenAI GPT models
+        if lowered.hasPrefix("gpt-") {
+            return formatGptModel(modelId, style: style)
         }
 
         // Check for Gemini models
         if lowered.contains("gemini") {
             return formatGeminiModel(modelId, style: style)
+        }
+
+        // Check for MiniMax models
+        if lowered.hasPrefix("minimax-") {
+            return formatMiniMaxModel(modelId, style: style)
+        }
+
+        // Check for Kimi / Moonshot models
+        if lowered.hasPrefix("kimi-") || lowered.hasPrefix("moonshot-") {
+            return formatKimiModel(modelId, style: style)
+        }
+
+        // Check for Ollama models (gemma4:variant)
+        if lowered.hasPrefix("gemma") {
+            return formatOllamaModel(modelId, style: style)
         }
 
         // Detect Claude tier
@@ -121,16 +141,17 @@ enum ModelNameFormatter {
         return formatOutput(tier: tier, version: version, style: style)
     }
 
-    /// Format OpenAI Codex model IDs
-    /// e.g., "gpt-5.2-codex" -> "GPT-5.2 Codex"
-    ///       "gpt-5.1-codex-max" -> "GPT-5.1 Codex Max"
-    ///       "gpt-5.1-codex-mini" -> "GPT-5.1 Codex Mini"
-    private static func formatCodexModel(_ modelId: String, style: Style) -> String {
+    /// Format OpenAI GPT model IDs
+    /// e.g., "gpt-5.4" -> "GPT-5.4", "gpt-5.4-pro" -> "GPT-5.4 Pro"
+    ///       "gpt-5.3-codex-spark" -> "GPT-5.3 Spark"
+    private static func formatGptModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
 
-        // Extract version (5.3, 5.2, 5.1, etc.)
+        // Extract version (5.4, 5.3, 5.2, 5.1, etc.)
         var version = ""
-        if lowered.contains("5.3") {
+        if lowered.contains("5.4") {
+            version = "5.4"
+        } else if lowered.contains("5.3") {
             version = "5.3"
         } else if lowered.contains("5.2") {
             version = "5.2"
@@ -140,34 +161,33 @@ enum ModelNameFormatter {
             version = "5"
         }
 
-        // Extract suffix (max, mini, spark, etc.)
+        // Extract suffix (pro, mini, max, spark, etc.)
         var suffix = ""
-        if lowered.contains("codex-max") {
-            suffix = " Max"
-        } else if lowered.contains("codex-mini") {
+        if lowered.hasSuffix("-pro") {
+            suffix = " Pro"
+        } else if lowered.contains("-mini") {
             suffix = " Mini"
-        } else if lowered.contains("codex-spark") {
+        } else if lowered.contains("-max") {
+            suffix = " Max"
+        } else if lowered.contains("-spark") {
             suffix = " Spark"
         }
 
         switch style {
         case .tierOnly:
-            return "Codex\(suffix)"
+            return "GPT\(suffix)"
         case .short:
             if version.isEmpty {
-                return "Codex\(suffix)"
+                return "GPT\(suffix)"
             }
-            return "GPT-\(version) Codex\(suffix)"
+            return "GPT-\(version)\(suffix)"
         case .compact:
-            if version.isEmpty {
-                return "codex\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
-            }
-            return "gpt-\(version)-codex\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
+            return "gpt-\(version)\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
         case .full:
             if version.isEmpty {
-                return "OpenAI Codex\(suffix)"
+                return "GPT\(suffix)"
             }
-            return "OpenAI GPT-\(version) Codex\(suffix)"
+            return "GPT-\(version)\(suffix)"
         }
     }
 
@@ -178,9 +198,11 @@ enum ModelNameFormatter {
     private static func formatGeminiModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
 
-        // Extract version
+        // Extract version (check more specific first)
         var version = ""
-        if lowered.contains("gemini-3") {
+        if lowered.contains("gemini-3.1") {
+            version = "3.1"
+        } else if lowered.contains("gemini-3") {
             version = "3"
         } else if lowered.contains("gemini-2.5") || lowered.contains("2-5") {
             version = "2.5"
@@ -225,6 +247,90 @@ enum ModelNameFormatter {
             if !tier.isEmpty { parts.append(tier) }
             return parts.joined(separator: " ")
         }
+    }
+
+    /// Format MiniMax model IDs
+    /// e.g., "MiniMax-M2.7" -> "MiniMax M2.7", "MiniMax-M2.7-highspeed" -> "MiniMax M2.7 HS"
+    private static func formatMiniMaxModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+
+        // Extract version
+        var version = ""
+        if lowered.contains("m2.7") { version = "M2.7" }
+        else if lowered.contains("m2.5") { version = "M2.5" }
+        else if lowered.contains("m2.1") { version = "M2.1" }
+        else if lowered.contains("m2") { version = "M2" }
+
+        let hs = lowered.contains("highspeed") ? " HS" : ""
+
+        switch style {
+        case .tierOnly:
+            return "\(version)\(hs)"
+        case .short, .compact:
+            return "MiniMax \(version)\(hs)"
+        case .full:
+            return "MiniMax \(version)\(hs)"
+        }
+    }
+
+    /// Format Kimi / Moonshot model IDs
+    /// e.g., "kimi-k2.5" -> "Kimi K2.5", "moonshot-v1-128k" -> "Moonshot V1 128K"
+    private static func formatKimiModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+
+        if lowered.hasPrefix("moonshot-") {
+            // Legacy moonshot models
+            var ctx = ""
+            if lowered.contains("128k") { ctx = "128K" }
+            else if lowered.contains("32k") { ctx = "32K" }
+            else if lowered.contains("8k") { ctx = "8K" }
+            let name = ctx.isEmpty ? "Moonshot V1" : "Moonshot V1 \(ctx)"
+            return style == .compact ? name.lowercased().replacingOccurrences(of: " ", with: "-") : name
+        }
+
+        // Kimi K2 variants
+        var suffix = ""
+        if lowered.contains("k2.5") {
+            suffix = "K2.5"
+        } else if lowered.contains("k2-thinking-turbo") {
+            suffix = "K2 Think Turbo"
+        } else if lowered.contains("k2-thinking") {
+            suffix = "K2 Think"
+        } else if lowered.contains("k2-turbo") {
+            suffix = "K2 Turbo"
+        } else if lowered.contains("k2-0905") {
+            suffix = "K2 0905"
+        } else if lowered.contains("k2-0711") {
+            suffix = "K2 0711"
+        } else {
+            suffix = "K2"
+        }
+
+        switch style {
+        case .tierOnly:
+            return suffix
+        case .compact:
+            return "kimi-\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
+        case .short, .full:
+            return "Kimi \(suffix)"
+        }
+    }
+
+    /// Format Ollama local model IDs
+    /// e.g., "gemma4:e4b" -> "Gemma 4 E4B", "gemma4:26b" -> "Gemma 4 26B"
+    private static func formatOllamaModel(_ modelId: String, style: Style) -> String {
+        let parts = modelId.split(separator: ":")
+        let base = String(parts.first ?? Substring(modelId))
+        let variant = parts.count > 1 ? String(parts[1]).uppercased() : ""
+
+        // Extract name and version from e.g. "gemma4"
+        var name = "Gemma"
+        if let range = base.range(of: #"[0-9]+"#, options: .regularExpression) {
+            name = "\(base[base.startIndex..<range.lowerBound].capitalized) \(base[range])"
+        }
+
+        let display = variant.isEmpty ? name : "\(name) \(variant)"
+        return style == .compact ? display.lowercased().replacingOccurrences(of: " ", with: "-") : display
     }
 
     // MARK: - Private
