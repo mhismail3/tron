@@ -2,12 +2,10 @@ import SwiftUI
 
 /// Fork button display state for event rows
 enum ForkButtonState {
-    /// HEAD event — no button shown
+    /// No button shown
     case hidden
-    /// Safe fork point — tappable button
+    /// Tappable fork button
     case active
-    /// Unsafe fork point — dimmed, non-interactive icon
-    case disabled
 }
 
 // MARK: - Event Row
@@ -64,24 +62,17 @@ struct EventRow: View {
                 }
 
                 // Fork button
-                switch forkButtonState {
-                case .hidden:
-                    EmptyView()
-                case .active:
+                if case .active = forkButtonState {
                     Button(action: onFork) {
-                        Image(systemName: "tuningfork")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronPurple)
-                            .frame(width: 28, height: 28)
-                            .background(Color.tronPurple.opacity(0.15))
-                            .clipShape(Circle())
+                        Text("Fork")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                            .foregroundStyle(.tronAmber)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.tronAmber.opacity(0.15))
+                            .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                case .disabled:
-                    Image(systemName: "tuningfork")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted.opacity(0.3))
-                        .frame(width: 28, height: 28)
                 }
             }
             .padding(.vertical, 8)

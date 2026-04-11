@@ -36,7 +36,7 @@ struct ThisSessionSection: View {
                                 event: event,
                                 isHead: event.id == headEventId,
                                 forkButtonState: event.id == headEventId ? .hidden
-                                    : event.isForkable ? .active : .disabled,
+                                    : event.isForkable ? .active : .hidden,
                                 onFork: { onFork(event.id) }
                             )
                             .id(event.id)

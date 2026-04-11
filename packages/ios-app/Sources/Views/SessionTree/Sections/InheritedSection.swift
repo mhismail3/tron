@@ -69,7 +69,7 @@ struct InheritedSection: View {
                             event: event,
                             isHead: false,
                             isMuted: true,
-                            forkButtonState: event.isForkable ? .active : .disabled,
+                            forkButtonState: event.isForkable ? .active : .hidden,
                             onFork: { onFork(event.id) }
                         )
                     }

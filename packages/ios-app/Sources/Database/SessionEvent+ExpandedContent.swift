@@ -31,28 +31,37 @@ extension SessionEvent {
                 lines.append(String(fullText.prefix(500)))
             }
 
-            // Metadata section
+            // Structured metadata
             var meta: [String] = []
             if let model = payload["model"]?.value as? String {
-                meta.append("Model: \(model)")
-            }
-            if let turn = payload["turn"]?.value as? Int {
-                meta.append("Turn: \(turn)")
+                meta.append("Model  \(model.shortModelName)")
             }
             if let latency = payload["latency"]?.value as? Int {
-                meta.append("Latency: \(formatLatency(latency))")
+                meta.append("Latency  \(formatLatency(latency))")
             }
             if let stopReason = payload["stopReason"]?.value as? String {
-                meta.append("Stop reason: \(stopReason)")
+                let friendly: String
+                switch stopReason {
+                case "end_turn": friendly = "Completed"
+                case "tool_use": friendly = "Tool use"
+                case "max_tokens": friendly = "Max tokens"
+                case "interrupted": friendly = "Interrupted"
+                default: friendly = stopReason
+                }
+                meta.append("Stop  \(friendly)")
             }
             if payload["hasThinking"]?.value as? Bool == true {
-                meta.append("Extended thinking: Yes")
+                meta.append("Thinking  Enabled")
             }
             if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
                let source = tokenRecord["source"] as? [String: Any],
                let input = source["rawInputTokens"] as? Int,
                let output = source["rawOutputTokens"] as? Int {
-                meta.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
+                meta.append("Input  \(TokenFormatter.format(input, style: .uppercase))")
+                meta.append("Output  \(TokenFormatter.format(output, style: .uppercase))")
+                if let cacheRead = source["rawCacheReadTokens"] as? Int, cacheRead > 0 {
+                    meta.append("Cache ↓  \(TokenFormatter.format(cacheRead, style: .uppercase))")
+                }
             }
 
             if !meta.isEmpty {

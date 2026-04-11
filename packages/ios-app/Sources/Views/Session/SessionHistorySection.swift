@@ -27,14 +27,9 @@ struct SessionHistorySection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
-            VStack(alignment: .leading, spacing: 2) {
-                Text("History")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-                Text("Turn-by-turn session activity")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextDisabled)
-            }
+            Text("Turn Breakdown")
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
 
             if turnGroups.isEmpty {
                 emptyState
@@ -154,11 +149,17 @@ struct SessionHistorySection: View {
                         .background((muted ? Color.tronTextMuted : Color.tronAmberLight).opacity(0.2))
                         .clipShape(Circle())
 
-                    // Role icon (user vs assistant)
-                    if turn.turnNumber > 0 && !muted {
-                        Image(systemName: turn.startsWithUserMessage ? "person.fill" : "cpu")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(turn.startsWithUserMessage ? .tronBlue : .tronEmerald)
+                    // Role icon
+                    if !muted {
+                        if turn.turnNumber == 0 {
+                            Image(systemName: "gearshape.fill")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextMuted)
+                        } else {
+                            Image(systemName: turn.startsWithUserMessage ? "person.fill" : "cpu")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(turn.startsWithUserMessage ? .tronBlue : .tronEmerald)
+                        }
                     }
 
                     // Message preview or fallback
@@ -225,7 +226,7 @@ struct SessionHistorySection: View {
                 }
             }
             .padding(10)
-            .sectionFill(muted ? .tronSlate : .tronAmberLight, cornerRadius: 10, subtle: true)
+            .sectionFill(muted ? .tronSlate : .tronAmberLight, cornerRadius: 10, subtle: true, compact: false)
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)

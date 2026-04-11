@@ -27,7 +27,6 @@ extension SessionEvent {
             // Extract text from content blocks or plain string
             var text = ""
             if let contentArray = payload["content"]?.value as? [[String: Any]] {
-                // Array of content blocks — extract text blocks
                 let textParts = contentArray.compactMap { block -> String? in
                     guard (block["type"] as? String) == "text" else { return nil }
                     return block["text"] as? String
@@ -37,23 +36,35 @@ extension SessionEvent {
                 text = plain
             }
 
-            var summary = text.isEmpty
-                ? "Assistant response"
+            let preview = text.isEmpty
+                ? nil
                 : String(text.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Add metadata indicators
-            var indicators: [String] = []
-            if let latency = payload.int("latency") {
-                indicators.append(formatLatency(latency))
-            }
-            if payload.bool("hasThinking") == true {
-                indicators.append("Thinking")
+            // Build a friendly summary
+            if let preview {
+                return preview
             }
 
-            if !indicators.isEmpty {
-                summary += " • " + indicators.joined(separator: " • ")
+            // No text content — describe what kind of response
+            var parts: [String] = []
+            let hasThinking = payload.bool("hasThinking") == true
+            let stopReason = payload.string("stopReason")
+
+            if hasThinking && stopReason == "tool_use" {
+                parts.append("Thinking → tool use")
+            } else if hasThinking {
+                parts.append("Thinking response")
+            } else if stopReason == "tool_use" {
+                parts.append("Tool use")
+            } else {
+                parts.append("Assistant response")
             }
-            return summary
+
+            if let latency = payload.int("latency") {
+                parts.append(formatLatency(latency))
+            }
+
+            return parts.joined(separator: " • ")
 
         case .toolCall:
             let name = payload.string("name") ?? "unknown"
@@ -107,7 +118,7 @@ extension SessionEvent {
             let from = payload.string("previousModel")?.shortModelName ?? "?"
             let to = payload.string("newModel")?.shortModelName ??
                      payload.string("model")?.shortModelName ?? "?"
-            return "\(from) → \(to)"
+            return "Model: \(from) → \(to)"
 
         case .notificationInterrupted:
             return "Session interrupted"
@@ -201,7 +212,7 @@ extension SessionEvent {
 
         case .worktreeAcquired:
             let branch = payload.string("branch") ?? ""
-            return branch.isEmpty ? "Worktree acquired" : "Worktree: \(branch)"
+            return branch.isEmpty ? "Branch created" : "Branch: \(branch)"
 
         case .worktreeCommit:
             let message = payload.string("message") ?? ""
@@ -212,10 +223,10 @@ extension SessionEvent {
 
         case .worktreeReleased:
             let deleted = payload.bool("deleted") ?? false
-            return deleted ? "Worktree released (deleted)" : "Worktree released"
+            return deleted ? "Branch deleted" : "Branch released"
 
         case .worktreeMerged:
-            return "Worktree merged"
+            return "Branch merged"
 
         case .worktreeRenamed:
             let newBranch = payload.string("newBranch") ?? ""
@@ -234,10 +245,11 @@ extension SessionEvent {
 
         case .llmHookResult:
             let hookName = payload.string("hookName") ?? ""
+            let success = (payload["success"]?.value as? Bool) ?? true
             if !hookName.isEmpty {
-                return "Hook: \(hookName)"
+                return success ? "Hook: \(hookName)" : "Hook failed: \(hookName)"
             }
-            return "LLM hook result"
+            return success ? "Hook completed" : "Hook failed"
 
         case .subagentSpawned:
             return "Subagent spawned"

@@ -32,8 +32,8 @@ struct TurnDetailSheet: View {
                             .sheetSection()
                     }
 
-                    // Event timeline
-                    eventTimeline
+                    // Events
+                    processedEventsView
                         .sheetSection()
                 }
                 .padding(.vertical, 8)
@@ -60,109 +60,69 @@ struct TurnDetailSheet: View {
 
     @ViewBuilder
     private func turnAnalyticsSummary(_ data: ConsolidatedAnalytics.TurnData) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Token breakdown
-            HStack(spacing: 12) {
-                tokenStat("Input", value: TokenFormatter.format(data.inputTokens))
-                tokenStat("Output", value: TokenFormatter.format(data.outputTokens))
+        let breakdown = ConsolidatedAnalytics.turnCostBreakdown(for: data)
 
-                if data.cacheReadTokens > 0 || data.cacheCreationTokens > 0 {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Cache")
-                            .font(TronTypography.pill)
-                            .foregroundStyle(.tronTextMuted)
-                        HStack(spacing: 4) {
-                            if data.cacheReadTokens > 0 {
-                                Text("\u{2193}\(TokenFormatter.format(data.cacheReadTokens))")
-                                    .font(TronTypography.codeSM)
-                                    .foregroundStyle(.tronAmberLight)
-                            }
-                            if data.hasPerTTLBreakdown {
-                                if data.cacheCreation5mTokens > 0 {
-                                    Text("\u{2191}5m:\(TokenFormatter.format(data.cacheCreation5mTokens))")
-                                        .font(TronTypography.codeSM)
-                                        .foregroundStyle(.tronAmberLight)
-                                }
-                                if data.cacheCreation1hTokens > 0 {
-                                    Text("\u{2191}1h:\(TokenFormatter.format(data.cacheCreation1hTokens))")
-                                        .font(TronTypography.codeSM)
-                                        .foregroundStyle(.tronAmberLight)
-                                }
-                            } else if data.cacheCreationTokens > 0 {
-                                Text("\u{2191}\(TokenFormatter.format(data.cacheCreationTokens))")
-                                    .font(TronTypography.codeSM)
-                                    .foregroundStyle(.tronAmberLight)
-                            }
-                        }
-                    }
+        VStack(spacing: 10) {
+            // Totals header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(TokenFormatter.format(data.totalTokens))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .bold))
+                        .foregroundStyle(.tronAmberLight)
+                    Text("tokens")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
                 }
-
                 Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatCost(data.cost))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .bold))
+                        .foregroundStyle(.tronAmber)
+                    Text("cost")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
             }
 
-            // Cost + latency + model row
-            HStack(spacing: 12) {
-                if data.cost > 0 {
-                    HStack(spacing: 4) {
-                        Text("Cost:")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                        Text(formatCost(data.cost))
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                            .foregroundStyle(.tronAmberLight)
-                    }
+            // Token/cost pills — single row
+            HStack(spacing: 6) {
+                analyticsPill(label: "In", tokens: data.inputTokens, cost: breakdown.inputCost)
+                analyticsPill(label: "Out", tokens: data.outputTokens, cost: breakdown.outputCost)
+                if data.cacheReadTokens > 0 {
+                    analyticsPill(label: "Cache↓", tokens: data.cacheReadTokens, cost: breakdown.cacheReadCost)
                 }
+                if data.cacheCreationTokens > 0 {
+                    analyticsPill(label: "Cache↑", tokens: data.cacheCreationTokens, cost: breakdown.cacheWriteCost)
+                }
+            }
 
+            // Stats row
+            HStack(spacing: 0) {
                 if data.latency > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(TronTypography.sans(size: TronTypography.sizeXS))
-                        Text(formatLatency(data.latency))
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    }
-                    .foregroundStyle(.tronSlate)
+                    statItem(value: formatLatency(data.latency), label: "latency")
                 }
-
                 if let model = data.model {
-                    Text(model)
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.tronTextMuted)
+                    statItem(value: model, label: "model")
+                }
+                if data.toolCount > 0 {
+                    statItem(value: "\(data.toolCount)", label: "tools")
+                }
+                if data.errorCount > 0 {
+                    statItem(value: "\(data.errorCount)", label: "errors", color: .tronError)
                 }
             }
 
-            // Tools used
+            // Tool names
             if !data.tools.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Tools")
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.tronTextMuted)
-
-                    FlowLayout(spacing: 4) {
-                        ForEach(data.tools, id: \.self) { tool in
-                            Text(tool)
-                                .font(TronTypography.pill)
-                                .foregroundStyle(.tronCyan)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.tronCyan.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-            }
-
-            // Errors
-            if !data.errors.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Errors")
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.tronTextMuted)
-
-                    ForEach(data.errors, id: \.self) { error in
-                        Text(error)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronError)
-                            .lineLimit(2)
+                FlowLayout(spacing: 4) {
+                    ForEach(data.tools, id: \.self) { tool in
+                        Text(tool)
+                            .font(TronTypography.pill)
+                            .foregroundStyle(.tronCyan)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.tronCyan.opacity(0.15))
+                            .clipShape(Capsule())
                     }
                 }
             }
@@ -172,26 +132,51 @@ struct TurnDetailSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func tokenStat(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func analyticsPill(label: String, tokens: Int, cost: Double) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .foregroundStyle(.tronTextMuted)
+            HStack {
+                Text(TokenFormatter.format(tokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronAmberLight)
+                Spacer()
+                Text(formatCost(cost))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.tronAmber)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true, compact: false)
+    }
+
+    private func statItem(value: String, label: String, color: Color? = nil) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(color ?? .tronAmberLight.opacity(0.8))
             Text(label)
                 .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)
-            Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronAmberLight)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Event Timeline
+    // MARK: - Processed Events
 
-    private var eventTimeline: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    /// Events split into main events and post-turn events, with tool call/result merging
+    private var processedEventsView: some View {
+        let (mainItems, postTurnItems) = processEvents()
+
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Events")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
-            if turnGroup.events.isEmpty {
+            if mainItems.isEmpty && postTurnItems.isEmpty {
                 Text("No events in this turn")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
@@ -199,28 +184,195 @@ struct TurnDetailSheet: View {
                     .padding(.vertical, 12)
             } else {
                 LazyVStack(spacing: 2) {
-                    ForEach(turnGroup.events) { event in
-                        EventRow(
-                            event: event,
-                            isHead: false,
-                            isMuted: turnGroup.isInherited,
-                            forkButtonState: forkButtonState(for: event),
-                            onFork: { forkEventId = event.id }
-                        )
+                    ForEach(mainItems) { item in
+                        processedEventRow(item)
+                    }
+                }
+
+                if !postTurnItems.isEmpty {
+                    // Post-turn divider
+                    HStack(spacing: 8) {
+                        Rectangle()
+                            .fill(Color.tronTextMuted.opacity(0.2))
+                            .frame(height: 1)
+                        Text("Post-turn")
+                            .font(TronTypography.mono(size: TronTypography.sizeXS, weight: .medium))
+                            .foregroundStyle(.tronTextMuted)
+                        Rectangle()
+                            .fill(Color.tronTextMuted.opacity(0.2))
+                            .frame(height: 1)
+                    }
+                    .padding(.vertical, 4)
+
+                    LazyVStack(spacing: 2) {
+                        ForEach(postTurnItems) { item in
+                            processedEventRow(item)
+                        }
                     }
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private func processedEventRow(_ item: ProcessedEventItem) -> some View {
+        switch item.kind {
+        case .single(let event):
+            EventRow(
+                event: event,
+                isHead: false,
+                isMuted: turnGroup.isInherited,
+                forkButtonState: forkButtonState(for: event),
+                onFork: { forkEventId = event.id }
+            )
+
+        case .mergedTool(let call, let result):
+            mergedToolRow(call: call, result: result)
+        }
+    }
+
+    // MARK: - Merged Tool Row
+
+    @available(iOS 26.0, *)
+    private func mergedToolRow(call: SessionEvent, result: SessionEvent?) -> some View {
+        let toolName = call.payload.string("name") ?? "unknown"
+        let args = call.payload.dict("arguments") ?? [:]
+        let keyArg = call.extractKeyArgument(toolName: toolName, from: args)
+        let isError = result?.payload.bool("isError") ?? false
+        let duration = result?.payload.int("duration")
+
+        let displayName = keyArg.isEmpty ? toolName : "\(toolName): \(keyArg)"
+        let statusIcon = isError ? "xmark.circle.fill" : "checkmark.circle.fill"
+        let statusColor: Color = isError ? .tronError : .tronSuccess
+
+        return HStack(spacing: 10) {
+            // Tool icon
+            Image(systemName: "wrench.and.screwdriver")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronCyan)
+                .frame(width: 20)
+
+            // Tool name + key arg
+            Text(displayName)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Status + duration
+            if let result {
+                HStack(spacing: 4) {
+                    if let duration {
+                        Text("\(duration)ms")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    Image(systemName: statusIcon)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(statusColor)
+                }
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.tronCyan)
+            }
+
+            // Fork button (on the call event)
+            if case .active = forkButtonState(for: call) {
+                Button(action: { forkEventId = call.id }) {
+                    Text("Fork")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronAmber)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.tronAmber.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+    }
+
+    // MARK: - Event Processing
+
+    /// Process events into merged tool rows and separate post-turn events
+    private func processEvents() -> (main: [ProcessedEventItem], postTurn: [ProcessedEventItem]) {
+        let events = turnGroup.events
+
+        // Find the index of the last assistant message
+        let lastAssistantIndex = events.lastIndex(where: { $0.eventType == .messageAssistant })
+
+        // Find the last tool result after the last assistant message (or the assistant itself)
+        let lastMainIndex: Int
+        if let lai = lastAssistantIndex {
+            // Check if there are tool results after this assistant message
+            let afterAssistant = events[lai...]
+            if let lastToolResult = afterAssistant.lastIndex(where: { $0.eventType == .toolResult }) {
+                lastMainIndex = lastToolResult
+            } else {
+                lastMainIndex = lai
+            }
+        } else {
+            lastMainIndex = events.count - 1
+        }
+
+        // Split events into main and post-turn
+        let mainEvents = lastMainIndex < events.count ? Array(events[...lastMainIndex]) : events
+        let postTurnEvents = lastMainIndex + 1 < events.count ? Array(events[(lastMainIndex + 1)...]) : []
+
+        // Post-turn event types that should be shown (exclude noise)
+        let postTurnTypes: Set<SessionEventType> = [
+            .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
+            .llmHookResult, .worktreeAcquired, .worktreeCommit, .worktreeReleased,
+            .worktreeMerged, .worktreeRenamed, .skillActivated, .skillDeactivated,
+            .memoryRetained, .rulesLoaded, .rulesActivated
+        ]
+
+        let filteredPostTurn = postTurnEvents.filter { postTurnTypes.contains($0.eventType) }
+
+        // Process main events — merge tool.call + tool.result pairs
+        var mainItems: [ProcessedEventItem] = []
+        var consumedResultIds = Set<String>()
+
+        // Build a map of toolCallId → tool.result event
+        var resultByCallId: [String: SessionEvent] = [:]
+        for event in mainEvents where event.eventType == .toolResult {
+            if let callId = event.payload.string("toolCallId") {
+                resultByCallId[callId] = event
+            }
+        }
+
+        for event in mainEvents {
+            if event.eventType == .toolResult {
+                // Skip tool results — they're merged into tool calls
+                continue
+            }
+
+            if event.eventType == .toolCall {
+                let callId = event.payload.string("toolCallId") ?? event.id
+                let result = resultByCallId[callId]
+                if let result { consumedResultIds.insert(result.id) }
+                mainItems.append(ProcessedEventItem(kind: .mergedTool(call: event, result: result)))
+            } else {
+                mainItems.append(ProcessedEventItem(kind: .single(event)))
+            }
+        }
+
+        // Post-turn items are always single events
+        let postTurnItems = filteredPostTurn.map { ProcessedEventItem(kind: .single($0)) }
+
+        return (mainItems, postTurnItems)
+    }
+
     // MARK: - Fork Button State
 
     private func forkButtonState(for event: SessionEvent) -> ForkButtonState {
-        // Don't show fork buttons for inherited events
         if turnGroup.isInherited { return .hidden }
-        // Don't show for events from other sessions
         if event.sessionId != sessionId { return .hidden }
-        return event.isForkable ? .active : .disabled
+        return event.isForkable ? .active : .hidden
     }
 
     // MARK: - Helpers
@@ -228,6 +380,25 @@ struct TurnDetailSheet: View {
     private func formatLatency(_ ms: Int) -> String {
         if ms < 1000 { return "\(ms)ms" }
         return String(format: "%.1fs", Double(ms) / 1000.0)
+    }
+}
+
+// MARK: - Processed Event Item
+
+/// Represents either a single event or a merged tool call+result pair
+struct ProcessedEventItem: Identifiable {
+    enum Kind {
+        case single(SessionEvent)
+        case mergedTool(call: SessionEvent, result: SessionEvent?)
+    }
+
+    let kind: Kind
+
+    var id: String {
+        switch kind {
+        case .single(let event): return event.id
+        case .mergedTool(let call, _): return "tool-\(call.id)"
+        }
     }
 }
 
