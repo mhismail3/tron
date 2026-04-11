@@ -302,7 +302,7 @@ struct FileDetailSheet: View {
             if isDiscarding {
                 ProgressView().controlSize(.small).tint(.tronError)
             } else {
-                Image(systemName: "trash")
+                Image(systemName: "arrow.uturn.backward")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronError)
             }

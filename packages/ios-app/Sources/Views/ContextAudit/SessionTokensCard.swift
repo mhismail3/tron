@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Session Tokens Card (Accumulated tokens for billing)
+// MARK: - Session Tokens Card (Compact single-row layout)
 
 @available(iOS 26.0, *)
 struct SessionTokensCard: View {
@@ -15,18 +15,16 @@ struct SessionTokensCard: View {
         inputTokens + outputTokens
     }
 
-    /// Whether any cache tokens exist (hides cache section if none)
     private var hasCacheTokens: Bool {
         cacheReadTokens > 0 || cacheCreationTokens > 0
     }
 
-    /// Whether per-TTL breakdown is available
     private var hasPerTTLBreakdown: Bool {
         cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // Header with total
             HStack {
                 Image(systemName: "arrow.up.arrow.down")
@@ -44,130 +42,50 @@ struct SessionTokensCard: View {
                     .foregroundStyle(.tronAmber)
             }
 
-            // Token breakdown row
-            HStack(spacing: 8) {
-                // Input tokens
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronAmberLight)
-                        Text("Input")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                    Text(TokenFormatter.format(inputTokens))
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronAmberLight)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
+            // All token categories in a single row
+            HStack(spacing: 6) {
+                tokenPill(label: "In", value: inputTokens, icon: "arrow.up.circle.fill")
+                tokenPill(label: "Out", value: outputTokens, icon: "arrow.down.circle.fill")
 
-                // Output tokens
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronAmberLight)
-                        Text("Output")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                    Text(TokenFormatter.format(outputTokens))
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronAmberLight)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
-            }
-
-            // Cache tokens row (only shown if cache tokens exist)
-            if hasCacheTokens {
-                HStack(spacing: 8) {
-                    // Cache read tokens
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bolt.fill")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronAmber)
-                            Text("Cache Read")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                        Text(TokenFormatter.format(cacheReadTokens))
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.tronAmber)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
+                if hasCacheTokens {
+                    tokenPill(label: "Cache \u{2193}", value: cacheReadTokens, icon: nil)
 
                     if hasPerTTLBreakdown {
-                        // Per-TTL cache write breakdown
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "memorychip.fill")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronAmber)
-                                Text("Cache 5m ↑")
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextMuted)
-                            }
-                            Text(TokenFormatter.format(cacheCreation5mTokens))
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                                .foregroundStyle(.tronAmber)
+                        if cacheCreation5mTokens > 0 {
+                            tokenPill(label: "5m \u{2191}", value: cacheCreation5mTokens, icon: nil)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "memorychip.fill")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronAmber)
-                                Text("Cache 1h ↑")
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextMuted)
-                            }
-                            Text(TokenFormatter.format(cacheCreation1hTokens))
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                                .foregroundStyle(.tronAmber)
+                        if cacheCreation1hTokens > 0 {
+                            tokenPill(label: "1h \u{2191}", value: cacheCreation1hTokens, icon: nil)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
-                    } else {
-                        // Single cache write card (no per-TTL data)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "memorychip.fill")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronAmber)
-                                Text("Cache Write")
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextMuted)
-                            }
-                            Text(TokenFormatter.format(cacheCreationTokens))
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                                .foregroundStyle(.tronAmber)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
+                    } else if cacheCreationTokens > 0 {
+                        tokenPill(label: "Cache \u{2191}", value: cacheCreationTokens, icon: nil)
                     }
                 }
             }
-
-            // Footer explanation
-            Text("Total tokens consumed this session (for billing)")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .sectionFill(.tronAmber)
+    }
+
+    private func tokenPill(label: String, value: Int, icon: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 3) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeXS))
+                        .foregroundStyle(.tronAmberLight)
+                }
+                Text(label)
+                    .font(TronTypography.mono(size: TronTypography.sizeXS))
+                    .foregroundStyle(.tronTextMuted)
+            }
+            Text(TokenFormatter.format(value))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronAmberLight)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
     }
 }

@@ -5,67 +5,39 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct CostSummaryCard: View {
     let analytics: ConsolidatedAnalytics
-    @State private var showBreakdown = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header + stats
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "dollarsign.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronAmberLight)
+        VStack(spacing: 10) {
+            // Header row: title + total cost
+            HStack {
+                Image(systemName: "dollarsign.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronAmberLight)
 
-                    Text("Session Cost")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronAmberLight)
+                Text("Session Cost")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronAmberLight)
 
-                    Spacer()
+                Spacer()
 
-                    Text(formatCost(analytics.totalCost))
-                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(.tronAmberLight)
-                }
-
-                HStack(spacing: 0) {
-                    CostStatItem(color: .tronAmberLight, value: "\(analytics.totalTurns)", label: "turns")
-                    CostStatItem(color: .tronAmberLight, value: formatLatency(analytics.avgLatency), label: "avg latency")
-                    CostStatItem(color: .tronAmberLight, value: "\(analytics.totalToolCalls)", label: "tool calls")
-                    CostStatItem(color: .tronAmberLight, value: "\(analytics.totalErrors)", label: "errors", isError: analytics.totalErrors > 0)
-                }
-
-                // Breakdown toggle
-                HStack {
-                    Text("Cost Breakdown")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                        .rotationEffect(.degrees(showBreakdown ? -180 : 0))
-                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showBreakdown)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        showBreakdown.toggle()
-                    }
-                }
+                Text(formatCost(analytics.totalCost))
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronAmberLight)
             }
-            .padding(14)
 
-            // Expanded breakdown
-            if showBreakdown {
-                CostBreakdownSection(breakdown: analytics.costBreakdown)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 14)
+            // Stats row
+            HStack(spacing: 0) {
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalTurns)", label: "turns")
+                CostStatItem(color: .tronAmberLight, value: formatLatency(analytics.avgLatency), label: "avg latency")
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalToolCalls)", label: "tools")
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalErrors)", label: "errors", isError: analytics.totalErrors > 0)
             }
+
+            // Cost breakdown (always visible)
+            CostBreakdownSection(breakdown: analytics.costBreakdown)
         }
+        .padding(14)
         .sectionFill(.tronAmberLight)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func formatLatency(_ ms: Int) -> String {
@@ -78,62 +50,37 @@ struct CostSummaryCard: View {
 // MARK: - Cost Breakdown Section
 
 @available(iOS 26.0, *)
-private struct CostBreakdownSection: View {
+struct CostBreakdownSection: View {
     let breakdown: ConsolidatedAnalytics.CostBreakdown
 
     var body: some View {
-        VStack(spacing: 6) {
-            CostBreakdownRow(
-                label: "Base Input",
-                tokens: breakdown.baseInputTokens,
-                cost: breakdown.baseInputCost
-            )
-
-            CostBreakdownRow(
-                label: "Output",
-                tokens: breakdown.outputTokens,
-                cost: breakdown.outputCost
-            )
+        VStack(spacing: 4) {
+            CostBreakdownRow(label: "Base Input", tokens: breakdown.baseInputTokens, cost: breakdown.baseInputCost)
+            CostBreakdownRow(label: "Output", tokens: breakdown.outputTokens, cost: breakdown.outputCost)
 
             if breakdown.cacheReadTokens > 0 {
-                CostBreakdownRow(
-                    label: "Cache Read",
-                    tokens: breakdown.cacheReadTokens,
-                    cost: breakdown.cacheReadCost
-                )
+                CostBreakdownRow(label: "Cache Read", tokens: breakdown.cacheReadTokens, cost: breakdown.cacheReadCost)
             }
 
             if breakdown.hasPerTTLBreakdown {
                 if breakdown.cacheWrite5mTokens > 0 {
-                    CostBreakdownRow(
-                        label: "Cache Write 5m",
-                        tokens: breakdown.cacheWrite5mTokens,
-                        cost: breakdown.cacheWrite5mCost
-                    )
+                    CostBreakdownRow(label: "Cache 5m", tokens: breakdown.cacheWrite5mTokens, cost: breakdown.cacheWrite5mCost)
                 }
                 if breakdown.cacheWrite1hTokens > 0 {
-                    CostBreakdownRow(
-                        label: "Cache Write 1h",
-                        tokens: breakdown.cacheWrite1hTokens,
-                        cost: breakdown.cacheWrite1hCost
-                    )
+                    CostBreakdownRow(label: "Cache 1h", tokens: breakdown.cacheWrite1hTokens, cost: breakdown.cacheWrite1hCost)
                 }
             } else if breakdown.cacheWriteLegacyTokens > 0 {
-                CostBreakdownRow(
-                    label: "Cache Write",
-                    tokens: breakdown.cacheWriteLegacyTokens,
-                    cost: breakdown.cacheWriteLegacyCost
-                )
+                CostBreakdownRow(label: "Cache Write", tokens: breakdown.cacheWriteLegacyTokens, cost: breakdown.cacheWriteLegacyCost)
             }
 
             if breakdown.cacheSavings > 0.000001 {
                 HStack {
-                    Text("Cache saved ~\(formatCost(breakdown.cacheSavings)) vs uncached input")
+                    Text("Cache saved ~\(formatCost(breakdown.cacheSavings))")
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronEmerald)
                     Spacer()
                 }
-                .padding(.top, 4)
+                .padding(.top, 2)
             }
         }
         .padding(10)

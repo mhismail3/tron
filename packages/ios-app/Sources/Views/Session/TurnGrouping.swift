@@ -7,11 +7,18 @@ struct TurnGroup: Identifiable, Equatable {
     let events: [SessionEvent]
     let analyticsData: ConsolidatedAnalytics.TurnData?
     let userMessagePreview: String?
+    let assistantMessagePreview: String?
+    let startsWithUserMessage: Bool
     let isInherited: Bool
 
     /// Composite ID prevents collisions in forked sessions where inherited and
     /// current turns can share the same turn number.
     var id: String { "\(isInherited ? "i" : "c")\(turnNumber)" }
+
+    /// Best available preview text for this turn.
+    var displayPreview: String? {
+        userMessagePreview ?? assistantMessagePreview
+    }
 
     static func == (lhs: TurnGroup, rhs: TurnGroup) -> Bool {
         lhs.turnNumber == rhs.turnNumber
@@ -80,14 +87,18 @@ enum TurnGrouping {
         )
 
         return turnMap.map { (turn, turnEvents) in
-            let preview = extractUserMessagePreview(from: turnEvents)
+            let userPreview = extractUserMessagePreview(from: turnEvents)
+            let assistantPreview = extractAssistantMessagePreview(from: turnEvents)
+            let startsWithUser = turnEvents.first?.eventType == .messageUser
             let isInherited = turnEvents.allSatisfy { $0.sessionId != currentSessionId }
 
             return TurnGroup(
                 turnNumber: turn,
                 events: turnEvents,
                 analyticsData: analyticsMap[turn],
-                userMessagePreview: preview,
+                userMessagePreview: userPreview,
+                assistantMessagePreview: assistantPreview,
+                startsWithUserMessage: startsWithUser,
                 isInherited: isInherited
             )
         }
@@ -168,31 +179,42 @@ enum TurnGrouping {
 
     /// Extracts first ~80 chars of user message content from events in a turn.
     static func extractUserMessagePreview(from events: [SessionEvent]) -> String? {
-        for event in events {
-            guard event.eventType == .messageUser else { continue }
+        extractMessagePreview(from: events, eventType: .messageUser)
+    }
 
-            // Try to extract content from payload
+    /// Extracts first ~80 chars of assistant message content from events in a turn.
+    static func extractAssistantMessagePreview(from events: [SessionEvent]) -> String? {
+        extractMessagePreview(from: events, eventType: .messageAssistant)
+    }
+
+    /// Extracts first ~80 chars of message content for a given event type.
+    private static func extractMessagePreview(from events: [SessionEvent], eventType: SessionEventType) -> String? {
+        for event in events {
+            guard event.eventType == eventType else { continue }
+
+            // Try content as a plain string
             if let content = event.payload["content"]?.value as? String, !content.isEmpty {
-                let firstLine = content.components(separatedBy: .newlines).first ?? content
-                if firstLine.count > 80 {
-                    return String(firstLine.prefix(77)) + "..."
-                }
-                return firstLine
+                return truncatePreview(content)
             }
 
-            // Try content array format (array of blocks)
+            // Try content array format (array of blocks with text)
             if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
                 for block in contentArray {
+                    if block["type"] as? String == "tool_use" { continue }
                     if let text = block["text"] as? String, !text.isEmpty {
-                        let firstLine = text.components(separatedBy: .newlines).first ?? text
-                        if firstLine.count > 80 {
-                            return String(firstLine.prefix(77)) + "..."
-                        }
-                        return firstLine
+                        return truncatePreview(text)
                     }
                 }
             }
         }
         return nil
+    }
+
+    private static func truncatePreview(_ text: String) -> String {
+        let firstLine = text.components(separatedBy: .newlines).first ?? text
+        if firstLine.count > 80 {
+            return String(firstLine.prefix(77)) + "..."
+        }
+        return firstLine
     }
 }

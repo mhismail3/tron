@@ -107,7 +107,7 @@ struct SessionSheet: View {
                         .background(.ultraThinMaterial)
                         .overlay {
                             ProgressView()
-                                .tint(.tronEmerald)
+                                .tint(.tronAmber)
                         }
                         .ignoresSafeArea()
                 }
@@ -124,13 +124,13 @@ struct SessionSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("Session")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronAmber)
                     }
                 }
             }
@@ -146,7 +146,7 @@ struct SessionSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+        .tint(.tronAmber)
         // Sub-sheets
         .sheet(item: $selectedFileDetail) { fileData in
             FileDetailSheet(

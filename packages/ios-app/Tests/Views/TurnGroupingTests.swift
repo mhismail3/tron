@@ -231,7 +231,14 @@ struct TurnGroupingTests {
             makeEvent(sessionId: "current", type: "message.assistant", sequence: 4, payload: makePayload(turn: 2)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
+        #expect(groups.count == 2)
+        // Turn 1: parent events only → inherited
+        #expect(groups[0].turnNumber == 1)
+        #expect(groups[0].events.count == 2)
+        #expect(groups[0].events.allSatisfy { $0.sessionId == "parent" })
         #expect(groups[0].isInherited == true)
+        // Turn 2: current events only → not inherited
+        #expect(groups[1].turnNumber == 2)
         #expect(groups[1].isInherited == false)
     }
 

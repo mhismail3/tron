@@ -93,11 +93,11 @@ extension ChatView {
                 }
             }
             Menu {
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.session.rawValue) } label: {
-                    Label("Session", systemImage: "rectangle.stack.person.crop")
-                }
                 Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.context.rawValue) } label: {
                     Label("Context", systemImage: "gauge.with.dots.needle.67percent")
+                }
+                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.session.rawValue) } label: {
+                    Label("Session", systemImage: "arrow.triangle.branch")
                 }
                 if viewModel.processState.hasActiveProcesses {
                     Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.processes.rawValue) } label: {

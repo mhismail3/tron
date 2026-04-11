@@ -144,7 +144,7 @@ struct SessionHistorySection: View {
             onTurnSelected(turn)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                // Line 1: Turn badge + user message preview
+                // Line 1: Turn badge + role icon + message preview
                 HStack(spacing: 8) {
                     // Turn number badge
                     Text(turn.turnNumber == 0 ? "S" : "\(turn.turnNumber)")
@@ -154,8 +154,15 @@ struct SessionHistorySection: View {
                         .background((muted ? Color.tronTextMuted : Color.tronAmberLight).opacity(0.2))
                         .clipShape(Circle())
 
-                    // User message preview or fallback
-                    Text(turn.userMessagePreview ?? (turn.turnNumber == 0 ? "Session events" : "Tool execution"))
+                    // Role icon (user vs assistant)
+                    if turn.turnNumber > 0 && !muted {
+                        Image(systemName: turn.startsWithUserMessage ? "person.fill" : "cpu")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(turn.startsWithUserMessage ? .tronBlue : .tronEmerald)
+                    }
+
+                    // Message preview or fallback
+                    Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Session events" : "Agent activity"))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                         .lineLimit(1)

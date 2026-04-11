@@ -49,11 +49,11 @@ struct SessionChangesSection: View {
             if let name = branchName {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmber)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     Text(name)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmber)
                         .lineLimit(1)
                 }
             }
@@ -141,7 +141,7 @@ struct SessionChangesSection: View {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.tronAmberLight)
 
                 Text("View All Branches")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
@@ -150,7 +150,7 @@ struct SessionChangesSection: View {
                 if !branches.isEmpty {
                     Text("\(branches.count)")
                         .font(TronTypography.pillValue)
-                        .countBadge(.tronSlate)
+                        .countBadge(.tronAmberLight)
                 }
 
                 Spacer()
@@ -160,7 +160,7 @@ struct SessionChangesSection: View {
                     .foregroundStyle(.tronTextMuted)
             }
             .padding(12)
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronAmberLight)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
