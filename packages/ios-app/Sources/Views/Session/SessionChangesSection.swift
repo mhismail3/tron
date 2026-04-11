@@ -181,32 +181,24 @@ struct SessionChangesSection: View {
     // MARK: - Empty States
 
     private var noChangesView: some View {
-        VStack(spacing: 12) {
+        HStack(spacing: 6) {
             Image(systemName: "checkmark.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronSuccess)
             Text("No changes")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextMuted)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
     }
 
     private var notGitRepoView: some View {
-        VStack(spacing: 12) {
+        HStack(spacing: 6) {
             Image(systemName: "info.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
-            Text("Not a Git Repository")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-            Text("This session's working directory is not inside a git repository.")
+            Text("Not a git repository")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
     }
 }
