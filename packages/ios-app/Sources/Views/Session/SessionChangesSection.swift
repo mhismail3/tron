@@ -50,24 +50,54 @@ struct SessionChangesSection: View {
         worktreeStatus?.worktree?.shortBranch ?? diffResult?.branch
     }
 
+    private var totalFiles: Int {
+        stagedFiles.count + unstagedFiles.count
+    }
+
+    private var totalAdditions: Int {
+        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.additions }
+    }
+
+    private var totalDeletions: Int {
+        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
+    }
+
     private var sectionHeader: some View {
-        HStack {
-            Text("Changes")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Source Control")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
 
-            Spacer()
+                Spacer()
 
-            if let name = branchName {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(.tronAmber)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    Text(name)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
-                        .lineLimit(1)
+                if let name = branchName {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .foregroundStyle(.tronAmber)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        Text(name)
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronAmber)
+                            .lineLimit(1)
+                    }
                 }
+            }
+
+            if diffResult != nil && totalFiles > 0 {
+                HStack(spacing: 6) {
+                    Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")
+                        .foregroundStyle(.tronTextMuted)
+                    if totalAdditions > 0 {
+                        Text("+\(totalAdditions)")
+                            .foregroundStyle(.tronSuccess)
+                    }
+                    if totalDeletions > 0 {
+                        Text("−\(totalDeletions)")
+                            .foregroundStyle(.tronError)
+                    }
+                }
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
             }
         }
     }

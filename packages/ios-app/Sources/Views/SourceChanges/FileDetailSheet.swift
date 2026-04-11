@@ -37,6 +37,10 @@ struct FileDetailSheet: View {
         FileDisplayHelpers.fileIcon(for: file.fileName)
     }
 
+    private var isNewFile: Bool {
+        file.changeStatus == .added || file.changeStatus == .untracked
+    }
+
     var body: some View {
         ToolDetailSheetContainer(
             toolName: file.fileName,
@@ -49,21 +53,25 @@ struct FileDetailSheet: View {
                     .sheetSection()
                     .padding(.top, 8)
 
-                Picker("", selection: $selectedTab) {
-                    ForEach(FileDetailTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-                switch selectedTab {
-                case .diff:
-                    diffContent
-                case .contents:
+                if isNewFile {
                     contentsContent
+                } else {
+                    Picker("", selection: $selectedTab) {
+                        ForEach(FileDetailTab.allCases, id: \.self) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                    switch selectedTab {
+                    case .diff:
+                        diffContent
+                    case .contents:
+                        contentsContent
+                    }
                 }
             }
             .alert("Error", isPresented: Binding(
