@@ -64,9 +64,6 @@ struct FileDetailSheet: View {
                 case .contents:
                     contentsContent
                 }
-
-                // Staging action bar
-                stagingActionBar
             }
             .alert("Error", isPresented: Binding(
                 get: { actionError != nil },
@@ -76,6 +73,8 @@ struct FileDetailSheet: View {
             } message: {
                 Text(actionError ?? "")
             }
+        } leadingToolbar: {
+            stagingToolbarButtons
         }
     }
 
@@ -172,7 +171,8 @@ struct FileDetailSheet: View {
                     }
                 }
                 .padding(10)
-                .frame(width: geometry.size.width)
+                .frame(maxWidth: .infinity)
+                .clipped()
                 .background {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(.clear)
@@ -183,6 +183,7 @@ struct FileDetailSheet: View {
                 }
                 .sheetSection()
                 .padding(.vertical, 8)
+                .frame(width: geometry.size.width)
             }
         }
     }
@@ -266,98 +267,81 @@ struct FileDetailSheet: View {
         }
     }
 
-    // MARK: - Staging Actions
+    // MARK: - Staging Toolbar Buttons
 
     @ViewBuilder
-    private var stagingActionBar: some View {
+    private var stagingToolbarButtons: some View {
         if let area = stagingArea, rpcClient != nil, sessionId != nil {
-            Divider()
-                .foregroundStyle(.tronTextMuted.opacity(0.15))
-            HStack(spacing: 12) {
-                switch area {
-                case .unstaged, .both:
-                    Button {
-                        Task { await stageFile() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isStaging {
-                                ProgressView().controlSize(.small).tint(.white)
-                            } else {
-                                Image(systemName: "plus.circle")
-                            }
-                            Text("Stage")
-                        }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.tronEmerald)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .disabled(isStaging || isDiscarding)
+            switch area {
+            case .unstaged, .both:
+                stageButton
+                discardButton
 
-                    Button { showDiscardConfirmation = true } label: {
-                        HStack(spacing: 6) {
-                            if isDiscarding {
-                                ProgressView().controlSize(.small).tint(.white)
-                            } else {
-                                Image(systemName: "trash")
-                            }
-                            Text("Discard")
-                        }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.tronError)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .disabled(isStaging || isDiscarding)
-                    .popover(isPresented: $showDiscardConfirmation, arrowEdge: .bottom) {
-                        GlassActionSheet(
-                            actions: [
-                                GlassAction(
-                                    title: "Discard changes to \(file.fileName)",
-                                    icon: "trash",
-                                    color: .tronError,
-                                    role: .destructive
-                                ) {
-                                    showDiscardConfirmation = false
-                                    Task { await discardFile() }
-                                },
-                                GlassAction(title: "Cancel", icon: nil, color: .tronTextMuted, role: .cancel) {
-                                    showDiscardConfirmation = false
-                                }
-                            ]
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
-
-                case .staged:
-                    Button {
-                        Task { await unstageFile() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isStaging {
-                                ProgressView().controlSize(.small).tint(.white)
-                            } else {
-                                Image(systemName: "minus.circle")
-                            }
-                            Text("Unstage")
-                        }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .disabled(isStaging)
-                }
+            case .staged:
+                unstageButton
             }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
         }
+    }
+
+    private var stageButton: some View {
+        Button { Task { await stageFile() } } label: {
+            if isStaging {
+                ProgressView().controlSize(.small).tint(.tronEmerald)
+            } else {
+                Image(systemName: "plus.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronEmerald)
+            }
+        }
+        .disabled(isStaging || isDiscarding)
+        .accessibilityLabel("Stage")
+    }
+
+    private var discardButton: some View {
+        Button { showDiscardConfirmation = true } label: {
+            if isDiscarding {
+                ProgressView().controlSize(.small).tint(.tronError)
+            } else {
+                Image(systemName: "trash")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronError)
+            }
+        }
+        .disabled(isStaging || isDiscarding)
+        .accessibilityLabel("Discard")
+        .popover(isPresented: $showDiscardConfirmation, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Discard changes to \(file.fileName)",
+                        icon: "trash",
+                        color: .tronError,
+                        role: .destructive
+                    ) {
+                        showDiscardConfirmation = false
+                        Task { await discardFile() }
+                    },
+                    GlassAction(title: "Cancel", icon: nil, color: .tronTextMuted, role: .cancel) {
+                        showDiscardConfirmation = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var unstageButton: some View {
+        Button { Task { await unstageFile() } } label: {
+            if isStaging {
+                ProgressView().controlSize(.small).tint(.orange)
+            } else {
+                Image(systemName: "minus.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .disabled(isStaging)
+        .accessibilityLabel("Unstage")
     }
 
     private func stageFile() async {

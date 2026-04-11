@@ -36,49 +36,71 @@ struct TurnGroupingTests {
 
     private let emptyAnalytics = ConsolidatedAnalytics(from: [])
 
-    // MARK: - Basic Grouping
+    // MARK: - Boundary-Based Grouping
 
-    @Test("Single turn groups all events together")
-    func singleTurn() {
+    @Test("User message + assistant + tools grouped into same turn")
+    func userAndAssistantGroupedTogether() {
         let events = [
-            makeEvent(type: "message.user", sequence: 1, payload: makePayload(turn: 1, content: "Hello")),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("Hello")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
             makeEvent(type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.result", sequence: 4, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups.count == 1)
         #expect(groups[0].turnNumber == 1)
-        #expect(groups[0].events.count == 3)
+        #expect(groups[0].events.count == 4)
+        #expect(groups[0].userMessagePreview == "Hello")
     }
 
-    @Test("Multiple turns create separate groups")
-    func multipleTurns() {
+    @Test("Multiple turns each contain user message + assistant events")
+    func multipleTurnsGroupCorrectly() {
         let events = [
-            makeEvent(type: "message.user", sequence: 1, payload: makePayload(turn: 1)),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("First")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(type: "message.user", sequence: 3, payload: makePayload(turn: 2)),
-            makeEvent(type: "tool.call", sequence: 4, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "message.user", sequence: 4, payload: ["content": AnyCodable("Second")]),
             makeEvent(type: "message.assistant", sequence: 5, payload: makePayload(turn: 2)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups.count == 2)
         #expect(groups[0].turnNumber == 1)
-        #expect(groups[0].events.count == 2)
+        #expect(groups[0].events.count == 3)
+        #expect(groups[0].userMessagePreview == "First")
         #expect(groups[1].turnNumber == 2)
-        #expect(groups[1].events.count == 3)
+        #expect(groups[1].events.count == 2)
+        #expect(groups[1].userMessagePreview == "Second")
     }
 
-    @Test("Session events without turn go to turn 0")
-    func sessionEventsInTurnZero() {
+    @Test("Session setup events before first turn go to turn 0")
+    func sessionSetupInTurnZero() {
         let events = [
-            makeEvent(type: "session.start", sequence: 1, payload: [:]),
-            makeEvent(type: "message.user", sequence: 2, payload: makePayload(turn: 1)),
+            makeEvent(type: "session.start", sequence: 1),
+            makeEvent(type: "worktree.acquired", sequence: 2),
+            makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Hello")]),
+            makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups.count == 2)
         #expect(groups[0].turnNumber == 0)
-        #expect(groups[0].events.count == 1)
+        #expect(groups[0].events.count == 2) // session.start + worktree.acquired
         #expect(groups[1].turnNumber == 1)
+        #expect(groups[1].events.count == 2) // message.user + message.assistant
+    }
+
+    @Test("Worktree/hook events between turns grouped with preceding turn")
+    func interTurnEventsInheritTurn() {
+        let events = [
+            makeEvent(type: "message.user", sequence: 1),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
+            makeEvent(type: "worktree.commit", sequence: 3), // no turn in payload
+            makeEvent(type: "message.user", sequence: 4),
+            makeEvent(type: "message.assistant", sequence: 5, payload: makePayload(turn: 2)),
+        ]
+        let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
+        #expect(groups.count == 2)
+        #expect(groups[0].events.count == 3) // user + assistant + worktree.commit
+        #expect(groups[1].events.count == 2) // user + assistant
     }
 
     @Test("Empty events returns empty result")
@@ -87,26 +109,15 @@ struct TurnGroupingTests {
         #expect(groups.isEmpty)
     }
 
-    @Test("Events within turn maintain original order")
+    @Test("Events within turn maintain sequence order")
     func preservesEventOrder() {
         let events = [
-            makeEvent(id: "a", type: "tool.call", sequence: 1, payload: makePayload(turn: 1)),
-            makeEvent(id: "b", type: "tool.result", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(id: "c", type: "message.assistant", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(id: "a", type: "message.user", sequence: 1),
+            makeEvent(id: "b", type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
+            makeEvent(id: "c", type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].events.map(\.id) == ["a", "b", "c"])
-    }
-
-    @Test("Groups sorted by turn number")
-    func sortedByTurnNumber() {
-        let events = [
-            makeEvent(type: "message.user", sequence: 5, payload: makePayload(turn: 3)),
-            makeEvent(type: "message.user", sequence: 1, payload: makePayload(turn: 1)),
-            makeEvent(type: "message.user", sequence: 3, payload: makePayload(turn: 2)),
-        ]
-        let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
-        #expect(groups.map(\.turnNumber) == [1, 2, 3])
     }
 
     // MARK: - User Message Preview
@@ -114,17 +125,19 @@ struct TurnGroupingTests {
     @Test("Extracts user message preview from content string")
     func userMessagePreview() {
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 1, content: "Refactor the authentication module")),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("Refactor the auth module")]),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
-        #expect(groups[0].userMessagePreview == "Refactor the authentication module")
+        #expect(groups[0].userMessagePreview == "Refactor the auth module")
     }
 
     @Test("Truncates long user message preview to ~80 chars")
     func userMessagePreviewTruncated() {
         let longMessage = String(repeating: "a", count: 100)
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 1, content: longMessage)),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable(longMessage)]),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         let preview = groups[0].userMessagePreview!
@@ -134,9 +147,9 @@ struct TurnGroupingTests {
 
     @Test("No user message in turn returns nil preview")
     func noUserMessagePreview() {
+        // Session setup events with no user message
         let events = [
-            makeEvent(type: "tool.call", payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.result", payload: makePayload(turn: 1)),
+            makeEvent(type: "session.start", sequence: 1),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].userMessagePreview == nil)
@@ -145,7 +158,8 @@ struct TurnGroupingTests {
     @Test("Multiline message uses first line only")
     func multilineMessagePreview() {
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 1, content: "First line\nSecond line\nThird line")),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("First line\nSecond line\nThird line")]),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].userMessagePreview == "First line")
@@ -154,7 +168,8 @@ struct TurnGroupingTests {
     @Test("Empty content returns nil preview")
     func emptyContentPreview() {
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 1, content: "")),
+            makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("")]),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].userMessagePreview == nil)
@@ -164,7 +179,6 @@ struct TurnGroupingTests {
 
     @Test("Matches analytics data by turn number")
     func matchesAnalyticsData() {
-        // Create events that produce analytics with turn 1 data
         let tokenRecord: [String: Any] = [
             "source": [
                 "rawInputTokens": 100,
@@ -188,7 +202,8 @@ struct TurnGroupingTests {
         let analytics = ConsolidatedAnalytics(from: analyticsEvents)
 
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 1)),
+            makeEvent(type: "message.user", sequence: 1),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: analytics, currentSessionId: "current")
         #expect(groups[0].analyticsData != nil)
@@ -198,7 +213,8 @@ struct TurnGroupingTests {
     @Test("Missing analytics data returns nil")
     func missingAnalyticsData() {
         let events = [
-            makeEvent(type: "message.user", payload: makePayload(turn: 3)),
+            makeEvent(type: "message.user", sequence: 1),
+            makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 3)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].analyticsData == nil)
@@ -209,45 +225,14 @@ struct TurnGroupingTests {
     @Test("Inherited events detected by session ID")
     func inheritedEventsDetected() {
         let events = [
-            makeEvent(sessionId: "parent", type: "message.user", payload: makePayload(turn: 1)),
-            makeEvent(sessionId: "parent", type: "message.assistant", payload: makePayload(turn: 1)),
-            makeEvent(sessionId: "current", type: "message.user", payload: makePayload(turn: 2)),
+            makeEvent(sessionId: "parent", type: "message.user", sequence: 1),
+            makeEvent(sessionId: "parent", type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
+            makeEvent(sessionId: "current", type: "message.user", sequence: 3),
+            makeEvent(sessionId: "current", type: "message.assistant", sequence: 4, payload: makePayload(turn: 2)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].isInherited == true)
         #expect(groups[1].isInherited == false)
-    }
-
-    @Test("Mixed session IDs in same turn — not inherited if any event is current")
-    func mixedSessionInTurn() {
-        // Edge case: a turn could theoretically have events from both sessions
-        // (e.g., if fork happened mid-turn). If any event belongs to current, it's not inherited.
-        let events = [
-            makeEvent(sessionId: "parent", type: "message.user", payload: makePayload(turn: 1)),
-            makeEvent(sessionId: "current", type: "message.assistant", payload: makePayload(turn: 1)),
-        ]
-        let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
-        #expect(groups[0].isInherited == false)
-    }
-
-    // MARK: - Turn Number Extraction
-
-    @Test("Extracts turn number from Int payload")
-    func turnNumberFromInt() {
-        let event = makeEvent(payload: ["turn": AnyCodable(5)])
-        #expect(TurnGrouping.turnNumber(for: event) == 5)
-    }
-
-    @Test("Extracts turn number from Double payload")
-    func turnNumberFromDouble() {
-        let event = makeEvent(payload: ["turn": AnyCodable(3.0)])
-        #expect(TurnGrouping.turnNumber(for: event) == 3)
-    }
-
-    @Test("Missing turn defaults to 0")
-    func missingTurnDefaultsToZero() {
-        let event = makeEvent(payload: [:])
-        #expect(TurnGrouping.turnNumber(for: event) == 0)
     }
 
     // MARK: - Scale
@@ -259,7 +244,7 @@ struct TurnGroupingTests {
             events.append(makeEvent(
                 type: "message.user",
                 sequence: turn * 2 - 1,
-                payload: makePayload(turn: turn, content: "Turn \(turn)")
+                payload: ["content": AnyCodable("Turn \(turn)")]
             ))
             events.append(makeEvent(
                 type: "message.assistant",
@@ -271,5 +256,48 @@ struct TurnGroupingTests {
         #expect(groups.count == 50)
         #expect(groups.first?.turnNumber == 1)
         #expect(groups.last?.turnNumber == 50)
+    }
+
+    // MARK: - Realistic Scenario
+
+    @Test("Full session with setup, multiple turns, hooks, and worktree events")
+    func realisticSession() {
+        let events = [
+            // Session setup
+            makeEvent(type: "session.start", sequence: 1),
+            makeEvent(type: "worktree.acquired", sequence: 2),
+            // Turn 1
+            makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Create test files")]),
+            makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.call", sequence: 5, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.result", sequence: 6, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.call", sequence: 7, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.result", sequence: 8, payload: makePayload(turn: 1)),
+            // Hook between turns (no turn in payload)
+            makeEvent(type: "hook.result", sequence: 9),
+            makeEvent(type: "worktree.commit", sequence: 10),
+            // Turn 2
+            makeEvent(type: "message.user", sequence: 11, payload: ["content": AnyCodable("Now edit them")]),
+            makeEvent(type: "message.assistant", sequence: 12, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.call", sequence: 13, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.result", sequence: 14, payload: makePayload(turn: 2)),
+        ]
+        let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
+
+        #expect(groups.count == 3) // turn 0 (setup), turn 1, turn 2
+
+        // Turn 0: session.start + worktree.acquired
+        #expect(groups[0].turnNumber == 0)
+        #expect(groups[0].events.count == 2)
+
+        // Turn 1: user + assistant + 2 tool calls + 2 tool results + hook + worktree.commit
+        #expect(groups[1].turnNumber == 1)
+        #expect(groups[1].events.count == 8)
+        #expect(groups[1].userMessagePreview == "Create test files")
+
+        // Turn 2: user + assistant + tool call + tool result
+        #expect(groups[2].turnNumber == 2)
+        #expect(groups[2].events.count == 4)
+        #expect(groups[2].userMessagePreview == "Now edit them")
     }
 }
