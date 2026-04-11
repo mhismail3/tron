@@ -271,13 +271,18 @@ struct CachedSessionSidebarRow: View {
                 ProcessingBar()
             }
 
-            Text(session.displayDirectory)
-                .font(TronTypography.mono(size: TronTypography.sizeXS))
-                .foregroundStyle(.tronTextMuted.opacity(0.5))
-                .lineLimit(1)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
+            HStack {
+                Text(session.displayDirectory)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+
+                Spacer()
+
+                Text(session.shortModel)
+            }
+            .font(TronTypography.mono(size: TronTypography.sizeXS))
+            .foregroundStyle(.tronTextMuted.opacity(0.5))
+            .padding(.top, 2)
         }
         .padding(.top, 10)
         .padding(.bottom, 6)
