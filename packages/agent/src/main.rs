@@ -184,7 +184,6 @@ fn init_directories() {
         system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS"),
     );
     for subdir in &[
-        dirs::SESSIONS,
         dirs::KNOWLEDGE,
         dirs::REPORTS,
         dirs::CRON,
@@ -195,7 +194,10 @@ fn init_directories() {
     }
     let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::VOICE_NOTES));
     let _ = std::fs::create_dir_all(tron_home.join(dirs::SKILLS));
-    let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::RULES));
+    // Memory workspace: rules (SYSTEM.md, core memories) + sessions (journals)
+    let memory = tron_home.join(dirs::WORKSPACE).join(dirs::MEMORY);
+    let _ = std::fs::create_dir_all(memory.join(dirs::RULES));
+    let _ = std::fs::create_dir_all(memory.join(dirs::SESSIONS));
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.

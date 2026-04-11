@@ -95,7 +95,8 @@ confirm_action() {
 
 ensure_tron_home() {
     mkdir -p "$TRON_HOME"/system/{database,deployment}
-    mkdir -p "$TRON_HOME"/workspace/{sessions,knowledge,automations,scratch,rules}
+    mkdir -p "$TRON_HOME"/workspace/{knowledge,automations,scratch}
+    mkdir -p "$TRON_HOME"/workspace/memory/{rules,sessions}
     mkdir -p "$TRON_HOME"/skills
     mkdir -p "$TRON_HOME/workspace/voice notes"
 }
