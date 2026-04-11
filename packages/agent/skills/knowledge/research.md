@@ -2,7 +2,7 @@
 
 Autonomous, multi-round investigation with rigorous source evaluation. Use this for broad research requests — not for quick lookups or single-URL extraction (use `ingest.md` for those).
 
-Read WIKI_SCHEMA before starting. Paths are defined in the skill's Paths table.
+Read WIKI_RULES before starting. Paths are defined in the skill's Paths table.
 
 ---
 
@@ -111,23 +111,25 @@ How to apply these findings.
 [2] Author, "Article Title" — URL (secondary, 2024)
 ```
 
-### 2. Wiki pages
+### 2. Topic notes
 
-Extract key concepts into WIKI_PAGES. Link them back to the research report with `[[topic-slug-research]]`. Follow the wiki page format from WIKI_SCHEMA.
+Extract key concepts into WIKI_TOPICS. Link them back to the research report with `[[topic-slug-research]]`. Follow the topic note format from WIKI_RULES.
+
+Apply the same topic routing logic as ingest.md Extract mode: for each key concept, check if it adds to existing topics or warrants new ones. Format as concise statements citing sources. Liberally create new topics and link to existing ones.
 
 ### 3. Conflicts
 
-Where sources disagree, flag and preserve both positions per WIKI_SCHEMA conflict conventions.
+Where sources disagree, flag and preserve both positions per WIKI_RULES conflict conventions.
 
 ### 4. Epilogue
 
-Update WIKI_INDEX, append to WIKI_LOG, git commit. Log operation type: `research`.
+Update WIKI_INDEX, append to WIKI_LOG, git commit with format `knowledge: research — {brief description}`. Log operation type: `research`.
 
 ### 5. Completion report
 
 1. Research report path
 2. Sources consulted (count and list)
-3. Wiki pages created/updated
+3. Topic notes created/updated
 4. Key findings summary
 5. Open questions / gaps
 

@@ -60,20 +60,22 @@ pub mod dirs {
     pub const SCRATCH: &str = "scratch";
     /// Saved screenshots from computer-use tool.
     pub const SCREENSHOTS: &str = "screenshots";
-    /// Global rules files (SYSTEM.md, CLAUDE.md, AGENTS.md).
+    /// Rules and core memories (SYSTEM.md, CLAUDE.md, user preferences).
     pub const RULES: &str = "rules";
+    /// Internal agent memory (rules/core memories, session journals).
+    pub const MEMORY: &str = "memory";
 
     // ── Under workspace/ ──
 
     /// Voice notes storage.
     pub const VOICE_NOTES: &str = "voice notes";
 
-    /// Relative agent dir for rules discovery: `.tron/<WORKSPACE>/rules`.
+    /// Relative agent dir for rules discovery: `.tron/<WORKSPACE>/<MEMORY>/rules`.
     ///
     /// This is a composed constant used in `rules_discovery.rs` where a
     /// `const &str` is required. A test verifies it stays in sync with
-    /// [`WORKSPACE`] and [`RULES`].
-    pub const TRON_RULES_RELATIVE: &str = ".tron/workspace/rules";
+    /// [`WORKSPACE`], [`MEMORY`], and [`RULES`].
+    pub const TRON_RULES_RELATIVE: &str = ".tron/workspace/memory/rules";
 }
 
 /// Well-known file names under `~/.tron/`.
@@ -183,11 +185,6 @@ pub fn transcription_hf_cache_dir() -> PathBuf {
 
 // ── Workspace subdirectory helpers ─────────────────────────────────────
 
-/// `~/.tron/<workspace>/sessions/`
-pub fn sessions_dir() -> PathBuf {
-    workspace_dir().join(dirs::SESSIONS)
-}
-
 /// `~/.tron/<workspace>/knowledge/`
 pub fn knowledge_dir() -> PathBuf {
     workspace_dir().join(dirs::KNOWLEDGE)
@@ -213,9 +210,13 @@ pub fn screenshots_dir() -> PathBuf {
     workspace_dir().join(dirs::SCREENSHOTS)
 }
 
-/// `~/.tron/<workspace>/rules/`
+/// `~/.tron/<workspace>/memory/rules/`
+///
+/// Global rules (SYSTEM.md, CLAUDE.md) and core memories (user preferences,
+/// agent identity) live here. Formerly at `workspace/rules/`, consolidated
+/// under `workspace/memory/rules/` so all persistent agent state is colocated.
 pub fn rules_dir() -> PathBuf {
-    workspace_dir().join(dirs::RULES)
+    memory_dir().join(dirs::RULES)
 }
 
 // ── Voice notes ──────────────────────────────────────────────────────
@@ -223,6 +224,26 @@ pub fn rules_dir() -> PathBuf {
 /// `~/.tron/workspace/voice notes/`
 pub fn voice_notes_dir() -> PathBuf {
     workspace_dir().join(dirs::VOICE_NOTES)
+}
+
+// ── Memory subdirectory helpers ───────────────────────────────────────
+
+/// `~/.tron/<workspace>/memory/`
+pub fn memory_dir() -> PathBuf {
+    workspace_dir().join(dirs::MEMORY)
+}
+
+/// `~/.tron/<workspace>/memory/sessions/`
+pub fn memory_sessions_dir() -> PathBuf {
+    memory_dir().join(dirs::SESSIONS)
+}
+
+/// `~/.tron/<workspace>/memory/rules/`
+///
+/// Alias for [`rules_dir()`] — both return the same path since rules
+/// and core memories are colocated under `workspace/memory/rules/`.
+pub fn memory_rules_dir() -> PathBuf {
+    rules_dir()
 }
 
 // ── Composite file path helpers ────────────────────────────────────────
@@ -247,7 +268,7 @@ pub fn automations_path() -> PathBuf {
     cron_dir().join(files::AUTOMATIONS_JSON)
 }
 
-/// `~/.tron/<workspace>/rules/SYSTEM.md`
+/// `~/.tron/<workspace>/memory/rules/SYSTEM.md`
 pub fn global_system_prompt_path() -> PathBuf {
     rules_dir().join(files::SYSTEM_MD)
 }
@@ -310,15 +331,14 @@ mod tests {
     // ── Workspace subdirs ──────────────────────────────────────────
 
     #[test]
-    fn sessions_dir_chains_correctly() {
-        let p = sessions_dir();
-        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::SESSIONS)));
-    }
-
-    #[test]
     fn rules_dir_chains_correctly() {
         let p = rules_dir();
-        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::RULES)));
+        assert!(p.ends_with(format!(
+            "{}/{}/{}",
+            dirs::WORKSPACE,
+            dirs::MEMORY,
+            dirs::RULES
+        )));
     }
 
     #[test]
@@ -344,7 +364,13 @@ mod tests {
     #[test]
     fn global_system_prompt_path_correct() {
         let p = global_system_prompt_path();
-        assert!(p.ends_with(format!("{}/{}/{}", dirs::WORKSPACE, dirs::RULES, files::SYSTEM_MD)));
+        assert!(p.ends_with(format!(
+            "{}/{}/{}/{}",
+            dirs::WORKSPACE,
+            dirs::MEMORY,
+            dirs::RULES,
+            files::SYSTEM_MD
+        )));
     }
 
     #[test]
@@ -417,14 +443,44 @@ mod tests {
         )));
     }
 
+    // ── Memory subdirs ──────────────────────────────────────────────
+
+    #[test]
+    fn memory_dir_under_workspace() {
+        let p = memory_dir();
+        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::MEMORY)));
+    }
+
+    #[test]
+    fn memory_sessions_dir_chains_correctly() {
+        let p = memory_sessions_dir();
+        assert!(p.ends_with(format!(
+            "{}/{}/{}",
+            dirs::WORKSPACE,
+            dirs::MEMORY,
+            dirs::SESSIONS
+        )));
+    }
+
+    #[test]
+    fn memory_rules_dir_chains_correctly() {
+        let p = memory_rules_dir();
+        assert!(p.ends_with(format!(
+            "{}/{}/{}",
+            dirs::WORKSPACE,
+            dirs::MEMORY,
+            dirs::RULES
+        )));
+    }
+
     // ── Consistency guards ─────────────────────────────────────────
 
     #[test]
     fn tron_rules_relative_matches_constants() {
-        let expected = format!(".tron/{}/{}", dirs::WORKSPACE, dirs::RULES);
+        let expected = format!(".tron/{}/{}/{}", dirs::WORKSPACE, dirs::MEMORY, dirs::RULES);
         assert_eq!(
             dirs::TRON_RULES_RELATIVE, expected,
-            "TRON_RULES_RELATIVE is out of sync with WORKSPACE/RULES constants"
+            "TRON_RULES_RELATIVE is out of sync with WORKSPACE/MEMORY/RULES constants"
         );
     }
 }

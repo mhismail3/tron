@@ -31,6 +31,10 @@ final class SettingsState {
     var skillsCompactionPolicy: String = "clearAll"
     var skillsShowIndex: String = "always"
 
+    // MARK: - Memory
+
+    var autoRetainInterval: Int = 10
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -122,5 +126,6 @@ final class SettingsState {
         chatWorkspace = settings.chatWorkingDirectory ?? ""
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
+        autoRetainInterval = settings.autoRetainInterval
     }
 }

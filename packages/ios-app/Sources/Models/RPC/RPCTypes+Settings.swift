@@ -23,13 +23,19 @@ struct ServerSettings: Decodable {
     let skillsCompactionPolicy: String
     let skillsShowIndex: String
     let queueDrainMode: String
+    let autoRetainInterval: Int
+    let retainModel: String
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks, skills
+        case models, server, context, session, hooks, skills, memory
     }
 
     private enum SkillsKeys: String, CodingKey {
         case compactionPolicy, showIndex
+    }
+
+    private enum MemoryKeys: String, CodingKey {
+        case autoRetainInterval, retainModel
     }
 
     private enum HooksKeys: String, CodingKey {
@@ -127,6 +133,15 @@ struct ServerSettings: Decodable {
         } else {
             skillsCompactionPolicy = "clearAll"
             skillsShowIndex = "always"
+        }
+
+        // memory.*
+        if let memoryContainer = try? container.nestedContainer(keyedBy: MemoryKeys.self, forKey: .memory) {
+            autoRetainInterval = (try? memoryContainer.decodeIfPresent(Int.self, forKey: .autoRetainInterval)) ?? 10
+            retainModel = (try? memoryContainer.decodeIfPresent(String.self, forKey: .retainModel)) ?? "claude-sonnet-4-6"
+        } else {
+            autoRetainInterval = 10
+            retainModel = "claude-sonnet-4-6"
         }
     }
 
@@ -233,7 +248,13 @@ struct ServerSettingsUpdate: Encodable {
         var showIndex: String?
     }
 
+    struct MemoryUpdate: Encodable {
+        var autoRetainInterval: Int?
+        var retainModel: String?
+    }
+
     var skills: SkillsUpdate?
+    var memory: MemoryUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

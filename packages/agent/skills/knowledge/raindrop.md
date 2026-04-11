@@ -1,8 +1,8 @@
 # Raindrop.io Integration
 
-Process bookmarks from Raindrop.io into the wiki. Raindrop is the **source backbone** — the canonical reference library that wiki pages link back to.
+Process bookmarks from Raindrop.io into the knowledge base. Raindrop is the **source backbone** — the canonical reference library that topic notes link back to.
 
-Read WIKI_SCHEMA before starting. Paths are defined in the skill's Paths table.
+Read WIKI_RULES before starting. Paths are defined in the skill's Paths table.
 
 ---
 
@@ -11,7 +11,7 @@ Read WIKI_SCHEMA before starting. Paths are defined in the skill's Paths table.
 - **Account:** User's existing Raindrop.io account
 - **Auth:** Test token from Raindrop.io → Settings → Integrations → "For Developers"
 - **Token storage:** `~/.tron/skills/vault/scripts/vault.sh set raindrop-api --type api_key --desc "Raindrop.io API test token" --tags "raindrop,knowledge,wiki" --field token=<test-token>`
-- **Monitored collection:** Unsorted (collection ID `0`)
+- **Monitored collection:** Any collection (resolved dynamically)
 - **API base:** `https://api.raindrop.io/rest/v1`
 
 ## Credentials
@@ -29,15 +29,22 @@ If not found, tell the user:
 
 ## Workflow
 
-### Step 1: Fetch unsorted bookmarks
+### Step 1: Resolve collection and fetch bookmarks
+
+**Collection selection:**
+1. If the user specifies a collection name (e.g., 'raindrop AI Research'), resolve the collection ID via the Raindrop API: `GET https://api.raindrop.io/rest/v1/collections` with Bearer token, find the collection by title.
+2. If the user says 'raindrop' with no collection specified, use AskUserQuestion to ask: 'Which Raindrop collection should I process? (e.g., Unsorted, AI Research, or a specific collection name)'
+3. Support processing from any collection, not just Unsorted.
+4. Track state per collection: `AUTOMATIONS/raindrop-ingest/state/{collection-slug}-last_seen.json`
 
 ```bash
+# Resolve collection ID (0 = Unsorted, or look up by name)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.raindrop.io/rest/v1/raindrops/0?perpage=25&sort=-created" \
+  "https://api.raindrop.io/rest/v1/raindrops/$COLLECTION_ID?perpage=25&sort=-created" \
   | jq '.items[] | select(.tags | index("wiki-ingested") | not) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
 ```
 
-Fetches the 25 most recent unsorted bookmarks not yet ingested (no `wiki-ingested` tag).
+Fetches the 25 most recent bookmarks from the selected collection not yet ingested (no `wiki-ingested` tag).
 
 ### Step 2: Process each bookmark (max 10 per run)
 
@@ -48,8 +55,8 @@ For each unprocessed bookmark:
 2. **Deep extraction:** Follow `ingest.md` Extract mode:
    - Create source note in WIKI_SOURCES with `raindrop_id` and `raindrop_collection` in frontmatter
    - Transfer Raindrop tags to note's `tags` field
-   - Create/update wiki pages in WIKI_PAGES for key concepts
-   - Cross-link selectively with existing wiki pages
+   - Create/update topic notes in WIKI_TOPICS for key concepts
+   - Cross-link selectively with existing topic notes
 
 3. **Tag in Raindrop:** Mark as processed. Preserve existing tags, add `wiki-ingested`:
 
@@ -68,7 +75,7 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
 
 ### Step 3: Update state
 
-Write to `AUTOMATIONS/raindrop-ingest/state/last_seen.json`:
+Write to `AUTOMATIONS/raindrop-ingest/state/{collection-slug}-last_seen.json`:
 
 ```json
 {
@@ -86,12 +93,12 @@ Update WIKI_INDEX, append to WIKI_LOG:
 
 ```
 2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345678
-2026-04-07T16:00:00Z | raindrop | wiki | concept-slug | From raindrop ingest
+2026-04-07T16:00:00Z | raindrop | topic | concept-slug | From raindrop ingest
 ```
 
 Git commit:
 ```bash
-cd WIKI_ROOT && git add -A && git commit -m "wiki: raindrop — processed N bookmarks"
+cd WIKI_ROOT && git add -A && git commit -m "knowledge: raindrop — processed N bookmarks"
 ```
 
 ### Step 5: Report
@@ -107,7 +114,7 @@ cd WIKI_ROOT && git add -A && git commit -m "wiki: raindrop — processed N book
 
 A cron job in `AUTOMATIONS/automations.json` runs this workflow every 4 hours. The AgentTurn prompt instructs the agent to:
 
-1. Read WIKI_SCHEMA
+1. Read WIKI_RULES
 2. Read `~/.tron/skills/knowledge/raindrop.md` (this file)
 3. Execute the workflow above
 4. Write a summary to `AUTOMATIONS/raindrop-ingest/output/YYYY-MM-DD_HH-MM-SS.md`
@@ -126,7 +133,7 @@ This two-level indirection (cron → skill file → schema) means the cron promp
 | `/rest/v1/collections` | GET | List all collections |
 | `/rest/v1/tags/0` | GET | List all tags |
 
-Collection `0` = Unsorted. All requests need `Authorization: Bearer <token>` header.
+Collection `0` = Unsorted. Use `/rest/v1/collections` to resolve collection names to IDs. All requests need `Authorization: Bearer <token>` header.
 
 ---
 

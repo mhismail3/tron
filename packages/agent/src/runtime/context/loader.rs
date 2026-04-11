@@ -296,13 +296,13 @@ impl ContextLoader {
 /// File names to search for global rules (in priority order).
 const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
 
-/// Load global rules from `~/.tron/workspace/rules/` directory.
+/// Load global rules from `~/.tron/workspace/memory/rules/` directory.
 ///
 /// Searches for CLAUDE.md, claude.md, AGENTS.md, agents.md in priority order.
 /// Returns `None` if no file is found or all files are empty.
 pub fn load_global_rules(home_dir: &Path) -> Option<String> {
     use crate::core::paths::dirs;
-    let tron_dir = home_dir.join(".tron").join(dirs::WORKSPACE).join(dirs::RULES);
+    let tron_dir = home_dir.join(".tron").join(dirs::WORKSPACE).join(dirs::MEMORY).join(dirs::RULES);
     for name in GLOBAL_RULE_NAMES {
         let path = tron_dir.join(name);
         if path.is_file()
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn load_global_rules_from_tron_dir() {
         let home = create_temp_project();
-        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "# Global Rules").unwrap();
 
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn load_global_rules_skips_empty_file() {
         let home = create_temp_project();
-        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "   \n  ").unwrap();
 
@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn load_global_rules_priority_order() {
         let home = create_temp_project();
-        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "claude rules").unwrap();
         fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn load_global_rules_falls_back_to_agents() {
         let home = create_temp_project();
-        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let tron_dir = home.join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
 

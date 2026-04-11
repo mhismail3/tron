@@ -330,7 +330,7 @@ fn try_add_file(
 /// - Agent dir files: parent of the agent dir.
 ///   e.g. `packages/foo/.claude/CLAUDE.md` → `packages/foo`
 ///   e.g. `.claude/CLAUDE.md` → `""`
-///   e.g. `.tron/workspace/rules/CLAUDE.md` → `""` (multi-segment agent dir)
+///   e.g. `.tron/workspace/memory/rules/CLAUDE.md` → `""` (multi-segment agent dir)
 /// - Standalone files: parent directory.
 ///   e.g. `packages/foo/CLAUDE.md` → `packages/foo`
 ///   e.g. `CLAUDE.md` → `""`
@@ -346,9 +346,9 @@ fn compute_scope_dir(relative_path: &str, is_standalone: bool, agent_dir: Option
         // e.g. "packages/foo/.claude/CLAUDE.md" with agent_dir=".claude"
         //   → strip "/CLAUDE.md" → "packages/foo/.claude"
         //   → strip "/.claude" → "packages/foo"
-        // e.g. ".tron/workspace/rules/CLAUDE.md" with agent_dir=".tron/workspace/rules"
-        //   → strip "/CLAUDE.md" → ".tron/workspace/rules"
-        //   → strip "/.tron/workspace/rules" or match exactly → ""
+        // e.g. ".tron/workspace/memory/rules/CLAUDE.md" with agent_dir=".tron/workspace/memory/rules"
+        //   → strip "/CLAUDE.md" → ".tron/workspace/memory/rules"
+        //   → strip "/.tron/workspace/memory/rules" or match exactly → ""
         let without_file = match relative_path.rfind('/') {
             Some(idx) => &relative_path[..idx],
             None => return String::new(),
@@ -441,11 +441,11 @@ mod tests {
     #[test]
     fn discovers_tron_rules_dir_at_project_root() {
         let tmp = setup();
-        write_file(tmp.path(), ".tron/workspace/rules/CLAUDE.md", "# Tron rules");
+        write_file(tmp.path(), ".tron/workspace/memory/rules/CLAUDE.md", "# Tron rules");
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].relative_path, ".tron/workspace/rules/CLAUDE.md");
+        assert_eq!(results[0].relative_path, ".tron/workspace/memory/rules/CLAUDE.md");
     }
 
     #[test]
@@ -462,13 +462,13 @@ mod tests {
     fn case_insensitive_filenames() {
         let tmp = setup();
         write_file(tmp.path(), ".claude/claude.md", "# lowercase claude");
-        write_file(tmp.path(), ".tron/workspace/rules/agents.md", "# lowercase agents");
+        write_file(tmp.path(), ".tron/workspace/memory/rules/agents.md", "# lowercase agents");
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 2);
         let mut paths: Vec<_> = results.iter().map(|r| r.relative_path.as_str()).collect();
         paths.sort_unstable();
-        assert_eq!(paths, vec![".claude/claude.md", ".tron/workspace/rules/agents.md"]);
+        assert_eq!(paths, vec![".claude/claude.md", ".tron/workspace/memory/rules/agents.md"]);
     }
 
     #[test]
@@ -496,7 +496,7 @@ mod tests {
             "packages/agent/.claude/CLAUDE.md",
             "# Deep rule",
         );
-        write_file(tmp.path(), "src/lib/.tron/workspace/rules/AGENTS.md", "# Nested rule");
+        write_file(tmp.path(), "src/lib/.tron/workspace/memory/rules/AGENTS.md", "# Nested rule");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -506,7 +506,7 @@ mod tests {
             paths,
             vec![
                 "packages/agent/.claude/CLAUDE.md",
-                "src/lib/.tron/workspace/rules/AGENTS.md"
+                "src/lib/.tron/workspace/memory/rules/AGENTS.md"
             ]
         );
     }
@@ -752,7 +752,7 @@ mod tests {
     fn discovers_files_across_multiple_agent_dirs() {
         let tmp = setup();
         write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Claude");
-        write_file(tmp.path(), "packages/foo/.tron/workspace/rules/AGENTS.md", "# Tron Agents");
+        write_file(tmp.path(), "packages/foo/.tron/workspace/memory/rules/AGENTS.md", "# Tron Agents");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn scope_dir_deeply_nested_tron_rules() {
         assert_eq!(
-            compute_scope_dir("a/b/c/.tron/workspace/rules/AGENTS.md", false, Some(".tron/workspace/rules")),
+            compute_scope_dir("a/b/c/.tron/workspace/memory/rules/AGENTS.md", false, Some(".tron/workspace/memory/rules")),
             "a/b/c"
         );
     }
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn scope_dir_root_tron_rules() {
         assert_eq!(
-            compute_scope_dir(".tron/workspace/rules/CLAUDE.md", false, Some(".tron/workspace/rules")),
+            compute_scope_dir(".tron/workspace/memory/rules/CLAUDE.md", false, Some(".tron/workspace/memory/rules")),
             ""
         );
     }

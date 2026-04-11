@@ -24,7 +24,8 @@ struct ServerSettingsTests {
                 "queueDrainMode": "parallel"
             },
             "hooks": { "llmModel": "claude-opus-4-6", "builtinHooks": [{"id":"h1","enabled":true}] },
-            "skills": { "compactionPolicy": "preserveAll", "showIndex": "never" }
+            "skills": { "compactionPolicy": "preserveAll", "showIndex": "never" },
+            "memory": { "autoRetainInterval": 25, "retainModel": "claude-opus-4-6" }
         }
         """
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
@@ -45,6 +46,8 @@ struct ServerSettingsTests {
         #expect(settings.builtinHooks.count == 1)
         #expect(settings.skillsCompactionPolicy == "preserveAll")
         #expect(settings.skillsShowIndex == "never")
+        #expect(settings.autoRetainInterval == 25)
+        #expect(settings.retainModel == "claude-opus-4-6")
     }
 
     // MARK: - All Defaults
@@ -69,6 +72,8 @@ struct ServerSettingsTests {
         #expect(settings.builtinHooks.isEmpty)
         #expect(settings.skillsCompactionPolicy == "clearAll")
         #expect(settings.skillsShowIndex == "always")
+        #expect(settings.autoRetainInterval == 10)
+        #expect(settings.retainModel == "claude-sonnet-4-6")
     }
 
     // MARK: - Partial Nesting
@@ -139,6 +144,31 @@ struct ServerSettingsTests {
         #expect(preset.label == "Local Dev")
         #expect(preset.host == "192.168.1.100")
         #expect(preset.port == 9090)
+    }
+
+    // MARK: - Memory Settings
+
+    @Test("decode memory settings from JSON")
+    func memorySettingsDecode() throws {
+        let json = #"{"memory": {"autoRetainInterval": 20, "retainModel": "claude-haiku-4-5-20251001"}}"#
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        #expect(settings.autoRetainInterval == 20)
+        #expect(settings.retainModel == "claude-haiku-4-5-20251001")
+    }
+
+    @Test("memory settings defaults when key missing")
+    func memorySettingsDefaults() throws {
+        let json = "{}"
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        #expect(settings.autoRetainInterval == 10)
+        #expect(settings.retainModel == "claude-sonnet-4-6")
+    }
+
+    @Test("memory settings zero disables auto-retain")
+    func memorySettingsZeroDisables() throws {
+        let json = #"{"memory": {"autoRetainInterval": 0}}"#
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        #expect(settings.autoRetainInterval == 0)
     }
 
     // MARK: - ServerSettingsUpdate Encode

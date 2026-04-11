@@ -112,9 +112,6 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
     if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
         settings.server.heartbeat_interval_ms = v;
     }
-    if let Some(v) = read_env_string("TRON_SESSIONS_DIR") {
-        settings.server.sessions_dir = v;
-    }
     if let Some(v) = read_env_string("TRON_MEMORY_DB") {
         settings.server.memory_db_path = v;
     }

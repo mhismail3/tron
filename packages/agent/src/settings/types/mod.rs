@@ -8,6 +8,7 @@
 mod api;
 mod context;
 mod guardrails;
+mod memory;
 mod server;
 mod skills;
 mod tools;
@@ -16,6 +17,7 @@ mod ui;
 pub use api::*;
 pub use context::*;
 pub use guardrails::*;
+pub use memory::*;
 pub use server::*;
 pub use skills::*;
 pub use tools::*;
@@ -71,6 +73,8 @@ pub struct TronSettings {
     pub ui: UiSettings,
     /// Skill system settings (compaction policy, index visibility).
     pub skills: SkillsSettings,
+    /// Memory retention settings (auto-retain interval, model).
+    pub memory: MemorySettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
@@ -96,6 +100,7 @@ impl Default for TronSettings {
             session: SessionSettings::default(),
             ui: UiSettings::default(),
             skills: SkillsSettings::default(),
+            memory: MemorySettings::default(),
             guardrails: None,
             mcp: crate::mcp::types::McpSettings::default(),
         }

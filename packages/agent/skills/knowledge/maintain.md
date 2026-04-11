@@ -1,8 +1,8 @@
-# Wiki Maintenance Workflow
+# Knowledge Maintenance Workflow
 
 Health-checking, self-healing, and organization. Running maintenance is always safe and idempotent.
 
-Read WIKI_SCHEMA before starting. Paths are defined in the skill's Paths table.
+Read WIKI_RULES before starting. Paths are defined in the skill's Paths table.
 
 ---
 
@@ -25,15 +25,17 @@ Run all checks in order. Collect findings into a report. Apply auto-fixes per th
 
 ### Check 1: Schema Compliance
 
-Scan all `.md` files in WIKI_SOURCES and WIKI_PAGES (skip SCHEMA.md, index.md, log.md).
+Scan all `.md` files in WIKI_SOURCES, WIKI_TOPICS, and WIKI_ARGUMENTS (skip rules.md, index.md, log.md).
 
 For each note:
 - Has YAML frontmatter?
-- Has `type` field? (auto-fix: infer from directory — `sources/` → `source`, `wiki/` → `wiki`)
+- Has `type` field? (auto-fix: infer from directory — `sources/` → `source`, `topics/` → `topic`, `arguments/` → `argument`)
 - Has `created`? (auto-fix: use file modification time)
 - Has `updated`? (auto-fix: use file modification time)
 - Has `tags`? (report if missing, don't auto-fix — tags need thought)
 - Filename matches naming conventions for its type?
+- Arguments should reference at least 2 topics in their `topics` frontmatter (warning if not)
+- Arguments should have a `## Thesis` section (warning if missing)
 
 ### Check 2: Index Rebuild
 
@@ -41,19 +43,21 @@ Compare WIKI_INDEX against actual files on disk.
 
 ```
 Find *.md in WIKI_SOURCES
-Find *.md in WIKI_PAGES
+Find *.md in WIKI_TOPICS
+Find *.md in WIKI_ARGUMENTS
 ```
 
 - Files on disk not in index → **add** (read frontmatter for one-line summary)
 - Index entries for deleted files → **remove**
 - If WIKI_INDEX missing → **rebuild from scratch**
 - Bump `updated`, recalculate `page_count`
+- Index rebuild must include Arguments section with correct count
 
 Always auto-fix — the index is a cache.
 
 ### Check 3: Orphan Detection
 
-For each note in the index, search for `[[note-slug]]` across all wiki files (excluding index.md).
+For each note in the index, search for `[[note-slug]]` across all knowledge files (excluding index.md).
 
 Notes with zero inbound wikilinks are orphans.
 
@@ -66,19 +70,19 @@ Search all files for `[[wikilink]]` patterns:
 Search for "\[\[[^\]]+\]\]" in WIKI_ROOT
 ```
 
-For each unique wikilink target, check if a file with that slug exists in WIKI_SOURCES or WIKI_PAGES.
+For each unique wikilink target, check if a file with that slug exists in WIKI_SOURCES, WIKI_TOPICS, or WIKI_ARGUMENTS.
 
 Report: list dangling references with the file that contains them.
 
 ### Check 5: Contradiction Scan
 
-Read wiki notes that share tags or wikilinks. Flag cases where notes make opposing claims without acknowledging each other.
+Read topic notes that share tags or wikilinks. Flag cases where notes make opposing claims without acknowledging each other.
 
 Report only — contradictions are valuable signals, not errors.
 
 ### Check 6: Staleness
 
-Find wiki notes where `updated` is more than 90 days old and the topic is likely evolving (technology, current events, active research areas).
+Find topic notes where `updated` is more than 90 days old and the topic is likely evolving (technology, current events, active research areas).
 
 Report: list stale notes with last updated date. Suggest searching for recent developments.
 
@@ -90,7 +94,7 @@ Report: list stale notes with last updated date. Suggest searching for recent de
 ### Lint Report
 
 ```markdown
-# Wiki Lint Report — YYYY-MM-DD
+# Knowledge Lint Report — YYYY-MM-DD
 
 ## Schema Compliance
 - N notes checked, M issues found
@@ -137,7 +141,7 @@ Same as move — rename the file, then update all `[[old-slug]]` references to `
 
 ### Split a note
 
-If a wiki note covers multiple distinct concepts:
+If a topic note covers multiple distinct concepts:
 1. Read the note
 2. Create new notes for each concept
 3. Update the original to reference the new notes
@@ -153,7 +157,7 @@ If a wiki note covers multiple distinct concepts:
 
 ### Add/update tags
 
-Use Edit to modify frontmatter. Keep tags consistent across the wiki — check what tags already exist before inventing new ones.
+Use Edit to modify frontmatter. Keep tags consistent across the knowledge base — check what tags already exist before inventing new ones.
 
 ---
 
@@ -162,7 +166,7 @@ Use Edit to modify frontmatter. Keep tags consistent across the wiki — check w
 After any maintenance operation, commit:
 
 ```bash
-cd WIKI_ROOT && git add -A && git commit -m "wiki: maintain — {description}"
+cd WIKI_ROOT && git add -A && git commit -m "knowledge: maintain — {description}"
 ```
 
 ## Gotchas

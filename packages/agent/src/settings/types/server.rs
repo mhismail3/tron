@@ -15,8 +15,6 @@ pub struct ServerSettings {
     pub heartbeat_interval_ms: u64,
     /// Maximum number of concurrent sessions.
     pub max_concurrent_sessions: usize,
-    /// Directory for session data (relative to `~/.tron`).
-    pub sessions_dir: String,
     /// Path to the memory database (relative to `~/.tron`).
     pub memory_db_path: String,
     /// Default LLM model identifier.
@@ -38,7 +36,6 @@ impl Default for ServerSettings {
         Self {
             heartbeat_interval_ms: 30_000,
             max_concurrent_sessions: 10,
-            sessions_dir: "sessions".to_string(),
             memory_db_path: "memory.db".to_string(),
             default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),

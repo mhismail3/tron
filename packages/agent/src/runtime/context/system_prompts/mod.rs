@@ -8,7 +8,7 @@
 //! Users can optionally override at two levels:
 //!
 //! 1. **Project**: `.tron/SYSTEM.md` in the working directory
-//! 2. **Global**: `~/.tron/workspace/rules/SYSTEM.md` (manually created)
+//! 2. **Global**: `~/.tron/workspace/memory/rules/SYSTEM.md` (manually created)
 //!
 //! Precedence: project override > global override > embedded `TRON_CORE_PROMPT`.
 //!
@@ -96,43 +96,62 @@ Return a single JSON object:
 
 /// System prompt for the memory retain summarizer subagent.
 ///
-/// Used by the `memory.retain` RPC handler to produce structured markdown
-/// summaries optimized for future recall, not context reduction.
-pub const MEMORY_RETAIN_SUMMARIZER_PROMPT: &str = "You are a memory archivist for an AI coding agent. Your job is to produce a structured session summary that will be stored in long-term memory and recalled in future sessions to provide continuity.\n\
-\n\
-## Instructions\n\
-\n\
-Analyze the provided session transcript and output structured markdown. The first line must be a short title (under 60 characters) summarizing the session's main goal — this is used as the UI notification title.\n\
-\n\
-## Output Format\n\
-\n\
-<title — one line, under 60 chars>\n\
-\n\
-**Goal**: <what the user was trying to accomplish>\n\
-**Model**: <model name if visible, else omit>\n\
-\n\
-### Completed\n\
-- <concrete thing done>\n\
-\n\
-### Pending\n\
-- <remaining task, if any>\n\
-\n\
-### Key Decisions\n\
-- <decision>: <rationale>\n\
-\n\
-### Files Modified\n\
-- <path>\n\
-\n\
-### Context\n\
-<2-4 sentences of narrative context. What was asked, what approach was taken, any important constraints or outcomes.>\n\
-\n\
-## Rules\n\
-\n\
-- First line = title only (no heading prefix)\n\
-- Be specific: include exact file paths, function names, error messages, command outputs.\n\
-- Omit sections that are empty.\n\
-- Do NOT include JSON, code fences, or tool call traces.\n\
-- Keep the whole summary under 400 words.";
+/// Used by the `memory.retain` RPC handler as a smart router that produces
+/// up to three structured sections: journal (always), core memory (conditional),
+/// and argument (conditional). The handler parses `<journal>`, `<core_memory>`,
+/// and `<argument>` tags from the output.
+pub const MEMORY_RETAIN_SUMMARIZER_PROMPT: &str = r#"You are a memory archivist for an AI agent named Tron. Analyze the provided session transcript and produce structured output with up to three sections.
+
+## Section 1: Journal (ALWAYS produce this)
+
+Wrap in <journal>...</journal> tags. Format:
+
+## YYYY-MM-DD HH:MM — {Title under 60 chars}
+
+**Goal**: what the user was trying to accomplish
+
+### Completed
+- concrete things done
+
+### Key Decisions
+- decision: rationale
+
+### Files Modified
+- path (if applicable)
+
+### Context
+2-4 sentences of narrative.
+
+## Section 2: Core Memory (ONLY if timeless identity facts were revealed)
+
+Wrap in <core_memory>...</core_memory> tags. Only produce this if the conversation revealed something genuinely timeless about the user's identity, preferences, working style, or the agent's own behavioral patterns. NOT for ephemeral task details.
+
+file: {filename, e.g. user-preferences.md or tron-identity.md}
+update: {concise statement to add, e.g. "Prefers systems thinking and first-principles reasoning"}
+
+## Section 3: Argument (ONLY if knowledge topics were discussed)
+
+Wrap in <argument>...</argument> tags. Only produce this if the conversation involved substantive discussion connecting ideas, topics, or sources from the knowledge base at ~/.tron/workspace/knowledge/.
+
+title: {descriptive title}
+thesis: {core connection or insight}
+topics: [topic-slug-1, topic-slug-2]
+sources: [source-slug-1]
+evidence:
+- How topic-a connects to topic-b
+- Supporting evidence from sources
+
+## Rules
+
+- Journal section is MANDATORY. Sections 2 and 3 are conditional.
+- Be specific: include exact file paths, function names, decisions.
+- Omit empty subsections within journal.
+- Keep journal under 400 words.
+- Core memory updates must be genuinely timeless — not task-specific.
+- Arguments must articulate a thesis, not just summarize.
+- If no knowledge topics were discussed, omit the argument section entirely.
+- If no identity-relevant facts were revealed, omit the core memory section entirely.
+- Do NOT include JSON, code fences, or tool call traces."#;
 
 // =============================================================================
 // File-Based System Prompt Loading
@@ -152,7 +171,7 @@ pub struct LoadedSystemPrompt {
 pub enum SystemPromptSource {
     /// Project-level `.tron/SYSTEM.md`.
     Project,
-    /// Global `~/.tron/workspace/rules/SYSTEM.md`.
+    /// Global `~/.tron/workspace/memory/rules/SYSTEM.md`.
     Global,
 }
 
@@ -192,7 +211,7 @@ pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSys
 
 /// Load the global system prompt from a given home directory.
 ///
-/// Looks for `{home}/.tron/workspace/rules/SYSTEM.md`.
+/// Looks for `{home}/.tron/workspace/memory/rules/SYSTEM.md`.
 /// Returns `None` if the file is missing, empty, or oversized.
 ///
 /// Users can manually create this file to override the embedded core prompt.
@@ -201,7 +220,7 @@ pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSys
 #[must_use]
 pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt> {
     use crate::core::paths::{dirs, files};
-    let path = home.join(".tron").join(dirs::WORKSPACE).join(dirs::RULES).join(files::SYSTEM_MD);
+    let path = home.join(".tron").join(dirs::WORKSPACE).join(dirs::MEMORY).join(dirs::RULES).join(files::SYSTEM_MD);
 
     let Ok(metadata) = fs::metadata(&path) else {
         return None;
@@ -232,7 +251,7 @@ pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt>
     }
 }
 
-/// Load the global system prompt from `~/.tron/workspace/rules/SYSTEM.md`.
+/// Load the global system prompt from `~/.tron/workspace/memory/rules/SYSTEM.md`.
 ///
 /// Convenience wrapper around [`load_global_system_prompt_from`] using the
 /// user's home directory.
@@ -508,7 +527,7 @@ mod tests {
     #[test]
     fn load_global_returns_content_when_file_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "Custom global prompt").unwrap();
 
@@ -519,7 +538,7 @@ mod tests {
     #[test]
     fn load_global_source_is_global() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "prompt").unwrap();
 
@@ -530,7 +549,7 @@ mod tests {
     #[test]
     fn load_global_rejects_oversized_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         let big = "x".repeat(150_000);
         fs::write(rules_dir.join("SYSTEM.md"), big).unwrap();
@@ -541,7 +560,7 @@ mod tests {
     #[test]
     fn load_global_returns_none_for_empty_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
 
