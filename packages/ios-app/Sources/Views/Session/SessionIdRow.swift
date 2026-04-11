@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Session ID Row
 
 /// Displays the session ID with a copy-to-clipboard gesture.
-/// Extracted from ContextAnalyticsOverview for shared use.
 @available(iOS 26.0, *)
 struct SessionIdRow: View {
     let sessionId: String
@@ -11,18 +10,18 @@ struct SessionIdRow: View {
 
     var body: some View {
         HStack {
-            Image(systemName: "number.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+            Text("ID")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronAmber)
+
+            Spacer()
 
             Text(showCopied ? "Copied!" : sessionId)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
+                .foregroundStyle(showCopied ? .tronAmber : .tronTextSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .animation(.easeInOut(duration: 0.15), value: showCopied)
-
-            Spacer()
 
             Image(systemName: "doc.on.doc")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
