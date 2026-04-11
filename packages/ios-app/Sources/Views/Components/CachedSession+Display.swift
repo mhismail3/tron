@@ -49,6 +49,11 @@ extension CachedSession {
     }
 
     var displayDirectory: String {
-        (workingDirectory as NSString).abbreviatingWithTildeInPath
+        // Server paths are macOS paths — NSString.abbreviatingWithTildeInPath
+        // only matches the iOS home dir, so replace /Users/<name>/ manually.
+        if let range = workingDirectory.range(of: #"^/Users/[^/]+"#, options: .regularExpression) {
+            return "~" + workingDirectory[range.upperBound...]
+        }
+        return workingDirectory
     }
 }
